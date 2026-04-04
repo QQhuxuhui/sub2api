@@ -20,6 +20,78 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
+func TestInjectSiteTitle(t *testing.T) {
+	t.Run("replaces_title_with_site_name", func(t *testing.T) {
+		html := []byte(`<html><head><title>Sub2API - AI API Gateway</title></head><body></body></html>`)
+		settingsJSON := []byte(`{"site_name":"MyCustomSite"}`)
+
+		result := injectSiteTitle(html, settingsJSON)
+
+		assert.Contains(t, string(result), "<title>MyCustomSite - AI API Gateway</title>")
+		assert.NotContains(t, string(result), "Sub2API")
+	})
+
+	t.Run("returns_unchanged_when_site_name_empty", func(t *testing.T) {
+		html := []byte(`<html><head><title>Sub2API - AI API Gateway</title></head><body></body></html>`)
+		settingsJSON := []byte(`{"site_name":""}`)
+
+		result := injectSiteTitle(html, settingsJSON)
+
+		assert.Equal(t, string(html), string(result))
+	})
+
+	t.Run("returns_unchanged_when_site_name_missing", func(t *testing.T) {
+		html := []byte(`<html><head><title>Sub2API - AI API Gateway</title></head><body></body></html>`)
+		settingsJSON := []byte(`{"other_field":"value"}`)
+
+		result := injectSiteTitle(html, settingsJSON)
+
+		assert.Equal(t, string(html), string(result))
+	})
+
+	t.Run("returns_unchanged_when_invalid_json", func(t *testing.T) {
+		html := []byte(`<html><head><title>Sub2API - AI API Gateway</title></head><body></body></html>`)
+		settingsJSON := []byte(`{invalid json}`)
+
+		result := injectSiteTitle(html, settingsJSON)
+
+		assert.Equal(t, string(html), string(result))
+	})
+
+	t.Run("returns_unchanged_when_no_title_tag", func(t *testing.T) {
+		html := []byte(`<html><head></head><body></body></html>`)
+		settingsJSON := []byte(`{"site_name":"MyCustomSite"}`)
+
+		result := injectSiteTitle(html, settingsJSON)
+
+		assert.Equal(t, string(html), string(result))
+	})
+
+	t.Run("returns_unchanged_when_title_has_attributes", func(t *testing.T) {
+		// The function looks for "<title>" literally, so attributes are not supported
+		// This is acceptable since index.html uses plain <title> without attributes
+		html := []byte(`<html><head><title lang="en">Sub2API</title></head><body></body></html>`)
+		settingsJSON := []byte(`{"site_name":"NewSite"}`)
+
+		result := injectSiteTitle(html, settingsJSON)
+
+		// Should return unchanged since <title> with attributes is not matched
+		assert.Equal(t, string(html), string(result))
+	})
+
+	t.Run("preserves_rest_of_html", func(t *testing.T) {
+		html := []byte(`<html><head><meta charset="UTF-8"><title>Sub2API</title><script src="app.js"></script></head><body><div id="app"></div></body></html>`)
+		settingsJSON := []byte(`{"site_name":"TestSite"}`)
+
+		result := injectSiteTitle(html, settingsJSON)
+
+		assert.Contains(t, string(result), `<meta charset="UTF-8">`)
+		assert.Contains(t, string(result), `<script src="app.js"></script>`)
+		assert.Contains(t, string(result), `<div id="app"></div>`)
+		assert.Contains(t, string(result), "<title>TestSite - AI API Gateway</title>")
+	})
+}
+
 func TestReplaceNoncePlaceholder(t *testing.T) {
 	t.Run("replaces_single_placeholder", func(t *testing.T) {
 		html := []byte(`<script nonce="__CSP_NONCE_VALUE__">console.log('test');</script>`)
@@ -362,10 +434,12 @@ func TestFrontendServer_Middleware(t *testing.T) {
 			"/api/v1/users",
 			"/v1/models",
 			"/v1beta/chat",
+			"/sora/v1/models",
 			"/antigravity/test",
 			"/setup/init",
 			"/health",
 			"/responses",
+			"/responses/compact",
 		}
 
 		for _, path := range apiPaths {
@@ -385,6 +459,32 @@ func TestFrontendServer_Middleware(t *testing.T) {
 				assert.True(t, nextCalled, "next handler should be called for API route")
 			})
 		}
+	})
+
+	t.Run("skips_responses_compact_post_routes", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]string{"test": "value"},
+		}
+
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+		nextCalled := false
+		router.POST("/responses/compact", func(c *gin.Context) {
+			nextCalled = true
+			c.String(http.StatusOK, `{"ok":true}`)
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/responses/compact", strings.NewReader(`{"model":"gpt-5"}`))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.True(t, nextCalled, "next handler should be called for compact API route")
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.JSONEq(t, `{"ok":true}`, w.Body.String())
 	})
 
 	t.Run("serves_index_for_spa_routes", func(t *testing.T) {
@@ -537,10 +637,12 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 			"/api/users",
 			"/v1/models",
 			"/v1beta/chat",
+			"/sora/v1/models",
 			"/antigravity/test",
 			"/setup/init",
 			"/health",
 			"/responses",
+			"/responses/compact",
 		}
 
 		for _, path := range apiPaths {

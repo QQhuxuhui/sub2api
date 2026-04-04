@@ -4,7 +4,8 @@
  */
 
 import { apiClient } from '../client'
-import type { AdminUsageLog, UsageQueryParams, PaginatedResponse } from '@/types'
+import type { AdminUsageLog, UsageQueryParams, PaginatedResponse, UsageRequestType } from '@/types'
+import type { EndpointStat } from '@/types'
 
 // ==================== Types ====================
 
@@ -18,6 +19,9 @@ export interface AdminUsageStatsResponse {
   total_actual_cost: number
   total_account_cost?: number
   average_duration_ms: number
+  endpoints?: EndpointStat[]
+  upstream_endpoints?: EndpointStat[]
+  endpoint_paths?: EndpointStat[]
 }
 
 export interface SimpleUser {
@@ -39,6 +43,7 @@ export interface UsageCleanupFilters {
   account_id?: number
   group_id?: number
   model?: string | null
+  request_type?: UsageRequestType | null
   stream?: boolean | null
   billing_type?: number | null
 }
@@ -66,6 +71,7 @@ export interface CreateUsageCleanupTaskRequest {
   account_id?: number
   group_id?: number
   model?: string | null
+  request_type?: UsageRequestType | null
   stream?: boolean | null
   billing_type?: number | null
   timezone?: string
@@ -73,6 +79,7 @@ export interface CreateUsageCleanupTaskRequest {
 
 export interface AdminUsageQueryParams extends UsageQueryParams {
   user_id?: number
+  exact_total?: boolean
 }
 
 // ==================== API Functions ====================
@@ -104,6 +111,7 @@ export async function getStats(params: {
   account_id?: number
   group_id?: number
   model?: string
+  request_type?: UsageRequestType
   stream?: boolean
   period?: string
   start_date?: string

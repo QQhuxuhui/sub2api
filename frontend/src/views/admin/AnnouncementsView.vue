@@ -1,26 +1,10 @@
 <template>
   <AppLayout>
     <TablePageLayout>
-      <template #actions>
-        <div class="flex justify-end gap-3">
-          <button
-            @click="loadAnnouncements"
-            :disabled="loading"
-            class="btn btn-secondary"
-            :title="t('common.refresh')"
-          >
-            <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-          </button>
-          <button @click="openCreateDialog" class="btn btn-primary">
-            <Icon name="plus" size="md" class="mr-1" />
-            {{ t('admin.announcements.createAnnouncement') }}
-          </button>
-        </div>
-      </template>
-
       <template #filters>
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div class="max-w-md flex-1">
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Left: Search + Filters -->
+          <div class="flex-1 sm:max-w-64">
             <input
               v-model="searchQuery"
               type="text"
@@ -29,13 +13,27 @@
               @input="handleSearch"
             />
           </div>
-          <div class="flex gap-2">
-            <Select
-              v-model="filters.status"
-              :options="statusFilterOptions"
-              class="w-40"
-              @change="handleStatusChange"
-            />
+          <Select
+            v-model="filters.status"
+            :options="statusFilterOptions"
+            class="w-40"
+            @change="handleStatusChange"
+          />
+
+          <!-- Right: Action buttons -->
+          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+            <button
+              @click="loadAnnouncements"
+              :disabled="loading"
+              class="btn btn-secondary"
+              :title="t('common.refresh')"
+            >
+              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+            </button>
+            <button @click="openCreateDialog" class="btn btn-primary">
+              <Icon name="plus" size="md" class="mr-1" />
+              {{ t('admin.announcements.createAnnouncement') }}
+            </button>
           </div>
         </div>
       </template>
@@ -67,6 +65,19 @@
               ]"
             >
               {{ statusLabel(value) }}
+            </span>
+          </template>
+
+          <template #cell-notifyMode="{ row }">
+            <span
+              :class="[
+                'badge',
+                row.notify_mode === 'popup'
+                  ? 'badge-warning'
+                  : 'badge-gray'
+              ]"
+            >
+              {{ row.notify_mode === 'popup' ? t('admin.announcements.notifyModeLabels.popup') : t('admin.announcements.notifyModeLabels.silent') }}
             </span>
           </template>
 
@@ -165,7 +176,11 @@
             <label class="input-label">{{ t('admin.announcements.form.status') }}</label>
             <Select v-model="form.status" :options="statusOptions" />
           </div>
-          <div></div>
+          <div>
+            <label class="input-label">{{ t('admin.announcements.form.notifyMode') }}</label>
+            <Select v-model="form.notify_mode" :options="notifyModeOptions" />
+            <p class="input-hint">{{ t('admin.announcements.form.notifyModeHint') }}</p>
+          </div>
         </div>
 
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -224,6 +239,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { adminAPI } from '@/api/admin'
 import { formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import type { AdminGroup, Announcement, AnnouncementTargeting } from '@/types'
@@ -255,7 +271,7 @@ const searchQuery = ref('')
 
 const pagination = reactive({
   page: 1,
-  page_size: 20,
+  page_size: getPersistedPageSize(),
   total: 0,
   pages: 0
 })
@@ -273,9 +289,15 @@ const statusOptions = computed(() => [
   { value: 'archived', label: t('admin.announcements.statusLabels.archived') }
 ])
 
+const notifyModeOptions = computed(() => [
+  { value: 'silent', label: t('admin.announcements.notifyModeLabels.silent') },
+  { value: 'popup', label: t('admin.announcements.notifyModeLabels.popup') }
+])
+
 const columns = computed<Column[]>(() => [
   { key: 'title', label: t('admin.announcements.columns.title') },
   { key: 'status', label: t('admin.announcements.columns.status') },
+  { key: 'notifyMode', label: t('admin.announcements.columns.notifyMode') },
   { key: 'targeting', label: t('admin.announcements.columns.targeting') },
   { key: 'timeRange', label: t('admin.announcements.columns.timeRange') },
   { key: 'createdAt', label: t('admin.announcements.columns.createdAt') },
@@ -359,6 +381,7 @@ const form = reactive({
   title: '',
   content: '',
   status: 'draft',
+  notify_mode: 'silent',
   starts_at_str: '',
   ends_at_str: '',
   targeting: { any_of: [] } as AnnouncementTargeting
@@ -380,6 +403,7 @@ function resetForm() {
   form.title = ''
   form.content = ''
   form.status = 'draft'
+  form.notify_mode = 'silent'
   form.starts_at_str = ''
   form.ends_at_str = ''
   form.targeting = { any_of: [] }
@@ -389,6 +413,7 @@ function fillFormFromAnnouncement(a: Announcement) {
   form.title = a.title
   form.content = a.content
   form.status = a.status
+  form.notify_mode = a.notify_mode || 'silent'
 
   // Backend returns RFC3339 strings
   form.starts_at_str = a.starts_at ? formatDateTimeLocalInput(Math.floor(new Date(a.starts_at).getTime() / 1000)) : ''
@@ -422,6 +447,7 @@ function buildCreatePayload() {
     title: form.title,
     content: form.content,
     status: form.status as any,
+    notify_mode: form.notify_mode as any,
     targeting: form.targeting,
     starts_at: startsAt ?? undefined,
     ends_at: endsAt ?? undefined
@@ -434,6 +460,7 @@ function buildUpdatePayload(original: Announcement) {
   if (form.title !== original.title) payload.title = form.title
   if (form.content !== original.content) payload.content = form.content
   if (form.status !== original.status) payload.status = form.status
+  if (form.notify_mode !== (original.notify_mode || 'silent')) payload.notify_mode = form.notify_mode
 
   // starts_at / ends_at: distinguish unchanged vs clear(0) vs set
   const originalStarts = original.starts_at ? Math.floor(new Date(original.starts_at).getTime() / 1000) : null

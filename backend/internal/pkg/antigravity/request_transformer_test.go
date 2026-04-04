@@ -2,7 +2,10 @@ package antigravity
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestBuildParts_ThinkingBlockWithoutSignature 测试thinking block无signature时的处理
@@ -256,6 +259,144 @@ func TestBuildTools_CustomTypeTools(t *testing.T) {
 						tt.description, len(result[0].FunctionDeclarations), len(tt.tools))
 				}
 			}
+		})
+	}
+}
+
+func TestBuildGenerationConfig_ThinkingDynamicBudget(t *testing.T) {
+	tests := []struct {
+		name        string
+		model       string
+		thinking    *ThinkingConfig
+		wantBudget  int
+		wantPresent bool
+	}{
+		{
+			name:        "enabled without budget defaults to dynamic (-1)",
+			model:       "claude-opus-4-6-thinking",
+			thinking:    &ThinkingConfig{Type: "enabled"},
+			wantBudget:  -1,
+			wantPresent: true,
+		},
+		{
+			name:        "enabled with budget uses the provided value",
+			model:       "claude-opus-4-6-thinking",
+			thinking:    &ThinkingConfig{Type: "enabled", BudgetTokens: 1024},
+			wantBudget:  1024,
+			wantPresent: true,
+		},
+		{
+			name:        "enabled with -1 budget uses dynamic (-1)",
+			model:       "claude-opus-4-6-thinking",
+			thinking:    &ThinkingConfig{Type: "enabled", BudgetTokens: -1},
+			wantBudget:  -1,
+			wantPresent: true,
+		},
+		{
+			name:        "adaptive on opus4.6 maps to high budget (24576)",
+			model:       "claude-opus-4-6-thinking",
+			thinking:    &ThinkingConfig{Type: "adaptive", BudgetTokens: 20000},
+			wantBudget:  ClaudeAdaptiveHighThinkingBudgetTokens,
+			wantPresent: true,
+		},
+		{
+			name:        "adaptive on non-opus model keeps default dynamic (-1)",
+			model:       "claude-sonnet-4-5-thinking",
+			thinking:    &ThinkingConfig{Type: "adaptive"},
+			wantBudget:  -1,
+			wantPresent: true,
+		},
+		{
+			name:        "disabled does not emit thinkingConfig",
+			model:       "claude-opus-4-6-thinking",
+			thinking:    &ThinkingConfig{Type: "disabled", BudgetTokens: 1024},
+			wantBudget:  0,
+			wantPresent: false,
+		},
+		{
+			name:        "nil thinking does not emit thinkingConfig",
+			model:       "claude-opus-4-6-thinking",
+			thinking:    nil,
+			wantBudget:  0,
+			wantPresent: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &ClaudeRequest{
+				Model:    tt.model,
+				Thinking: tt.thinking,
+			}
+			cfg := buildGenerationConfig(req)
+			if cfg == nil {
+				t.Fatalf("expected non-nil generationConfig")
+			}
+
+			if tt.wantPresent {
+				if cfg.ThinkingConfig == nil {
+					t.Fatalf("expected thinkingConfig to be present")
+				}
+				if !cfg.ThinkingConfig.IncludeThoughts {
+					t.Fatalf("expected includeThoughts=true")
+				}
+				if cfg.ThinkingConfig.ThinkingBudget != tt.wantBudget {
+					t.Fatalf("expected thinkingBudget=%d, got %d", tt.wantBudget, cfg.ThinkingConfig.ThinkingBudget)
+				}
+				return
+			}
+
+			if cfg.ThinkingConfig != nil {
+				t.Fatalf("expected thinkingConfig to be nil, got %+v", cfg.ThinkingConfig)
+			}
+		})
+	}
+}
+
+func TestTransformClaudeToGeminiWithOptions_PreservesBillingHeaderSystemBlock(t *testing.T) {
+	tests := []struct {
+		name   string
+		system json.RawMessage
+	}{
+		{
+			name:   "system array",
+			system: json.RawMessage(`[{"type":"text","text":"x-anthropic-billing-header keep"}]`),
+		},
+		{
+			name:   "system string",
+			system: json.RawMessage(`"x-anthropic-billing-header keep"`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claudeReq := &ClaudeRequest{
+				Model:  "claude-3-5-sonnet-latest",
+				System: tt.system,
+				Messages: []ClaudeMessage{
+					{
+						Role:    "user",
+						Content: json.RawMessage(`[{"type":"text","text":"hello"}]`),
+					},
+				},
+			}
+
+			body, err := TransformClaudeToGeminiWithOptions(claudeReq, "project-1", "gemini-2.5-flash", DefaultTransformOptions())
+			require.NoError(t, err)
+
+			var req V1InternalRequest
+			require.NoError(t, json.Unmarshal(body, &req))
+			require.NotNil(t, req.Request.SystemInstruction)
+
+			found := false
+			for _, part := range req.Request.SystemInstruction.Parts {
+				if strings.Contains(part.Text, "x-anthropic-billing-header keep") {
+					found = true
+					break
+				}
+			}
+
+			require.True(t, found, "转换后的 systemInstruction 应保留 x-anthropic-billing-header 内容")
 		})
 	}
 }

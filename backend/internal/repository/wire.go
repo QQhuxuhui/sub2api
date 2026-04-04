@@ -28,13 +28,13 @@ func ProvideConcurrencyCache(rdb *redis.Client, cfg *config.Config) service.Conc
 // ProvideGitHubReleaseClient 创建 GitHub Release 客户端
 // 从配置中读取代理设置，支持国内服务器通过代理访问 GitHub
 func ProvideGitHubReleaseClient(cfg *config.Config) service.GitHubReleaseClient {
-	return NewGitHubReleaseClient(cfg.Update.ProxyURL)
+	return NewGitHubReleaseClient(cfg.Update.ProxyURL, cfg.Security.ProxyFallback.AllowDirectOnError)
 }
 
 // ProvidePricingRemoteClient 创建定价数据远程客户端
 // 从配置中读取代理设置，支持国内服务器通过代理访问 GitHub 上的定价数据
 func ProvidePricingRemoteClient(cfg *config.Config) service.PricingRemoteClient {
-	return NewPricingRemoteClient(cfg.Update.ProxyURL)
+	return NewPricingRemoteClient(cfg.Update.ProxyURL, cfg.Security.ProxyFallback.AllowDirectOnError)
 }
 
 // ProvideSessionLimitCache 创建会话限制缓存
@@ -53,12 +53,17 @@ var ProviderSet = wire.NewSet(
 	NewAPIKeyRepository,
 	NewGroupRepository,
 	NewAccountRepository,
+	NewSoraAccountRepository,         // Sora 账号扩展表仓储
+	NewScheduledTestPlanRepository,   // 定时测试计划仓储
+	NewScheduledTestResultRepository, // 定时测试结果仓储
 	NewProxyRepository,
 	NewRedeemCodeRepository,
 	NewPromoCodeRepository,
 	NewAnnouncementRepository,
 	NewAnnouncementReadRepository,
 	NewUsageLogRepository,
+	NewUsageBillingRepository,
+	NewIdempotencyRepository,
 	NewUsageCleanupRepository,
 	NewDashboardAggregationRepository,
 	NewSettingRepository,
@@ -66,6 +71,9 @@ var ProviderSet = wire.NewSet(
 	NewUserSubscriptionRepository,
 	NewUserAttributeDefinitionRepository,
 	NewUserAttributeValueRepository,
+	NewUserGroupRateRepository,
+	NewErrorPassthroughRepository,
+	NewTLSFingerprintProfileRepository,
 
 	// Cache implementations
 	NewGatewayCache,
@@ -73,8 +81,11 @@ var ProviderSet = wire.NewSet(
 	NewAPIKeyCache,
 	NewTempUnschedCache,
 	NewTimeoutCounterCache,
+	NewInternal500CounterCache,
 	ProvideConcurrencyCache,
 	ProvideSessionLimitCache,
+	NewRPMCache,
+	NewUserMsgQueueCache,
 	NewDashboardCache,
 	NewEmailCache,
 	NewIdentityCache,
@@ -85,9 +96,16 @@ var ProviderSet = wire.NewSet(
 	NewSchedulerOutboxRepository,
 	NewProxyLatencyCache,
 	NewTotpCache,
+	NewRefreshTokenCache,
+	NewErrorPassthroughCache,
+	NewTLSFingerprintProfileCache,
 
 	// Encryptors
 	NewAESEncryptor,
+
+	// Backup infrastructure
+	NewPgDumper,
+	NewS3BackupStoreFactory,
 
 	// HTTP service ports (DI Strategy A: return interface directly)
 	NewTurnstileVerifier,
@@ -100,6 +118,7 @@ var ProviderSet = wire.NewSet(
 	NewOpenAIOAuthClient,
 	NewGeminiOAuthClient,
 	NewGeminiCliCodeAssistClient,
+	NewGeminiDriveClient,
 
 	ProvideEnt,
 	ProvideSQLDB,

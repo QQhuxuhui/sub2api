@@ -102,6 +102,46 @@ func (_u *UsageLogUpdate) SetNillableModel(v *string) *UsageLogUpdate {
 	return _u
 }
 
+// SetRequestedModel sets the "requested_model" field.
+func (_u *UsageLogUpdate) SetRequestedModel(v string) *UsageLogUpdate {
+	_u.mutation.SetRequestedModel(v)
+	return _u
+}
+
+// SetNillableRequestedModel sets the "requested_model" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableRequestedModel(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetRequestedModel(*v)
+	}
+	return _u
+}
+
+// ClearRequestedModel clears the value of the "requested_model" field.
+func (_u *UsageLogUpdate) ClearRequestedModel() *UsageLogUpdate {
+	_u.mutation.ClearRequestedModel()
+	return _u
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (_u *UsageLogUpdate) SetUpstreamModel(v string) *UsageLogUpdate {
+	_u.mutation.SetUpstreamModel(v)
+	return _u
+}
+
+// SetNillableUpstreamModel sets the "upstream_model" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableUpstreamModel(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetUpstreamModel(*v)
+	}
+	return _u
+}
+
+// ClearUpstreamModel clears the value of the "upstream_model" field.
+func (_u *UsageLogUpdate) ClearUpstreamModel() *UsageLogUpdate {
+	_u.mutation.ClearUpstreamModel()
+	return _u
+}
+
 // SetGroupID sets the "group_id" field.
 func (_u *UsageLogUpdate) SetGroupID(v int64) *UsageLogUpdate {
 	_u.mutation.SetGroupID(v)
@@ -612,6 +652,40 @@ func (_u *UsageLogUpdate) ClearImageSize() *UsageLogUpdate {
 	return _u
 }
 
+// SetMediaType sets the "media_type" field.
+func (_u *UsageLogUpdate) SetMediaType(v string) *UsageLogUpdate {
+	_u.mutation.SetMediaType(v)
+	return _u
+}
+
+// SetNillableMediaType sets the "media_type" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableMediaType(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetMediaType(*v)
+	}
+	return _u
+}
+
+// ClearMediaType clears the value of the "media_type" field.
+func (_u *UsageLogUpdate) ClearMediaType() *UsageLogUpdate {
+	_u.mutation.ClearMediaType()
+	return _u
+}
+
+// SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
+func (_u *UsageLogUpdate) SetCacheTTLOverridden(v bool) *UsageLogUpdate {
+	_u.mutation.SetCacheTTLOverridden(v)
+	return _u
+}
+
+// SetNillableCacheTTLOverridden sets the "cache_ttl_overridden" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableCacheTTLOverridden(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetCacheTTLOverridden(*v)
+	}
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UsageLogUpdate) SetUser(v *User) *UsageLogUpdate {
 	return _u.SetUserID(v.ID)
@@ -711,6 +785,16 @@ func (_u *UsageLogUpdate) check() error {
 			return &ValidationError{Name: "model", err: fmt.Errorf(`ent: validator failed for field "UsageLog.model": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.RequestedModel(); ok {
+		if err := usagelog.RequestedModelValidator(v); err != nil {
+			return &ValidationError{Name: "requested_model", err: fmt.Errorf(`ent: validator failed for field "UsageLog.requested_model": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.UpstreamModel(); ok {
+		if err := usagelog.UpstreamModelValidator(v); err != nil {
+			return &ValidationError{Name: "upstream_model", err: fmt.Errorf(`ent: validator failed for field "UsageLog.upstream_model": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.UserAgent(); ok {
 		if err := usagelog.UserAgentValidator(v); err != nil {
 			return &ValidationError{Name: "user_agent", err: fmt.Errorf(`ent: validator failed for field "UsageLog.user_agent": %w`, err)}
@@ -724,6 +808,11 @@ func (_u *UsageLogUpdate) check() error {
 	if v, ok := _u.mutation.ImageSize(); ok {
 		if err := usagelog.ImageSizeValidator(v); err != nil {
 			return &ValidationError{Name: "image_size", err: fmt.Errorf(`ent: validator failed for field "UsageLog.image_size": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.MediaType(); ok {
+		if err := usagelog.MediaTypeValidator(v); err != nil {
+			return &ValidationError{Name: "media_type", err: fmt.Errorf(`ent: validator failed for field "UsageLog.media_type": %w`, err)}
 		}
 	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
@@ -755,6 +844,18 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.RequestedModel(); ok {
+		_spec.SetField(usagelog.FieldRequestedModel, field.TypeString, value)
+	}
+	if _u.mutation.RequestedModelCleared() {
+		_spec.ClearField(usagelog.FieldRequestedModel, field.TypeString)
+	}
+	if value, ok := _u.mutation.UpstreamModel(); ok {
+		_spec.SetField(usagelog.FieldUpstreamModel, field.TypeString, value)
+	}
+	if _u.mutation.UpstreamModelCleared() {
+		_spec.ClearField(usagelog.FieldUpstreamModel, field.TypeString)
 	}
 	if value, ok := _u.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)
@@ -893,6 +994,15 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.ImageSizeCleared() {
 		_spec.ClearField(usagelog.FieldImageSize, field.TypeString)
+	}
+	if value, ok := _u.mutation.MediaType(); ok {
+		_spec.SetField(usagelog.FieldMediaType, field.TypeString, value)
+	}
+	if _u.mutation.MediaTypeCleared() {
+		_spec.ClearField(usagelog.FieldMediaType, field.TypeString)
+	}
+	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
+		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1126,6 +1236,46 @@ func (_u *UsageLogUpdateOne) SetNillableModel(v *string) *UsageLogUpdateOne {
 	if v != nil {
 		_u.SetModel(*v)
 	}
+	return _u
+}
+
+// SetRequestedModel sets the "requested_model" field.
+func (_u *UsageLogUpdateOne) SetRequestedModel(v string) *UsageLogUpdateOne {
+	_u.mutation.SetRequestedModel(v)
+	return _u
+}
+
+// SetNillableRequestedModel sets the "requested_model" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableRequestedModel(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetRequestedModel(*v)
+	}
+	return _u
+}
+
+// ClearRequestedModel clears the value of the "requested_model" field.
+func (_u *UsageLogUpdateOne) ClearRequestedModel() *UsageLogUpdateOne {
+	_u.mutation.ClearRequestedModel()
+	return _u
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (_u *UsageLogUpdateOne) SetUpstreamModel(v string) *UsageLogUpdateOne {
+	_u.mutation.SetUpstreamModel(v)
+	return _u
+}
+
+// SetNillableUpstreamModel sets the "upstream_model" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableUpstreamModel(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetUpstreamModel(*v)
+	}
+	return _u
+}
+
+// ClearUpstreamModel clears the value of the "upstream_model" field.
+func (_u *UsageLogUpdateOne) ClearUpstreamModel() *UsageLogUpdateOne {
+	_u.mutation.ClearUpstreamModel()
 	return _u
 }
 
@@ -1639,6 +1789,40 @@ func (_u *UsageLogUpdateOne) ClearImageSize() *UsageLogUpdateOne {
 	return _u
 }
 
+// SetMediaType sets the "media_type" field.
+func (_u *UsageLogUpdateOne) SetMediaType(v string) *UsageLogUpdateOne {
+	_u.mutation.SetMediaType(v)
+	return _u
+}
+
+// SetNillableMediaType sets the "media_type" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableMediaType(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetMediaType(*v)
+	}
+	return _u
+}
+
+// ClearMediaType clears the value of the "media_type" field.
+func (_u *UsageLogUpdateOne) ClearMediaType() *UsageLogUpdateOne {
+	_u.mutation.ClearMediaType()
+	return _u
+}
+
+// SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
+func (_u *UsageLogUpdateOne) SetCacheTTLOverridden(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetCacheTTLOverridden(v)
+	return _u
+}
+
+// SetNillableCacheTTLOverridden sets the "cache_ttl_overridden" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableCacheTTLOverridden(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetCacheTTLOverridden(*v)
+	}
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UsageLogUpdateOne) SetUser(v *User) *UsageLogUpdateOne {
 	return _u.SetUserID(v.ID)
@@ -1751,6 +1935,16 @@ func (_u *UsageLogUpdateOne) check() error {
 			return &ValidationError{Name: "model", err: fmt.Errorf(`ent: validator failed for field "UsageLog.model": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.RequestedModel(); ok {
+		if err := usagelog.RequestedModelValidator(v); err != nil {
+			return &ValidationError{Name: "requested_model", err: fmt.Errorf(`ent: validator failed for field "UsageLog.requested_model": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.UpstreamModel(); ok {
+		if err := usagelog.UpstreamModelValidator(v); err != nil {
+			return &ValidationError{Name: "upstream_model", err: fmt.Errorf(`ent: validator failed for field "UsageLog.upstream_model": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.UserAgent(); ok {
 		if err := usagelog.UserAgentValidator(v); err != nil {
 			return &ValidationError{Name: "user_agent", err: fmt.Errorf(`ent: validator failed for field "UsageLog.user_agent": %w`, err)}
@@ -1764,6 +1958,11 @@ func (_u *UsageLogUpdateOne) check() error {
 	if v, ok := _u.mutation.ImageSize(); ok {
 		if err := usagelog.ImageSizeValidator(v); err != nil {
 			return &ValidationError{Name: "image_size", err: fmt.Errorf(`ent: validator failed for field "UsageLog.image_size": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.MediaType(); ok {
+		if err := usagelog.MediaTypeValidator(v); err != nil {
+			return &ValidationError{Name: "media_type", err: fmt.Errorf(`ent: validator failed for field "UsageLog.media_type": %w`, err)}
 		}
 	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
@@ -1812,6 +2011,18 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.RequestedModel(); ok {
+		_spec.SetField(usagelog.FieldRequestedModel, field.TypeString, value)
+	}
+	if _u.mutation.RequestedModelCleared() {
+		_spec.ClearField(usagelog.FieldRequestedModel, field.TypeString)
+	}
+	if value, ok := _u.mutation.UpstreamModel(); ok {
+		_spec.SetField(usagelog.FieldUpstreamModel, field.TypeString, value)
+	}
+	if _u.mutation.UpstreamModelCleared() {
+		_spec.ClearField(usagelog.FieldUpstreamModel, field.TypeString)
 	}
 	if value, ok := _u.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)
@@ -1950,6 +2161,15 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.ImageSizeCleared() {
 		_spec.ClearField(usagelog.FieldImageSize, field.TypeString)
+	}
+	if value, ok := _u.mutation.MediaType(); ok {
+		_spec.SetField(usagelog.FieldMediaType, field.TypeString, value)
+	}
+	if _u.mutation.MediaTypeCleared() {
+		_spec.ClearField(usagelog.FieldMediaType, field.TypeString)
+	}
+	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
+		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{

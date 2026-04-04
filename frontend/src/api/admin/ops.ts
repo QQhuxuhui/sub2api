@@ -259,6 +259,47 @@ export interface OpsErrorDistributionResponse {
   items: OpsErrorDistributionItem[]
 }
 
+export interface OpsDashboardSnapshotV2Response {
+  generated_at: string
+  overview: OpsDashboardOverview
+  throughput_trend: OpsThroughputTrendResponse
+  error_trend: OpsErrorTrendResponse
+}
+
+export type OpsOpenAITokenStatsTimeRange = '30m' | '1h' | '1d' | '15d' | '30d'
+
+export interface OpsOpenAITokenStatsItem {
+  model: string
+  request_count: number
+  avg_tokens_per_sec?: number | null
+  avg_first_token_ms?: number | null
+  total_output_tokens: number
+  avg_duration_ms: number
+  requests_with_first_token: number
+}
+
+export interface OpsOpenAITokenStatsResponse {
+  time_range: OpsOpenAITokenStatsTimeRange
+  start_time: string
+  end_time: string
+  platform?: string
+  group_id?: number | null
+  items: OpsOpenAITokenStatsItem[]
+  total: number
+  page?: number
+  page_size?: number
+  top_n?: number | null
+}
+
+export interface OpsOpenAITokenStatsParams {
+  time_range?: OpsOpenAITokenStatsTimeRange
+  platform?: string
+  group_id?: number | null
+  page?: number
+  page_size?: number
+  top_n?: number
+}
+
 export interface OpsSystemMetricsSnapshot {
   id: number
   created_at: string
@@ -337,6 +378,22 @@ export interface OpsConcurrencyStatsResponse {
   timestamp?: string
 }
 
+export interface UserConcurrencyInfo {
+  user_id: number
+  user_email: string
+  username: string
+  current_in_use: number
+  max_capacity: number
+  load_percentage: number
+  waiting_in_queue: number
+}
+
+export interface OpsUserConcurrencyStatsResponse {
+  enabled: boolean
+  user: Record<string, UserConcurrencyInfo>
+  timestamp?: string
+}
+
 export async function getConcurrencyStats(platform?: string, groupId?: number | null): Promise<OpsConcurrencyStatsResponse> {
   const params: Record<string, any> = {}
   if (platform) {
@@ -350,12 +407,16 @@ export async function getConcurrencyStats(platform?: string, groupId?: number | 
   return data
 }
 
+export async function getUserConcurrencyStats(): Promise<OpsUserConcurrencyStatsResponse> {
+  const { data } = await apiClient.get<OpsUserConcurrencyStatsResponse>('/admin/ops/user-concurrency')
+  return data
+}
+
 export interface PlatformAvailability {
   platform: string
   total_accounts: number
   available_count: number
   rate_limit_count: number
-  scope_rate_limit_count?: Record<string, number>
   error_count: number
 }
 
@@ -366,7 +427,6 @@ export interface GroupAvailability {
   total_accounts: number
   available_count: number
   rate_limit_count: number
-  scope_rate_limit_count?: Record<string, number>
   error_count: number
 }
 
@@ -381,7 +441,6 @@ export interface AccountAvailability {
   is_rate_limited: boolean
   rate_limit_reset_at?: string
   rate_limit_remaining_sec?: number
-  scope_rate_limits?: Record<string, number>
   is_overloaded: boolean
   overload_until?: string
   overload_remaining_sec?: number
@@ -782,6 +841,9 @@ export interface OpsAdvancedSettings {
   ignore_context_canceled: boolean
   ignore_no_available_accounts: boolean
   ignore_invalid_api_key_errors: boolean
+  ignore_insufficient_balance_errors: boolean
+  display_openai_token_stats: boolean
+  display_alert_events: boolean
   auto_refresh_enabled: boolean
   auto_refresh_interval_seconds: number
 }
@@ -796,6 +858,77 @@ export interface OpsDataRetentionSettings {
 
 export interface OpsAggregationSettings {
   aggregation_enabled: boolean
+}
+
+export interface OpsRuntimeLogConfig {
+  level: 'debug' | 'info' | 'warn' | 'error'
+  enable_sampling: boolean
+  sampling_initial: number
+  sampling_thereafter: number
+  caller: boolean
+  stacktrace_level: 'none' | 'error' | 'fatal'
+  retention_days: number
+  source?: string
+  updated_at?: string
+  updated_by_user_id?: number
+}
+
+export interface OpsSystemLog {
+  id: number
+  created_at: string
+  level: string
+  component: string
+  message: string
+  request_id?: string
+  client_request_id?: string
+  user_id?: number | null
+  account_id?: number | null
+  platform?: string
+  model?: string
+  extra?: Record<string, any>
+}
+
+export type OpsSystemLogListResponse = PaginatedResponse<OpsSystemLog>
+
+export interface OpsSystemLogQuery {
+  page?: number
+  page_size?: number
+  time_range?: '5m' | '30m' | '1h' | '6h' | '24h' | '7d' | '30d'
+  start_time?: string
+  end_time?: string
+  level?: string
+  component?: string
+  request_id?: string
+  client_request_id?: string
+  user_id?: number | null
+  account_id?: number | null
+  platform?: string
+  model?: string
+  q?: string
+}
+
+export interface OpsSystemLogCleanupRequest {
+  start_time?: string
+  end_time?: string
+  level?: string
+  component?: string
+  request_id?: string
+  client_request_id?: string
+  user_id?: number | null
+  account_id?: number | null
+  platform?: string
+  model?: string
+  q?: string
+}
+
+export interface OpsSystemLogSinkHealth {
+  queue_depth: number
+  queue_capacity: number
+  dropped_count: number
+  write_failed_count: number
+  written_count: number
+  avg_write_delay_ms: number
+  last_error?: string
 }
 
 export interface OpsErrorLog {
@@ -836,6 +969,13 @@ export interface OpsErrorLog {
   client_ip?: string | null
   request_path?: string
   stream?: boolean
+
+  // Error observability context (endpoint + model mapping)
+  inbound_endpoint?: string
+  upstream_endpoint?: string
+  requested_model?: string
+  upstream_model?: string
+  request_type?: number | null
 }
 
 export interface OpsErrorDetail extends OpsErrorLog {
@@ -875,6 +1015,24 @@ export async function getDashboardOverview(
   options: OpsRequestOptions = {}
 ): Promise<OpsDashboardOverview> {
   const { data } = await apiClient.get<OpsDashboardOverview>('/admin/ops/dashboard/overview', {
+    params,
+    signal: options.signal
+  })
+  return data
+}
+
+export async function getDashboardSnapshotV2(
+  params: {
+  time_range?: '5m' | '30m' | '1h' | '6h' | '24h'
+  start_time?: string
+  end_time?: string
+  platform?: string
+  group_id?: number | null
+  mode?: OpsQueryMode
+  },
+  options: OpsRequestOptions = {}
+): Promise<OpsDashboardSnapshotV2Response> {
+  const { data } = await apiClient.get<OpsDashboardSnapshotV2Response>('/admin/ops/dashboard/snapshot-v2', {
     params,
     signal: options.signal
   })
@@ -947,6 +1105,17 @@ export async function getErrorDistribution(
   options: OpsRequestOptions = {}
 ): Promise<OpsErrorDistributionResponse> {
   const { data } = await apiClient.get<OpsErrorDistributionResponse>('/admin/ops/dashboard/error-distribution', {
+    params,
+    signal: options.signal
+  })
+  return data
+}
+
+export async function getOpenAITokenStats(
+  params: OpsOpenAITokenStatsParams,
+  options: OpsRequestOptions = {}
+): Promise<OpsOpenAITokenStatsResponse> {
+  const { data } = await apiClient.get<OpsOpenAITokenStatsResponse>('/admin/ops/dashboard/openai-token-stats', {
     params,
     signal: options.signal
   })
@@ -1142,6 +1311,36 @@ export async function updateAlertRuntimeSettings(config: OpsAlertRuntimeSettings
   return data
 }
 
+export async function getRuntimeLogConfig(): Promise<OpsRuntimeLogConfig> {
+  const { data } = await apiClient.get<OpsRuntimeLogConfig>('/admin/ops/runtime/logging')
+  return data
+}
+
+export async function updateRuntimeLogConfig(config: OpsRuntimeLogConfig): Promise<OpsRuntimeLogConfig> {
+  const { data } = await apiClient.put<OpsRuntimeLogConfig>('/admin/ops/runtime/logging', config)
+  return data
+}
+
+export async function resetRuntimeLogConfig(): Promise<OpsRuntimeLogConfig> {
+  const { data } = await apiClient.post<OpsRuntimeLogConfig>('/admin/ops/runtime/logging/reset')
+  return data
+}
+
+export async function listSystemLogs(params: OpsSystemLogQuery): Promise<OpsSystemLogListResponse> {
+  const { data } = await apiClient.get<OpsSystemLogListResponse>('/admin/ops/system-logs', { params })
+  return data
+}
+
+export async function cleanupSystemLogs(payload: OpsSystemLogCleanupRequest): Promise<{ deleted: number }> {
+  const { data } = await apiClient.post<{ deleted: number }>('/admin/ops/system-logs/cleanup', payload)
+  return data
+}
+
+export async function getSystemLogSinkHealth(): Promise<OpsSystemLogSinkHealth> {
+  const { data } = await apiClient.get<OpsSystemLogSinkHealth>('/admin/ops/system-logs/health')
+  return data
+}
+
 // Advanced settings (DB-backed)
 export async function getAdvancedSettings(): Promise<OpsAdvancedSettings> {
   const { data } = await apiClient.get<OpsAdvancedSettings>('/admin/ops/advanced-settings')
@@ -1165,12 +1364,15 @@ async function updateMetricThresholds(thresholds: OpsMetricThresholds): Promise<
 }
 
 export const opsAPI = {
+  getDashboardSnapshotV2,
   getDashboardOverview,
   getThroughputTrend,
   getLatencyHistogram,
   getErrorTrend,
   getErrorDistribution,
+  getOpenAITokenStats,
   getConcurrencyStats,
+  getUserConcurrencyStats,
   getAccountAvailabilityStats,
   getRealtimeTrafficSummary,
   subscribeQPS,
@@ -1207,10 +1409,16 @@ export const opsAPI = {
   updateEmailNotificationConfig,
   getAlertRuntimeSettings,
   updateAlertRuntimeSettings,
+  getRuntimeLogConfig,
+  updateRuntimeLogConfig,
+  resetRuntimeLogConfig,
   getAdvancedSettings,
   updateAdvancedSettings,
   getMetricThresholds,
-  updateMetricThresholds
+  updateMetricThresholds,
+  listSystemLogs,
+  cleanupSystemLogs,
+  getSystemLogSinkHealth
 }
 
 export default opsAPI

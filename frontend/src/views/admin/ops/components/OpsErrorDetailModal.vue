@@ -59,7 +59,28 @@
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
           <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.model') }}</div>
           <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-            {{ detail.model || '—' }}
+            <template v-if="hasModelMapping(detail)">
+              <span class="font-mono">{{ detail.requested_model }}</span>
+              <span class="mx-1 text-gray-400">→</span>
+              <span class="font-mono text-primary-600 dark:text-primary-400">{{ detail.upstream_model }}</span>
+            </template>
+            <template v-else>
+              {{ displayModel(detail) || '—' }}
+            </template>
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.inboundEndpoint') }}</div>
+          <div class="mt-1 break-all font-mono text-sm font-medium text-gray-900 dark:text-white">
+            {{ detail.inbound_endpoint || '—' }}
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.upstreamEndpoint') }}</div>
+          <div class="mt-1 break-all font-mono text-sm font-medium text-gray-900 dark:text-white">
+            {{ detail.upstream_endpoint || '—' }}
           </div>
         </div>
 
@@ -69,6 +90,13 @@
             <span :class="['inline-flex items-center rounded-lg px-2 py-1 text-xs font-black ring-1 ring-inset shadow-sm', statusClass]">
               {{ detail.status_code }}
             </span>
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.requestType') }}</div>
+          <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+            {{ formatRequestTypeLabel(detail.request_type) }}
           </div>
         </div>
 
@@ -167,6 +195,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
 import { opsAPI, type OpsErrorDetail } from '@/api/admin/ops'
 import { formatDateTime } from '@/utils/format'
+import { resolvePrimaryResponseBody, resolveUpstreamPayload } from '../utils/errorDetailResponse'
 
 interface Props {
   show: boolean
@@ -192,11 +221,7 @@ const showUpstreamList = computed(() => props.errorType === 'request')
 const requestId = computed(() => detail.value?.request_id || detail.value?.client_request_id || '')
 
 const primaryResponseBody = computed(() => {
-  if (!detail.value) return ''
-  if (props.errorType === 'upstream') {
-    return detail.value.upstream_error_detail || detail.value.upstream_errors || detail.value.upstream_error_message || detail.value.error_body || ''
-  }
-  return detail.value.error_body || ''
+  return resolvePrimaryResponseBody(detail.value, props.errorType)
 })
 
 
@@ -216,6 +241,31 @@ function isUpstreamError(d: OpsErrorDetail | null): boolean {
   return phase === 'upstream' && owner === 'provider'
 }
 
+function formatRequestTypeLabel(type: number | null | undefined): string {
+  switch (type) {
+    case 1: return t('admin.ops.errorDetail.requestTypeSync')
+    case 2: return t('admin.ops.errorDetail.requestTypeStream')
+    case 3: return t('admin.ops.errorDetail.requestTypeWs')
+    default: return t('admin.ops.errorDetail.requestTypeUnknown')
+  }
+}
+
+function hasModelMapping(d: OpsErrorDetail | null): boolean {
+  if (!d) return false
+  const requested = String(d.requested_model || '').trim()
+  const upstream = String(d.upstream_model || '').trim()
+  return !!requested && !!upstream && requested !== upstream
+}
+
+function displayModel(d: OpsErrorDetail | null): string {
+  if (!d) return ''
+  const upstream = String(d.upstream_model || '').trim()
+  if (upstream) return upstream
+  const requested = String(d.requested_model || '').trim()
+  if (requested) return requested
+  return String(d.model || '').trim()
+}
+
 const correlatedUpstream = ref<OpsErrorDetail[]>([])
 const correlatedUpstreamLoading = ref(false)
 
@@ -224,7 +274,9 @@ const correlatedUpstreamErrors = computed<OpsErrorDetail[]>(() => correlatedUpst
 const expandedUpstreamDetailIds = ref(new Set<number>())
 
 function getUpstreamResponsePreview(ev: OpsErrorDetail): string {
-  return String(ev.upstream_error_detail || ev.error_body || ev.upstream_error_message || '').trim()
+  const upstreamPayload = resolveUpstreamPayload(ev)
+  if (upstreamPayload) return upstreamPayload
+  return String(ev.error_body || '').trim()
 }
 
 function toggleUpstreamDetail(id: number) {

@@ -36,6 +36,10 @@
 
       <!-- Usage data -->
       <div v-else-if="usageInfo" class="space-y-1">
+        <!-- API error (degraded response) -->
+        <div v-if="usageInfo.error" class="text-xs text-amber-600 dark:text-amber-400 truncate max-w-[200px]" :title="usageInfo.error">
+          {{ usageInfo.error }}
+        </div>
         <!-- 5h Window -->
         <UsageProgressBar
           v-if="usageInfo.five_hour"
@@ -63,32 +67,77 @@
           :resets-at="usageInfo.seven_day_sonnet.resets_at"
           color="purple"
         />
+
+        <!-- Passive sampling label + active query button -->
+        <div class="flex items-center gap-1.5 mt-0.5">
+          <span
+            v-if="usageInfo.source === 'passive'"
+            class="text-[9px] text-gray-400 dark:text-gray-500 italic"
+          >
+            {{ t('admin.accounts.usageWindow.passiveSampled') }}
+          </span>
+          <button
+            type="button"
+            class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors"
+            :disabled="activeQueryLoading"
+            @click="loadActiveUsage"
+          >
+            <svg
+              class="h-2.5 w-2.5"
+              :class="{ 'animate-spin': activeQueryLoading }"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+            {{ t('admin.accounts.usageWindow.activeQuery') }}
+          </button>
+        </div>
       </div>
 
       <!-- No data yet -->
       <div v-else class="text-xs text-gray-400">-</div>
     </template>
 
-    <!-- OpenAI OAuth accounts: show Codex usage from extra field -->
+    <!-- OpenAI OAuth accounts: single source from /usage API -->
     <template v-else-if="account.platform === 'openai' && account.type === 'oauth'">
-      <div v-if="hasCodexUsage" class="space-y-1">
-        <!-- 5h Window -->
+      <div v-if="hasOpenAIUsageFallback" class="space-y-1">
         <UsageProgressBar
-          v-if="codex5hUsedPercent !== null"
+          v-if="usageInfo?.five_hour"
           label="5h"
-          :utilization="codex5hUsedPercent"
-          :resets-at="codex5hResetAt"
+          :utilization="usageInfo.five_hour.utilization"
+          :resets-at="usageInfo.five_hour.resets_at"
+          :window-stats="usageInfo.five_hour.window_stats"
+          :show-now-when-idle="true"
           color="indigo"
         />
-
-        <!-- 7d Window -->
         <UsageProgressBar
-          v-if="codex7dUsedPercent !== null"
+          v-if="usageInfo?.seven_day"
           label="7d"
-          :utilization="codex7dUsedPercent"
-          :resets-at="codex7dResetAt"
+          :utilization="usageInfo.seven_day.utilization"
+          :resets-at="usageInfo.seven_day.resets_at"
+          :window-stats="usageInfo.seven_day.window_stats"
+          :show-now-when-idle="true"
           color="emerald"
         />
+      </div>
+      <div v-else-if="loading" class="space-y-1.5">
+        <div class="flex items-center gap-1">
+          <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+          <div class="h-1.5 w-8 animate-pulse rounded-full bg-gray-200 dark:bg-gray-700"></div>
+          <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+        </div>
+        <div class="flex items-center gap-1">
+          <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+          <div class="h-1.5 w-8 animate-pulse rounded-full bg-gray-200 dark:bg-gray-700"></div>
+          <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+        </div>
       </div>
       <div v-else class="text-xs text-gray-400">-</div>
     </template>
@@ -129,8 +178,53 @@
         </span>
       </div>
 
+      <!-- Forbidden state (403) -->
+      <div v-if="isForbidden" class="space-y-1">
+        <span
+          :class="[
+            'inline-block rounded px-1.5 py-0.5 text-[10px] font-medium',
+            forbiddenBadgeClass
+          ]"
+        >
+          {{ forbiddenLabel }}
+        </span>
+        <div v-if="validationURL" class="flex items-center gap-1">
+          <a
+            :href="validationURL"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-[10px] text-blue-600 hover:text-blue-800 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+            :title="t('admin.accounts.openVerification')"
+          >
+            {{ t('admin.accounts.openVerification') }}
+          </a>
+          <button
+            type="button"
+            class="text-[10px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            :title="t('admin.accounts.copyLink')"
+            @click="copyValidationURL"
+          >
+            {{ linkCopied ? t('admin.accounts.linkCopied') : t('admin.accounts.copyLink') }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Needs reauth (401) -->
+      <div v-else-if="needsReauth" class="space-y-1">
+        <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">
+          {{ t('admin.accounts.needsReauth') }}
+        </span>
+      </div>
+
+      <!-- Degraded error (non-403, non-401) -->
+      <div v-else-if="usageInfo?.error" class="space-y-1">
+        <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+          {{ usageErrorLabel }}
+        </span>
+      </div>
+
       <!-- Loading state -->
-      <div v-if="loading" class="space-y-1.5">
+      <div v-else-if="loading" class="space-y-1.5">
         <div class="flex items-center gap-1">
           <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
           <div class="h-1.5 w-8 animate-pulse rounded-full bg-gray-200 dark:bg-gray-700"></div>
@@ -172,14 +266,21 @@
           color="purple"
         />
 
-        <!-- Claude 4.5 -->
+        <!-- Claude -->
         <UsageProgressBar
-          v-if="antigravityClaude45UsageFromAPI !== null"
-          :label="t('admin.accounts.usageWindow.claude45')"
-          :utilization="antigravityClaude45UsageFromAPI.utilization"
-          :resets-at="antigravityClaude45UsageFromAPI.resetTime"
+          v-if="antigravityClaudeUsageFromAPI !== null"
+          :label="t('admin.accounts.usageWindow.claude')"
+          :utilization="antigravityClaudeUsageFromAPI.utilization"
+          :resets-at="antigravityClaudeUsageFromAPI.resetTime"
           color="amber"
         />
+
+        <div v-if="aiCreditsDisplay" class="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
+          💳 {{ t('admin.accounts.aiCreditsBalance') }}: {{ aiCreditsDisplay }}
+        </div>
+      </div>
+      <div v-else-if="aiCreditsDisplay" class="text-[10px] text-gray-500 dark:text-gray-400">
+        💳 {{ t('admin.accounts.aiCreditsBalance') }}: {{ aiCreditsDisplay }}
       </div>
       <div v-else class="text-xs text-gray-400">-</div>
     </template>
@@ -273,25 +374,98 @@
   <div v-else>
     <!-- Gemini API Key accounts: show quota info -->
     <AccountQuotaInfo v-if="account.platform === 'gemini'" :account="account" />
-    <div v-else class="text-xs text-gray-400">-</div>
+    <!-- Key/Bedrock accounts: show today stats + optional quota bars -->
+    <div v-else class="space-y-1">
+      <!-- Today stats row (requests, tokens, cost, user_cost) -->
+      <div
+        v-if="todayStats"
+        class="mb-0.5 flex items-center"
+      >
+        <div class="flex items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
+          <span class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800">
+            {{ formatKeyRequests }} req
+          </span>
+          <span class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800">
+            {{ formatKeyTokens }}
+          </span>
+          <span class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800" :title="t('usage.accountBilled')">
+            A ${{ formatKeyCost }}
+          </span>
+          <span
+            v-if="todayStats.user_cost != null"
+            class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
+            :title="t('usage.userBilled')"
+          >
+            U ${{ formatKeyUserCost }}
+          </span>
+        </div>
+      </div>
+      <!-- Loading skeleton for today stats -->
+      <div
+        v-else-if="todayStatsLoading"
+        class="mb-0.5 flex items-center gap-1"
+      >
+        <div class="h-3 w-10 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+        <div class="h-3 w-8 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+        <div class="h-3 w-12 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+      </div>
+
+      <!-- API Key accounts with quota limits: show progress bars -->
+      <UsageProgressBar
+        v-if="quotaDailyBar"
+        label="1d"
+        :utilization="quotaDailyBar.utilization"
+        :resets-at="quotaDailyBar.resetsAt"
+        color="indigo"
+      />
+      <UsageProgressBar
+        v-if="quotaWeeklyBar"
+        label="7d"
+        :utilization="quotaWeeklyBar.utilization"
+        :resets-at="quotaWeeklyBar.resetsAt"
+        color="emerald"
+      />
+      <UsageProgressBar
+        v-if="quotaTotalBar"
+        label="total"
+        :utilization="quotaTotalBar.utilization"
+        color="purple"
+      />
+
+      <!-- No data at all -->
+      <div v-if="!todayStats && !todayStatsLoading && !hasApiKeyQuota" class="text-xs text-gray-400">-</div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { Account, AccountUsageInfo, GeminiCredentials, WindowStats } from '@/types'
+import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
+import { formatCompactNumber } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 
-const props = defineProps<{
-  account: Account
-}>()
+const props = withDefaults(
+  defineProps<{
+    account: Account
+    todayStats?: WindowStats | null
+    todayStatsLoading?: boolean
+    manualRefreshToken?: number
+  }>(),
+  {
+    todayStats: null,
+    todayStatsLoading: false,
+    manualRefreshToken: 0
+  }
+)
 
 const { t } = useI18n()
 
 const loading = ref(false)
+const activeQueryLoading = ref(false)
 const error = ref<string | null>(null)
 const usageInfo = ref<AccountUsageInfo | null>(null)
 
@@ -312,6 +486,9 @@ const shouldFetchUsage = computed(() => {
   if (props.account.platform === 'antigravity') {
     return props.account.type === 'oauth'
   }
+  if (props.account.platform === 'openai') {
+    return props.account.type === 'oauth'
+  }
   return false
 })
 
@@ -326,152 +503,15 @@ const geminiUsageAvailable = computed(() => {
   )
 })
 
-// OpenAI Codex usage computed properties
-const hasCodexUsage = computed(() => {
-  const extra = props.account.extra
-  return (
-    extra &&
-    // Check for new canonical fields first
-    (extra.codex_5h_used_percent !== undefined ||
-      extra.codex_7d_used_percent !== undefined ||
-      // Fallback to legacy fields
-      extra.codex_primary_used_percent !== undefined ||
-      extra.codex_secondary_used_percent !== undefined)
-  )
+const hasOpenAIUsageFallback = computed(() => {
+  if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return false
+  return !!usageInfo.value?.five_hour || !!usageInfo.value?.seven_day
 })
 
-// 5h window usage (prefer canonical field)
-const codex5hUsedPercent = computed(() => {
-  const extra = props.account.extra
-  if (!extra) return null
+const openAIUsageRefreshKey = computed(() => buildOpenAIUsageRefreshKey(props.account))
 
-  // Prefer canonical field
-  if (extra.codex_5h_used_percent !== undefined) {
-    return extra.codex_5h_used_percent
-  }
-
-  // Fallback: detect from legacy fields using window_minutes
-  if (
-    extra.codex_primary_window_minutes !== undefined &&
-    extra.codex_primary_window_minutes <= 360
-  ) {
-    return extra.codex_primary_used_percent ?? null
-  }
-  if (
-    extra.codex_secondary_window_minutes !== undefined &&
-    extra.codex_secondary_window_minutes <= 360
-  ) {
-    return extra.codex_secondary_used_percent ?? null
-  }
-
-  // Legacy assumption: secondary = 5h (may be incorrect)
-  return extra.codex_secondary_used_percent ?? null
-})
-
-const codex5hResetAt = computed(() => {
-  const extra = props.account.extra
-  if (!extra) return null
-
-  // Prefer canonical field
-  if (extra.codex_5h_reset_after_seconds !== undefined) {
-    const resetTime = new Date(Date.now() + extra.codex_5h_reset_after_seconds * 1000)
-    return resetTime.toISOString()
-  }
-
-  // Fallback: detect from legacy fields using window_minutes
-  if (
-    extra.codex_primary_window_minutes !== undefined &&
-    extra.codex_primary_window_minutes <= 360
-  ) {
-    if (extra.codex_primary_reset_after_seconds !== undefined) {
-      const resetTime = new Date(Date.now() + extra.codex_primary_reset_after_seconds * 1000)
-      return resetTime.toISOString()
-    }
-  }
-  if (
-    extra.codex_secondary_window_minutes !== undefined &&
-    extra.codex_secondary_window_minutes <= 360
-  ) {
-    if (extra.codex_secondary_reset_after_seconds !== undefined) {
-      const resetTime = new Date(Date.now() + extra.codex_secondary_reset_after_seconds * 1000)
-      return resetTime.toISOString()
-    }
-  }
-
-  // Legacy assumption: secondary = 5h
-  if (extra.codex_secondary_reset_after_seconds !== undefined) {
-    const resetTime = new Date(Date.now() + extra.codex_secondary_reset_after_seconds * 1000)
-    return resetTime.toISOString()
-  }
-
-  return null
-})
-
-// 7d window usage (prefer canonical field)
-const codex7dUsedPercent = computed(() => {
-  const extra = props.account.extra
-  if (!extra) return null
-
-  // Prefer canonical field
-  if (extra.codex_7d_used_percent !== undefined) {
-    return extra.codex_7d_used_percent
-  }
-
-  // Fallback: detect from legacy fields using window_minutes
-  if (
-    extra.codex_primary_window_minutes !== undefined &&
-    extra.codex_primary_window_minutes >= 10000
-  ) {
-    return extra.codex_primary_used_percent ?? null
-  }
-  if (
-    extra.codex_secondary_window_minutes !== undefined &&
-    extra.codex_secondary_window_minutes >= 10000
-  ) {
-    return extra.codex_secondary_used_percent ?? null
-  }
-
-  // Legacy assumption: primary = 7d (may be incorrect)
-  return extra.codex_primary_used_percent ?? null
-})
-
-const codex7dResetAt = computed(() => {
-  const extra = props.account.extra
-  if (!extra) return null
-
-  // Prefer canonical field
-  if (extra.codex_7d_reset_after_seconds !== undefined) {
-    const resetTime = new Date(Date.now() + extra.codex_7d_reset_after_seconds * 1000)
-    return resetTime.toISOString()
-  }
-
-  // Fallback: detect from legacy fields using window_minutes
-  if (
-    extra.codex_primary_window_minutes !== undefined &&
-    extra.codex_primary_window_minutes >= 10000
-  ) {
-    if (extra.codex_primary_reset_after_seconds !== undefined) {
-      const resetTime = new Date(Date.now() + extra.codex_primary_reset_after_seconds * 1000)
-      return resetTime.toISOString()
-    }
-  }
-  if (
-    extra.codex_secondary_window_minutes !== undefined &&
-    extra.codex_secondary_window_minutes >= 10000
-  ) {
-    if (extra.codex_secondary_reset_after_seconds !== undefined) {
-      const resetTime = new Date(Date.now() + extra.codex_secondary_reset_after_seconds * 1000)
-      return resetTime.toISOString()
-    }
-  }
-
-  // Legacy assumption: primary = 7d
-  if (extra.codex_primary_reset_after_seconds !== undefined) {
-    const resetTime = new Date(Date.now() + extra.codex_primary_reset_after_seconds * 1000)
-    return resetTime.toISOString()
-  }
-
-  return null
+const shouldAutoLoadUsageOnMount = computed(() => {
+  return shouldFetchUsage.value
 })
 
 // Antigravity quota types (用于 API 返回的数据)
@@ -531,13 +571,26 @@ const antigravity3ProUsageFromAPI = computed(() =>
 // Gemini 3 Flash from API
 const antigravity3FlashUsageFromAPI = computed(() => getAntigravityUsageFromAPI(['gemini-3-flash']))
 
-// Gemini 3 Image from API
-const antigravity3ImageUsageFromAPI = computed(() => getAntigravityUsageFromAPI(['gemini-3-pro-image']))
-
-// Claude 4.5 from API
-const antigravityClaude45UsageFromAPI = computed(() =>
-  getAntigravityUsageFromAPI(['claude-sonnet-4-5', 'claude-opus-4-5-thinking'])
+// Gemini Image from API
+const antigravity3ImageUsageFromAPI = computed(() =>
+  getAntigravityUsageFromAPI(['gemini-2.5-flash-image', 'gemini-3.1-flash-image', 'gemini-3-pro-image'])
 )
+
+// Claude from API (all Claude model variants)
+const antigravityClaudeUsageFromAPI = computed(() =>
+  getAntigravityUsageFromAPI([
+    'claude-sonnet-4-5', 'claude-opus-4-5-thinking',
+    'claude-sonnet-4-6', 'claude-opus-4-6', 'claude-opus-4-6-thinking',
+  ])
+)
+
+const aiCreditsDisplay = computed(() => {
+  const credits = usageInfo.value?.ai_credits
+  if (!credits || credits.length === 0) return null
+  const total = credits.reduce((sum, credit) => sum + (credit.amount ?? 0), 0)
+  if (total <= 0) return null
+  return total.toFixed(0)
+})
 
 // Antigravity 账户类型（从 load_code_assist 响应中提取）
 const antigravityTier = computed(() => {
@@ -823,14 +876,63 @@ const hasIneligibleTiers = computed(() => {
   return Array.isArray(ineligibleTiers) && ineligibleTiers.length > 0
 })
 
-const loadUsage = async () => {
+// Antigravity 403 forbidden 状态
+const isForbidden = computed(() => !!usageInfo.value?.is_forbidden)
+const forbiddenType = computed(() => usageInfo.value?.forbidden_type || 'forbidden')
+const validationURL = computed(() => usageInfo.value?.validation_url || '')
+
+// 需要重新授权（401）
+const needsReauth = computed(() => !!usageInfo.value?.needs_reauth)
+
+// 降级错误标签（rate_limited / network_error）
+const usageErrorLabel = computed(() => {
+  const code = usageInfo.value?.error_code
+  if (code === 'rate_limited') return t('admin.accounts.rateLimited')
+  return t('admin.accounts.usageError')
+})
+
+const forbiddenLabel = computed(() => {
+  switch (forbiddenType.value) {
+    case 'validation':
+      return t('admin.accounts.forbiddenValidation')
+    case 'violation':
+      return t('admin.accounts.forbiddenViolation')
+    default:
+      return t('admin.accounts.forbidden')
+  }
+})
+
+const forbiddenBadgeClass = computed(() => {
+  if (forbiddenType.value === 'validation') {
+    return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
+  }
+  return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+})
+
+const linkCopied = ref(false)
+const copyValidationURL = async () => {
+  if (!validationURL.value) return
+  try {
+    await navigator.clipboard.writeText(validationURL.value)
+    linkCopied.value = true
+    setTimeout(() => { linkCopied.value = false }, 2000)
+  } catch {
+    // fallback: ignore
+  }
+}
+
+const isAnthropicOAuthOrSetupToken = computed(() => {
+  return props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')
+})
+
+const loadUsage = async (source?: 'passive' | 'active') => {
   if (!shouldFetchUsage.value) return
 
   loading.value = true
   error.value = null
 
   try {
-    usageInfo.value = await adminAPI.accounts.getUsage(props.account.id)
+    usageInfo.value = await adminAPI.accounts.getUsage(props.account.id, source)
   } catch (e: any) {
     error.value = t('common.error')
     console.error('Failed to load usage:', e)
@@ -839,7 +941,129 @@ const loadUsage = async () => {
   }
 }
 
-onMounted(() => {
-  loadUsage()
+const loadActiveUsage = async () => {
+  activeQueryLoading.value = true
+  try {
+    usageInfo.value = await adminAPI.accounts.getUsage(props.account.id, 'active')
+  } catch (e: any) {
+    console.error('Failed to load active usage:', e)
+  } finally {
+    activeQueryLoading.value = false
+  }
+}
+
+// ===== API Key quota progress bars =====
+
+interface QuotaBarInfo {
+  utilization: number
+  resetsAt: string | null
+}
+
+const makeQuotaBar = (
+  used: number,
+  limit: number,
+  startKey?: string
+): QuotaBarInfo => {
+  const utilization = limit > 0 ? (used / limit) * 100 : 0
+  let resetsAt: string | null = null
+  if (startKey) {
+    const extra = props.account.extra as Record<string, unknown> | undefined
+    const isDaily = startKey.includes('daily')
+    const mode = isDaily
+      ? (extra?.quota_daily_reset_mode as string) || 'rolling'
+      : (extra?.quota_weekly_reset_mode as string) || 'rolling'
+
+    if (mode === 'fixed') {
+      // Use pre-computed next reset time for fixed mode
+      const resetAtKey = isDaily ? 'quota_daily_reset_at' : 'quota_weekly_reset_at'
+      resetsAt = (extra?.[resetAtKey] as string) || null
+    } else {
+      // Rolling mode: compute from start + period
+      const startStr = extra?.[startKey] as string | undefined
+      if (startStr) {
+        const startDate = new Date(startStr)
+        const periodMs = isDaily ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
+        resetsAt = new Date(startDate.getTime() + periodMs).toISOString()
+      }
+    }
+  }
+  return { utilization, resetsAt }
+}
+
+const hasApiKeyQuota = computed(() => {
+  if (props.account.type !== 'apikey' && props.account.type !== 'bedrock') return false
+  return (
+    (props.account.quota_daily_limit ?? 0) > 0 ||
+    (props.account.quota_weekly_limit ?? 0) > 0 ||
+    (props.account.quota_limit ?? 0) > 0
+  )
 })
+
+const quotaDailyBar = computed((): QuotaBarInfo | null => {
+  const limit = props.account.quota_daily_limit ?? 0
+  if (limit <= 0) return null
+  return makeQuotaBar(props.account.quota_daily_used ?? 0, limit, 'quota_daily_start')
+})
+
+const quotaWeeklyBar = computed((): QuotaBarInfo | null => {
+  const limit = props.account.quota_weekly_limit ?? 0
+  if (limit <= 0) return null
+  return makeQuotaBar(props.account.quota_weekly_used ?? 0, limit, 'quota_weekly_start')
+})
+
+const quotaTotalBar = computed((): QuotaBarInfo | null => {
+  const limit = props.account.quota_limit ?? 0
+  if (limit <= 0) return null
+  return makeQuotaBar(props.account.quota_used ?? 0, limit)
+})
+
+// ===== Key account today stats formatters =====
+
+const formatKeyRequests = computed(() => {
+  if (!props.todayStats) return ''
+  return formatCompactNumber(props.todayStats.requests, { allowBillions: false })
+})
+
+const formatKeyTokens = computed(() => {
+  if (!props.todayStats) return ''
+  return formatCompactNumber(props.todayStats.tokens)
+})
+
+const formatKeyCost = computed(() => {
+  if (!props.todayStats) return '0.00'
+  return props.todayStats.cost.toFixed(2)
+})
+
+const formatKeyUserCost = computed(() => {
+  if (!props.todayStats || props.todayStats.user_cost == null) return '0.00'
+  return props.todayStats.user_cost.toFixed(2)
+})
+
+onMounted(() => {
+  if (!shouldAutoLoadUsageOnMount.value) return
+  const source = isAnthropicOAuthOrSetupToken.value ? 'passive' : undefined
+  loadUsage(source)
+})
+
+watch(openAIUsageRefreshKey, (nextKey, prevKey) => {
+  if (!prevKey || nextKey === prevKey) return
+  if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return
+
+  loadUsage().catch((e) => {
+    console.error('Failed to refresh OpenAI usage:', e)
+  })
+})
+
+watch(
+  () => props.manualRefreshToken,
+  (nextToken, prevToken) => {
+    if (nextToken === prevToken) return
+    if (!shouldFetchUsage.value) return
+
+    const source = isAnthropicOAuthOrSetupToken.value ? 'passive' : undefined
+    loadUsage(source).catch((e) => {
+      console.error('Failed to refresh usage after manual refresh:', e)
+    })
+  }
+)
 </script>

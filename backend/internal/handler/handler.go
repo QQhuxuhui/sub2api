@@ -6,24 +6,30 @@ import (
 
 // AdminHandlers contains all admin-related HTTP handlers
 type AdminHandlers struct {
-	Dashboard        *admin.DashboardHandler
-	User             *admin.UserHandler
-	Group            *admin.GroupHandler
-	Account          *admin.AccountHandler
-	Announcement     *admin.AnnouncementHandler
-	OAuth            *admin.OAuthHandler
-	OpenAIOAuth      *admin.OpenAIOAuthHandler
-	GeminiOAuth      *admin.GeminiOAuthHandler
-	AntigravityOAuth *admin.AntigravityOAuthHandler
-	Proxy            *admin.ProxyHandler
-	Redeem           *admin.RedeemHandler
-	Promo            *admin.PromoHandler
-	Setting          *admin.SettingHandler
-	Ops              *admin.OpsHandler
-	System           *admin.SystemHandler
-	Subscription     *admin.SubscriptionHandler
-	Usage            *admin.UsageHandler
-	UserAttribute    *admin.UserAttributeHandler
+	Dashboard             *admin.DashboardHandler
+	User                  *admin.UserHandler
+	Group                 *admin.GroupHandler
+	Account               *admin.AccountHandler
+	Announcement          *admin.AnnouncementHandler
+	DataManagement        *admin.DataManagementHandler
+	Backup                *admin.BackupHandler
+	OAuth                 *admin.OAuthHandler
+	OpenAIOAuth           *admin.OpenAIOAuthHandler
+	GeminiOAuth           *admin.GeminiOAuthHandler
+	AntigravityOAuth      *admin.AntigravityOAuthHandler
+	Proxy                 *admin.ProxyHandler
+	Redeem                *admin.RedeemHandler
+	Promo                 *admin.PromoHandler
+	Setting               *admin.SettingHandler
+	Ops                   *admin.OpsHandler
+	System                *admin.SystemHandler
+	Subscription          *admin.SubscriptionHandler
+	Usage                 *admin.UsageHandler
+	UserAttribute         *admin.UserAttributeHandler
+	ErrorPassthrough      *admin.ErrorPassthroughHandler
+	TLSFingerprintProfile *admin.TLSFingerprintProfileHandler
+	APIKey                *admin.AdminAPIKeyHandler
+	ScheduledTest         *admin.ScheduledTestHandler
 }
 
 // Handlers contains all HTTP handlers
@@ -38,6 +44,8 @@ type Handlers struct {
 	Admin         *AdminHandlers
 	Gateway       *GatewayHandler
 	OpenAIGateway *OpenAIGatewayHandler
+	SoraGateway   *SoraGatewayHandler
+	SoraClient    *SoraClientHandler
 	Setting       *SettingHandler
 	Totp          *TotpHandler
 }

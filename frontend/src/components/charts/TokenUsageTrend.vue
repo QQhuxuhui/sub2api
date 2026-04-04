@@ -63,7 +63,9 @@ const chartColors = computed(() => ({
   grid: isDarkMode.value ? '#374151' : '#e5e7eb',
   input: '#3b82f6',
   output: '#10b981',
-  cache: '#f59e0b'
+  cacheCreation: '#f59e0b',
+  cacheRead: '#06b6d4',
+  cacheHitRate: '#8b5cf6'
 }))
 
 const chartData = computed(() => {
@@ -89,12 +91,33 @@ const chartData = computed(() => {
         tension: 0.3
       },
       {
-        label: 'Cache',
-        data: props.trendData.map((d) => d.cache_tokens),
-        borderColor: chartColors.value.cache,
-        backgroundColor: `${chartColors.value.cache}20`,
+        label: 'Cache Creation',
+        data: props.trendData.map((d) => d.cache_creation_tokens),
+        borderColor: chartColors.value.cacheCreation,
+        backgroundColor: `${chartColors.value.cacheCreation}20`,
         fill: true,
         tension: 0.3
+      },
+      {
+        label: 'Cache Read',
+        data: props.trendData.map((d) => d.cache_read_tokens),
+        borderColor: chartColors.value.cacheRead,
+        backgroundColor: `${chartColors.value.cacheRead}20`,
+        fill: true,
+        tension: 0.3
+      },
+      {
+        label: 'Cache Hit Rate',
+        data: props.trendData.map((d) => {
+          const total = d.cache_read_tokens + d.cache_creation_tokens
+          return total > 0 ? (d.cache_read_tokens / total) * 100 : 0
+        }),
+        borderColor: chartColors.value.cacheHitRate,
+        backgroundColor: `${chartColors.value.cacheHitRate}20`,
+        borderDash: [5, 5],
+        fill: false,
+        tension: 0.3,
+        yAxisID: 'yPercent'
       }
     ]
   }
@@ -123,6 +146,9 @@ const lineOptions = computed(() => ({
     tooltip: {
       callbacks: {
         label: (context: any) => {
+          if (context.dataset.yAxisID === 'yPercent') {
+            return `${context.dataset.label}: ${context.raw.toFixed(1)}%`
+          }
           return `${context.dataset.label}: ${formatTokens(context.raw)}`
         },
         footer: (tooltipItems: any) => {
@@ -158,6 +184,21 @@ const lineOptions = computed(() => ({
           size: 10
         },
         callback: (value: string | number) => formatTokens(Number(value))
+      }
+    },
+    yPercent: {
+      position: 'right' as const,
+      min: 0,
+      max: 100,
+      grid: {
+        drawOnChartArea: false
+      },
+      ticks: {
+        color: chartColors.value.cacheHitRate,
+        font: {
+          size: 10
+        },
+        callback: (value: string | number) => `${value}%`
       }
     }
   }

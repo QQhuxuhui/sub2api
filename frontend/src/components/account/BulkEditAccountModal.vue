@@ -21,6 +21,67 @@
         </p>
       </div>
 
+      <!-- Mixed platform warning -->
+      <div v-if="isMixedPlatform" class="rounded-lg bg-amber-50 p-4 dark:bg-amber-900/20">
+        <p class="text-sm text-amber-700 dark:text-amber-400">
+          <svg class="mr-1.5 inline h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          {{ t('admin.accounts.bulkEdit.mixedPlatformWarning', { platforms: selectedPlatforms.join(', ') }) }}
+        </p>
+      </div>
+
+      <!-- OpenAI passthrough -->
+      <div
+        v-if="allOpenAIPassthroughCapable"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="mb-3 flex items-center justify-between">
+          <div class="flex-1 pr-4">
+            <label
+              id="bulk-edit-openai-passthrough-label"
+              class="input-label mb-0"
+              for="bulk-edit-openai-passthrough-enabled"
+            >
+              {{ t('admin.accounts.openai.oauthPassthrough') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.oauthPassthroughDesc') }}
+            </p>
+          </div>
+          <input
+            v-model="enableOpenAIPassthrough"
+            id="bulk-edit-openai-passthrough-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-openai-passthrough-body"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-openai-passthrough-body"
+          :class="!enableOpenAIPassthrough && 'pointer-events-none opacity-50'"
+          role="group"
+          aria-labelledby="bulk-edit-openai-passthrough-label"
+        >
+          <button
+            id="bulk-edit-openai-passthrough-toggle"
+            type="button"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              openaiPassthroughEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+            @click="openaiPassthroughEnabled = !openaiPassthroughEnabled"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                openaiPassthroughEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
       <!-- Base URL (API Key only) -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -79,117 +140,30 @@
           role="group"
           aria-labelledby="bulk-edit-model-restriction-label"
         >
-          <!-- Mode Toggle -->
-          <div class="mb-4 flex gap-2">
-            <button
-              type="button"
-              :class="[
-                'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-                modelRestrictionMode === 'whitelist'
-                  ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-              ]"
-              @click="modelRestrictionMode = 'whitelist'"
-            >
-              <svg
-                class="mr-1.5 inline h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              {{ t('admin.accounts.modelWhitelist') }}
-            </button>
-            <button
-              type="button"
-              :class="[
-                'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-                modelRestrictionMode === 'mapping'
-                  ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-              ]"
-              @click="modelRestrictionMode = 'mapping'"
-            >
-              <svg
-                class="mr-1.5 inline h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
-                />
-              </svg>
-              {{ t('admin.accounts.modelMapping') }}
-            </button>
-          </div>
-
-          <!-- Whitelist Mode -->
-          <div v-if="modelRestrictionMode === 'whitelist'">
-            <div class="mb-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-              <p class="text-xs text-blue-700 dark:text-blue-400">
-                <svg
-                  class="mr-1 inline h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                {{ t('admin.accounts.selectAllowedModels') }}
-              </p>
-            </div>
-
-            <!-- Model Checkbox List -->
-            <div class="mb-3 grid grid-cols-2 gap-2">
-              <label
-                v-for="model in allModels"
-                :key="model.value"
-                class="flex cursor-pointer items-center rounded-lg border p-3 transition-all hover:bg-gray-50 dark:border-dark-600 dark:hover:bg-dark-700"
-                :class="
-                  allowedModels.includes(model.value)
-                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                    : 'border-gray-200'
-                "
-              >
-                <input
-                  v-model="allowedModels"
-                  type="checkbox"
-                  :value="model.value"
-                  class="mr-2 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                />
-                <span class="text-sm text-gray-700 dark:text-gray-300">{{ model.label }}</span>
-              </label>
-            </div>
-
-            <p class="text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-              <span v-if="allowedModels.length === 0">{{
-                t('admin.accounts.supportsAllModels')
-              }}</span>
+          <div
+            v-if="isOpenAIModelRestrictionDisabled"
+            class="rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20"
+          >
+            <p class="text-xs text-amber-700 dark:text-amber-400">
+              {{ t('admin.accounts.openai.modelRestrictionDisabledByPassthrough') }}
             </p>
           </div>
 
-          <!-- Mapping Mode -->
-          <div v-else>
-            <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
-              <p class="text-xs text-purple-700 dark:text-purple-400">
+          <template v-else>
+            <!-- Mode Toggle -->
+            <div class="mb-4 flex gap-2">
+              <button
+                type="button"
+                :class="[
+                  'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                  modelRestrictionMode === 'whitelist'
+                    ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                ]"
+                @click="modelRestrictionMode = 'whitelist'"
+              >
                 <svg
-                  class="mr-1 inline h-4 w-4"
+                  class="mr-1.5 inline h-4 w-4"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -198,96 +172,177 @@
                     stroke-linecap="round"
                     stroke-linejoin="round"
                     stroke-width="2"
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
                 </svg>
-                {{ t('admin.accounts.mapRequestModels') }}
-              </p>
+                {{ t('admin.accounts.modelWhitelist') }}
+              </button>
+              <button
+                type="button"
+                :class="[
+                  'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                  modelRestrictionMode === 'mapping'
+                    ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                ]"
+                @click="modelRestrictionMode = 'mapping'"
+              >
+                <svg
+                  class="mr-1.5 inline h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                  />
+                </svg>
+                {{ t('admin.accounts.modelMapping') }}
+              </button>
             </div>
 
-            <!-- Model Mapping List -->
-            <div v-if="modelMappings.length > 0" class="mb-3 space-y-2">
-              <div
-                v-for="(mapping, index) in modelMappings"
-                :key="index"
-                class="flex items-center gap-2"
-              >
-                <input
-                  v-model="mapping.from"
-                  type="text"
-                  class="input flex-1"
-                  :placeholder="t('admin.accounts.requestModel')"
-                />
-                <svg
-                  class="h-4 w-4 flex-shrink-0 text-gray-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M14 5l7 7m0 0l-7 7m7-7H3"
-                  />
-                </svg>
-                <input
-                  v-model="mapping.to"
-                  type="text"
-                  class="input flex-1"
-                  :placeholder="t('admin.accounts.actualModel')"
-                />
-                <button
-                  type="button"
-                  class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                  @click="removeModelMapping(index)"
-                >
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <!-- Whitelist Mode -->
+            <div v-if="modelRestrictionMode === 'whitelist'">
+              <div class="mb-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+                <p class="text-xs text-blue-700 dark:text-blue-400">
+                  <svg
+                    class="mr-1 inline h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
                     <path
                       stroke-linecap="round"
                       stroke-linejoin="round"
                       stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                     />
                   </svg>
+                  {{ t('admin.accounts.selectAllowedModels') }}
+                </p>
+              </div>
+
+              <ModelWhitelistSelector
+                v-model="allowedModels"
+                :platforms="selectedPlatforms"
+              />
+
+              <p class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
+                <span v-if="allowedModels.length === 0">{{
+                  t('admin.accounts.supportsAllModels')
+                }}</span>
+              </p>
+            </div>
+
+            <!-- Mapping Mode -->
+            <div v-else>
+              <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
+                <p class="text-xs text-purple-700 dark:text-purple-400">
+                  <svg
+                    class="mr-1 inline h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  {{ t('admin.accounts.mapRequestModels') }}
+                </p>
+              </div>
+
+              <!-- Model Mapping List -->
+              <div v-if="modelMappings.length > 0" class="mb-3 space-y-2">
+                <div
+                  v-for="(mapping, index) in modelMappings"
+                  :key="index"
+                  class="flex items-center gap-2"
+                >
+                  <input
+                    v-model="mapping.from"
+                    type="text"
+                    class="input flex-1"
+                    :placeholder="t('admin.accounts.requestModel')"
+                  />
+                  <svg
+                    class="h-4 w-4 flex-shrink-0 text-gray-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M14 5l7 7m0 0l-7 7m7-7H3"
+                    />
+                  </svg>
+                  <input
+                    v-model="mapping.to"
+                    type="text"
+                    class="input flex-1"
+                    :placeholder="t('admin.accounts.actualModel')"
+                  />
+                  <button
+                    type="button"
+                    class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                    @click="removeModelMapping(index)"
+                  >
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+                @click="addModelMapping"
+              >
+                <svg
+                  class="mr-1 inline h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 4v16m8-8H4"
+                  />
+                </svg>
+                {{ t('admin.accounts.addMapping') }}
+              </button>
+
+              <!-- Quick Add Buttons -->
+              <div class="flex flex-wrap gap-2">
+                <button
+                  v-for="preset in filteredPresets"
+                  :key="preset.label"
+                  type="button"
+                  :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
+                  @click="addPresetMapping(preset.from, preset.to)"
+                >
+                  + {{ preset.label }}
                 </button>
               </div>
             </div>
-
-            <button
-              type="button"
-              class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-              @click="addModelMapping"
-            >
-              <svg
-                class="mr-1 inline h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 4v16m8-8H4"
-                />
-              </svg>
-              {{ t('admin.accounts.addMapping') }}
-            </button>
-
-            <!-- Quick Add Buttons -->
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="preset in presetMappings"
-                :key="preset.label"
-                type="button"
-                :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
-                @click="addPresetMapping(preset.from, preset.to)"
-              >
-                + {{ preset.label }}
-              </button>
-            </div>
-          </div>
+          </template>
         </div>
       </div>
 
@@ -459,7 +514,7 @@
       </div>
 
       <!-- Concurrency & Priority -->
-      <div class="grid grid-cols-2 gap-4 border-t border-gray-200 pt-4 dark:border-dark-600 lg:grid-cols-3">
+      <div class="grid grid-cols-2 gap-4 border-t border-gray-200 pt-4 dark:border-dark-600 lg:grid-cols-4">
         <div>
           <div class="mb-3 flex items-center justify-between">
             <label
@@ -486,7 +541,38 @@
             class="input"
             :class="!enableConcurrency && 'cursor-not-allowed opacity-50'"
             aria-labelledby="bulk-edit-concurrency-label"
+            @input="concurrency = Math.max(1, concurrency || 1)"
           />
+        </div>
+        <div>
+          <div class="mb-3 flex items-center justify-between">
+            <label
+              id="bulk-edit-load-factor-label"
+              class="input-label mb-0"
+              for="bulk-edit-load-factor-enabled"
+            >
+              {{ t('admin.accounts.loadFactor') }}
+            </label>
+            <input
+              v-model="enableLoadFactor"
+              id="bulk-edit-load-factor-enabled"
+              type="checkbox"
+              aria-controls="bulk-edit-load-factor"
+              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            />
+          </div>
+          <input
+            v-model.number="loadFactor"
+            id="bulk-edit-load-factor"
+            type="number"
+            min="1"
+            :disabled="!enableLoadFactor"
+            class="input"
+            :class="!enableLoadFactor && 'cursor-not-allowed opacity-50'"
+            aria-labelledby="bulk-edit-load-factor-label"
+            @input="loadFactor = (loadFactor &amp;&amp; loadFactor >= 1) ? loadFactor : null"
+          />
+          <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
         </div>
         <div>
           <div class="mb-3 flex items-center justify-between">
@@ -575,6 +661,169 @@
         </div>
       </div>
 
+      <!-- OpenAI OAuth WS mode -->
+      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <label
+            id="bulk-edit-openai-ws-mode-label"
+            class="input-label mb-0"
+            for="bulk-edit-openai-ws-mode-enabled"
+          >
+            {{ t('admin.accounts.openai.wsMode') }}
+          </label>
+          <input
+            v-model="enableOpenAIWSMode"
+            id="bulk-edit-openai-ws-mode-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-openai-ws-mode"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-openai-ws-mode"
+          :class="!enableOpenAIWSMode && 'pointer-events-none opacity-50'"
+        >
+          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.wsModeDesc') }}
+          </p>
+          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t(openAIWSModeConcurrencyHintKey) }}
+          </p>
+          <Select
+            v-model="openaiOAuthResponsesWebSocketV2Mode"
+            data-testid="bulk-edit-openai-ws-mode-select"
+            :options="openAIWSModeOptions"
+            aria-labelledby="bulk-edit-openai-ws-mode-label"
+          />
+        </div>
+      </div>
+
+      <!-- RPM Limit (仅全部为 Anthropic OAuth/SetupToken 时显示) -->
+      <div v-if="allAnthropicOAuthOrSetupToken" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <label
+            id="bulk-edit-rpm-limit-label"
+            class="input-label mb-0"
+            for="bulk-edit-rpm-limit-enabled"
+          >
+            {{ t('admin.accounts.quotaControl.rpmLimit.label') }}
+          </label>
+          <input
+            v-model="enableRpmLimit"
+            id="bulk-edit-rpm-limit-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-rpm-limit-body"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+
+        <div
+          id="bulk-edit-rpm-limit-body"
+          :class="!enableRpmLimit && 'pointer-events-none opacity-50'"
+          role="group"
+          aria-labelledby="bulk-edit-rpm-limit-label"
+        >
+          <div class="mb-3 flex items-center justify-between">
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.quotaControl.rpmLimit.hint') }}</span>
+            <button
+              type="button"
+              @click="rpmLimitEnabled = !rpmLimitEnabled"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                rpmLimitEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+              ]"
+            >
+              <span
+                :class="[
+                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  rpmLimitEnabled ? 'translate-x-5' : 'translate-x-0'
+                ]"
+              />
+            </button>
+          </div>
+
+          <div v-if="rpmLimitEnabled" class="space-y-3">
+            <div>
+              <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpm') }}</label>
+              <input
+                v-model.number="bulkBaseRpm"
+                type="number"
+                min="1"
+                max="1000"
+                step="1"
+                class="input"
+                :placeholder="t('admin.accounts.quotaControl.rpmLimit.baseRpmPlaceholder')"
+              />
+              <p class="input-hint">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpmHint') }}</p>
+            </div>
+
+            <div>
+              <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.rpmLimit.strategy') }}</label>
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  @click="bulkRpmStrategy = 'tiered'"
+                  :class="[
+                    'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-all',
+                    bulkRpmStrategy === 'tiered'
+                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                  ]"
+                >
+                  {{ t('admin.accounts.quotaControl.rpmLimit.strategyTiered') }}
+                </button>
+                <button
+                  type="button"
+                  @click="bulkRpmStrategy = 'sticky_exempt'"
+                  :class="[
+                    'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-all',
+                    bulkRpmStrategy === 'sticky_exempt'
+                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                  ]"
+                >
+                  {{ t('admin.accounts.quotaControl.rpmLimit.strategyStickyExempt') }}
+                </button>
+              </div>
+            </div>
+
+            <div v-if="bulkRpmStrategy === 'tiered'">
+              <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.rpmLimit.stickyBuffer') }}</label>
+              <input
+                v-model.number="bulkRpmStickyBuffer"
+                type="number"
+                min="1"
+                step="1"
+                class="input"
+                :placeholder="t('admin.accounts.quotaControl.rpmLimit.stickyBufferPlaceholder')"
+              />
+              <p class="input-hint">{{ t('admin.accounts.quotaControl.rpmLimit.stickyBufferHint') }}</p>
+            </div>
+
+            </div>
+          </div>
+
+        <!-- 用户消息限速模式（独立于 RPM 开关，始终可见） -->
+        <div class="mt-4">
+          <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.userMsgQueue') }}</label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 mb-2">
+            {{ t('admin.accounts.quotaControl.rpmLimit.userMsgQueueHint') }}
+          </p>
+          <div class="flex space-x-2">
+            <button type="button" v-for="opt in umqModeOptions" :key="opt.value"
+              @click="userMsgQueueMode = userMsgQueueMode === opt.value ? null : opt.value"
+              :class="[
+                'px-3 py-1.5 text-sm rounded-md border transition-colors',
+                userMsgQueueMode === opt.value
+                  ? 'bg-primary-600 text-white border-primary-600'
+                  : 'bg-white dark:bg-dark-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-500 hover:bg-gray-50 dark:hover:bg-dark-600'
+              ]">
+              {{ opt.label }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Groups -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -641,6 +890,17 @@
       </div>
     </template>
   </BaseDialog>
+
+  <ConfirmDialog
+    :show="showMixedChannelWarning"
+    :title="t('admin.accounts.mixedChannelWarningTitle')"
+    :message="mixedChannelWarningMessage"
+    :confirm-text="t('common.confirm')"
+    :cancel-text="t('common.cancel')"
+    :danger="true"
+    @confirm="handleMixedChannelConfirm"
+    @cancel="handleMixedChannelCancel"
+  />
 </template>
 
 <script setup lang="ts">
@@ -648,17 +908,31 @@ import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { Proxy, AdminGroup } from '@/types'
+import type { Proxy as ProxyConfig, AdminGroup, AccountPlatform, AccountType } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
+import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
-
+import {
+  buildModelMappingObject as buildModelMappingPayload,
+  getPresetMappingsByPlatform
+} from '@/composables/useModelWhitelist'
+import {
+  OPENAI_WS_MODE_OFF,
+  OPENAI_WS_MODE_PASSTHROUGH,
+  isOpenAIWSModeEnabled,
+  resolveOpenAIWSModeConcurrencyHintKey
+} from '@/utils/openaiWsMode'
+import type { OpenAIWSMode } from '@/utils/openaiWsMode'
 interface Props {
   show: boolean
   accountIds: number[]
-  proxies: Proxy[]
+  selectedPlatforms: AccountPlatform[]
+  selectedTypes: AccountType[]
+  proxies: ProxyConfig[]
   groups: AdminGroup[]
 }
 
@@ -670,6 +944,52 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+
+// Platform awareness
+const isMixedPlatform = computed(() => props.selectedPlatforms.length > 1)
+
+const allOpenAIPassthroughCapable = computed(() => {
+  return (
+    props.selectedPlatforms.length === 1 &&
+    props.selectedPlatforms[0] === 'openai' &&
+    props.selectedTypes.length > 0 &&
+    props.selectedTypes.every(t => t === 'oauth' || t === 'apikey')
+  )
+})
+
+const allOpenAIOAuth = computed(() => {
+  return (
+    props.selectedPlatforms.length === 1 &&
+    props.selectedPlatforms[0] === 'openai' &&
+    props.selectedTypes.length > 0 &&
+    props.selectedTypes.every(t => t === 'oauth')
+  )
+})
+
+// 是否全部为 Anthropic OAuth/SetupToken（RPM 配置仅在此条件下显示）
+const allAnthropicOAuthOrSetupToken = computed(() => {
+  return (
+    props.selectedPlatforms.length === 1 &&
+    props.selectedPlatforms[0] === 'anthropic' &&
+    props.selectedTypes.every(t => t === 'oauth' || t === 'setup-token')
+  )
+})
+
+const filteredPresets = computed(() => {
+  if (props.selectedPlatforms.length === 0) return []
+
+  const dedupedPresets = new Map<string, ReturnType<typeof getPresetMappingsByPlatform>[number]>()
+  for (const platform of props.selectedPlatforms) {
+    for (const preset of getPresetMappingsByPlatform(platform)) {
+      const key = `${preset.from}=>${preset.to}`
+      if (!dedupedPresets.has(key)) {
+        dedupedPresets.set(key, preset)
+      }
+    }
+  }
+
+  return Array.from(dedupedPresets.values())
+})
 
 // Model mapping type
 interface ModelMapping {
@@ -684,13 +1004,20 @@ const enableCustomErrorCodes = ref(false)
 const enableInterceptWarmup = ref(false)
 const enableProxy = ref(false)
 const enableConcurrency = ref(false)
+const enableLoadFactor = ref(false)
 const enablePriority = ref(false)
 const enableRateMultiplier = ref(false)
 const enableStatus = ref(false)
 const enableGroups = ref(false)
+const enableOpenAIPassthrough = ref(false)
+const enableOpenAIWSMode = ref(false)
+const enableRpmLimit = ref(false)
 
 // State - field values
 const submitting = ref(false)
+const showMixedChannelWarning = ref(false)
+const mixedChannelWarningMessage = ref('')
+const pendingUpdatesForConfirm = ref<Record<string, unknown> | null>(null)
 const baseUrl = ref('')
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
@@ -700,77 +1027,23 @@ const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
 const proxyId = ref<number | null>(null)
 const concurrency = ref(1)
+const loadFactor = ref<number | null>(null)
 const priority = ref(1)
 const rateMultiplier = ref(1)
 const status = ref<'active' | 'inactive'>('active')
 const groupIds = ref<number[]>([])
-
-// All models list (combined Anthropic + OpenAI)
-const allModels = [
-  { value: 'claude-opus-4-5-20251101', label: 'Claude Opus 4.5' },
-  { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
-  { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
-  { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku' },
-  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
-  { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus' },
-  { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },
-  { value: 'claude-3-haiku-20240307', label: 'Claude 3 Haiku' },
-  { value: 'gpt-5.2-2025-12-11', label: 'GPT-5.2' },
-  { value: 'gpt-5.2-codex', label: 'GPT-5.2 Codex' },
-  { value: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max' },
-  { value: 'gpt-5.1-codex', label: 'GPT-5.1 Codex' },
-  { value: 'gpt-5.1-2025-11-13', label: 'GPT-5.1' },
-  { value: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Codex Mini' },
-  { value: 'gpt-5-2025-08-07', label: 'GPT-5' }
-]
-
-// Preset mappings (combined Anthropic + OpenAI)
-const presetMappings = [
-  {
-    label: 'Sonnet 4',
-    from: 'claude-sonnet-4-20250514',
-    to: 'claude-sonnet-4-20250514',
-    color: 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400'
-  },
-  {
-    label: 'Sonnet 4.5',
-    from: 'claude-sonnet-4-5-20250929',
-    to: 'claude-sonnet-4-5-20250929',
-    color:
-      'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400'
-  },
-  {
-    label: 'Opus 4.5',
-    from: 'claude-opus-4-5-20251101',
-    to: 'claude-opus-4-5-20251101',
-    color:
-      'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400'
-  },
-  {
-    label: 'Opus->Sonnet',
-    from: 'claude-opus-4-5-20251101',
-    to: 'claude-sonnet-4-5-20250929',
-    color: 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400'
-  },
-  {
-    label: 'GPT-5.2',
-    from: 'gpt-5.2-2025-12-11',
-    to: 'gpt-5.2-2025-12-11',
-    color: 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400'
-  },
-  {
-    label: 'GPT-5.2 Codex',
-    from: 'gpt-5.2-codex',
-    to: 'gpt-5.2-codex',
-    color: 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400'
-  },
-  {
-    label: 'Max->Codex',
-    from: 'gpt-5.1-codex-max',
-    to: 'gpt-5.1-codex',
-    color: 'bg-pink-100 text-pink-700 hover:bg-pink-200 dark:bg-pink-900/30 dark:text-pink-400'
-  }
-]
+const openaiPassthroughEnabled = ref(false)
+const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+const rpmLimitEnabled = ref(false)
+const bulkBaseRpm = ref<number | null>(null)
+const bulkRpmStrategy = ref<'tiered' | 'sticky_exempt'>('tiered')
+const bulkRpmStickyBuffer = ref<number | null>(null)
+const userMsgQueueMode = ref<string | null>(null)
+const umqModeOptions = computed(() => [
+  { value: '', label: t('admin.accounts.quotaControl.rpmLimit.umqModeOff') },
+  { value: 'throttle', label: t('admin.accounts.quotaControl.rpmLimit.umqModeThrottle') },
+  { value: 'serialize', label: t('admin.accounts.quotaControl.rpmLimit.umqModeSerialize') },
+])
 
 // Common HTTP error codes
 const commonErrorCodes = [
@@ -787,6 +1060,20 @@ const statusOptions = computed(() => [
   { value: 'active', label: t('common.active') },
   { value: 'inactive', label: t('common.inactive') }
 ])
+const isOpenAIModelRestrictionDisabled = computed(
+  () =>
+    allOpenAIPassthroughCapable.value &&
+    enableOpenAIPassthrough.value &&
+    openaiPassthroughEnabled.value
+)
+
+const openAIWSModeOptions = computed(() => [
+  { value: OPENAI_WS_MODE_OFF, label: t('admin.accounts.openai.wsModeOff') },
+  { value: OPENAI_WS_MODE_PASSTHROUGH, label: t('admin.accounts.openai.wsModePassthrough') }
+])
+const openAIWSModeConcurrencyHintKey = computed(() =>
+  resolveOpenAIWSModeConcurrencyHintKey(openaiOAuthResponsesWebSocketV2Mode.value)
+)
 
 // Model mapping helpers
 const addModelMapping = () => {
@@ -858,29 +1145,23 @@ const removeErrorCode = (code: number) => {
 }
 
 const buildModelMappingObject = (): Record<string, string> | null => {
-  const mapping: Record<string, string> = {}
-
-  if (modelRestrictionMode.value === 'whitelist') {
-    for (const model of allowedModels.value) {
-      mapping[model] = model
-    }
-  } else {
-    for (const m of modelMappings.value) {
-      const from = m.from.trim()
-      const to = m.to.trim()
-      if (from && to) {
-        mapping[from] = to
-      }
-    }
-  }
-
-  return Object.keys(mapping).length > 0 ? mapping : null
+  return buildModelMappingPayload(
+    modelRestrictionMode.value,
+    allowedModels.value,
+    modelMappings.value
+  )
 }
 
 const buildUpdatePayload = (): Record<string, unknown> | null => {
   const updates: Record<string, unknown> = {}
   const credentials: Record<string, unknown> = {}
   let credentialsChanged = false
+  const ensureExtra = (): Record<string, unknown> => {
+    if (!updates.extra) {
+      updates.extra = {}
+    }
+    return updates.extra as Record<string, unknown>
+  }
 
   if (enableProxy.value) {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
@@ -889,6 +1170,12 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
 
   if (enableConcurrency.value) {
     updates.concurrency = concurrency.value
+  }
+
+  if (enableLoadFactor.value) {
+    // 空值/NaN/0 时发送 0（后端约定 <= 0 表示清除）
+    const lf = loadFactor.value
+    updates.load_factor = (lf != null && !Number.isNaN(lf) && lf > 0) ? lf : 0
   }
 
   if (enablePriority.value) {
@@ -915,10 +1202,29 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
-  if (enableModelRestriction.value) {
-    const modelMapping = buildModelMappingObject()
-    if (modelMapping) {
-      credentials.model_mapping = modelMapping
+  if (enableOpenAIPassthrough.value) {
+    const extra = ensureExtra()
+    extra.openai_passthrough = openaiPassthroughEnabled.value
+    if (!openaiPassthroughEnabled.value) {
+      extra.openai_oauth_passthrough = false
+    }
+  }
+
+  if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value) {
+    // 统一使用 model_mapping 字段
+    if (modelRestrictionMode.value === 'whitelist') {
+      // 白名单模式：将模型转换为 model_mapping 格式（key=value）
+      // 空白名单表示“支持所有模型”，需显式发送空对象以覆盖已有限制。
+      const mapping: Record<string, string> = {}
+      for (const m of allowedModels.value) {
+        mapping[m] = m
+      }
+      credentials.model_mapping = mapping
+      credentialsChanged = true
+    } else {
+      // 映射模式下空配置同样表示“支持所有模型”。
+      const modelMapping = buildModelMappingObject()
+      credentials.model_mapping = modelMapping ?? {}
       credentialsChanged = true
     }
   }
@@ -938,11 +1244,82 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     updates.credentials = credentials
   }
 
+  if (enableOpenAIWSMode.value) {
+    const extra = ensureExtra()
+    extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
+    extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(
+      openaiOAuthResponsesWebSocketV2Mode.value
+    )
+  }
+
+  // RPM limit settings (写入 extra 字段)
+  if (enableRpmLimit.value) {
+    const extra = ensureExtra()
+    if (rpmLimitEnabled.value && bulkBaseRpm.value != null && bulkBaseRpm.value > 0) {
+      extra.base_rpm = bulkBaseRpm.value
+      extra.rpm_strategy = bulkRpmStrategy.value
+      if (bulkRpmStickyBuffer.value != null && bulkRpmStickyBuffer.value > 0) {
+        extra.rpm_sticky_buffer = bulkRpmStickyBuffer.value
+      }
+    } else {
+      // 关闭 RPM 限制 - 设置 base_rpm 为 0，并用空值覆盖关联字段
+      // 后端使用 JSONB || merge 语义，不会删除已有 key，
+      // 所以必须显式发送空值来重置（后端读取时会 fallback 到默认值）
+      extra.base_rpm = 0
+      extra.rpm_strategy = ''
+      extra.rpm_sticky_buffer = 0
+    }
+    updates.extra = extra
+  }
+
+  // UMQ mode（独立于 RPM 保存）
+  if (userMsgQueueMode.value !== null) {
+    const umqExtra = ensureExtra()
+    umqExtra.user_msg_queue_mode = userMsgQueueMode.value  // '' = 清除账号级覆盖
+    umqExtra.user_msg_queue_enabled = false  // 清理旧字段（JSONB merge）
+  }
+
   return Object.keys(updates).length > 0 ? updates : null
 }
 
+const mixedChannelConfirmed = ref(false)
+
+// 是否需要预检查：改了分组 + 全是单一的 antigravity 或 anthropic 平台
+// 多平台混合的情况由 submitBulkUpdate 的 409 catch 兜底
+const canPreCheck = () =>
+  enableGroups.value &&
+  groupIds.value.length > 0 &&
+  props.selectedPlatforms.length === 1 &&
+  (props.selectedPlatforms[0] === 'antigravity' || props.selectedPlatforms[0] === 'anthropic')
+
 const handleClose = () => {
+  showMixedChannelWarning.value = false
+  mixedChannelWarningMessage.value = ''
+  pendingUpdatesForConfirm.value = null
+  mixedChannelConfirmed.value = false
   emit('close')
+}
+
+// 预检查：提交前调接口检测，有风险就弹窗阻止，返回 false 表示需要用户确认
+const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise<boolean> => {
+  if (!canPreCheck()) return true
+  if (mixedChannelConfirmed.value) return true
+
+  try {
+    const result = await adminAPI.accounts.checkMixedChannelRisk({
+      platform: props.selectedPlatforms[0],
+      group_ids: groupIds.value
+    })
+    if (!result.has_risk) return true
+
+    pendingUpdatesForConfirm.value = built
+    mixedChannelWarningMessage.value = result.message || t('admin.accounts.bulkEdit.failed')
+    showMixedChannelWarning.value = true
+    return false
+  } catch (error: any) {
+    appStore.showError(error.message || t('admin.accounts.bulkEdit.failed'))
+    return false
+  }
 }
 
 const handleSubmit = async () => {
@@ -953,26 +1330,43 @@ const handleSubmit = async () => {
 
   const hasAnyFieldEnabled =
     enableBaseUrl.value ||
+    enableOpenAIPassthrough.value ||
     enableModelRestriction.value ||
     enableCustomErrorCodes.value ||
     enableInterceptWarmup.value ||
     enableProxy.value ||
     enableConcurrency.value ||
+    enableLoadFactor.value ||
     enablePriority.value ||
     enableRateMultiplier.value ||
     enableStatus.value ||
-    enableGroups.value
+    enableGroups.value ||
+    enableOpenAIWSMode.value ||
+    enableRpmLimit.value ||
+    userMsgQueueMode.value !== null
 
   if (!hasAnyFieldEnabled) {
     appStore.showError(t('admin.accounts.bulkEdit.noFieldsSelected'))
     return
   }
 
-  const updates = buildUpdatePayload()
-  if (!updates) {
+  const built = buildUpdatePayload()
+  if (!built) {
     appStore.showError(t('admin.accounts.bulkEdit.noFieldsSelected'))
     return
   }
+
+  const canContinue = await preCheckMixedChannelRisk(built)
+  if (!canContinue) return
+
+  await submitBulkUpdate(built)
+}
+
+const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
+  // 无论是预检查确认还是 409 兜底确认，只要 mixedChannelConfirmed 为 true 就带上 flag
+  const updates = mixedChannelConfirmed.value
+    ? { ...baseUpdates, confirm_mixed_channel_risk: true }
+    : baseUpdates
 
   submitting.value = true
 
@@ -990,15 +1384,36 @@ const handleSubmit = async () => {
     }
 
     if (success > 0) {
+      pendingUpdatesForConfirm.value = null
       emit('updated')
       handleClose()
     }
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.accounts.bulkEdit.failed'))
-    console.error('Error bulk updating accounts:', error)
+    // 兜底：多平台混合场景下，预检查跳过，由后端 409 触发确认框
+    if (error.status === 409 && error.error === 'mixed_channel_warning') {
+      pendingUpdatesForConfirm.value = baseUpdates
+      mixedChannelWarningMessage.value = error.message
+      showMixedChannelWarning.value = true
+    } else {
+      appStore.showError(error.message || t('admin.accounts.bulkEdit.failed'))
+      console.error('Error bulk updating accounts:', error)
+    }
   } finally {
     submitting.value = false
   }
+}
+
+const handleMixedChannelConfirm = async () => {
+  showMixedChannelWarning.value = false
+  mixedChannelConfirmed.value = true
+  if (pendingUpdatesForConfirm.value) {
+    await submitBulkUpdate(pendingUpdatesForConfirm.value)
+  }
+}
+
+const handleMixedChannelCancel = () => {
+  showMixedChannelWarning.value = false
+  pendingUpdatesForConfirm.value = null
 }
 
 // Reset form when modal closes
@@ -1013,13 +1428,18 @@ watch(
       enableInterceptWarmup.value = false
       enableProxy.value = false
       enableConcurrency.value = false
+      enableLoadFactor.value = false
       enablePriority.value = false
       enableRateMultiplier.value = false
       enableStatus.value = false
       enableGroups.value = false
+      enableOpenAIPassthrough.value = false
+      enableOpenAIWSMode.value = false
+      enableRpmLimit.value = false
 
       // Reset all values
       baseUrl.value = ''
+      openaiPassthroughEnabled.value = false
       modelRestrictionMode.value = 'whitelist'
       allowedModels.value = []
       modelMappings.value = []
@@ -1028,10 +1448,23 @@ watch(
       interceptWarmupRequests.value = false
       proxyId.value = null
       concurrency.value = 1
+      loadFactor.value = null
       priority.value = 1
       rateMultiplier.value = 1
       status.value = 'active'
       groupIds.value = []
+      openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+      rpmLimitEnabled.value = false
+      bulkBaseRpm.value = null
+      bulkRpmStrategy.value = 'tiered'
+      bulkRpmStickyBuffer.value = null
+      userMsgQueueMode.value = null
+
+      // Reset mixed channel warning state
+      showMixedChannelWarning.value = false
+      mixedChannelWarningMessage.value = ''
+      pendingUpdatesForConfirm.value = null
+      mixedChannelConfirmed.value = false
     }
   }
 )

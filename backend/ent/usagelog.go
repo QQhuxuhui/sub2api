@@ -32,6 +32,10 @@ type UsageLog struct {
 	RequestID string `json:"request_id,omitempty"`
 	// Model holds the value of the "model" field.
 	Model string `json:"model,omitempty"`
+	// RequestedModel holds the value of the "requested_model" field.
+	RequestedModel *string `json:"requested_model,omitempty"`
+	// UpstreamModel holds the value of the "upstream_model" field.
+	UpstreamModel *string `json:"upstream_model,omitempty"`
 	// GroupID holds the value of the "group_id" field.
 	GroupID *int64 `json:"group_id,omitempty"`
 	// SubscriptionID holds the value of the "subscription_id" field.
@@ -80,6 +84,10 @@ type UsageLog struct {
 	ImageCount int `json:"image_count,omitempty"`
 	// ImageSize holds the value of the "image_size" field.
 	ImageSize *string `json:"image_size,omitempty"`
+	// MediaType holds the value of the "media_type" field.
+	MediaType *string `json:"media_type,omitempty"`
+	// CacheTTLOverridden holds the value of the "cache_ttl_overridden" field.
+	CacheTTLOverridden bool `json:"cache_ttl_overridden,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt time.Time `json:"created_at,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
@@ -165,13 +173,13 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case usagelog.FieldStream:
+		case usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
 		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount:
 			values[i] = new(sql.NullInt64)
-		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize:
+		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldMediaType:
 			values[i] = new(sql.NullString)
 		case usagelog.FieldCreatedAt:
 			values[i] = new(sql.NullTime)
@@ -225,6 +233,20 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field model", values[i])
 			} else if value.Valid {
 				_m.Model = value.String
+			}
+		case usagelog.FieldRequestedModel:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field requested_model", values[i])
+			} else if value.Valid {
+				_m.RequestedModel = new(string)
+				*_m.RequestedModel = value.String
+			}
+		case usagelog.FieldUpstreamModel:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field upstream_model", values[i])
+			} else if value.Valid {
+				_m.UpstreamModel = new(string)
+				*_m.UpstreamModel = value.String
 			}
 		case usagelog.FieldGroupID:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -378,6 +400,19 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				_m.ImageSize = new(string)
 				*_m.ImageSize = value.String
 			}
+		case usagelog.FieldMediaType:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field media_type", values[i])
+			} else if value.Valid {
+				_m.MediaType = new(string)
+				*_m.MediaType = value.String
+			}
+		case usagelog.FieldCacheTTLOverridden:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field cache_ttl_overridden", values[i])
+			} else if value.Valid {
+				_m.CacheTTLOverridden = value.Bool
+			}
 		case usagelog.FieldCreatedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
 				return fmt.Errorf("unexpected type %T for field created_at", values[i])
@@ -459,6 +494,16 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("model=")
 	builder.WriteString(_m.Model)
+	builder.WriteString(", ")
+	if v := _m.RequestedModel; v != nil {
+		builder.WriteString("requested_model=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.UpstreamModel; v != nil {
+		builder.WriteString("upstream_model=")
+		builder.WriteString(*v)
+	}
 	builder.WriteString(", ")
 	if v := _m.GroupID; v != nil {
 		builder.WriteString("group_id=")
@@ -547,6 +592,14 @@ func (_m *UsageLog) String() string {
 		builder.WriteString("image_size=")
 		builder.WriteString(*v)
 	}
+	builder.WriteString(", ")
+	if v := _m.MediaType; v != nil {
+		builder.WriteString("media_type=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	builder.WriteString("cache_ttl_overridden=")
+	builder.WriteString(fmt.Sprintf("%v", _m.CacheTTLOverridden))
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
 	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))

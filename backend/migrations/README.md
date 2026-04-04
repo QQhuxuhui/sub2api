@@ -12,19 +12,39 @@ Format: `NNN_description.sql`
 
 Example: `017_add_gemini_tier_id.sql`
 
+### `_notx.sql` 命名与执行语义（并发索引专用）
+
+当迁移包含 `CREATE INDEX CONCURRENTLY` 或 `DROP INDEX CONCURRENTLY` 时，必须使用 `_notx.sql` 后缀，例如：
+
+- `062_add_accounts_priority_indexes_notx.sql`
+- `063_drop_legacy_indexes_notx.sql`
+
+运行规则：
+
+1. `*.sql`（不带 `_notx`）按事务执行。
+2. `*_notx.sql` 按非事务执行，不会包裹在 `BEGIN/COMMIT` 中。
+3. `*_notx.sql` 仅允许并发索引语句，不允许混入事务控制语句或其他 DDL/DML。
+
+幂等要求（必须）：
+
+- 创建索引：`CREATE INDEX CONCURRENTLY IF NOT EXISTS ...`
+- 删除索引：`DROP INDEX CONCURRENTLY IF EXISTS ...`
+
+这样可以保证灾备重放、重复执行时不会因对象已存在/不存在而失败。
+
 ## Migration File Structure
 
-```sql
--- +goose Up
--- +goose StatementBegin
--- Your forward migration SQL here
--- +goose StatementEnd
+This project uses a custom migration runner (`internal/repository/migrations_runner.go`) that executes the full SQL file content as-is.
 
--- +goose Down
--- +goose StatementBegin
--- Your rollback migration SQL here
--- +goose StatementEnd
+- Regular migrations (`*.sql`): executed in a transaction.
+- Non-transactional migrations (`*_notx.sql`): split by statement and executed without transaction (for `CONCURRENTLY`).
+
+```sql
+-- Forward-only migration (recommended)
+ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS example_column VARCHAR(100);
 ```
+
+> ⚠️ Do **not** place executable "Down" SQL in the same file. The runner does not parse goose Up/Down sections and will execute all SQL statements in the file.
 
 ## Important Rules
 
@@ -46,9 +66,9 @@ Why?
    touch migrations/018_your_change.sql
    ```
 
-2. **Write Up and Down migrations**
-   - Up: Apply the change
-   - Down: Revert the change (should be symmetric with Up)
+2. **Write forward-only migration SQL**
+   - Put only the intended schema change in the file
+   - If rollback is needed, create a new migration file to revert
 
 3. **Test locally**
    ```bash
@@ -124,8 +144,6 @@ touch migrations/018_your_new_change.sql
 ## Example Migration
 
 ```sql
--- +goose Up
--- +goose StatementBegin
 -- Add tier_id field to Gemini OAuth accounts for quota tracking
 UPDATE accounts
 SET credentials = jsonb_set(
@@ -137,17 +155,6 @@ SET credentials = jsonb_set(
 WHERE platform = 'gemini'
   AND type = 'oauth'
   AND credentials->>'tier_id' IS NULL;
--- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
--- Remove tier_id field
-UPDATE accounts
-SET credentials = credentials - 'tier_id'
-WHERE platform = 'gemini'
-  AND type = 'oauth'
-  AND credentials->>'tier_id' = 'LEGACY';
--- +goose StatementEnd
 ```
 
 ## Troubleshooting
@@ -174,5 +181,4 @@ VALUES ('NNN_migration.sql', 'calculated_checksum', NOW());
 ## References
 
 - Migration runner: `internal/repository/migrations_runner.go`
-- Goose syntax: https://github.com/pressly/goose
 - PostgreSQL docs: https://www.postgresql.org/docs/

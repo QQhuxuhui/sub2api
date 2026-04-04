@@ -47,6 +47,7 @@ export const useAppStore = defineStore('app', () => {
   // ==================== Computed ====================
 
   const hasActiveToasts = computed(() => toasts.value.length > 0)
+  const backendModeEnabled = computed(() => cachedPublicSettings.value?.backend_mode_enabled ?? false)
 
   const loadingCount = ref<number>(0)
 
@@ -312,6 +313,7 @@ export const useAppStore = defineStore('app', () => {
       return {
         registration_enabled: false,
         email_verify_enabled: false,
+        registration_email_suffix_whitelist: [],
         promo_code_enabled: true,
         password_reset_enabled: false,
         invitation_code_enabled: false,
@@ -327,7 +329,11 @@ export const useAppStore = defineStore('app', () => {
         hide_ccs_import_button: false,
         purchase_subscription_enabled: false,
         purchase_subscription_url: '',
+        custom_menu_items: [],
+        custom_endpoints: [],
         linuxdo_oauth_enabled: false,
+        sora_client_enabled: false,
+        backend_mode_enabled: false,
         version: siteVersion.value
       }
     }
@@ -401,6 +407,7 @@ export const useAppStore = defineStore('app', () => {
 
     // Computed
     hasActiveToasts,
+    backendModeEnabled,
 
     // Actions
     toggleSidebar,

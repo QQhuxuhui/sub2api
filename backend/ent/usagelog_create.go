@@ -57,6 +57,34 @@ func (_c *UsageLogCreate) SetModel(v string) *UsageLogCreate {
 	return _c
 }
 
+// SetRequestedModel sets the "requested_model" field.
+func (_c *UsageLogCreate) SetRequestedModel(v string) *UsageLogCreate {
+	_c.mutation.SetRequestedModel(v)
+	return _c
+}
+
+// SetNillableRequestedModel sets the "requested_model" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableRequestedModel(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetRequestedModel(*v)
+	}
+	return _c
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (_c *UsageLogCreate) SetUpstreamModel(v string) *UsageLogCreate {
+	_c.mutation.SetUpstreamModel(v)
+	return _c
+}
+
+// SetNillableUpstreamModel sets the "upstream_model" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableUpstreamModel(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetUpstreamModel(*v)
+	}
+	return _c
+}
+
 // SetGroupID sets the "group_id" field.
 func (_c *UsageLogCreate) SetGroupID(v int64) *UsageLogCreate {
 	_c.mutation.SetGroupID(v)
@@ -393,6 +421,34 @@ func (_c *UsageLogCreate) SetNillableImageSize(v *string) *UsageLogCreate {
 	return _c
 }
 
+// SetMediaType sets the "media_type" field.
+func (_c *UsageLogCreate) SetMediaType(v string) *UsageLogCreate {
+	_c.mutation.SetMediaType(v)
+	return _c
+}
+
+// SetNillableMediaType sets the "media_type" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableMediaType(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetMediaType(*v)
+	}
+	return _c
+}
+
+// SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
+func (_c *UsageLogCreate) SetCacheTTLOverridden(v bool) *UsageLogCreate {
+	_c.mutation.SetCacheTTLOverridden(v)
+	return _c
+}
+
+// SetNillableCacheTTLOverridden sets the "cache_ttl_overridden" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableCacheTTLOverridden(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetCacheTTLOverridden(*v)
+	}
+	return _c
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (_c *UsageLogCreate) SetCreatedAt(v time.Time) *UsageLogCreate {
 	_c.mutation.SetCreatedAt(v)
@@ -531,6 +587,10 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultImageCount
 		_c.mutation.SetImageCount(v)
 	}
+	if _, ok := _c.mutation.CacheTTLOverridden(); !ok {
+		v := usagelog.DefaultCacheTTLOverridden
+		_c.mutation.SetCacheTTLOverridden(v)
+	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		v := usagelog.DefaultCreatedAt()
 		_c.mutation.SetCreatedAt(v)
@@ -562,6 +622,16 @@ func (_c *UsageLogCreate) check() error {
 	if v, ok := _c.mutation.Model(); ok {
 		if err := usagelog.ModelValidator(v); err != nil {
 			return &ValidationError{Name: "model", err: fmt.Errorf(`ent: validator failed for field "UsageLog.model": %w`, err)}
+		}
+	}
+	if v, ok := _c.mutation.RequestedModel(); ok {
+		if err := usagelog.RequestedModelValidator(v); err != nil {
+			return &ValidationError{Name: "requested_model", err: fmt.Errorf(`ent: validator failed for field "UsageLog.requested_model": %w`, err)}
+		}
+	}
+	if v, ok := _c.mutation.UpstreamModel(); ok {
+		if err := usagelog.UpstreamModelValidator(v); err != nil {
+			return &ValidationError{Name: "upstream_model", err: fmt.Errorf(`ent: validator failed for field "UsageLog.upstream_model": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.InputTokens(); !ok {
@@ -627,6 +697,14 @@ func (_c *UsageLogCreate) check() error {
 			return &ValidationError{Name: "image_size", err: fmt.Errorf(`ent: validator failed for field "UsageLog.image_size": %w`, err)}
 		}
 	}
+	if v, ok := _c.mutation.MediaType(); ok {
+		if err := usagelog.MediaTypeValidator(v); err != nil {
+			return &ValidationError{Name: "media_type", err: fmt.Errorf(`ent: validator failed for field "UsageLog.media_type": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.CacheTTLOverridden(); !ok {
+		return &ValidationError{Name: "cache_ttl_overridden", err: errors.New(`ent: missing required field "UsageLog.cache_ttl_overridden"`)}
+	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "UsageLog.created_at"`)}
 	}
@@ -673,6 +751,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 		_node.Model = value
+	}
+	if value, ok := _c.mutation.RequestedModel(); ok {
+		_spec.SetField(usagelog.FieldRequestedModel, field.TypeString, value)
+		_node.RequestedModel = &value
+	}
+	if value, ok := _c.mutation.UpstreamModel(); ok {
+		_spec.SetField(usagelog.FieldUpstreamModel, field.TypeString, value)
+		_node.UpstreamModel = &value
 	}
 	if value, ok := _c.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)
@@ -761,6 +847,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ImageSize(); ok {
 		_spec.SetField(usagelog.FieldImageSize, field.TypeString, value)
 		_node.ImageSize = &value
+	}
+	if value, ok := _c.mutation.MediaType(); ok {
+		_spec.SetField(usagelog.FieldMediaType, field.TypeString, value)
+		_node.MediaType = &value
+	}
+	if value, ok := _c.mutation.CacheTTLOverridden(); ok {
+		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+		_node.CacheTTLOverridden = value
 	}
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(usagelog.FieldCreatedAt, field.TypeTime, value)
@@ -960,6 +1054,42 @@ func (u *UsageLogUpsert) SetModel(v string) *UsageLogUpsert {
 // UpdateModel sets the "model" field to the value that was provided on create.
 func (u *UsageLogUpsert) UpdateModel() *UsageLogUpsert {
 	u.SetExcluded(usagelog.FieldModel)
+	return u
+}
+
+// SetRequestedModel sets the "requested_model" field.
+func (u *UsageLogUpsert) SetRequestedModel(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldRequestedModel, v)
+	return u
+}
+
+// UpdateRequestedModel sets the "requested_model" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateRequestedModel() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldRequestedModel)
+	return u
+}
+
+// ClearRequestedModel clears the value of the "requested_model" field.
+func (u *UsageLogUpsert) ClearRequestedModel() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldRequestedModel)
+	return u
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (u *UsageLogUpsert) SetUpstreamModel(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldUpstreamModel, v)
+	return u
+}
+
+// UpdateUpstreamModel sets the "upstream_model" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateUpstreamModel() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldUpstreamModel)
+	return u
+}
+
+// ClearUpstreamModel clears the value of the "upstream_model" field.
+func (u *UsageLogUpsert) ClearUpstreamModel() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldUpstreamModel)
 	return u
 }
 
@@ -1407,6 +1537,36 @@ func (u *UsageLogUpsert) ClearImageSize() *UsageLogUpsert {
 	return u
 }
 
+// SetMediaType sets the "media_type" field.
+func (u *UsageLogUpsert) SetMediaType(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldMediaType, v)
+	return u
+}
+
+// UpdateMediaType sets the "media_type" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateMediaType() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldMediaType)
+	return u
+}
+
+// ClearMediaType clears the value of the "media_type" field.
+func (u *UsageLogUpsert) ClearMediaType() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldMediaType)
+	return u
+}
+
+// SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
+func (u *UsageLogUpsert) SetCacheTTLOverridden(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldCacheTTLOverridden, v)
+	return u
+}
+
+// UpdateCacheTTLOverridden sets the "cache_ttl_overridden" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateCacheTTLOverridden() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldCacheTTLOverridden)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -1519,6 +1679,48 @@ func (u *UsageLogUpsertOne) SetModel(v string) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateModel() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateModel()
+	})
+}
+
+// SetRequestedModel sets the "requested_model" field.
+func (u *UsageLogUpsertOne) SetRequestedModel(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestedModel(v)
+	})
+}
+
+// UpdateRequestedModel sets the "requested_model" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateRequestedModel() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestedModel()
+	})
+}
+
+// ClearRequestedModel clears the value of the "requested_model" field.
+func (u *UsageLogUpsertOne) ClearRequestedModel() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRequestedModel()
+	})
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (u *UsageLogUpsertOne) SetUpstreamModel(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUpstreamModel(v)
+	})
+}
+
+// UpdateUpstreamModel sets the "upstream_model" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateUpstreamModel() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUpstreamModel()
+	})
+}
+
+// ClearUpstreamModel clears the value of the "upstream_model" field.
+func (u *UsageLogUpsertOne) ClearUpstreamModel() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUpstreamModel()
 	})
 }
 
@@ -2040,6 +2242,41 @@ func (u *UsageLogUpsertOne) ClearImageSize() *UsageLogUpsertOne {
 	})
 }
 
+// SetMediaType sets the "media_type" field.
+func (u *UsageLogUpsertOne) SetMediaType(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetMediaType(v)
+	})
+}
+
+// UpdateMediaType sets the "media_type" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateMediaType() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateMediaType()
+	})
+}
+
+// ClearMediaType clears the value of the "media_type" field.
+func (u *UsageLogUpsertOne) ClearMediaType() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearMediaType()
+	})
+}
+
+// SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
+func (u *UsageLogUpsertOne) SetCacheTTLOverridden(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCacheTTLOverridden(v)
+	})
+}
+
+// UpdateCacheTTLOverridden sets the "cache_ttl_overridden" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateCacheTTLOverridden() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCacheTTLOverridden()
+	})
+}
+
 // Exec executes the query.
 func (u *UsageLogUpsertOne) Exec(ctx context.Context) error {
 	if len(u.create.conflict) == 0 {
@@ -2318,6 +2555,48 @@ func (u *UsageLogUpsertBulk) SetModel(v string) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateModel() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateModel()
+	})
+}
+
+// SetRequestedModel sets the "requested_model" field.
+func (u *UsageLogUpsertBulk) SetRequestedModel(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestedModel(v)
+	})
+}
+
+// UpdateRequestedModel sets the "requested_model" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateRequestedModel() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestedModel()
+	})
+}
+
+// ClearRequestedModel clears the value of the "requested_model" field.
+func (u *UsageLogUpsertBulk) ClearRequestedModel() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRequestedModel()
+	})
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (u *UsageLogUpsertBulk) SetUpstreamModel(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUpstreamModel(v)
+	})
+}
+
+// UpdateUpstreamModel sets the "upstream_model" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateUpstreamModel() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUpstreamModel()
+	})
+}
+
+// ClearUpstreamModel clears the value of the "upstream_model" field.
+func (u *UsageLogUpsertBulk) ClearUpstreamModel() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUpstreamModel()
 	})
 }
 
@@ -2836,6 +3115,41 @@ func (u *UsageLogUpsertBulk) UpdateImageSize() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearImageSize() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearImageSize()
+	})
+}
+
+// SetMediaType sets the "media_type" field.
+func (u *UsageLogUpsertBulk) SetMediaType(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetMediaType(v)
+	})
+}
+
+// UpdateMediaType sets the "media_type" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateMediaType() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateMediaType()
+	})
+}
+
+// ClearMediaType clears the value of the "media_type" field.
+func (u *UsageLogUpsertBulk) ClearMediaType() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearMediaType()
+	})
+}
+
+// SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
+func (u *UsageLogUpsertBulk) SetCacheTTLOverridden(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCacheTTLOverridden(v)
+	})
+}
+
+// UpdateCacheTTLOverridden sets the "cache_ttl_overridden" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateCacheTTLOverridden() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCacheTTLOverridden()
 	})
 }
 

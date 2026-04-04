@@ -83,13 +83,7 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 		path := c.Request.URL.Path
 
 		// Skip API routes
-		if strings.HasPrefix(path, "/api/") ||
-			strings.HasPrefix(path, "/v1/") ||
-			strings.HasPrefix(path, "/v1beta/") ||
-			strings.HasPrefix(path, "/antigravity/") ||
-			strings.HasPrefix(path, "/setup/") ||
-			path == "/health" ||
-			path == "/responses" {
+		if shouldBypassEmbeddedFrontend(path) {
 			c.Next()
 			return
 		}
@@ -186,7 +180,37 @@ func (s *FrontendServer) injectSettings(settingsJSON []byte) []byte {
 
 	// Inject before </head>
 	headClose := []byte("</head>")
-	return bytes.Replace(s.baseHTML, headClose, append(script, headClose...), 1)
+	result := bytes.Replace(s.baseHTML, headClose, append(script, headClose...), 1)
+
+	// Replace <title> with custom site name so the browser tab shows it immediately
+	result = injectSiteTitle(result, settingsJSON)
+
+	return result
+}
+
+// injectSiteTitle replaces the static <title> in HTML with the configured site name.
+// This ensures the browser tab shows the correct title before JS executes.
+func injectSiteTitle(html, settingsJSON []byte) []byte {
+	var cfg struct {
+		SiteName string `json:"site_name"`
+	}
+	if err := json.Unmarshal(settingsJSON, &cfg); err != nil || cfg.SiteName == "" {
+		return html
+	}
+
+	// Find and replace the existing <title>...</title>
+	titleStart := bytes.Index(html, []byte("<title>"))
+	titleEnd := bytes.Index(html, []byte("</title>"))
+	if titleStart == -1 || titleEnd == -1 || titleEnd <= titleStart {
+		return html
+	}
+
+	newTitle := []byte("<title>" + cfg.SiteName + " - AI API Gateway</title>")
+	var buf bytes.Buffer
+	buf.Write(html[:titleStart])
+	buf.Write(newTitle)
+	buf.Write(html[titleEnd+len("</title>"):])
+	return buf.Bytes()
 }
 
 // replaceNoncePlaceholder replaces the nonce placeholder with actual nonce value
@@ -206,13 +230,7 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 
-		if strings.HasPrefix(path, "/api/") ||
-			strings.HasPrefix(path, "/v1/") ||
-			strings.HasPrefix(path, "/v1beta/") ||
-			strings.HasPrefix(path, "/antigravity/") ||
-			strings.HasPrefix(path, "/setup/") ||
-			path == "/health" ||
-			path == "/responses" {
+		if shouldBypassEmbeddedFrontend(path) {
 			c.Next()
 			return
 		}
@@ -231,6 +249,19 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 
 		serveIndexHTML(c, distFS)
 	}
+}
+
+func shouldBypassEmbeddedFrontend(path string) bool {
+	trimmed := strings.TrimSpace(path)
+	return strings.HasPrefix(trimmed, "/api/") ||
+		strings.HasPrefix(trimmed, "/v1/") ||
+		strings.HasPrefix(trimmed, "/v1beta/") ||
+		strings.HasPrefix(trimmed, "/sora/") ||
+		strings.HasPrefix(trimmed, "/antigravity/") ||
+		strings.HasPrefix(trimmed, "/setup/") ||
+		trimmed == "/health" ||
+		trimmed == "/responses" ||
+		strings.HasPrefix(trimmed, "/responses/")
 }
 
 func serveIndexHTML(c *gin.Context, fsys fs.FS) {

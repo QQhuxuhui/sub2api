@@ -204,7 +204,7 @@ export function formatReasoningEffort(effort: string | null | undefined): string
 }
 
 /**
- * 格式化时间（只显示时分）
+ * 格式化时间（显示时分秒）
  * @param date 日期字符串或 Date 对象
  * @returns 格式化后的时间字符串
  */
@@ -212,6 +212,7 @@ export function formatTime(date: string | Date | null | undefined): string {
   return formatDate(date, {
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
     hour12: false
   })
 }
@@ -244,6 +245,26 @@ export function formatTokensK(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
   if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`
   return tokens.toString()
+}
+
+/**
+ * 格式化大数字（K/M/B，保留 1 位小数）
+ * @param num 数字
+ * @param options allowBillions=false 时最高只显示到 M
+ */
+export function formatCompactNumber(
+  num: number | null | undefined,
+  options?: { allowBillions?: boolean }
+): string {
+  if (num === null || num === undefined) return '0'
+
+  const abs = Math.abs(num)
+  const allowBillions = options?.allowBillions !== false
+
+  if (allowBillions && abs >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(1)}B`
+  if (abs >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
+  if (abs >= 1_000) return `${(num / 1_000).toFixed(1)}K`
+  return num.toString()
 }
 
 /**

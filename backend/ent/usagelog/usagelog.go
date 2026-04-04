@@ -24,6 +24,10 @@ const (
 	FieldRequestID = "request_id"
 	// FieldModel holds the string denoting the model field in the database.
 	FieldModel = "model"
+	// FieldRequestedModel holds the string denoting the requested_model field in the database.
+	FieldRequestedModel = "requested_model"
+	// FieldUpstreamModel holds the string denoting the upstream_model field in the database.
+	FieldUpstreamModel = "upstream_model"
 	// FieldGroupID holds the string denoting the group_id field in the database.
 	FieldGroupID = "group_id"
 	// FieldSubscriptionID holds the string denoting the subscription_id field in the database.
@@ -72,6 +76,10 @@ const (
 	FieldImageCount = "image_count"
 	// FieldImageSize holds the string denoting the image_size field in the database.
 	FieldImageSize = "image_size"
+	// FieldMediaType holds the string denoting the media_type field in the database.
+	FieldMediaType = "media_type"
+	// FieldCacheTTLOverridden holds the string denoting the cache_ttl_overridden field in the database.
+	FieldCacheTTLOverridden = "cache_ttl_overridden"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
 	// EdgeUser holds the string denoting the user edge name in mutations.
@@ -131,6 +139,8 @@ var Columns = []string{
 	FieldAccountID,
 	FieldRequestID,
 	FieldModel,
+	FieldRequestedModel,
+	FieldUpstreamModel,
 	FieldGroupID,
 	FieldSubscriptionID,
 	FieldInputTokens,
@@ -155,6 +165,8 @@ var Columns = []string{
 	FieldIPAddress,
 	FieldImageCount,
 	FieldImageSize,
+	FieldMediaType,
+	FieldCacheTTLOverridden,
 	FieldCreatedAt,
 }
 
@@ -173,6 +185,10 @@ var (
 	RequestIDValidator func(string) error
 	// ModelValidator is a validator for the "model" field. It is called by the builders before save.
 	ModelValidator func(string) error
+	// RequestedModelValidator is a validator for the "requested_model" field. It is called by the builders before save.
+	RequestedModelValidator func(string) error
+	// UpstreamModelValidator is a validator for the "upstream_model" field. It is called by the builders before save.
+	UpstreamModelValidator func(string) error
 	// DefaultInputTokens holds the default value on creation for the "input_tokens" field.
 	DefaultInputTokens int
 	// DefaultOutputTokens holds the default value on creation for the "output_tokens" field.
@@ -211,6 +227,10 @@ var (
 	DefaultImageCount int
 	// ImageSizeValidator is a validator for the "image_size" field. It is called by the builders before save.
 	ImageSizeValidator func(string) error
+	// MediaTypeValidator is a validator for the "media_type" field. It is called by the builders before save.
+	MediaTypeValidator func(string) error
+	// DefaultCacheTTLOverridden holds the default value on creation for the "cache_ttl_overridden" field.
+	DefaultCacheTTLOverridden bool
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
 	DefaultCreatedAt func() time.Time
 )
@@ -246,6 +266,16 @@ func ByRequestID(opts ...sql.OrderTermOption) OrderOption {
 // ByModel orders the results by the model field.
 func ByModel(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldModel, opts...).ToFunc()
+}
+
+// ByRequestedModel orders the results by the requested_model field.
+func ByRequestedModel(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRequestedModel, opts...).ToFunc()
+}
+
+// ByUpstreamModel orders the results by the upstream_model field.
+func ByUpstreamModel(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUpstreamModel, opts...).ToFunc()
 }
 
 // ByGroupID orders the results by the group_id field.
@@ -366,6 +396,16 @@ func ByImageCount(opts ...sql.OrderTermOption) OrderOption {
 // ByImageSize orders the results by the image_size field.
 func ByImageSize(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldImageSize, opts...).ToFunc()
+}
+
+// ByMediaType orders the results by the media_type field.
+func ByMediaType(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMediaType, opts...).ToFunc()
+}
+
+// ByCacheTTLOverridden orders the results by the cache_ttl_overridden field.
+func ByCacheTTLOverridden(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCacheTTLOverridden, opts...).ToFunc()
 }
 
 // ByCreatedAt orders the results by the created_at field.

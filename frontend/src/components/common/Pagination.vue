@@ -84,8 +84,8 @@
 
         <!-- Page numbers -->
         <button
-          v-for="pageNum in visiblePages"
-          :key="pageNum"
+          v-for="(pageNum, index) in visiblePages"
+          :key="`${pageNum}-${index}`"
           @click="typeof pageNum === 'number' && goToPage(pageNum)"
           :disabled="typeof pageNum !== 'number'"
           :class="[
@@ -122,6 +122,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import Select from './Select.vue'
+import { setPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
 
@@ -216,6 +217,7 @@ const goToPage = (newPage: number) => {
 const handlePageSizeChange = (value: string | number | boolean | null) => {
   if (value === null || typeof value === 'boolean') return
   const newPageSize = typeof value === 'string' ? parseInt(value) : value
+  setPersistedPageSize(newPageSize)
   emit('update:pageSize', newPageSize)
 }
 

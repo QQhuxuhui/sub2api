@@ -2,6 +2,7 @@ package handler
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
@@ -68,9 +69,39 @@ type LoginRequest struct {
 
 // AuthResponse 认证响应格式（匹配前端期望）
 type AuthResponse struct {
-	AccessToken string    `json:"access_token"`
-	TokenType   string    `json:"token_type"`
-	User        *dto.User `json:"user"`
+	AccessToken  string    `json:"access_token"`
+	RefreshToken string    `json:"refresh_token,omitempty"` // 新增：Refresh Token
+	ExpiresIn    int       `json:"expires_in,omitempty"`    // 新增：Access Token有效期（秒）
+	TokenType    string    `json:"token_type"`
+	User         *dto.User `json:"user"`
+}
+
+// respondWithTokenPair 生成 Token 对并返回认证响应
+// 如果 Token 对生成失败，回退到只返回 Access Token（向后兼容）
+func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
+	tokenPair, err := h.authService.GenerateTokenPair(c.Request.Context(), user, "")
+	if err != nil {
+		slog.Error("failed to generate token pair", "error", err, "user_id", user.ID)
+		// 回退到只返回Access Token
+		token, tokenErr := h.authService.GenerateToken(user)
+		if tokenErr != nil {
+			response.InternalError(c, "Failed to generate token")
+			return
+		}
+		response.Success(c, AuthResponse{
+			AccessToken: token,
+			TokenType:   "Bearer",
+			User:        dto.UserFromService(user),
+		})
+		return
+	}
+	response.Success(c, AuthResponse{
+		AccessToken:  tokenPair.AccessToken,
+		RefreshToken: tokenPair.RefreshToken,
+		ExpiresIn:    tokenPair.ExpiresIn,
+		TokenType:    "Bearer",
+		User:         dto.UserFromService(user),
+	})
 }
 
 // Register handles user registration
@@ -82,25 +113,19 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// Turnstile 验证（当提供了邮箱验证码时跳过，因为发送验证码时已验证过）
-	if req.VerifyCode == "" {
-		if err := h.authService.VerifyTurnstile(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c)); err != nil {
-			response.ErrorFrom(c, err)
-			return
-		}
+	// Turnstile 验证（邮箱验证码注册场景避免重复校验一次性 token）
+	if err := h.authService.VerifyTurnstileForRegister(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c), req.VerifyCode); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 
-	token, user, err := h.authService.RegisterWithVerification(c.Request.Context(), req.Email, req.Password, req.VerifyCode, req.PromoCode, req.InvitationCode)
+	_, user, err := h.authService.RegisterWithVerification(c.Request.Context(), req.Email, req.Password, req.VerifyCode, req.PromoCode, req.InvitationCode)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	response.Success(c, AuthResponse{
-		AccessToken: token,
-		TokenType:   "Bearer",
-		User:        dto.UserFromService(user),
-	})
+	h.respondWithTokenPair(c, user)
 }
 
 // SendVerifyCode 发送邮箱验证码
@@ -150,6 +175,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	_ = token // token 由 authService.Login 返回但此处由 respondWithTokenPair 重新生成
 
 	// Check if TOTP 2FA is enabled for this user
 	if h.totpService != nil && h.settingSvc.IsTotpEnabled(c.Request.Context()) && user.TotpEnabled {
@@ -168,11 +194,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, AuthResponse{
-		AccessToken: token,
-		TokenType:   "Bearer",
-		User:        dto.UserFromService(user),
-	})
+	// Backend mode: only admin can login
+	if h.settingSvc.IsBackendModeEnabled(c.Request.Context()) && !user.IsAdmin() {
+		response.Forbidden(c, "Backend mode is active. Only admin login is allowed.")
+		return
+	}
+
+	h.respondWithTokenPair(c, user)
 }
 
 // TotpLoginResponse represents the response when 2FA is required
@@ -228,28 +256,23 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 		return
 	}
 
-	// Delete the login session
-	_ = h.totpService.DeleteLoginSession(c.Request.Context(), req.TempToken)
-
-	// Get the user
+	// Get the user (before session deletion so we can check backend mode)
 	user, err := h.userService.GetByID(c.Request.Context(), session.UserID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	// Generate the JWT token
-	token, err := h.authService.GenerateToken(user)
-	if err != nil {
-		response.InternalError(c, "Failed to generate token")
+	// Backend mode: only admin can login (check BEFORE deleting session)
+	if h.settingSvc.IsBackendModeEnabled(c.Request.Context()) && !user.IsAdmin() {
+		response.Forbidden(c, "Backend mode is active. Only admin login is allowed.")
 		return
 	}
 
-	response.Success(c, AuthResponse{
-		AccessToken: token,
-		TokenType:   "Bearer",
-		User:        dto.UserFromService(user),
-	})
+	// Delete the login session (only after all checks pass)
+	_ = h.totpService.DeleteLoginSession(c.Request.Context(), req.TempToken)
+
+	h.respondWithTokenPair(c, user)
 }
 
 // GetCurrentUser handles getting current authenticated user
@@ -436,17 +459,12 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 		return
 	}
 
-	// Build frontend base URL from request
-	scheme := "https"
-	if c.Request.TLS == nil {
-		// Check X-Forwarded-Proto header (common in reverse proxy setups)
-		if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
-			scheme = proto
-		} else {
-			scheme = "http"
-		}
+	frontendBaseURL := strings.TrimSpace(h.settingSvc.GetFrontendURL(c.Request.Context()))
+	if frontendBaseURL == "" {
+		slog.Error("frontend_url not configured in settings or config; cannot build password reset link")
+		response.InternalError(c, "Password reset is not configured")
+		return
 	}
-	frontendBaseURL := scheme + "://" + c.Request.Host
 
 	// Request password reset (async)
 	// Note: This returns success even if email doesn't exist (to prevent enumeration)
@@ -489,5 +507,104 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 
 	response.Success(c, ResetPasswordResponse{
 		Message: "Your password has been reset successfully. You can now log in with your new password.",
+	})
+}
+
+// ==================== Token Refresh Endpoints ====================
+
+// RefreshTokenRequest 刷新Token请求
+type RefreshTokenRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+// RefreshTokenResponse 刷新Token响应
+type RefreshTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int    `json:"expires_in"` // Access Token有效期（秒）
+	TokenType    string `json:"token_type"`
+}
+
+// RefreshToken 刷新Token
+// POST /api/v1/auth/refresh
+func (h *AuthHandler) RefreshToken(c *gin.Context) {
+	var req RefreshTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	result, err := h.authService.RefreshTokenPair(c.Request.Context(), req.RefreshToken)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	// Backend mode: block non-admin token refresh
+	if h.settingSvc.IsBackendModeEnabled(c.Request.Context()) && result.UserRole != "admin" {
+		response.Forbidden(c, "Backend mode is active. Only admin login is allowed.")
+		return
+	}
+
+	response.Success(c, RefreshTokenResponse{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+		TokenType:    "Bearer",
+	})
+}
+
+// LogoutRequest 登出请求
+type LogoutRequest struct {
+	RefreshToken string `json:"refresh_token,omitempty"` // 可选：撤销指定的Refresh Token
+}
+
+// LogoutResponse 登出响应
+type LogoutResponse struct {
+	Message string `json:"message"`
+}
+
+// Logout 用户登出
+// POST /api/v1/auth/logout
+func (h *AuthHandler) Logout(c *gin.Context) {
+	var req LogoutRequest
+	// 允许空请求体（向后兼容）
+	_ = c.ShouldBindJSON(&req)
+
+	// 如果提供了Refresh Token，撤销它
+	if req.RefreshToken != "" {
+		if err := h.authService.RevokeRefreshToken(c.Request.Context(), req.RefreshToken); err != nil {
+			slog.Debug("failed to revoke refresh token", "error", err)
+			// 不影响登出流程
+		}
+	}
+
+	response.Success(c, LogoutResponse{
+		Message: "Logged out successfully",
+	})
+}
+
+// RevokeAllSessionsResponse 撤销所有会话响应
+type RevokeAllSessionsResponse struct {
+	Message string `json:"message"`
+}
+
+// RevokeAllSessions 撤销当前用户的所有会话
+// POST /api/v1/auth/revoke-all-sessions
+func (h *AuthHandler) RevokeAllSessions(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	if err := h.authService.RevokeAllUserSessions(c.Request.Context(), subject.UserID); err != nil {
+		slog.Error("failed to revoke all sessions", "user_id", subject.UserID, "error", err)
+		response.InternalError(c, "Failed to revoke sessions")
+		return
+	}
+
+	response.Success(c, RevokeAllSessionsResponse{
+		Message: "All sessions have been revoked. Please log in again.",
 	})
 }

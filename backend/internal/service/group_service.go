@@ -27,12 +27,20 @@ type GroupRepository interface {
 	ListActiveByPlatform(ctx context.Context, platform string) ([]Group, error)
 
 	ExistsByName(ctx context.Context, name string) (bool, error)
-	GetAccountCount(ctx context.Context, groupID int64) (int64, error)
+	GetAccountCount(ctx context.Context, groupID int64) (total int64, active int64, err error)
 	DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error)
 	// GetAccountIDsByGroupIDs 获取多个分组的所有账号 ID（去重）
 	GetAccountIDsByGroupIDs(ctx context.Context, groupIDs []int64) ([]int64, error)
 	// BindAccountsToGroup 将多个账号绑定到指定分组
 	BindAccountsToGroup(ctx context.Context, groupID int64, accountIDs []int64) error
+	// UpdateSortOrders 批量更新分组排序
+	UpdateSortOrders(ctx context.Context, updates []GroupSortOrderUpdate) error
+}
+
+// GroupSortOrderUpdate 分组排序更新
+type GroupSortOrderUpdate struct {
+	ID        int64 `json:"id"`
+	SortOrder int   `json:"sort_order"`
 }
 
 // CreateGroupRequest 创建分组请求
@@ -194,7 +202,7 @@ func (s *GroupService) GetStats(ctx context.Context, id int64) (map[string]any, 
 	}
 
 	// 获取账号数量
-	accountCount, err := s.groupRepo.GetAccountCount(ctx, id)
+	accountCount, _, err := s.groupRepo.GetAccountCount(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get account count: %w", err)
 	}

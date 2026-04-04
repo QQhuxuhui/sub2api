@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"math"
 	"strconv"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
@@ -88,6 +88,7 @@ func (s *OpsAlertEvaluatorService) Start() {
 		if s.stopCh == nil {
 			s.stopCh = make(chan struct{})
 		}
+		s.wg.Add(1)
 		go s.run()
 	})
 }
@@ -105,7 +106,6 @@ func (s *OpsAlertEvaluatorService) Stop() {
 }
 
 func (s *OpsAlertEvaluatorService) run() {
-	s.wg.Add(1)
 	defer s.wg.Done()
 
 	// Start immediately to produce early feedback in ops dashboard.
@@ -186,7 +186,7 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 	rules, err := s.opsRepo.ListAlertRules(ctx)
 	if err != nil {
 		s.recordHeartbeatError(runAt, time.Since(startedAt), err)
-		log.Printf("[OpsAlertEvaluator] list rules failed: %v", err)
+		logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] list rules failed: %v", err)
 		return
 	}
 
@@ -236,7 +236,7 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 
 		activeEvent, err := s.opsRepo.GetActiveAlertEvent(ctx, rule.ID)
 		if err != nil {
-			log.Printf("[OpsAlertEvaluator] get active event failed (rule=%d): %v", rule.ID, err)
+			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] get active event failed (rule=%d): %v", rule.ID, err)
 			continue
 		}
 
@@ -258,7 +258,7 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 
 			latestEvent, err := s.opsRepo.GetLatestAlertEvent(ctx, rule.ID)
 			if err != nil {
-				log.Printf("[OpsAlertEvaluator] get latest event failed (rule=%d): %v", rule.ID, err)
+				logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] get latest event failed (rule=%d): %v", rule.ID, err)
 				continue
 			}
 			if latestEvent != nil && rule.CooldownMinutes > 0 {
@@ -283,7 +283,7 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 
 			created, err := s.opsRepo.CreateAlertEvent(ctx, firedEvent)
 			if err != nil {
-				log.Printf("[OpsAlertEvaluator] create event failed (rule=%d): %v", rule.ID, err)
+				logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] create event failed (rule=%d): %v", rule.ID, err)
 				continue
 			}
 
@@ -300,7 +300,7 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 		if activeEvent != nil {
 			resolvedAt := now
 			if err := s.opsRepo.UpdateAlertEventStatus(ctx, activeEvent.ID, OpsAlertStatusResolved, &resolvedAt); err != nil {
-				log.Printf("[OpsAlertEvaluator] resolve event failed (event=%d): %v", activeEvent.ID, err)
+				logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] resolve event failed (event=%d): %v", activeEvent.ID, err)
 			} else {
 				eventsResolved++
 			}
@@ -505,6 +505,48 @@ func (s *OpsAlertEvaluatorService) computeRuleMetric(
 		}
 		return float64(countAccountsByCondition(availability.Accounts, func(acc *AccountAvailability) bool {
 			return acc.HasError && acc.TempUnschedulableUntil == nil
+		})), true
+	case "group_rate_limit_ratio":
+		if groupID == nil || *groupID <= 0 {
+			return 0, false
+		}
+		if s == nil || s.opsService == nil {
+			return 0, false
+		}
+		availability, err := s.opsService.GetAccountAvailability(ctx, platform, groupID)
+		if err != nil || availability == nil {
+			return 0, false
+		}
+		if availability.Group == nil || availability.Group.TotalAccounts <= 0 {
+			return 0, true
+		}
+		return (float64(availability.Group.RateLimitCount) / float64(availability.Group.TotalAccounts)) * 100, true
+	case "account_error_ratio":
+		if s == nil || s.opsService == nil {
+			return 0, false
+		}
+		availability, err := s.opsService.GetAccountAvailability(ctx, platform, groupID)
+		if err != nil || availability == nil {
+			return 0, false
+		}
+		total := int64(len(availability.Accounts))
+		if total <= 0 {
+			return 0, true
+		}
+		errorCount := countAccountsByCondition(availability.Accounts, func(acc *AccountAvailability) bool {
+			return acc.HasError && acc.TempUnschedulableUntil == nil
+		})
+		return (float64(errorCount) / float64(total)) * 100, true
+	case "overload_account_count":
+		if s == nil || s.opsService == nil {
+			return 0, false
+		}
+		availability, err := s.opsService.GetAccountAvailability(ctx, platform, groupID)
+		if err != nil || availability == nil {
+			return 0, false
+		}
+		return float64(countAccountsByCondition(availability.Accounts, func(acc *AccountAvailability) bool {
+			return acc.IsOverloaded
 		})), true
 	}
 
@@ -779,7 +821,7 @@ func (s *OpsAlertEvaluatorService) tryAcquireLeaderLock(ctx context.Context, loc
 	}
 	if s.redisClient == nil {
 		s.warnNoRedisOnce.Do(func() {
-			log.Printf("[OpsAlertEvaluator] redis not configured; running without distributed lock")
+			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] redis not configured; running without distributed lock")
 		})
 		return nil, true
 	}
@@ -797,7 +839,7 @@ func (s *OpsAlertEvaluatorService) tryAcquireLeaderLock(ctx context.Context, loc
 		// Prefer fail-closed to avoid duplicate evaluators stampeding the DB when Redis is flaky.
 		// Single-node deployments can disable the distributed lock via runtime settings.
 		s.warnNoRedisOnce.Do(func() {
-			log.Printf("[OpsAlertEvaluator] leader lock SetNX failed; skipping this cycle: %v", err)
+			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] leader lock SetNX failed; skipping this cycle: %v", err)
 		})
 		return nil, false
 	}
@@ -806,7 +848,9 @@ func (s *OpsAlertEvaluatorService) tryAcquireLeaderLock(ctx context.Context, loc
 		return nil, false
 	}
 	return func() {
-		_, _ = opsAlertEvaluatorReleaseScript.Run(ctx, s.redisClient, []string{key}, s.instanceID).Result()
+		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer releaseCancel()
+		_, _ = opsAlertEvaluatorReleaseScript.Run(releaseCtx, s.redisClient, []string{key}, s.instanceID).Result()
 	}, true
 }
 
@@ -819,7 +863,7 @@ func (s *OpsAlertEvaluatorService) maybeLogSkip(key string) {
 		return
 	}
 	s.skipLogAt = now
-	log.Printf("[OpsAlertEvaluator] leader lock held by another instance; skipping (key=%q)", key)
+	logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] leader lock held by another instance; skipping (key=%q)", key)
 }
 
 func (s *OpsAlertEvaluatorService) recordHeartbeatSuccess(runAt time.Time, duration time.Duration, result string) {

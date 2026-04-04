@@ -19,7 +19,10 @@ This directory contains files for deploying Sub2API on Linux servers.
 | `.env.example` | Docker environment variables template |
 | `DOCKER.md` | Docker Hub documentation |
 | `install.sh` | One-click binary installation script |
+| `install-datamanagementd.sh` | datamanagementd 一键安装脚本 |
 | `sub2api.service` | Systemd service unit file |
+| `sub2api-datamanagementd.service` | datamanagementd systemd service unit file |
+| `DATAMANAGEMENTD_CN.md` | datamanagementd 部署与联动说明（中文） |
 | `config.example.yaml` | Example configuration file |
 
 ---
@@ -50,13 +53,13 @@ chmod +x docker-deploy.sh
 **After running the script:**
 ```bash
 # Start services
-docker-compose -f docker-compose.local.yml up -d
+docker compose -f docker-compose.local.yml up -d
 
 # View logs
-docker-compose -f docker-compose.local.yml logs -f sub2api
+docker compose -f docker-compose.local.yml logs -f sub2api
 
 # If admin password was auto-generated, find it in logs:
-docker-compose -f docker-compose.local.yml logs sub2api | grep "admin password"
+docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
 
 # Access Web UI
 # http://localhost:8080
@@ -85,10 +88,10 @@ echo "TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY}" >> .env
 mkdir -p data postgres_data redis_data
 
 # Start all services using local directory version
-docker-compose -f docker-compose.local.yml up -d
+docker compose -f docker-compose.local.yml up -d
 
 # View logs (check for auto-generated admin password)
-docker-compose -f docker-compose.local.yml logs -f sub2api
+docker compose -f docker-compose.local.yml logs -f sub2api
 
 # Access Web UI
 # http://localhost:8080
@@ -118,7 +121,7 @@ When using Docker Compose with `AUTO_SETUP=true`:
 
 3. If `ADMIN_PASSWORD` is not set, check logs for the generated password:
    ```bash
-   docker-compose logs sub2api | grep "admin password"
+   docker compose logs sub2api | grep "admin password"
    ```
 
 ### Database Migration Notes (PostgreSQL)
@@ -145,29 +148,37 @@ SELECT
   (SELECT COUNT(*) FROM user_allowed_groups) AS new_pair_count;
 ```
 
+### datamanagementd（数据管理）联动
+
+如需启用管理后台“数据管理”功能，请额外部署宿主机 `datamanagementd`：
+
+- 主进程固定探测 `/tmp/sub2api-datamanagement.sock`
+- Docker 场景下需把宿主机 Socket 挂载到容器内同路径
+- 详细步骤见：`deploy/DATAMANAGEMENTD_CN.md`
+
 ### Commands
 
 For **local directory version** (docker-compose.local.yml):
 
 ```bash
 # Start services
-docker-compose -f docker-compose.local.yml up -d
+docker compose -f docker-compose.local.yml up -d
 
 # Stop services
-docker-compose -f docker-compose.local.yml down
+docker compose -f docker-compose.local.yml down
 
 # View logs
-docker-compose -f docker-compose.local.yml logs -f sub2api
+docker compose -f docker-compose.local.yml logs -f sub2api
 
 # Restart Sub2API only
-docker-compose -f docker-compose.local.yml restart sub2api
+docker compose -f docker-compose.local.yml restart sub2api
 
 # Update to latest version
-docker-compose -f docker-compose.local.yml pull
-docker-compose -f docker-compose.local.yml up -d
+docker compose -f docker-compose.local.yml pull
+docker compose -f docker-compose.local.yml up -d
 
 # Remove all data (caution!)
-docker-compose -f docker-compose.local.yml down
+docker compose -f docker-compose.local.yml down
 rm -rf data/ postgres_data/ redis_data/
 ```
 
@@ -175,23 +186,23 @@ For **named volumes version** (docker-compose.yml):
 
 ```bash
 # Start services
-docker-compose up -d
+docker compose up -d
 
 # Stop services
-docker-compose down
+docker compose down
 
 # View logs
-docker-compose logs -f sub2api
+docker compose logs -f sub2api
 
 # Restart Sub2API only
-docker-compose restart sub2api
+docker compose restart sub2api
 
 # Update to latest version
-docker-compose pull
-docker-compose up -d
+docker compose pull
+docker compose up -d
 
 # Remove all data (caution!)
-docker-compose down -v
+docker compose down -v
 ```
 
 ### Environment Variables
@@ -221,7 +232,7 @@ When using `docker-compose.local.yml`, all data is stored in local directories, 
 ```bash
 # On source server: Stop services and create archive
 cd /path/to/deployment
-docker-compose -f docker-compose.local.yml down
+docker compose -f docker-compose.local.yml down
 cd ..
 tar czf sub2api-complete.tar.gz deployment/
 
@@ -231,7 +242,7 @@ scp sub2api-complete.tar.gz user@new-server:/path/to/destination/
 # On new server: Extract and start
 tar xzf sub2api-complete.tar.gz
 cd deployment/
-docker-compose -f docker-compose.local.yml up -d
+docker compose -f docker-compose.local.yml up -d
 ```
 
 Your entire deployment (configuration + data) is migrated!
@@ -303,6 +314,10 @@ Requires your own OAuth client credentials.
 ```bash
 GEMINI_OAUTH_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GEMINI_OAUTH_CLIENT_SECRET=GOCSPX-your-client-secret
+
+# 可选：如需使用 Gemini CLI 内置 OAuth Client（Code Assist / Google One）
+# 安全说明：本仓库不会内置该 client_secret，请在运行环境通过环境变量注入。
+# GEMINI_CLI_OAUTH_CLIENT_SECRET=GOCSPX-your-built-in-secret
 ```
 
 **Step 3: Create Account in Admin UI**
@@ -430,6 +445,11 @@ If you need to use AI Studio OAuth for Gemini accounts, add the OAuth client cre
    Environment=GEMINI_OAUTH_CLIENT_SECRET=GOCSPX-your-client-secret
    ```
 
+   如需使用“内置 Gemini CLI OAuth Client”（Code Assist / Google One），还需要注入：
+   ```ini
+   Environment=GEMINI_CLI_OAUTH_CLIENT_SECRET=GOCSPX-your-built-in-secret
+   ```
+
 3. Reload and restart:
    ```bash
    sudo systemctl daemon-reload
@@ -472,19 +492,19 @@ For **local directory version**:
 
 ```bash
 # Check container status
-docker-compose -f docker-compose.local.yml ps
+docker compose -f docker-compose.local.yml ps
 
 # View detailed logs
-docker-compose -f docker-compose.local.yml logs --tail=100 sub2api
+docker compose -f docker-compose.local.yml logs --tail=100 sub2api
 
 # Check database connection
-docker-compose -f docker-compose.local.yml exec postgres pg_isready
+docker compose -f docker-compose.local.yml exec postgres pg_isready
 
 # Check Redis connection
-docker-compose -f docker-compose.local.yml exec redis redis-cli ping
+docker compose -f docker-compose.local.yml exec redis redis-cli ping
 
 # Restart all services
-docker-compose -f docker-compose.local.yml restart
+docker compose -f docker-compose.local.yml restart
 
 # Check data directories
 ls -la data/ postgres_data/ redis_data/
@@ -494,19 +514,19 @@ For **named volumes version**:
 
 ```bash
 # Check container status
-docker-compose ps
+docker compose ps
 
 # View detailed logs
-docker-compose logs --tail=100 sub2api
+docker compose logs --tail=100 sub2api
 
 # Check database connection
-docker-compose exec postgres pg_isready
+docker compose exec postgres pg_isready
 
 # Check Redis connection
-docker-compose exec redis redis-cli ping
+docker compose exec redis redis-cli ping
 
 # Restart all services
-docker-compose restart
+docker compose restart
 ```
 
 ### Binary Install
@@ -566,7 +586,7 @@ gateway:
         name: "Profile 2"
         cipher_suites: [4866, 4867, 4865, 49199, 49195, 49200, 49196]
         curves: [29, 23, 24]
-        point_formats: [0]
+        point_formats: 0
 
       # Another custom profile
       profile_3:

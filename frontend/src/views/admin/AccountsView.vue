@@ -6,13 +6,14 @@
           <AccountTableFilters
             v-model:searchQuery="params.search"
             :filters="params"
+            :groups="groups"
             @update:filters="(newFilters) => Object.assign(params, newFilters)"
             @change="debouncedReload"
             @update:searchQuery="debouncedReload"
           />
           <AccountTableActions
             :loading="loading"
-            @refresh="load"
+            @refresh="handleManualRefresh"
             @sync="showSync = true"
             @create="showCreate = true"
           >
@@ -62,6 +63,26 @@
                 </div>
               </div>
 
+              <!-- Error Passthrough Rules -->
+              <button
+                @click="showErrorPassthrough = true"
+                class="btn btn-secondary"
+                :title="t('admin.errorPassthrough.title')"
+              >
+                <Icon name="shield" size="md" class="mr-1.5" />
+                <span class="hidden md:inline">{{ t('admin.errorPassthrough.title') }}</span>
+              </button>
+
+              <!-- TLS Fingerprint Profiles -->
+              <button
+                @click="showTLSFingerprintProfiles = true"
+                class="btn btn-secondary"
+                :title="t('admin.tlsFingerprintProfiles.title')"
+              >
+                <Icon name="lock" size="md" class="mr-1.5" />
+                <span class="hidden md:inline">{{ t('admin.tlsFingerprintProfiles.title') }}</span>
+              </button>
+
               <!-- Column Settings Dropdown -->
               <div class="relative" ref="columnDropdownRef">
                 <button
@@ -96,11 +117,32 @@
                 </div>
               </div>
             </template>
+            <template #beforeCreate>
+              <button @click="showImportData = true" class="btn btn-secondary">
+                {{ t('admin.accounts.dataImport') }}
+              </button>
+              <button @click="openExportDataDialog" class="btn btn-secondary">
+                {{ selIds.length ? t('admin.accounts.dataExportSelected') : t('admin.accounts.dataExport') }}
+              </button>
+            </template>
           </AccountTableActions>
+        </div>
+        <div
+          v-if="hasPendingListSync"
+          class="mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200"
+        >
+          <span>{{ t('admin.accounts.listPendingSyncHint') }}</span>
+          <button
+            class="btn btn-secondary px-2 py-1 text-xs"
+            @click="syncPendingListChanges"
+          >
+            {{ t('admin.accounts.listPendingSyncAction') }}
+          </button>
         </div>
       </template>
       <template #table>
-        <AccountBulkActionsBar :selected-ids="selIds" @delete="handleBulkDelete" @edit="showBulkEdit = true" @clear="selIds = []" @select-page="selectPage" @toggle-schedulable="handleBulkToggleSchedulable" />
+        <AccountBulkActionsBar :selected-ids="selIds" @delete="handleBulkDelete" @reset-status="handleBulkResetStatus" @refresh-token="handleBulkRefreshToken" @edit="showBulkEdit = true" @clear="clearSelection" @select-page="selectPage" @toggle-schedulable="handleBulkToggleSchedulable" />
+        <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <DataTable
           :columns="cols"
           :data="accounts"
@@ -110,6 +152,15 @@
           default-sort-order="asc"
           :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
         >
+          <template #header-select>
+            <input
+              type="checkbox"
+              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              :checked="allVisibleSelected"
+              @click.stop
+              @change="toggleSelectAllVisible($event)"
+            />
+          </template>
           <template #cell-select="{ row }">
             <input type="checkbox" :checked="selIds.includes(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
           </template>
@@ -130,7 +181,15 @@
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
           <template #cell-platform_type="{ row }">
-            <PlatformTypeBadge :platform="row.platform" :type="row.type" />
+            <div class="flex flex-wrap items-center gap-1">
+              <PlatformTypeBadge :platform="row.platform" :type="row.type" :plan-type="row.credentials?.plan_type" :privacy-mode="row.extra?.privacy_mode" :subscription-expires-at="row.credentials?.subscription_expires_at" />
+              <span
+                v-if="getAntigravityTierLabel(row)"
+                :class="['inline-block rounded px-1.5 py-0.5 text-[10px] font-medium', getAntigravityTierClass(row)]"
+              >
+                {{ getAntigravityTierLabel(row) }}
+              </span>
+            </div>
           </template>
           <template #cell-capacity="{ row }">
             <AccountCapacityCell :account="row" />
@@ -144,13 +203,22 @@
             </button>
           </template>
           <template #cell-today_stats="{ row }">
-            <AccountTodayStatsCell :account="row" />
+            <AccountTodayStatsCell
+              :stats="todayStatsByAccountId[String(row.id)] ?? null"
+              :loading="todayStatsLoading"
+              :error="todayStatsError"
+            />
           </template>
           <template #cell-groups="{ row }">
             <AccountGroupsCell :groups="row.groups" :max-display="4" />
           </template>
           <template #cell-usage="{ row }">
-            <AccountUsageCell :account="row" />
+            <AccountUsageCell
+              :account="row"
+              :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
+              :today-stats-loading="todayStatsLoading"
+              :manual-refresh-token="usageManualRefreshToken"
+            />
           </template>
           <template #cell-proxy="{ row }">
             <div v-if="row.proxy" class="flex items-center gap-2">
@@ -208,30 +276,43 @@
             </div>
           </template>
         </DataTable>
+        </div>
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="load" />
-    <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="load" />
+    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
+    <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @reauth="handleReAuth" @refresh-token="handleRefresh" @reset-status="handleResetStatus" @clear-rate-limit="handleClearRateLimit" />
+    <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
-    <BulkEditAccountModal :show="showBulkEdit" :account-ids="selIds" :proxies="proxies" :groups="groups" @close="showBulkEdit = false" @updated="handleBulkUpdated" />
+    <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
+    <BulkEditAccountModal :show="showBulkEdit" :account-ids="selIds" :selected-platforms="selPlatforms" :selected-types="selTypes" :proxies="proxies" :groups="groups" @close="showBulkEdit = false" @updated="handleBulkUpdated" />
     <TempUnschedStatusModal :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
+    <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
+      <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+        <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" v-model="includeProxyOnExport" />
+        <span>{{ t('admin.accounts.dataExportIncludeProxies') }}</span>
+      </label>
+    </ConfirmDialog>
+    <ErrorPassthroughRulesModal :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
+    <TLSFingerprintProfilesModal :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import { useTableLoader } from '@/composables/useTableLoader'
+import { useSwipeSelect } from '@/composables/useSwipeSelect'
+import { useTableSelection } from '@/composables/useTableSelection'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -242,9 +323,12 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
+import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
+import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
@@ -252,39 +336,67 @@ import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
+import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
+import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
+import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
-import type { Account, Proxy, AdminGroup } from '@/types'
+import type { Account, AccountPlatform, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel } from '@/types'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
-const proxies = ref<Proxy[]>([])
+const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
-const selIds = ref<number[]>([])
+const accountTableRef = ref<HTMLElement | null>(null)
+const selPlatforms = computed<AccountPlatform[]>(() => {
+  const platforms = new Set(
+    accounts.value
+      .filter(a => isSelected(a.id))
+      .map(a => a.platform)
+  )
+  return [...platforms]
+})
+const selTypes = computed<AccountType[]>(() => {
+  const types = new Set(
+    accounts.value
+      .filter(a => isSelected(a.id))
+      .map(a => a.type)
+  )
+  return [...types]
+})
 const showCreate = ref(false)
 const showEdit = ref(false)
 const showSync = ref(false)
+const showImportData = ref(false)
+const showExportDataDialog = ref(false)
+const includeProxyOnExport = ref(true)
 const showBulkEdit = ref(false)
 const showTempUnsched = ref(false)
 const showDeleteDialog = ref(false)
 const showReAuth = ref(false)
 const showTest = ref(false)
 const showStats = ref(false)
+const showErrorPassthrough = ref(false)
+const showTLSFingerprintProfiles = ref(false)
 const edAcc = ref<Account | null>(null)
 const tempUnschedAcc = ref<Account | null>(null)
 const deletingAcc = ref<Account | null>(null)
 const reAuthAcc = ref<Account | null>(null)
 const testingAcc = ref<Account | null>(null)
 const statsAcc = ref<Account | null>(null)
+const showSchedulePanel = ref(false)
+const scheduleAcc = ref<Account | null>(null)
+const scheduleModelOptions = ref<SelectOption[]>([])
 const togglingSchedulable = ref<number | null>(null)
 const menu = reactive<{show:boolean, acc:Account|null, pos:{top:number, left:number}|null}>({ show: false, acc: null, pos: null })
+const exportingData = ref(false)
 
 // Column settings
 const showColumnDropdown = ref(false)
 const columnDropdownRef = ref<HTMLElement | null>(null)
 const hiddenColumns = reactive<Set<string>>(new Set())
-const DEFAULT_HIDDEN_COLUMNS = ['proxy', 'notes', 'priority', 'rate_multiplier']
+const DEFAULT_HIDDEN_COLUMNS = ['today_stats', 'proxy', 'notes', 'priority', 'rate_multiplier']
 const HIDDEN_COLUMNS_KEY = 'account-hidden-columns'
 
 // Sorting settings
@@ -298,6 +410,69 @@ const autoRefreshIntervals = [5, 10, 15, 30] as const
 const autoRefreshEnabled = ref(false)
 const autoRefreshIntervalSeconds = ref<(typeof autoRefreshIntervals)[number]>(30)
 const autoRefreshCountdown = ref(0)
+const autoRefreshETag = ref<string | null>(null)
+const autoRefreshFetching = ref(false)
+const AUTO_REFRESH_SILENT_WINDOW_MS = 15000
+const autoRefreshSilentUntil = ref(0)
+const hasPendingListSync = ref(false)
+const todayStatsByAccountId = ref<Record<string, WindowStats>>({})
+const todayStatsLoading = ref(false)
+const todayStatsError = ref<string | null>(null)
+const todayStatsReqSeq = ref(0)
+const pendingTodayStatsRefresh = ref(false)
+const usageManualRefreshToken = ref(0)
+
+const buildDefaultTodayStats = (): WindowStats => ({
+  requests: 0,
+  tokens: 0,
+  cost: 0,
+  standard_cost: 0,
+  user_cost: 0
+})
+
+const refreshTodayStatsBatch = async () => {
+  // Why this checks both columns:
+  // - today_stats column shows dedicated today's metrics.
+  // - usage column also embeds today's stats for Key/Bedrock rows.
+  // So we only skip fetching when BOTH columns are hidden.
+  if (hiddenColumns.has('today_stats') && hiddenColumns.has('usage')) {
+    todayStatsLoading.value = false
+    todayStatsError.value = null
+    return
+  }
+
+  const accountIDs = accounts.value.map(account => account.id)
+  const reqSeq = ++todayStatsReqSeq.value
+  if (accountIDs.length === 0) {
+    todayStatsByAccountId.value = {}
+    todayStatsError.value = null
+    todayStatsLoading.value = false
+    return
+  }
+
+  todayStatsLoading.value = true
+  todayStatsError.value = null
+
+  try {
+    const result = await adminAPI.accounts.getBatchTodayStats(accountIDs)
+    if (reqSeq !== todayStatsReqSeq.value) return
+    const serverStats = result.stats ?? {}
+    const nextStats: Record<string, WindowStats> = {}
+    for (const accountID of accountIDs) {
+      const key = String(accountID)
+      nextStats[key] = serverStats[key] ?? buildDefaultTodayStats()
+    }
+    todayStatsByAccountId.value = nextStats
+  } catch (error) {
+    if (reqSeq !== todayStatsReqSeq.value) return
+    todayStatsError.value = 'Failed'
+    console.error('Failed to load account today stats:', error)
+  } finally {
+    if (reqSeq === todayStatsReqSeq.value) {
+      todayStatsLoading.value = false
+    }
+  }
+}
 
 const autoRefreshIntervalLabel = (sec: number) => {
   if (sec === 5) return t('admin.accounts.refreshInterval5s')
@@ -312,13 +487,19 @@ const loadSavedColumns = () => {
     const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
     if (saved) {
       const parsed = JSON.parse(saved) as string[]
-      parsed.forEach(key => hiddenColumns.add(key))
+      parsed.forEach(key => {
+        hiddenColumns.add(key)
+      })
     } else {
-      DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
+      DEFAULT_HIDDEN_COLUMNS.forEach(key => {
+        hiddenColumns.add(key)
+      })
     }
   } catch (e) {
     console.error('Failed to load saved columns:', e)
-    DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
+    DEFAULT_HIDDEN_COLUMNS.forEach(key => {
+      hiddenColumns.add(key)
+    })
   }
 }
 
@@ -385,19 +566,118 @@ const setAutoRefreshInterval = (seconds: (typeof autoRefreshIntervals)[number]) 
 }
 
 const toggleColumn = (key: string) => {
+  const wasHidden = hiddenColumns.has(key)
   if (hiddenColumns.has(key)) {
     hiddenColumns.delete(key)
   } else {
     hiddenColumns.add(key)
   }
   saveColumnsToStorage()
+  if ((key === 'today_stats' || key === 'usage') && wasHidden) {
+    refreshTodayStatsBatch().catch((error) => {
+      console.error('Failed to load account today stats after showing column:', error)
+    })
+  }
 }
 
 const isColumnVisible = (key: string) => !hiddenColumns.has(key)
 
-const { items: accounts, loading, params, pagination, load, reload, debouncedReload, handlePageChange, handlePageSizeChange } = useTableLoader<Account, any>({
+const {
+  items: accounts,
+  loading,
+  params,
+  pagination,
+  load: baseLoad,
+  reload: baseReload,
+  debouncedReload: baseDebouncedReload,
+  handlePageChange: baseHandlePageChange,
+  handlePageSizeChange: baseHandlePageSizeChange
+} = useTableLoader<Account, any>({
   fetchFn: adminAPI.accounts.list,
-  initialParams: { platform: '', type: '', status: '', search: '' }
+  initialParams: { platform: '', type: '', status: '', privacy_mode: '', group: '', search: '' }
+})
+
+const {
+  selectedIds: selIds,
+  allVisibleSelected,
+  isSelected,
+  setSelectedIds,
+  select,
+  deselect,
+  toggle: toggleSel,
+  clear: clearSelection,
+  removeMany: removeSelectedAccounts,
+  toggleVisible,
+  selectVisible: selectPage
+} = useTableSelection<Account>({
+  rows: accounts,
+  getId: (account) => account.id
+})
+
+useSwipeSelect(accountTableRef, {
+  isSelected,
+  select,
+  deselect
+})
+
+const resetAutoRefreshCache = () => {
+  autoRefreshETag.value = null
+}
+
+const isFirstLoad = ref(true)
+
+const load = async () => {
+  const requestParams = params as any
+  hasPendingListSync.value = false
+  resetAutoRefreshCache()
+  pendingTodayStatsRefresh.value = false
+  if (isFirstLoad.value) {
+    requestParams.lite = '1'
+  }
+  await baseLoad()
+  if (isFirstLoad.value) {
+    isFirstLoad.value = false
+    delete requestParams.lite
+  }
+  await refreshTodayStatsBatch()
+}
+
+const reload = async () => {
+  hasPendingListSync.value = false
+  resetAutoRefreshCache()
+  pendingTodayStatsRefresh.value = false
+  await baseReload()
+  await refreshTodayStatsBatch()
+}
+
+const debouncedReload = () => {
+  hasPendingListSync.value = false
+  resetAutoRefreshCache()
+  pendingTodayStatsRefresh.value = true
+  baseDebouncedReload()
+}
+
+const handlePageChange = (page: number) => {
+  hasPendingListSync.value = false
+  resetAutoRefreshCache()
+  pendingTodayStatsRefresh.value = true
+  baseHandlePageChange(page)
+}
+
+const handlePageSizeChange = (size: number) => {
+  hasPendingListSync.value = false
+  resetAutoRefreshCache()
+  pendingTodayStatsRefresh.value = true
+  baseHandlePageSizeChange(size)
+}
+
+watch(loading, (isLoading, wasLoading) => {
+  if (wasLoading && !isLoading && pendingTodayStatsRefresh.value) {
+    pendingTodayStatsRefresh.value = false
+    refreshTodayStatsBatch().catch((error) => {
+      console.error('Failed to refresh account today stats after table load:', error)
+    })
+  }
 })
 
 const isAnyModalOpen = computed(() => {
@@ -405,30 +685,149 @@ const isAnyModalOpen = computed(() => {
     showCreate.value ||
     showEdit.value ||
     showSync.value ||
+    showImportData.value ||
+    showExportDataDialog.value ||
     showBulkEdit.value ||
     showTempUnsched.value ||
     showDeleteDialog.value ||
     showReAuth.value ||
     showTest.value ||
-    showStats.value
+    showStats.value ||
+    showSchedulePanel.value ||
+    showErrorPassthrough.value
   )
 })
+
+const enterAutoRefreshSilentWindow = () => {
+  autoRefreshSilentUntil.value = Date.now() + AUTO_REFRESH_SILENT_WINDOW_MS
+  autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
+}
+
+const inAutoRefreshSilentWindow = () => {
+  return Date.now() < autoRefreshSilentUntil.value
+}
+
+const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
+  return (
+    current.updated_at !== next.updated_at ||
+    current.current_concurrency !== next.current_concurrency ||
+    current.current_window_cost !== next.current_window_cost ||
+    current.active_sessions !== next.active_sessions ||
+    current.schedulable !== next.schedulable ||
+    current.status !== next.status ||
+    current.rate_limit_reset_at !== next.rate_limit_reset_at ||
+    current.overload_until !== next.overload_until ||
+    current.temp_unschedulable_until !== next.temp_unschedulable_until ||
+    buildOpenAIUsageRefreshKey(current) !== buildOpenAIUsageRefreshKey(next)
+  )
+}
+
+const syncAccountRefs = (nextAccount: Account) => {
+  if (edAcc.value?.id === nextAccount.id) edAcc.value = nextAccount
+  if (reAuthAcc.value?.id === nextAccount.id) reAuthAcc.value = nextAccount
+  if (tempUnschedAcc.value?.id === nextAccount.id) tempUnschedAcc.value = nextAccount
+  if (deletingAcc.value?.id === nextAccount.id) deletingAcc.value = nextAccount
+  if (menu.acc?.id === nextAccount.id) menu.acc = nextAccount
+}
+
+const mergeAccountsIncrementally = (nextRows: Account[]) => {
+  const currentRows = accounts.value
+  const currentByID = new Map(currentRows.map(row => [row.id, row]))
+  let changed = nextRows.length !== currentRows.length
+  const mergedRows = nextRows.map((nextRow) => {
+    const currentRow = currentByID.get(nextRow.id)
+    if (!currentRow) {
+      changed = true
+      return nextRow
+    }
+    if (shouldReplaceAutoRefreshRow(currentRow, nextRow)) {
+      changed = true
+      syncAccountRefs(nextRow)
+      return nextRow
+    }
+    return currentRow
+  })
+  if (!changed) {
+    for (let i = 0; i < mergedRows.length; i += 1) {
+      if (mergedRows[i].id !== currentRows[i]?.id) {
+        changed = true
+        break
+      }
+    }
+  }
+  if (changed) {
+    accounts.value = mergedRows
+  }
+}
+
+const refreshAccountsIncrementally = async () => {
+  if (autoRefreshFetching.value) return
+  autoRefreshFetching.value = true
+  try {
+    const result = await adminAPI.accounts.listWithEtag(
+      pagination.page,
+      pagination.page_size,
+      toRaw(params) as {
+        platform?: string
+        type?: string
+        status?: string
+        privacy_mode?: string
+        group?: string
+        search?: string
+
+      },
+      { etag: autoRefreshETag.value }
+    )
+
+    if (result.etag) {
+      autoRefreshETag.value = result.etag
+    }
+    if (!result.notModified && result.data) {
+      pagination.total = result.data.total || 0
+      pagination.pages = result.data.pages || 0
+      mergeAccountsIncrementally(result.data.items || [])
+      hasPendingListSync.value = false
+    }
+
+    await refreshTodayStatsBatch()
+  } catch (error) {
+    console.error('Auto refresh failed:', error)
+  } finally {
+    autoRefreshFetching.value = false
+  }
+}
+
+const handleManualRefresh = async () => {
+  await load()
+  // Force usage cells to refetch /usage on explicit user refresh.
+  usageManualRefreshToken.value += 1
+}
+
+const syncPendingListChanges = async () => {
+  hasPendingListSync.value = false
+  await load()
+  // Keep behavior consistent with manual refresh.
+  usageManualRefreshToken.value += 1
+}
 
 const { pause: pauseAutoRefresh, resume: resumeAutoRefresh } = useIntervalFn(
   async () => {
     if (!autoRefreshEnabled.value) return
     if (document.hidden) return
-    if (loading.value) return
+    if (loading.value || autoRefreshFetching.value) return
     if (isAnyModalOpen.value) return
     if (menu.show) return
+    if (inAutoRefreshSilentWindow()) {
+      autoRefreshCountdown.value = Math.max(
+        0,
+        Math.ceil((autoRefreshSilentUntil.value - Date.now()) / 1000)
+      )
+      return
+    }
 
     if (autoRefreshCountdown.value <= 0) {
       autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
-      try {
-        await load()
-      } catch (e) {
-        console.error('Auto refresh failed:', e)
-      }
+      await refreshAccountsIncrementally()
       return
     }
 
@@ -437,6 +836,40 @@ const { pause: pauseAutoRefresh, resume: resumeAutoRefresh } = useIntervalFn(
   1000,
   { immediate: false }
 )
+
+// Antigravity 订阅等级辅助函数
+function getAntigravityTierFromRow(row: any): string | null {
+  if (row.platform !== 'antigravity') return null
+  const extra = row.extra as Record<string, unknown> | undefined
+  if (!extra) return null
+  const lca = extra.load_code_assist as Record<string, unknown> | undefined
+  if (!lca) return null
+  const paid = lca.paidTier as Record<string, unknown> | undefined
+  if (paid && typeof paid.id === 'string') return paid.id
+  const current = lca.currentTier as Record<string, unknown> | undefined
+  if (current && typeof current.id === 'string') return current.id
+  return null
+}
+
+function getAntigravityTierLabel(row: any): string | null {
+  const tier = getAntigravityTierFromRow(row)
+  switch (tier) {
+    case 'free-tier': return t('admin.accounts.tier.free')
+    case 'g1-pro-tier': return t('admin.accounts.tier.pro')
+    case 'g1-ultra-tier': return t('admin.accounts.tier.ultra')
+    default: return null
+  }
+}
+
+function getAntigravityTierClass(row: any): string {
+  const tier = getAntigravityTierFromRow(row)
+  switch (tier) {
+    case 'free-tier': return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+    case 'g1-pro-tier': return 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300'
+    case 'g1-ultra-tier': return 'bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-300'
+    default: return ''
+  }
+}
 
 // All available columns
 const allColumns = computed(() => {
@@ -490,7 +923,8 @@ const openMenu = (a: Account, e: MouseEvent) => {
     const viewportWidth = window.innerWidth
     const viewportHeight = window.innerHeight
 
-    let left, top
+    let left: number
+    let top: number
 
     if (viewportWidth < 768) {
       // 居中显示,水平位置
@@ -528,9 +962,43 @@ const openMenu = (a: Account, e: MouseEvent) => {
 
   menu.show = true
 }
-const toggleSel = (id: number) => { const i = selIds.value.indexOf(id); if(i === -1) selIds.value.push(id); else selIds.value.splice(i, 1) }
-const selectPage = () => { selIds.value = [...new Set([...selIds.value, ...accounts.value.map(a => a.id)])] }
-const handleBulkDelete = async () => { if(!confirm(t('common.confirm'))) return; try { await Promise.all(selIds.value.map(id => adminAPI.accounts.delete(id))); selIds.value = []; reload() } catch (error) { console.error('Failed to bulk delete accounts:', error) } }
+const toggleSelectAllVisible = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  toggleVisible(target.checked)
+}
+const handleBulkDelete = async () => { if(!confirm(t('common.confirm'))) return; try { await Promise.all(selIds.value.map(id => adminAPI.accounts.delete(id))); clearSelection(); reload() } catch (error) { console.error('Failed to bulk delete accounts:', error) } }
+const handleBulkResetStatus = async () => {
+  if (!confirm(t('common.confirm'))) return
+  try {
+    const result = await adminAPI.accounts.batchClearError(selIds.value)
+    if (result.failed > 0) {
+      appStore.showError(t('admin.accounts.bulkActions.partialSuccess', { success: result.success, failed: result.failed }))
+    } else {
+      appStore.showSuccess(t('admin.accounts.bulkActions.resetStatusSuccess', { count: result.success }))
+      clearSelection()
+    }
+    reload()
+  } catch (error) {
+    console.error('Failed to bulk reset status:', error)
+    appStore.showError(String(error))
+  }
+}
+const handleBulkRefreshToken = async () => {
+  if (!confirm(t('common.confirm'))) return
+  try {
+    const result = await adminAPI.accounts.batchRefresh(selIds.value)
+    if (result.failed > 0) {
+      appStore.showError(t('admin.accounts.bulkActions.partialSuccess', { success: result.success, failed: result.failed }))
+    } else {
+      appStore.showSuccess(t('admin.accounts.bulkActions.refreshTokenSuccess', { count: result.success }))
+      clearSelection()
+    }
+    reload()
+  } catch (error) {
+    console.error('Failed to bulk refresh token:', error)
+    appStore.showError(String(error))
+  }
+}
 const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => {
   if (accountIds.length === 0) return
   const idSet = new Set(accountIds)
@@ -603,7 +1071,7 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
     const { successIds, failedIds, successCount, failedCount, hasIds, hasCounts } = normalizeBulkSchedulableResult(result, accountIds)
     if (!hasIds && !hasCounts) {
       appStore.showError(t('admin.accounts.bulkSchedulableResultUnknown'))
-      selIds.value = accountIds
+      setSelectedIds(accountIds)
       load().catch((error) => {
         console.error('Failed to refresh accounts:', error)
       })
@@ -623,25 +1091,180 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
         ? t('admin.accounts.bulkSchedulablePartial', { success: successCount, failed: failedCount })
         : t('admin.accounts.bulkSchedulableResultUnknown')
       appStore.showError(message)
-      selIds.value = failedIds.length > 0 ? failedIds : accountIds
+      setSelectedIds(failedIds.length > 0 ? failedIds : accountIds)
     } else {
-      selIds.value = hasIds ? [] : accountIds
+      if (hasIds) clearSelection()
+      else setSelectedIds(accountIds)
     }
   } catch (error) {
     console.error('Failed to bulk toggle schedulable:', error)
     appStore.showError(t('common.error'))
   }
 }
-const handleBulkUpdated = () => { showBulkEdit.value = false; selIds.value = []; reload() }
+const handleBulkUpdated = () => { showBulkEdit.value = false; clearSelection(); reload() }
+const handleDataImported = () => { showImportData.value = false; reload() }
+const accountMatchesCurrentFilters = (account: Account) => {
+  if (params.platform && account.platform !== params.platform) return false
+  if (params.type && account.type !== params.type) return false
+  if (params.status) {
+    if (params.status === 'rate_limited') {
+      if (!account.rate_limit_reset_at) return false
+      const resetAt = new Date(account.rate_limit_reset_at).getTime()
+      if (!Number.isFinite(resetAt) || resetAt <= Date.now()) return false
+    } else if (account.status !== params.status) {
+      return false
+    }
+  }
+  const search = String(params.search || '').trim().toLowerCase()
+  if (search && !account.name.toLowerCase().includes(search)) return false
+  return true
+}
+const mergeRuntimeFields = (oldAccount: Account, updatedAccount: Account): Account => ({
+  ...updatedAccount,
+  current_concurrency: updatedAccount.current_concurrency ?? oldAccount.current_concurrency,
+  current_window_cost: updatedAccount.current_window_cost ?? oldAccount.current_window_cost,
+  active_sessions: updatedAccount.active_sessions ?? oldAccount.active_sessions
+})
+
+const syncPaginationAfterLocalRemoval = () => {
+  const nextTotal = Math.max(0, pagination.total - 1)
+  pagination.total = nextTotal
+  pagination.pages = nextTotal > 0 ? Math.ceil(nextTotal / pagination.page_size) : 0
+
+  const maxPage = Math.max(1, pagination.pages || 1)
+
+  if (pagination.page > maxPage) {
+    pagination.page = maxPage
+  }
+  // 行被本地移除后不立刻全量补页，改为提示用户手动同步。
+  hasPendingListSync.value = nextTotal > 0
+}
+
+const patchAccountInList = (updatedAccount: Account) => {
+  const index = accounts.value.findIndex(account => account.id === updatedAccount.id)
+  if (index === -1) return
+  const mergedAccount = mergeRuntimeFields(accounts.value[index], updatedAccount)
+  if (!accountMatchesCurrentFilters(mergedAccount)) {
+    accounts.value = accounts.value.filter(account => account.id !== mergedAccount.id)
+    syncPaginationAfterLocalRemoval()
+    removeSelectedAccounts([mergedAccount.id])
+    if (menu.acc?.id === mergedAccount.id) {
+      menu.show = false
+      menu.acc = null
+    }
+    return
+  }
+  const nextAccounts = [...accounts.value]
+  nextAccounts[index] = mergedAccount
+  accounts.value = nextAccounts
+  syncAccountRefs(mergedAccount)
+}
+const handleAccountUpdated = (updatedAccount: Account) => {
+  patchAccountInList(updatedAccount)
+  enterAutoRefreshSilentWindow()
+}
+const formatExportTimestamp = () => {
+  const now = new Date()
+  const pad2 = (value: number) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
+}
+const openExportDataDialog = () => {
+  includeProxyOnExport.value = true
+  showExportDataDialog.value = true
+}
+const handleExportData = async () => {
+  if (exportingData.value) return
+  exportingData.value = true
+  try {
+    const dataPayload = await adminAPI.accounts.exportData(
+      selIds.value.length > 0
+        ? { ids: selIds.value, includeProxies: includeProxyOnExport.value }
+        : {
+            includeProxies: includeProxyOnExport.value,
+            filters: {
+              platform: params.platform,
+              type: params.type,
+              status: params.status,
+              search: params.search
+            }
+          }
+    )
+    const timestamp = formatExportTimestamp()
+    const filename = `sub2api-account-${timestamp}.json`
+    const blob = new Blob([JSON.stringify(dataPayload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    link.click()
+    URL.revokeObjectURL(url)
+    appStore.showSuccess(t('admin.accounts.dataExported'))
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.accounts.dataExportFailed'))
+  } finally {
+    exportingData.value = false
+    showExportDataDialog.value = false
+  }
+}
 const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
 const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
 const handleTest = (a: Account) => { testingAcc.value = a; showTest.value = true }
 const handleViewStats = (a: Account) => { statsAcc.value = a; showStats.value = true }
+const handleSchedule = async (a: Account) => {
+  scheduleAcc.value = a
+  scheduleModelOptions.value = []
+  showSchedulePanel.value = true
+  try {
+    const models = await adminAPI.accounts.getAvailableModels(a.id)
+    scheduleModelOptions.value = models.map((m: ClaudeModel) => ({ value: m.id, label: m.display_name || m.id }))
+  } catch {
+    scheduleModelOptions.value = []
+  }
+}
+const closeSchedulePanel = () => { showSchedulePanel.value = false; scheduleAcc.value = null; scheduleModelOptions.value = [] }
 const handleReAuth = (a: Account) => { reAuthAcc.value = a; showReAuth.value = true }
-const handleRefresh = async (a: Account) => { try { await adminAPI.accounts.refreshCredentials(a.id); load() } catch (error) { console.error('Failed to refresh credentials:', error) } }
-const handleResetStatus = async (a: Account) => { try { await adminAPI.accounts.clearError(a.id); appStore.showSuccess(t('common.success')); load() } catch (error) { console.error('Failed to reset status:', error) } }
-const handleClearRateLimit = async (a: Account) => { try { await adminAPI.accounts.clearRateLimit(a.id); appStore.showSuccess(t('common.success')); load() } catch (error) { console.error('Failed to clear rate limit:', error) } }
+const handleRefresh = async (a: Account) => {
+  try {
+    const updated = await adminAPI.accounts.refreshCredentials(a.id)
+    patchAccountInList(updated)
+    enterAutoRefreshSilentWindow()
+  } catch (error) {
+    console.error('Failed to refresh credentials:', error)
+  }
+}
+const handleRecoverState = async (a: Account) => {
+  try {
+    const updated = await adminAPI.accounts.recoverState(a.id)
+    patchAccountInList(updated)
+    enterAutoRefreshSilentWindow()
+    appStore.showSuccess(t('admin.accounts.recoverStateSuccess'))
+  } catch (error: any) {
+    console.error('Failed to recover account state:', error)
+    appStore.showError(error?.message || t('admin.accounts.recoverStateFailed'))
+  }
+}
+const handleResetQuota = async (a: Account) => {
+  try {
+    const updated = await adminAPI.accounts.resetAccountQuota(a.id)
+    patchAccountInList(updated)
+    enterAutoRefreshSilentWindow()
+    appStore.showSuccess(t('common.success'))
+  } catch (error) {
+    console.error('Failed to reset quota:', error)
+  }
+}
+const handleSetPrivacy = async (a: Account) => {
+  try {
+    const updated = await adminAPI.accounts.setPrivacy(a.id)
+    patchAccountInList(updated)
+    enterAutoRefreshSilentWindow()
+    appStore.showSuccess(t('common.success'))
+  } catch (error: any) {
+    console.error('Failed to set privacy:', error)
+    appStore.showError(error?.response?.data?.message || t('admin.accounts.privacyFailed'))
+  }
+}
 const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }
 const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
 const handleToggleSchedulable = async (a: Account) => {
@@ -650,6 +1273,7 @@ const handleToggleSchedulable = async (a: Account) => {
   try {
     const updated = await adminAPI.accounts.setSchedulable(a.id, nextSchedulable)
     updateSchedulableInList([a.id], updated?.schedulable ?? nextSchedulable)
+    enterAutoRefreshSilentWindow()
   } catch (error) {
     console.error('Failed to toggle schedulable:', error)
     appStore.showError(t('admin.accounts.failedToToggleSchedulable'))
@@ -658,7 +1282,12 @@ const handleToggleSchedulable = async (a: Account) => {
   }
 }
 const handleShowTempUnsched = (a: Account) => { tempUnschedAcc.value = a; showTempUnsched.value = true }
-const handleTempUnschedReset = async () => { if(!tempUnschedAcc.value) return; try { await adminAPI.accounts.clearError(tempUnschedAcc.value.id); showTempUnsched.value = false; tempUnschedAcc.value = null; load() } catch (error) { console.error('Failed to reset temp unscheduled:', error) } }
+const handleTempUnschedReset = async (updated: Account) => {
+  showTempUnsched.value = false
+  tempUnschedAcc.value = null
+  patchAccountInList(updated)
+  enterAutoRefreshSilentWindow()
+}
 const formatExpiresAt = (value: number | null) => {
   if (!value) return '-'
   return formatDateTime(

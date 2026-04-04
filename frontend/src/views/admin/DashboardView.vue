@@ -219,6 +219,9 @@
                   @change="onDateRangeChange"
                 />
               </div>
+              <button @click="loadDashboardStats" :disabled="chartsLoading" class="btn btn-secondary">
+                {{ t('common.refresh') }}
+              </button>
               <div class="ml-auto flex items-center gap-2">
                 <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
                   >{{ t('admin.dashboard.granularity') }}:</span
@@ -236,7 +239,20 @@
 
           <!-- Charts Grid -->
           <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <ModelDistributionChart :model-stats="modelStats" :loading="chartsLoading" />
+            <ModelDistributionChart
+              :model-stats="modelStats"
+              :enable-ranking-view="true"
+              :ranking-items="rankingItems"
+              :ranking-total-actual-cost="rankingTotalActualCost"
+              :ranking-total-requests="rankingTotalRequests"
+              :ranking-total-tokens="rankingTotalTokens"
+              :loading="chartsLoading"
+              :ranking-loading="rankingLoading"
+              :ranking-error="rankingError"
+              :start-date="startDate"
+              :end-date="endDate"
+              @ranking-click="goToUserUsage"
+            />
             <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
           </div>
 
@@ -246,7 +262,10 @@
               {{ t('admin.dashboard.recentUsage') }} (Top 12)
             </h3>
             <div class="h-64">
-              <Line v-if="userTrendChartData" :data="userTrendChartData" :options="lineOptions" />
+              <div v-if="userTrendLoading" class="flex h-full items-center justify-center">
+                <LoadingSpinner size="md" />
+              </div>
+              <Line v-else-if="userTrendChartData" :data="userTrendChartData" :options="lineOptions" />
               <div
                 v-else
                 class="flex h-full items-center justify-center text-sm text-gray-500 dark:text-gray-400"
@@ -264,11 +283,18 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
-import type { DashboardStats, TrendDataPoint, ModelStat, UserUsageTrendPoint } from '@/types'
+import type {
+  DashboardStats,
+  TrendDataPoint,
+  ModelStat,
+  UserUsageTrendPoint,
+  UserSpendingRankingItem
+} from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -283,7 +309,6 @@ import {
   LinearScale,
   PointElement,
   LineElement,
-  Title,
   Tooltip,
   Legend,
   Filler
@@ -296,36 +321,52 @@ ChartJS.register(
   LinearScale,
   PointElement,
   LineElement,
-  Title,
   Tooltip,
   Legend,
   Filler
 )
 
 const appStore = useAppStore()
+const router = useRouter()
 const stats = ref<DashboardStats | null>(null)
 const loading = ref(false)
 const chartsLoading = ref(false)
+const userTrendLoading = ref(false)
+const rankingLoading = ref(false)
+const rankingError = ref(false)
 
 // Chart data
 const trendData = ref<TrendDataPoint[]>([])
 const modelStats = ref<ModelStat[]>([])
 const userTrend = ref<UserUsageTrendPoint[]>([])
+const rankingItems = ref<UserSpendingRankingItem[]>([])
+const rankingTotalActualCost = ref(0)
+const rankingTotalRequests = ref(0)
+const rankingTotalTokens = ref(0)
+let chartLoadSeq = 0
+let usersTrendLoadSeq = 0
+let rankingLoadSeq = 0
+const rankingLimit = 12
 
 // Helper function to format date in local timezone
 const formatLocalDate = (date: Date): string => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-// Initialize date range immediately
-const now = new Date()
-const weekAgo = new Date(now)
-weekAgo.setDate(weekAgo.getDate() - 6)
+const getLast24HoursRangeDates = (): { start: string; end: string } => {
+  const end = new Date()
+  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000)
+  return {
+    start: formatLocalDate(start),
+    end: formatLocalDate(end)
+  }
+}
 
 // Date range
-const granularity = ref<'day' | 'hour'>('day')
-const startDate = ref(formatLocalDate(weekAgo))
-const endDate = ref(formatLocalDate(now))
+const granularity = ref<'day' | 'hour'>('hour')
+const defaultRange = getLast24HoursRangeDates()
+const startDate = ref(defaultRange.start)
+const endDate = ref(defaultRange.end)
 
 // Granularity options for Select component
 const granularityOptions = computed(() => [
@@ -366,6 +407,11 @@ const lineOptions = computed(() => ({
       }
     },
     tooltip: {
+      itemSort: (a: any, b: any) => {
+        const aValue = typeof a?.raw === 'number' ? a.raw : Number(a?.parsed?.y ?? 0)
+        const bValue = typeof b?.raw === 'number' ? b.raw : Number(b?.parsed?.y ?? 0)
+        return bValue - aValue
+      },
       callbacks: {
         label: (context: any) => {
           return `${context.dataset.label}: ${formatTokens(context.raw)}`
@@ -404,23 +450,29 @@ const lineOptions = computed(() => ({
 const userTrendChartData = computed(() => {
   if (!userTrend.value?.length) return null
 
-  // Extract display name from email (part before @)
-  const getDisplayName = (email: string, userId: number): string => {
-    if (email && email.includes('@')) {
-      return email.split('@')[0]
+  const getDisplayName = (point: UserUsageTrendPoint): string => {
+    const username = point.username?.trim()
+    if (username) {
+      return username
     }
-    return t('admin.redeem.userPrefix', { id: userId })
+
+    const email = point.email?.trim()
+    if (email) {
+      return email
+    }
+
+    return t('admin.redeem.userPrefix', { id: point.user_id })
   }
 
-  // Group by user
-  const userGroups = new Map<string, { name: string; data: Map<string, number> }>()
+  // Group by user_id to avoid merging different users with the same display name
+  const userGroups = new Map<number, { name: string; data: Map<string, number> }>()
   const allDates = new Set<string>()
 
   userTrend.value.forEach((point) => {
     allDates.add(point.date)
-    const key = getDisplayName(point.email, point.user_id)
+    const key = point.user_id
     if (!userGroups.has(key)) {
-      userGroups.set(key, { name: key, data: new Map() })
+      userGroups.set(key, { name: getDisplayName(point), data: new Map() })
     }
     userGroups.get(key)!.data.set(point.date, point.tokens)
   })
@@ -491,6 +543,17 @@ const formatDuration = (ms: number): string => {
   return `${Math.round(ms)}ms`
 }
 
+const goToUserUsage = (item: UserSpendingRankingItem) => {
+  void router.push({
+    path: '/admin/usage',
+    query: {
+      user_id: String(item.user_id),
+      start_date: startDate.value,
+      end_date: endDate.value
+    }
+  })
+}
+
 // Date range change handler
 const onDateRangeChange = (range: {
   startDate: string
@@ -513,46 +576,112 @@ const onDateRangeChange = (range: {
 }
 
 // Load data
-const loadDashboardStats = async () => {
-  loading.value = true
+const loadDashboardSnapshot = async (includeStats: boolean) => {
+  const currentSeq = ++chartLoadSeq
+  if (includeStats && !stats.value) {
+    loading.value = true
+  }
+  chartsLoading.value = true
   try {
-    stats.value = await adminAPI.dashboard.getStats()
+    const response = await adminAPI.dashboard.getSnapshotV2({
+      start_date: startDate.value,
+      end_date: endDate.value,
+      granularity: granularity.value,
+      include_stats: includeStats,
+      include_trend: true,
+      include_model_stats: true,
+      include_group_stats: false,
+      include_users_trend: false
+    })
+    if (currentSeq !== chartLoadSeq) return
+    if (includeStats && response.stats) {
+      stats.value = response.stats
+    }
+    trendData.value = response.trend || []
+    modelStats.value = response.models || []
   } catch (error) {
+    if (currentSeq !== chartLoadSeq) return
     appStore.showError(t('admin.dashboard.failedToLoad'))
-    console.error('Error loading dashboard stats:', error)
+    console.error('Error loading dashboard snapshot:', error)
   } finally {
-    loading.value = false
+    if (currentSeq === chartLoadSeq) {
+      loading.value = false
+      chartsLoading.value = false
+    }
   }
 }
 
-const loadChartData = async () => {
-  chartsLoading.value = true
+const loadUsersTrend = async () => {
+  const currentSeq = ++usersTrendLoadSeq
+  userTrendLoading.value = true
   try {
-    const params = {
+    const response = await adminAPI.dashboard.getUserUsageTrend({
       start_date: startDate.value,
       end_date: endDate.value,
-      granularity: granularity.value
-    }
-
-    const [trendResponse, modelResponse, userResponse] = await Promise.all([
-      adminAPI.dashboard.getUsageTrend(params),
-      adminAPI.dashboard.getModelStats({ start_date: startDate.value, end_date: endDate.value }),
-      adminAPI.dashboard.getUserUsageTrend({ ...params, limit: 12 })
-    ])
-
-    trendData.value = trendResponse.trend || []
-    modelStats.value = modelResponse.models || []
-    userTrend.value = userResponse.trend || []
+      granularity: granularity.value,
+      limit: 12
+    })
+    if (currentSeq !== usersTrendLoadSeq) return
+    userTrend.value = response.trend || []
   } catch (error) {
-    console.error('Error loading chart data:', error)
+    if (currentSeq !== usersTrendLoadSeq) return
+    console.error('Error loading users trend:', error)
+    userTrend.value = []
   } finally {
-    chartsLoading.value = false
+    if (currentSeq === usersTrendLoadSeq) {
+      userTrendLoading.value = false
+    }
   }
+}
+
+const loadUserSpendingRanking = async () => {
+  const currentSeq = ++rankingLoadSeq
+  rankingLoading.value = true
+  rankingError.value = false
+  try {
+    const response = await adminAPI.dashboard.getUserSpendingRanking({
+      start_date: startDate.value,
+      end_date: endDate.value,
+      limit: rankingLimit
+    })
+    if (currentSeq !== rankingLoadSeq) return
+    rankingItems.value = response.ranking || []
+    rankingTotalActualCost.value = response.total_actual_cost || 0
+    rankingTotalRequests.value = response.total_requests || 0
+    rankingTotalTokens.value = response.total_tokens || 0
+  } catch (error) {
+    if (currentSeq !== rankingLoadSeq) return
+    console.error('Error loading user spending ranking:', error)
+    rankingItems.value = []
+    rankingTotalActualCost.value = 0
+    rankingTotalRequests.value = 0
+    rankingTotalTokens.value = 0
+    rankingError.value = true
+  } finally {
+    if (currentSeq === rankingLoadSeq) {
+      rankingLoading.value = false
+    }
+  }
+}
+
+const loadDashboardStats = async () => {
+  await Promise.all([
+    loadDashboardSnapshot(true),
+    loadUsersTrend(),
+    loadUserSpendingRanking()
+  ])
+}
+
+const loadChartData = async () => {
+  await Promise.all([
+    loadDashboardSnapshot(false),
+    loadUsersTrend(),
+    loadUserSpendingRanking()
+  ])
 }
 
 onMounted(() => {
   loadDashboardStats()
-  loadChartData()
 })
 </script>
 

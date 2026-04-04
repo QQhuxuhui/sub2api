@@ -1,34 +1,18 @@
 <template>
   <AppLayout>
     <TablePageLayout>
-      <template #actions>
-        <div class="flex justify-end gap-3">
-          <button
-          @click="loadCodes"
-          :disabled="loading"
-          class="btn btn-secondary"
-          :title="t('common.refresh')"
-        >
-          <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-        </button>
-        <button @click="showGenerateDialog = true" class="btn btn-primary">
-          {{ t('admin.redeem.generateCodes') }}
-        </button>
-        </div>
-      </template>
-
       <template #filters>
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div class="max-w-md flex-1">
-          <input
-            v-model="searchQuery"
-            type="text"
-            :placeholder="t('admin.redeem.searchCodes')"
-            class="input"
-            @input="handleSearch"
-          />
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Left: Search + Filters -->
+          <div class="flex-1 sm:max-w-64">
+            <input
+              v-model="searchQuery"
+              type="text"
+              :placeholder="t('admin.redeem.searchCodes')"
+              class="input"
+              @input="handleSearch"
+            />
           </div>
-          <div class="flex gap-2">
           <Select
             v-model="filters.type"
             :options="filterTypeOptions"
@@ -41,9 +25,23 @@
             class="w-36"
             @change="loadCodes"
           />
-          <button @click="handleExportCodes" class="btn btn-secondary">
-            {{ t('admin.redeem.exportCsv') }}
-          </button>
+
+          <!-- Right: Action buttons -->
+          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+            <button
+              @click="loadCodes"
+              :disabled="loading"
+              class="btn btn-secondary"
+              :title="t('common.refresh')"
+            >
+              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+            </button>
+            <button @click="handleExportCodes" class="btn btn-secondary">
+              {{ t('admin.redeem.exportCsv') }}
+            </button>
+            <button @click="showGenerateDialog = true" class="btn btn-primary">
+              {{ t('admin.redeem.generateCodes') }}
+            </button>
           </div>
         </div>
       </template>
@@ -119,9 +117,9 @@
             </span>
           </template>
 
-          <template #cell-used_by="{ value }">
+          <template #cell-used_by="{ value, row }">
             <span class="text-sm text-gray-500 dark:text-dark-400">
-              {{ value ? t('admin.redeem.userPrefix', { id: value }) : '-' }}
+              {{ row.user?.email || (value ? t('admin.redeem.userPrefix', { id: value }) : '-') }}
             </span>
           </template>
 
@@ -397,6 +395,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
+import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { adminAPI } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
 import type { RedeemCode, RedeemCodeType, Group, GroupPlatform, SubscriptionType } from '@/types'
@@ -534,7 +533,7 @@ const filters = reactive({
 })
 const pagination = reactive({
   page: 1,
-  page_size: 20,
+  page_size: getPersistedPageSize(),
   total: 0,
   pages: 0
 })

@@ -21,8 +21,14 @@ type Announcement func(*sql.Selector)
 // AnnouncementRead is the predicate function for announcementread builders.
 type AnnouncementRead func(*sql.Selector)
 
+// ErrorPassthroughRule is the predicate function for errorpassthroughrule builders.
+type ErrorPassthroughRule func(*sql.Selector)
+
 // Group is the predicate function for group builders.
 type Group func(*sql.Selector)
+
+// IdempotencyRecord is the predicate function for idempotencyrecord builders.
+type IdempotencyRecord func(*sql.Selector)
 
 // PromoCode is the predicate function for promocode builders.
 type PromoCode func(*sql.Selector)
@@ -36,8 +42,14 @@ type Proxy func(*sql.Selector)
 // RedeemCode is the predicate function for redeemcode builders.
 type RedeemCode func(*sql.Selector)
 
+// SecuritySecret is the predicate function for securitysecret builders.
+type SecuritySecret func(*sql.Selector)
+
 // Setting is the predicate function for setting builders.
 type Setting func(*sql.Selector)
+
+// TLSFingerprintProfile is the predicate function for tlsfingerprintprofile builders.
+type TLSFingerprintProfile func(*sql.Selector)
 
 // UsageCleanupTask is the predicate function for usagecleanuptask builders.
 type UsageCleanupTask func(*sql.Selector)

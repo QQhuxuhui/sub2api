@@ -20,6 +20,22 @@ const (
 	opsMaxStoredErrorBodyBytes   = 20 * 1024
 )
 
+// PrepareOpsRequestBodyForQueue 在入队前对请求体执行脱敏与裁剪，返回可直接写入 OpsInsertErrorLogInput 的字段。
+// 该方法用于避免异步队列持有大块原始请求体，减少错误风暴下的内存放大风险。
+func PrepareOpsRequestBodyForQueue(raw []byte) (requestBodyJSON *string, truncated bool, requestBodyBytes *int) {
+	if len(raw) == 0 {
+		return nil, false, nil
+	}
+	sanitized, truncated, bytesLen := sanitizeAndTrimRequestBody(raw, opsMaxStoredRequestBodyBytes)
+	if sanitized != "" {
+		out := sanitized
+		requestBodyJSON = &out
+	}
+	n := bytesLen
+	requestBodyBytes = &n
+	return requestBodyJSON, truncated, requestBodyBytes
+}
+
 // OpsService provides ingestion and query APIs for the Ops monitoring module.
 type OpsService struct {
 	opsRepo     OpsRepository
@@ -27,6 +43,7 @@ type OpsService struct {
 	cfg         *config.Config
 
 	accountRepo AccountRepository
+	userRepo    UserRepository
 
 	// getAccountAvailability is a unit-test hook for overriding account availability lookup.
 	getAccountAvailability func(ctx context.Context, platformFilter string, groupIDFilter *int64) (*OpsAccountAvailability, error)
@@ -36,6 +53,7 @@ type OpsService struct {
 	openAIGatewayService      *OpenAIGatewayService
 	geminiCompatService       *GeminiMessagesCompatService
 	antigravityGatewayService *AntigravityGatewayService
+	systemLogSink             *OpsSystemLogSink
 }
 
 func NewOpsService(
@@ -43,25 +61,31 @@ func NewOpsService(
 	settingRepo SettingRepository,
 	cfg *config.Config,
 	accountRepo AccountRepository,
+	userRepo UserRepository,
 	concurrencyService *ConcurrencyService,
 	gatewayService *GatewayService,
 	openAIGatewayService *OpenAIGatewayService,
 	geminiCompatService *GeminiMessagesCompatService,
 	antigravityGatewayService *AntigravityGatewayService,
+	systemLogSink *OpsSystemLogSink,
 ) *OpsService {
-	return &OpsService{
+	svc := &OpsService{
 		opsRepo:     opsRepo,
 		settingRepo: settingRepo,
 		cfg:         cfg,
 
 		accountRepo: accountRepo,
+		userRepo:    userRepo,
 
 		concurrencyService:        concurrencyService,
 		gatewayService:            gatewayService,
 		openAIGatewayService:      openAIGatewayService,
 		geminiCompatService:       geminiCompatService,
 		antigravityGatewayService: antigravityGatewayService,
+		systemLogSink:             systemLogSink,
 	}
+	svc.applyRuntimeLogConfigOnStartup(context.Background())
+	return svc
 }
 
 func (s *OpsService) RequireMonitoringEnabled(ctx context.Context) error {
@@ -97,14 +121,74 @@ func (s *OpsService) IsMonitoringEnabled(ctx context.Context) bool {
 }
 
 func (s *OpsService) RecordError(ctx context.Context, entry *OpsInsertErrorLogInput, rawRequestBody []byte) error {
-	if entry == nil {
+	prepared, ok, err := s.prepareErrorLogInput(ctx, entry, rawRequestBody)
+	if err != nil {
+		log.Printf("[Ops] RecordError prepare failed: %v", err)
+		return err
+	}
+	if !ok {
 		return nil
+	}
+
+	if _, err := s.opsRepo.InsertErrorLog(ctx, prepared); err != nil {
+		// Never bubble up to gateway; best-effort logging.
+		log.Printf("[Ops] RecordError failed: %v", err)
+		return err
+	}
+	return nil
+}
+
+func (s *OpsService) RecordErrorBatch(ctx context.Context, entries []*OpsInsertErrorLogInput) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	prepared := make([]*OpsInsertErrorLogInput, 0, len(entries))
+	for _, entry := range entries {
+		item, ok, err := s.prepareErrorLogInput(ctx, entry, nil)
+		if err != nil {
+			log.Printf("[Ops] RecordErrorBatch prepare failed: %v", err)
+			continue
+		}
+		if ok {
+			prepared = append(prepared, item)
+		}
+	}
+	if len(prepared) == 0 {
+		return nil
+	}
+	if len(prepared) == 1 {
+		_, err := s.opsRepo.InsertErrorLog(ctx, prepared[0])
+		if err != nil {
+			log.Printf("[Ops] RecordErrorBatch single insert failed: %v", err)
+		}
+		return err
+	}
+
+	if _, err := s.opsRepo.BatchInsertErrorLogs(ctx, prepared); err != nil {
+		log.Printf("[Ops] RecordErrorBatch failed, fallback to single inserts: %v", err)
+		var firstErr error
+		for _, entry := range prepared {
+			if _, insertErr := s.opsRepo.InsertErrorLog(ctx, entry); insertErr != nil {
+				log.Printf("[Ops] RecordErrorBatch fallback insert failed: %v", insertErr)
+				if firstErr == nil {
+					firstErr = insertErr
+				}
+			}
+		}
+		return firstErr
+	}
+	return nil
+}
+
+func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertErrorLogInput, rawRequestBody []byte) (*OpsInsertErrorLogInput, bool, error) {
+	if entry == nil {
+		return nil, false, nil
 	}
 	if !s.IsMonitoringEnabled(ctx) {
-		return nil
+		return nil, false, nil
 	}
 	if s.opsRepo == nil {
-		return nil
+		return nil, false, nil
 	}
 
 	// Ensure timestamps are always populated.
@@ -124,12 +208,7 @@ func (s *OpsService) RecordError(ctx context.Context, entry *OpsInsertErrorLogIn
 
 	// Sanitize + trim request body (errors only).
 	if len(rawRequestBody) > 0 {
-		sanitized, truncated, bytesLen := sanitizeAndTrimRequestBody(rawRequestBody, opsMaxStoredRequestBodyBytes)
-		if sanitized != "" {
-			entry.RequestBodyJSON = &sanitized
-		}
-		entry.RequestBodyTruncated = truncated
-		entry.RequestBodyBytes = &bytesLen
+		entry.RequestBodyJSON, entry.RequestBodyTruncated, entry.RequestBodyBytes = PrepareOpsRequestBodyForQueue(rawRequestBody)
 	}
 
 	// Sanitize + truncate error_body to avoid storing sensitive data.
@@ -166,85 +245,88 @@ func (s *OpsService) RecordError(ctx context.Context, entry *OpsInsertErrorLogIn
 		}
 	}
 
-	// Sanitize + serialize upstream error events list.
-	if len(entry.UpstreamErrors) > 0 {
-		const maxEvents = 32
-		events := entry.UpstreamErrors
-		if len(events) > maxEvents {
-			events = events[len(events)-maxEvents:]
+	if err := sanitizeOpsUpstreamErrors(entry); err != nil {
+		return nil, false, err
+	}
+
+	return entry, true, nil
+}
+
+func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
+	if entry == nil || len(entry.UpstreamErrors) == 0 {
+		return nil
+	}
+
+	const maxEvents = 32
+	events := entry.UpstreamErrors
+	if len(events) > maxEvents {
+		events = events[len(events)-maxEvents:]
+	}
+
+	sanitized := make([]*OpsUpstreamErrorEvent, 0, len(events))
+	for _, ev := range events {
+		if ev == nil {
+			continue
+		}
+		out := *ev
+
+		out.Platform = strings.TrimSpace(out.Platform)
+		out.UpstreamRequestID = truncateString(strings.TrimSpace(out.UpstreamRequestID), 128)
+		out.Kind = truncateString(strings.TrimSpace(out.Kind), 64)
+
+		if out.AccountID < 0 {
+			out.AccountID = 0
+		}
+		if out.UpstreamStatusCode < 0 {
+			out.UpstreamStatusCode = 0
+		}
+		if out.AtUnixMs < 0 {
+			out.AtUnixMs = 0
 		}
 
-		sanitized := make([]*OpsUpstreamErrorEvent, 0, len(events))
-		for _, ev := range events {
-			if ev == nil {
-				continue
-			}
-			out := *ev
+		msg := sanitizeUpstreamErrorMessage(strings.TrimSpace(out.Message))
+		msg = truncateString(msg, 2048)
+		out.Message = msg
 
-			out.Platform = strings.TrimSpace(out.Platform)
-			out.UpstreamRequestID = truncateString(strings.TrimSpace(out.UpstreamRequestID), 128)
-			out.Kind = truncateString(strings.TrimSpace(out.Kind), 64)
+		detail := strings.TrimSpace(out.Detail)
+		if detail != "" {
+			// Keep upstream detail small; request bodies are not stored here, only upstream error payloads.
+			sanitizedDetail, _ := sanitizeErrorBodyForStorage(detail, opsMaxStoredErrorBodyBytes)
+			out.Detail = sanitizedDetail
+		} else {
+			out.Detail = ""
+		}
 
-			if out.AccountID < 0 {
-				out.AccountID = 0
-			}
-			if out.UpstreamStatusCode < 0 {
-				out.UpstreamStatusCode = 0
-			}
-			if out.AtUnixMs < 0 {
-				out.AtUnixMs = 0
-			}
-
-			msg := sanitizeUpstreamErrorMessage(strings.TrimSpace(out.Message))
-			msg = truncateString(msg, 2048)
-			out.Message = msg
-
-			detail := strings.TrimSpace(out.Detail)
-			if detail != "" {
-				// Keep upstream detail small; request bodies are not stored here, only upstream error payloads.
-				sanitizedDetail, _ := sanitizeErrorBodyForStorage(detail, opsMaxStoredErrorBodyBytes)
-				out.Detail = sanitizedDetail
-			} else {
-				out.Detail = ""
-			}
-
-			out.UpstreamRequestBody = strings.TrimSpace(out.UpstreamRequestBody)
-			if out.UpstreamRequestBody != "" {
-				// Reuse the same sanitization/trimming strategy as request body storage.
-				// Keep it small so it is safe to persist in ops_error_logs JSON.
-				sanitized, truncated, _ := sanitizeAndTrimRequestBody([]byte(out.UpstreamRequestBody), 10*1024)
-				if sanitized != "" {
-					out.UpstreamRequestBody = sanitized
-					if truncated {
-						out.Kind = strings.TrimSpace(out.Kind)
-						if out.Kind == "" {
-							out.Kind = "upstream"
-						}
-						out.Kind = out.Kind + ":request_body_truncated"
+		out.UpstreamRequestBody = strings.TrimSpace(out.UpstreamRequestBody)
+		if out.UpstreamRequestBody != "" {
+			// Reuse the same sanitization/trimming strategy as request body storage.
+			// Keep it small so it is safe to persist in ops_error_logs JSON.
+			sanitizedBody, truncated, _ := sanitizeAndTrimRequestBody([]byte(out.UpstreamRequestBody), 10*1024)
+			if sanitizedBody != "" {
+				out.UpstreamRequestBody = sanitizedBody
+				if truncated {
+					out.Kind = strings.TrimSpace(out.Kind)
+					if out.Kind == "" {
+						out.Kind = "upstream"
 					}
-				} else {
-					out.UpstreamRequestBody = ""
+					out.Kind = out.Kind + ":request_body_truncated"
 				}
+			} else {
+				out.UpstreamRequestBody = ""
 			}
-
-			// Drop fully-empty events (can happen if only status code was known).
-			if out.UpstreamStatusCode == 0 && out.Message == "" && out.Detail == "" {
-				continue
-			}
-
-			evCopy := out
-			sanitized = append(sanitized, &evCopy)
 		}
 
-		entry.UpstreamErrorsJSON = marshalOpsUpstreamErrors(sanitized)
-		entry.UpstreamErrors = nil
+		// Drop fully-empty events (can happen if only status code was known).
+		if out.UpstreamStatusCode == 0 && out.Message == "" && out.Detail == "" {
+			continue
+		}
+
+		evCopy := out
+		sanitized = append(sanitized, &evCopy)
 	}
 
-	if _, err := s.opsRepo.InsertErrorLog(ctx, entry); err != nil {
-		// Never bubble up to gateway; best-effort logging.
-		log.Printf("[Ops] RecordError failed: %v", err)
-		return err
-	}
+	entry.UpstreamErrorsJSON = marshalOpsUpstreamErrors(sanitized)
+	entry.UpstreamErrors = nil
 	return nil
 }
 
@@ -424,6 +506,26 @@ func isSensitiveKey(key string) bool {
 		return false
 	}
 
+	// Token 计数 / 预算字段不是凭据，应保留用于排错。
+	// 白名单保持尽量窄，避免误把真实敏感信息"反脱敏"。
+	switch k {
+	case "max_tokens",
+		"max_output_tokens",
+		"max_input_tokens",
+		"max_completion_tokens",
+		"max_tokens_to_sample",
+		"budget_tokens",
+		"prompt_tokens",
+		"completion_tokens",
+		"input_tokens",
+		"output_tokens",
+		"total_tokens",
+		"token_count",
+		"cache_creation_input_tokens",
+		"cache_read_input_tokens":
+		return false
+	}
+
 	// Exact matches (common credential fields).
 	switch k {
 	case "authorization",
@@ -566,7 +668,18 @@ func trimArrayField(root map[string]any, field string, maxBytes int) (map[string
 
 func shrinkToEssentials(root map[string]any) map[string]any {
 	out := make(map[string]any)
-	for _, key := range []string{"model", "stream", "max_tokens", "temperature", "top_p", "top_k"} {
+	for _, key := range []string{
+		"model",
+		"stream",
+		"max_tokens",
+		"max_output_tokens",
+		"max_input_tokens",
+		"max_completion_tokens",
+		"thinking",
+		"temperature",
+		"top_p",
+		"top_k",
+	} {
 		if v, ok := root[key]; ok {
 			out[key] = v
 		}

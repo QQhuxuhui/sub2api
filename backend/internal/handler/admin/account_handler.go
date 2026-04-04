@@ -2,14 +2,25 @@
 package admin
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
+	"log/slog"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -45,6 +56,7 @@ type AccountHandler struct {
 	concurrencyService      *service.ConcurrencyService
 	crsSyncService          *service.CRSSyncService
 	sessionLimitCache       service.SessionLimitCache
+	rpmCache                service.RPMCache
 	tokenCacheInvalidator   service.TokenCacheInvalidator
 }
 
@@ -61,6 +73,7 @@ func NewAccountHandler(
 	concurrencyService *service.ConcurrencyService,
 	crsSyncService *service.CRSSyncService,
 	sessionLimitCache service.SessionLimitCache,
+	rpmCache service.RPMCache,
 	tokenCacheInvalidator service.TokenCacheInvalidator,
 ) *AccountHandler {
 	return &AccountHandler{
@@ -75,6 +88,7 @@ func NewAccountHandler(
 		concurrencyService:      concurrencyService,
 		crsSyncService:          crsSyncService,
 		sessionLimitCache:       sessionLimitCache,
+		rpmCache:                rpmCache,
 		tokenCacheInvalidator:   tokenCacheInvalidator,
 	}
 }
@@ -84,13 +98,14 @@ type CreateAccountRequest struct {
 	Name                    string         `json:"name" binding:"required"`
 	Notes                   *string        `json:"notes"`
 	Platform                string         `json:"platform" binding:"required"`
-	Type                    string         `json:"type" binding:"required,oneof=oauth setup-token apikey upstream"`
+	Type                    string         `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock"`
 	Credentials             map[string]any `json:"credentials" binding:"required"`
 	Extra                   map[string]any `json:"extra"`
 	ProxyID                 *int64         `json:"proxy_id"`
 	Concurrency             int            `json:"concurrency"`
 	Priority                int            `json:"priority"`
 	RateMultiplier          *float64       `json:"rate_multiplier"`
+	LoadFactor              *int           `json:"load_factor"`
 	GroupIDs                []int64        `json:"group_ids"`
 	ExpiresAt               *int64         `json:"expires_at"`
 	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
@@ -102,14 +117,15 @@ type CreateAccountRequest struct {
 type UpdateAccountRequest struct {
 	Name                    string         `json:"name"`
 	Notes                   *string        `json:"notes"`
-	Type                    string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream"`
+	Type                    string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock"`
 	Credentials             map[string]any `json:"credentials"`
 	Extra                   map[string]any `json:"extra"`
 	ProxyID                 *int64         `json:"proxy_id"`
 	Concurrency             *int           `json:"concurrency"`
 	Priority                *int           `json:"priority"`
 	RateMultiplier          *float64       `json:"rate_multiplier"`
-	Status                  string         `json:"status" binding:"omitempty,oneof=active inactive"`
+	LoadFactor              *int           `json:"load_factor"`
+	Status                  string         `json:"status" binding:"omitempty,oneof=active inactive error"`
 	GroupIDs                *[]int64       `json:"group_ids"`
 	ExpiresAt               *int64         `json:"expires_at"`
 	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
@@ -124,12 +140,20 @@ type BulkUpdateAccountsRequest struct {
 	Concurrency             *int           `json:"concurrency"`
 	Priority                *int           `json:"priority"`
 	RateMultiplier          *float64       `json:"rate_multiplier"`
+	LoadFactor              *int           `json:"load_factor"`
 	Status                  string         `json:"status" binding:"omitempty,oneof=active inactive error"`
 	Schedulable             *bool          `json:"schedulable"`
 	GroupIDs                *[]int64       `json:"group_ids"`
 	Credentials             map[string]any `json:"credentials"`
 	Extra                   map[string]any `json:"extra"`
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+}
+
+// CheckMixedChannelRequest represents check mixed channel risk request
+type CheckMixedChannelRequest struct {
+	Platform  string  `json:"platform" binding:"required"`
+	GroupIDs  []int64 `json:"group_ids"`
+	AccountID *int64  `json:"account_id"`
 }
 
 // AccountWithConcurrency extends Account with real-time concurrency info
@@ -139,6 +163,53 @@ type AccountWithConcurrency struct {
 	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
 	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
 	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
+	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+}
+
+const accountListGroupUngroupedQueryValue = "ungrouped"
+
+func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, account *service.Account) AccountWithConcurrency {
+	item := AccountWithConcurrency{
+		Account:            dto.AccountFromService(account),
+		CurrentConcurrency: 0,
+	}
+	if account == nil {
+		return item
+	}
+
+	if h.concurrencyService != nil {
+		if counts, err := h.concurrencyService.GetAccountConcurrencyBatch(ctx, []int64{account.ID}); err == nil {
+			item.CurrentConcurrency = counts[account.ID]
+		}
+	}
+
+	if account.IsAnthropicOAuthOrSetupToken() {
+		if h.accountUsageService != nil && account.GetWindowCostLimit() > 0 {
+			startTime := account.GetCurrentWindowStartTime()
+			if stats, err := h.accountUsageService.GetAccountWindowStats(ctx, account.ID, startTime); err == nil && stats != nil {
+				cost := stats.StandardCost
+				item.CurrentWindowCost = &cost
+			}
+		}
+
+		if h.sessionLimitCache != nil && account.GetMaxSessions() > 0 {
+			idleTimeout := time.Duration(account.GetSessionIdleTimeoutMinutes()) * time.Minute
+			idleTimeouts := map[int64]time.Duration{account.ID: idleTimeout}
+			if sessions, err := h.sessionLimitCache.GetActiveSessionCountBatch(ctx, []int64{account.ID}, idleTimeouts); err == nil {
+				if count, ok := sessions[account.ID]; ok {
+					item.ActiveSessions = &count
+				}
+			}
+		}
+
+		if h.rpmCache != nil && account.GetBaseRPM() > 0 {
+			if rpm, err := h.rpmCache.GetRPM(ctx, account.ID); err == nil {
+				item.CurrentRPM = &rpm
+			}
+		}
+	}
+
+	return item
 }
 
 // List handles listing all accounts with pagination
@@ -149,13 +220,33 @@ func (h *AccountHandler) List(c *gin.Context) {
 	accountType := c.Query("type")
 	status := c.Query("status")
 	search := c.Query("search")
+	privacyMode := strings.TrimSpace(c.Query("privacy_mode"))
 	// 标准化和验证 search 参数
 	search = strings.TrimSpace(search)
 	if len(search) > 100 {
 		search = search[:100]
 	}
+	lite := parseBoolQueryWithDefault(c.Query("lite"), false)
 
-	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search)
+	var groupID int64
+	if groupIDStr := c.Query("group"); groupIDStr != "" {
+		if groupIDStr == accountListGroupUngroupedQueryValue {
+			groupID = service.AccountListGroupUngrouped
+		} else {
+			parsedGroupID, parseErr := strconv.ParseInt(groupIDStr, 10, 64)
+			if parseErr != nil {
+				response.ErrorFrom(c, infraerrors.BadRequest("INVALID_GROUP_FILTER", "invalid group filter"))
+				return
+			}
+			if parsedGroupID < 0 {
+				response.ErrorFrom(c, infraerrors.BadRequest("INVALID_GROUP_FILTER", "invalid group filter"))
+				return
+			}
+			groupID = parsedGroupID
+		}
+	}
+
+	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -167,15 +258,22 @@ func (h *AccountHandler) List(c *gin.Context) {
 		accountIDs[i] = acc.ID
 	}
 
-	concurrencyCounts, err := h.concurrencyService.GetAccountConcurrencyBatch(c.Request.Context(), accountIDs)
-	if err != nil {
-		// Log error but don't fail the request, just use 0 for all
-		concurrencyCounts = make(map[int64]int)
+	concurrencyCounts := make(map[int64]int)
+	var windowCosts map[int64]float64
+	var activeSessions map[int64]int
+	var rpmCounts map[int64]int
+
+	// 始终获取并发数（Redis ZCARD，极低开销）
+	if h.concurrencyService != nil {
+		if cc, ccErr := h.concurrencyService.GetAccountConcurrencyBatch(c.Request.Context(), accountIDs); ccErr == nil && cc != nil {
+			concurrencyCounts = cc
+		}
 	}
 
-	// 识别需要查询窗口费用和会话数的账号（Anthropic OAuth/SetupToken 且启用了相应功能）
+	// 识别需要查询窗口费用、会话数和 RPM 的账号（Anthropic OAuth/SetupToken 且启用了相应功能）
 	windowCostAccountIDs := make([]int64, 0)
 	sessionLimitAccountIDs := make([]int64, 0)
+	rpmAccountIDs := make([]int64, 0)
 	sessionIdleTimeouts := make(map[int64]time.Duration) // 各账号的会话空闲超时配置
 	for i := range accounts {
 		acc := &accounts[i]
@@ -187,14 +285,21 @@ func (h *AccountHandler) List(c *gin.Context) {
 				sessionLimitAccountIDs = append(sessionLimitAccountIDs, acc.ID)
 				sessionIdleTimeouts[acc.ID] = time.Duration(acc.GetSessionIdleTimeoutMinutes()) * time.Minute
 			}
+			if acc.GetBaseRPM() > 0 {
+				rpmAccountIDs = append(rpmAccountIDs, acc.ID)
+			}
 		}
 	}
 
-	// 并行获取窗口费用和活跃会话数
-	var windowCosts map[int64]float64
-	var activeSessions map[int64]int
+	// 始终获取 RPM 计数（Redis GET，极低开销）
+	if len(rpmAccountIDs) > 0 && h.rpmCache != nil {
+		rpmCounts, _ = h.rpmCache.GetRPMBatch(c.Request.Context(), rpmAccountIDs)
+		if rpmCounts == nil {
+			rpmCounts = make(map[int64]int)
+		}
+	}
 
-	// 获取活跃会话数（批量查询，传入各账号的 idleTimeout 配置）
+	// 始终获取活跃会话数（Redis ZCARD，低开销）
 	if len(sessionLimitAccountIDs) > 0 && h.sessionLimitCache != nil {
 		activeSessions, _ = h.sessionLimitCache.GetActiveSessionCountBatch(c.Request.Context(), sessionLimitAccountIDs, sessionIdleTimeouts)
 		if activeSessions == nil {
@@ -202,7 +307,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	// 获取窗口费用（并行查询）
+	// 始终获取窗口费用（PostgreSQL 聚合查询）
 	if len(windowCostAccountIDs) > 0 {
 		windowCosts = make(map[int64]float64)
 		var mu sync.Mutex
@@ -253,10 +358,82 @@ func (h *AccountHandler) List(c *gin.Context) {
 			}
 		}
 
+		// 添加 RPM 计数（仅当启用时）
+		if rpmCounts != nil {
+			if rpm, ok := rpmCounts[acc.ID]; ok {
+				item.CurrentRPM = &rpm
+			}
+		}
+
 		result[i] = item
 	}
 
+	etag := buildAccountsListETag(result, total, page, pageSize, platform, accountType, status, search, lite)
+	if etag != "" {
+		c.Header("ETag", etag)
+		c.Header("Vary", "If-None-Match")
+		if ifNoneMatchMatched(c.GetHeader("If-None-Match"), etag) {
+			c.Status(http.StatusNotModified)
+			return
+		}
+	}
+
 	response.Paginated(c, result, total, page, pageSize)
+}
+
+func buildAccountsListETag(
+	items []AccountWithConcurrency,
+	total int64,
+	page, pageSize int,
+	platform, accountType, status, search string,
+	lite bool,
+) string {
+	payload := struct {
+		Total       int64                    `json:"total"`
+		Page        int                      `json:"page"`
+		PageSize    int                      `json:"page_size"`
+		Platform    string                   `json:"platform"`
+		AccountType string                   `json:"type"`
+		Status      string                   `json:"status"`
+		Search      string                   `json:"search"`
+		Lite        bool                     `json:"lite"`
+		Items       []AccountWithConcurrency `json:"items"`
+	}{
+		Total:       total,
+		Page:        page,
+		PageSize:    pageSize,
+		Platform:    platform,
+		AccountType: accountType,
+		Status:      status,
+		Search:      search,
+		Lite:        lite,
+		Items:       items,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return "\"" + hex.EncodeToString(sum[:]) + "\""
+}
+
+func ifNoneMatchMatched(ifNoneMatch, etag string) bool {
+	if etag == "" || ifNoneMatch == "" {
+		return false
+	}
+	for _, token := range strings.Split(ifNoneMatch, ",") {
+		candidate := strings.TrimSpace(token)
+		if candidate == "*" {
+			return true
+		}
+		if candidate == etag {
+			return true
+		}
+		if strings.HasPrefix(candidate, "W/") && strings.TrimPrefix(candidate, "W/") == etag {
+			return true
+		}
+	}
+	return false
 }
 
 // GetByID handles getting an account by ID
@@ -274,7 +451,51 @@ func (h *AccountHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.AccountFromService(account))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+}
+
+// CheckMixedChannel handles checking mixed channel risk for account-group binding.
+// POST /api/v1/admin/accounts/check-mixed-channel
+func (h *AccountHandler) CheckMixedChannel(c *gin.Context) {
+	var req CheckMixedChannelRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	if len(req.GroupIDs) == 0 {
+		response.Success(c, gin.H{"has_risk": false})
+		return
+	}
+
+	accountID := int64(0)
+	if req.AccountID != nil {
+		accountID = *req.AccountID
+	}
+
+	err := h.adminService.CheckMixedChannelRisk(c.Request.Context(), accountID, req.Platform, req.GroupIDs)
+	if err != nil {
+		var mixedErr *service.MixedChannelError
+		if errors.As(err, &mixedErr) {
+			response.Success(c, gin.H{
+				"has_risk": true,
+				"error":    "mixed_channel_warning",
+				"message":  mixedErr.Error(),
+				"details": gin.H{
+					"group_id":         mixedErr.GroupID,
+					"group_name":       mixedErr.GroupName,
+					"current_platform": mixedErr.CurrentPlatform,
+					"other_platform":   mixedErr.OtherPlatform,
+				},
+			})
+			return
+		}
+
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{"has_risk": false})
 }
 
 // Create handles creating a new account
@@ -289,50 +510,62 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
 	}
+	// base_rpm 输入校验：负值归零，超过 10000 截断
+	sanitizeExtraBaseRPM(req.Extra)
 
 	// 确定是否跳过混合渠道检查
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
-	account, err := h.adminService.CreateAccount(c.Request.Context(), &service.CreateAccountInput{
-		Name:                  req.Name,
-		Notes:                 req.Notes,
-		Platform:              req.Platform,
-		Type:                  req.Type,
-		Credentials:           req.Credentials,
-		Extra:                 req.Extra,
-		ProxyID:               req.ProxyID,
-		Concurrency:           req.Concurrency,
-		Priority:              req.Priority,
-		RateMultiplier:        req.RateMultiplier,
-		GroupIDs:              req.GroupIDs,
-		ExpiresAt:             req.ExpiresAt,
-		AutoPauseOnExpired:    req.AutoPauseOnExpired,
-		SkipMixedChannelCheck: skipCheck,
+	result, err := executeAdminIdempotent(c, "admin.accounts.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		account, execErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
+			Name:                  req.Name,
+			Notes:                 req.Notes,
+			Platform:              req.Platform,
+			Type:                  req.Type,
+			Credentials:           req.Credentials,
+			Extra:                 req.Extra,
+			ProxyID:               req.ProxyID,
+			Concurrency:           req.Concurrency,
+			Priority:              req.Priority,
+			RateMultiplier:        req.RateMultiplier,
+			LoadFactor:            req.LoadFactor,
+			GroupIDs:              req.GroupIDs,
+			ExpiresAt:             req.ExpiresAt,
+			AutoPauseOnExpired:    req.AutoPauseOnExpired,
+			SkipMixedChannelCheck: skipCheck,
+		})
+		if execErr != nil {
+			return nil, execErr
+		}
+		// Antigravity OAuth: 新账号直接设置隐私
+		h.adminService.ForceAntigravityPrivacy(ctx, account)
+		// OpenAI OAuth: 新账号直接设置隐私
+		h.adminService.ForceOpenAIPrivacy(ctx, account)
+		return h.buildAccountResponseWithRuntime(ctx, account), nil
 	})
 	if err != nil {
 		// 检查是否为混合渠道错误
 		var mixedErr *service.MixedChannelError
 		if errors.As(err, &mixedErr) {
-			// 返回特殊错误码要求确认
+			// 创建接口仅返回最小必要字段，详细信息由专门检查接口提供
 			c.JSON(409, gin.H{
 				"error":   "mixed_channel_warning",
 				"message": mixedErr.Error(),
-				"details": gin.H{
-					"group_id":         mixedErr.GroupID,
-					"group_name":       mixedErr.GroupName,
-					"current_platform": mixedErr.CurrentPlatform,
-					"other_platform":   mixedErr.OtherPlatform,
-				},
-				"require_confirmation": true,
 			})
 			return
 		}
 
+		if retryAfter := service.RetryAfterSecondsFromError(err); retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	response.Success(c, dto.AccountFromService(account))
+	if result != nil && result.Replayed {
+		c.Header("X-Idempotency-Replayed", "true")
+	}
+	response.Success(c, result.Data)
 }
 
 // Update handles updating an account
@@ -353,6 +586,8 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
 	}
+	// base_rpm 输入校验：负值归零，超过 10000 截断
+	sanitizeExtraBaseRPM(req.Extra)
 
 	// 确定是否跳过混合渠道检查
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
@@ -367,6 +602,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		Concurrency:           req.Concurrency, // 指针类型，nil 表示未提供
 		Priority:              req.Priority,    // 指针类型，nil 表示未提供
 		RateMultiplier:        req.RateMultiplier,
+		LoadFactor:            req.LoadFactor,
 		Status:                req.Status,
 		GroupIDs:              req.GroupIDs,
 		ExpiresAt:             req.ExpiresAt,
@@ -377,17 +613,10 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		// 检查是否为混合渠道错误
 		var mixedErr *service.MixedChannelError
 		if errors.As(err, &mixedErr) {
-			// 返回特殊错误码要求确认
+			// 更新接口仅返回最小必要字段，详细信息由专门检查接口提供
 			c.JSON(409, gin.H{
 				"error":   "mixed_channel_warning",
 				"message": mixedErr.Error(),
-				"details": gin.H{
-					"group_id":         mixedErr.GroupID,
-					"group_name":       mixedErr.GroupName,
-					"current_platform": mixedErr.CurrentPlatform,
-					"other_platform":   mixedErr.OtherPlatform,
-				},
-				"require_confirmation": true,
 			})
 			return
 		}
@@ -396,7 +625,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.AccountFromService(account))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
 }
 
 // Delete handles deleting an account
@@ -420,13 +649,21 @@ func (h *AccountHandler) Delete(c *gin.Context) {
 // TestAccountRequest represents the request body for testing an account
 type TestAccountRequest struct {
 	ModelID string `json:"model_id"`
+	Prompt  string `json:"prompt"`
 }
 
 type SyncFromCRSRequest struct {
-	BaseURL     string `json:"base_url" binding:"required"`
-	Username    string `json:"username" binding:"required"`
-	Password    string `json:"password" binding:"required"`
-	SyncProxies *bool  `json:"sync_proxies"`
+	BaseURL            string   `json:"base_url" binding:"required"`
+	Username           string   `json:"username" binding:"required"`
+	Password           string   `json:"password" binding:"required"`
+	SyncProxies        *bool    `json:"sync_proxies"`
+	SelectedAccountIDs []string `json:"selected_account_ids"`
+}
+
+type PreviewFromCRSRequest struct {
+	BaseURL  string `json:"base_url" binding:"required"`
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
 }
 
 // Test handles testing account connectivity with SSE streaming
@@ -443,10 +680,46 @@ func (h *AccountHandler) Test(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 
 	// Use AccountTestService to test the account with SSE streaming
-	if err := h.accountTestService.TestAccountConnection(c, accountID, req.ModelID); err != nil {
+	if err := h.accountTestService.TestAccountConnection(c, accountID, req.ModelID, req.Prompt); err != nil {
 		// Error already sent via SSE, just log
 		return
 	}
+
+	if h.rateLimitService != nil {
+		if _, err := h.rateLimitService.RecoverAccountAfterSuccessfulTest(c.Request.Context(), accountID); err != nil {
+			_ = c.Error(err)
+		}
+	}
+}
+
+// RecoverState handles unified recovery of recoverable account runtime state.
+// POST /api/v1/admin/accounts/:id/recover-state
+func (h *AccountHandler) RecoverState(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	if h.rateLimitService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Rate limit service unavailable")
+		return
+	}
+
+	if _, err := h.rateLimitService.RecoverAccountState(c.Request.Context(), accountID, service.AccountRecoveryOptions{
+		InvalidateToken: true,
+	}); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
 }
 
 // SyncFromCRS handles syncing accounts from claude-relay-service (CRS)
@@ -465,10 +738,11 @@ func (h *AccountHandler) SyncFromCRS(c *gin.Context) {
 	}
 
 	result, err := h.crsSyncService.SyncFromCRS(c.Request.Context(), service.SyncFromCRSInput{
-		BaseURL:     req.BaseURL,
-		Username:    req.Username,
-		Password:    req.Password,
-		SyncProxies: syncProxies,
+		BaseURL:            req.BaseURL,
+		Username:           req.Username,
+		Password:           req.Password,
+		SyncProxies:        syncProxies,
+		SelectedAccountIDs: req.SelectedAccountIDs,
 	})
 	if err != nil {
 		// Provide detailed error message for CRS sync failures
@@ -479,52 +753,55 @@ func (h *AccountHandler) SyncFromCRS(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// Refresh handles refreshing account credentials
-// POST /api/v1/admin/accounts/:id/refresh
-func (h *AccountHandler) Refresh(c *gin.Context) {
-	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "Invalid account ID")
+// PreviewFromCRS handles previewing accounts from CRS before sync
+// POST /api/v1/admin/accounts/sync/crs/preview
+func (h *AccountHandler) PreviewFromCRS(c *gin.Context) {
+	var req PreviewFromCRSRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
 
-	// Get account
-	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	result, err := h.crsSyncService.PreviewFromCRS(c.Request.Context(), service.SyncFromCRSInput{
+		BaseURL:  req.BaseURL,
+		Username: req.Username,
+		Password: req.Password,
+	})
 	if err != nil {
-		response.NotFound(c, "Account not found")
+		response.InternalError(c, "CRS preview failed: "+err.Error())
 		return
 	}
 
-	// Only refresh OAuth-based accounts (oauth and setup-token)
+	response.Success(c, result)
+}
+
+// refreshSingleAccount refreshes credentials for a single OAuth account.
+// Returns (updatedAccount, warning, error) where warning is used for Antigravity ProjectIDMissing scenario.
+func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *service.Account) (*service.Account, string, error) {
 	if !account.IsOAuth() {
-		response.BadRequest(c, "Cannot refresh non-OAuth account credentials")
-		return
+		return nil, "", infraerrors.BadRequest("NOT_OAUTH", "cannot refresh non-OAuth account")
 	}
 
 	var newCredentials map[string]any
 
 	if account.IsOpenAI() {
-		// Use OpenAI OAuth service to refresh token
-		tokenInfo, err := h.openaiOAuthService.RefreshAccountToken(c.Request.Context(), account)
+		tokenInfo, err := h.openaiOAuthService.RefreshAccountToken(ctx, account)
 		if err != nil {
-			response.ErrorFrom(c, err)
-			return
+			// 刷新失败但 access_token 可能仍有效，尝试设置隐私
+			h.adminService.EnsureOpenAIPrivacy(ctx, account)
+			return nil, "", err
 		}
 
-		// Build new credentials from token info
 		newCredentials = h.openaiOAuthService.BuildAccountCredentials(tokenInfo)
-
-		// Preserve non-token settings from existing credentials
 		for k, v := range account.Credentials {
 			if _, exists := newCredentials[k]; !exists {
 				newCredentials[k] = v
 			}
 		}
 	} else if account.Platform == service.PlatformGemini {
-		tokenInfo, err := h.geminiOAuthService.RefreshAccountToken(c.Request.Context(), account)
+		tokenInfo, err := h.geminiOAuthService.RefreshAccountToken(ctx, account)
 		if err != nil {
-			response.InternalError(c, "Failed to refresh credentials: "+err.Error())
-			return
+			return nil, "", fmt.Errorf("failed to refresh credentials: %w", err)
 		}
 
 		newCredentials = h.geminiOAuthService.BuildAccountCredentials(tokenInfo)
@@ -534,10 +811,9 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 			}
 		}
 	} else if account.Platform == service.PlatformAntigravity {
-		tokenInfo, err := h.antigravityOAuthService.RefreshAccountToken(c.Request.Context(), account)
+		tokenInfo, err := h.antigravityOAuthService.RefreshAccountToken(ctx, account)
 		if err != nil {
-			response.ErrorFrom(c, err)
-			return
+			return nil, "", err
 		}
 
 		newCredentials = h.antigravityOAuthService.BuildAccountCredentials(tokenInfo)
@@ -556,37 +832,28 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 		}
 
 		// 如果 project_id 获取失败，更新凭证但不标记为 error
-		// LoadCodeAssist 失败可能是临时网络问题，给它机会在下次自动刷新时重试
 		if tokenInfo.ProjectIDMissing {
-			// 先更新凭证（token 本身刷新成功了）
-			_, updateErr := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
+			updatedAccount, updateErr := h.adminService.UpdateAccount(ctx, account.ID, &service.UpdateAccountInput{
 				Credentials: newCredentials,
 			})
 			if updateErr != nil {
-				response.InternalError(c, "Failed to update credentials: "+updateErr.Error())
-				return
+				return nil, "", fmt.Errorf("failed to update credentials: %w", updateErr)
 			}
-			// 不标记为 error，只返回警告信息
-			response.Success(c, gin.H{
-				"message": "Token refreshed successfully, but project_id could not be retrieved (will retry automatically)",
-				"warning": "missing_project_id_temporary",
-			})
-			return
+			h.adminService.EnsureAntigravityPrivacy(ctx, updatedAccount)
+			return updatedAccount, "missing_project_id_temporary", nil
 		}
 
 		// 成功获取到 project_id，如果之前是 missing_project_id 错误则清除
 		if account.Status == service.StatusError && strings.Contains(account.ErrorMessage, "missing_project_id:") {
-			if _, clearErr := h.adminService.ClearAccountError(c.Request.Context(), accountID); clearErr != nil {
-				response.InternalError(c, "Failed to clear account error: "+clearErr.Error())
-				return
+			if _, clearErr := h.adminService.ClearAccountError(ctx, account.ID); clearErr != nil {
+				return nil, "", fmt.Errorf("failed to clear account error: %w", clearErr)
 			}
 		}
 	} else {
 		// Use Anthropic/Claude OAuth service to refresh token
-		tokenInfo, err := h.oauthService.RefreshAccountToken(c.Request.Context(), account)
+		tokenInfo, err := h.oauthService.RefreshAccountToken(ctx, account)
 		if err != nil {
-			response.ErrorFrom(c, err)
-			return
+			return nil, "", err
 		}
 
 		// Copy existing credentials to preserve non-token settings (e.g., intercept_warmup_requests)
@@ -608,23 +875,59 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 		}
 	}
 
-	updatedAccount, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
+	updatedAccount, err := h.adminService.UpdateAccount(ctx, account.ID, &service.UpdateAccountInput{
 		Credentials: newCredentials,
 	})
+	if err != nil {
+		return nil, "", err
+	}
+
+	// 刷新成功后，清除 token 缓存，确保下次请求使用新 token
+	if h.tokenCacheInvalidator != nil {
+		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(ctx, updatedAccount); invalidateErr != nil {
+			log.Printf("[WARN] Failed to invalidate token cache for account %d: %v", updatedAccount.ID, invalidateErr)
+		}
+	}
+
+	// OpenAI OAuth: 刷新成功后检查并设置 privacy_mode
+	h.adminService.EnsureOpenAIPrivacy(ctx, updatedAccount)
+	// Antigravity OAuth: 刷新成功后检查并设置 privacy_mode
+	h.adminService.EnsureAntigravityPrivacy(ctx, updatedAccount)
+
+	return updatedAccount, "", nil
+}
+
+// Refresh handles refreshing account credentials
+// POST /api/v1/admin/accounts/:id/refresh
+func (h *AccountHandler) Refresh(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	// Get account
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.NotFound(c, "Account not found")
+		return
+	}
+
+	updatedAccount, warning, err := h.refreshSingleAccount(c.Request.Context(), account)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	// 刷新成功后，清除 token 缓存，确保下次请求使用新 token
-	if h.tokenCacheInvalidator != nil {
-		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(c.Request.Context(), updatedAccount); invalidateErr != nil {
-			// 缓存失效失败只记录日志，不影响主流程
-			_ = c.Error(invalidateErr)
-		}
+	if warning == "missing_project_id_temporary" {
+		response.Success(c, gin.H{
+			"message": "Token refreshed successfully, but project_id could not be retrieved (will retry automatically)",
+			"warning": "missing_project_id_temporary",
+		})
+		return
 	}
 
-	response.Success(c, dto.AccountFromService(updatedAccount))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount))
 }
 
 // GetStats handles getting account statistics
@@ -677,12 +980,173 @@ func (h *AccountHandler) ClearError(c *gin.Context) {
 	// 这解决了管理员重置账号状态后，旧的失效 token 仍在缓存中导致立即再次 401 的问题
 	if h.tokenCacheInvalidator != nil && account.IsOAuth() {
 		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(c.Request.Context(), account); invalidateErr != nil {
-			// 缓存失效失败只记录日志，不影响主流程
-			_ = c.Error(invalidateErr)
+			log.Printf("[WARN] Failed to invalidate token cache for account %d: %v", accountID, invalidateErr)
 		}
 	}
 
-	response.Success(c, dto.AccountFromService(account))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+}
+
+// BatchClearError handles batch clearing account errors
+// POST /api/v1/admin/accounts/batch-clear-error
+func (h *AccountHandler) BatchClearError(c *gin.Context) {
+	var req struct {
+		AccountIDs []int64 `json:"account_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if len(req.AccountIDs) == 0 {
+		response.BadRequest(c, "account_ids is required")
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	const maxConcurrency = 10
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(maxConcurrency)
+
+	var mu sync.Mutex
+	var successCount, failedCount int
+	var errors []gin.H
+
+	// 注意：所有 goroutine 必须 return nil，避免 errgroup cancel 其他并发任务
+	for _, id := range req.AccountIDs {
+		accountID := id // 闭包捕获
+		g.Go(func() error {
+			account, err := h.adminService.ClearAccountError(gctx, accountID)
+			if err != nil {
+				mu.Lock()
+				failedCount++
+				errors = append(errors, gin.H{
+					"account_id": accountID,
+					"error":      err.Error(),
+				})
+				mu.Unlock()
+				return nil
+			}
+
+			// 清除错误后，同时清除 token 缓存
+			if h.tokenCacheInvalidator != nil && account.IsOAuth() {
+				if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(gctx, account); invalidateErr != nil {
+					log.Printf("[WARN] Failed to invalidate token cache for account %d: %v", accountID, invalidateErr)
+				}
+			}
+
+			mu.Lock()
+			successCount++
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{
+		"total":   len(req.AccountIDs),
+		"success": successCount,
+		"failed":  failedCount,
+		"errors":  errors,
+	})
+}
+
+// BatchRefresh handles batch refreshing account credentials
+// POST /api/v1/admin/accounts/batch-refresh
+func (h *AccountHandler) BatchRefresh(c *gin.Context) {
+	var req struct {
+		AccountIDs []int64 `json:"account_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if len(req.AccountIDs) == 0 {
+		response.BadRequest(c, "account_ids is required")
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	accounts, err := h.adminService.GetAccountsByIDs(ctx, req.AccountIDs)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	// 建立已获取账号的 ID 集合，检测缺失的 ID
+	foundIDs := make(map[int64]bool, len(accounts))
+	for _, acc := range accounts {
+		if acc != nil {
+			foundIDs[acc.ID] = true
+		}
+	}
+
+	const maxConcurrency = 10
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(maxConcurrency)
+
+	var mu sync.Mutex
+	var successCount, failedCount int
+	var errors []gin.H
+	var warnings []gin.H
+
+	// 将不存在的账号 ID 标记为失败
+	for _, id := range req.AccountIDs {
+		if !foundIDs[id] {
+			failedCount++
+			errors = append(errors, gin.H{
+				"account_id": id,
+				"error":      "account not found",
+			})
+		}
+	}
+
+	// 注意：所有 goroutine 必须 return nil，避免 errgroup cancel 其他并发任务
+	for _, account := range accounts {
+		acc := account // 闭包捕获
+		if acc == nil {
+			continue
+		}
+		g.Go(func() error {
+			_, warning, err := h.refreshSingleAccount(gctx, acc)
+			mu.Lock()
+			if err != nil {
+				failedCount++
+				errors = append(errors, gin.H{
+					"account_id": acc.ID,
+					"error":      err.Error(),
+				})
+			} else {
+				successCount++
+				if warning != "" {
+					warnings = append(warnings, gin.H{
+						"account_id": acc.ID,
+						"warning":    warning,
+					})
+				}
+			}
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{
+		"total":    len(req.AccountIDs),
+		"success":  successCount,
+		"failed":   failedCount,
+		"errors":   errors,
+		"warnings": warnings,
+	})
 }
 
 // BatchCreate handles batch creating accounts
@@ -696,11 +1160,108 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 		return
 	}
 
-	// Return mock data for now
-	response.Success(c, gin.H{
-		"success": len(req.Accounts),
-		"failed":  0,
-		"results": []gin.H{},
+	executeAdminIdempotentJSON(c, "admin.accounts.batch_create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		success := 0
+		failed := 0
+		results := make([]gin.H, 0, len(req.Accounts))
+		// 收集需要异步设置隐私的 OAuth 账号
+		var antigravityPrivacyAccounts []*service.Account
+		var openaiPrivacyAccounts []*service.Account
+
+		for _, item := range req.Accounts {
+			if item.RateMultiplier != nil && *item.RateMultiplier < 0 {
+				failed++
+				results = append(results, gin.H{
+					"name":    item.Name,
+					"success": false,
+					"error":   "rate_multiplier must be >= 0",
+				})
+				continue
+			}
+
+			// base_rpm 输入校验：负值归零，超过 10000 截断
+			sanitizeExtraBaseRPM(item.Extra)
+
+			skipCheck := item.ConfirmMixedChannelRisk != nil && *item.ConfirmMixedChannelRisk
+
+			account, err := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
+				Name:                  item.Name,
+				Notes:                 item.Notes,
+				Platform:              item.Platform,
+				Type:                  item.Type,
+				Credentials:           item.Credentials,
+				Extra:                 item.Extra,
+				ProxyID:               item.ProxyID,
+				Concurrency:           item.Concurrency,
+				Priority:              item.Priority,
+				RateMultiplier:        item.RateMultiplier,
+				GroupIDs:              item.GroupIDs,
+				ExpiresAt:             item.ExpiresAt,
+				AutoPauseOnExpired:    item.AutoPauseOnExpired,
+				SkipMixedChannelCheck: skipCheck,
+			})
+			if err != nil {
+				failed++
+				results = append(results, gin.H{
+					"name":    item.Name,
+					"success": false,
+					"error":   err.Error(),
+				})
+				continue
+			}
+			// 收集需要异步设置隐私的 OAuth 账号
+			if account.Type == service.AccountTypeOAuth {
+				switch account.Platform {
+				case service.PlatformAntigravity:
+					antigravityPrivacyAccounts = append(antigravityPrivacyAccounts, account)
+				case service.PlatformOpenAI:
+					openaiPrivacyAccounts = append(openaiPrivacyAccounts, account)
+				}
+			}
+			success++
+			results = append(results, gin.H{
+				"name":    item.Name,
+				"id":      account.ID,
+				"success": true,
+			})
+		}
+
+		// 异步设置隐私，避免批量创建时阻塞请求
+		adminSvc := h.adminService
+		if len(antigravityPrivacyAccounts) > 0 {
+			accounts := antigravityPrivacyAccounts
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("batch_create_antigravity_privacy_panic", "recover", r)
+					}
+				}()
+				bgCtx := context.Background()
+				for _, acc := range accounts {
+					adminSvc.ForceAntigravityPrivacy(bgCtx, acc)
+				}
+			}()
+		}
+		if len(openaiPrivacyAccounts) > 0 {
+			accounts := openaiPrivacyAccounts
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("batch_create_openai_privacy_panic", "recover", r)
+					}
+				}()
+				bgCtx := context.Background()
+				for _, acc := range accounts {
+					adminSvc.ForceOpenAIPrivacy(bgCtx, acc)
+				}
+			}()
+		}
+
+		return gin.H{
+			"success": success,
+			"failed":  failed,
+			"results": results,
+		}, nil
 	})
 }
 
@@ -738,57 +1299,58 @@ func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	success := 0
-	failed := 0
-	results := []gin.H{}
 
+	// 阶段一：预验证所有账号存在，收集 credentials
+	type accountUpdate struct {
+		ID          int64
+		Credentials map[string]any
+	}
+	updates := make([]accountUpdate, 0, len(req.AccountIDs))
 	for _, accountID := range req.AccountIDs {
-		// Get account
 		account, err := h.adminService.GetAccount(ctx, accountID)
 		if err != nil {
-			failed++
-			results = append(results, gin.H{
-				"account_id": accountID,
-				"success":    false,
-				"error":      "Account not found",
-			})
-			continue
+			response.Error(c, 404, fmt.Sprintf("Account %d not found", accountID))
+			return
 		}
-
-		// Update credentials field
 		if account.Credentials == nil {
 			account.Credentials = make(map[string]any)
 		}
-
 		account.Credentials[req.Field] = req.Value
+		updates = append(updates, accountUpdate{ID: accountID, Credentials: account.Credentials})
+	}
 
-		// Update account
-		updateInput := &service.UpdateAccountInput{
-			Credentials: account.Credentials,
-		}
-
-		_, err = h.adminService.UpdateAccount(ctx, accountID, updateInput)
-		if err != nil {
+	// 阶段二：依次更新，返回每个账号的成功/失败明细，便于调用方重试
+	success := 0
+	failed := 0
+	successIDs := make([]int64, 0, len(updates))
+	failedIDs := make([]int64, 0, len(updates))
+	results := make([]gin.H, 0, len(updates))
+	for _, u := range updates {
+		updateInput := &service.UpdateAccountInput{Credentials: u.Credentials}
+		if _, err := h.adminService.UpdateAccount(ctx, u.ID, updateInput); err != nil {
 			failed++
+			failedIDs = append(failedIDs, u.ID)
 			results = append(results, gin.H{
-				"account_id": accountID,
+				"account_id": u.ID,
 				"success":    false,
 				"error":      err.Error(),
 			})
 			continue
 		}
-
 		success++
+		successIDs = append(successIDs, u.ID)
 		results = append(results, gin.H{
-			"account_id": accountID,
+			"account_id": u.ID,
 			"success":    true,
 		})
 	}
 
 	response.Success(c, gin.H{
-		"success": success,
-		"failed":  failed,
-		"results": results,
+		"success":     success,
+		"failed":      failed,
+		"success_ids": successIDs,
+		"failed_ids":  failedIDs,
+		"results":     results,
 	})
 }
 
@@ -804,6 +1366,8 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
 	}
+	// base_rpm 输入校验：负值归零，超过 10000 截断
+	sanitizeExtraBaseRPM(req.Extra)
 
 	// 确定是否跳过混合渠道检查
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
@@ -813,6 +1377,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		req.Concurrency != nil ||
 		req.Priority != nil ||
 		req.RateMultiplier != nil ||
+		req.LoadFactor != nil ||
 		req.Status != "" ||
 		req.Schedulable != nil ||
 		req.GroupIDs != nil ||
@@ -831,6 +1396,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		Concurrency:           req.Concurrency,
 		Priority:              req.Priority,
 		RateMultiplier:        req.RateMultiplier,
+		LoadFactor:            req.LoadFactor,
 		Status:                req.Status,
 		Schedulable:           req.Schedulable,
 		GroupIDs:              req.GroupIDs,
@@ -839,6 +1405,14 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		SkipMixedChannelCheck: skipCheck,
 	})
 	if err != nil {
+		var mixedErr *service.MixedChannelError
+		if errors.As(err, &mixedErr) {
+			c.JSON(409, gin.H{
+				"error":   "mixed_channel_warning",
+				"message": mixedErr.Error(),
+			})
+			return
+		}
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -991,7 +1565,7 @@ func (h *OAuthHandler) SetupTokenCookieAuth(c *gin.Context) {
 }
 
 // GetUsage handles getting account usage information
-// GET /api/v1/admin/accounts/:id/usage
+// GET /api/v1/admin/accounts/:id/usage?source=passive|active
 func (h *AccountHandler) GetUsage(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -999,7 +1573,14 @@ func (h *AccountHandler) GetUsage(c *gin.Context) {
 		return
 	}
 
-	usage, err := h.accountUsageService.GetUsage(c.Request.Context(), accountID)
+	source := c.DefaultQuery("source", "active")
+
+	var usage *service.UsageInfo
+	if source == "passive" {
+		usage, err = h.accountUsageService.GetPassiveUsage(c.Request.Context(), accountID)
+	} else {
+		usage, err = h.accountUsageService.GetUsage(c.Request.Context(), accountID)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -1023,7 +1604,36 @@ func (h *AccountHandler) ClearRateLimit(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, gin.H{"message": "Rate limit cleared successfully"})
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+}
+
+// ResetQuota handles resetting account quota usage
+// POST /api/v1/admin/accounts/:id/reset-quota
+func (h *AccountHandler) ResetQuota(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	if err := h.adminService.ResetAccountQuota(c.Request.Context(), accountID); err != nil {
+		response.InternalError(c, "Failed to reset account quota: "+err.Error())
+		return
+	}
+
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
 }
 
 // GetTempUnschedulable handles getting temporary unschedulable status
@@ -1087,6 +1697,57 @@ func (h *AccountHandler) GetTodayStats(c *gin.Context) {
 	response.Success(c, stats)
 }
 
+// BatchTodayStatsRequest 批量今日统计请求体。
+type BatchTodayStatsRequest struct {
+	AccountIDs []int64 `json:"account_ids" binding:"required"`
+}
+
+// GetBatchTodayStats 批量获取多个账号的今日统计。
+// POST /api/v1/admin/accounts/today-stats/batch
+func (h *AccountHandler) GetBatchTodayStats(c *gin.Context) {
+	var req BatchTodayStatsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	accountIDs := normalizeInt64IDList(req.AccountIDs)
+	if len(accountIDs) == 0 {
+		response.Success(c, gin.H{"stats": map[string]any{}})
+		return
+	}
+
+	cacheKey := buildAccountTodayStatsBatchCacheKey(accountIDs)
+	if cached, ok := accountTodayStatsBatchCache.Get(cacheKey); ok {
+		if cached.ETag != "" {
+			c.Header("ETag", cached.ETag)
+			c.Header("Vary", "If-None-Match")
+			if ifNoneMatchMatched(c.GetHeader("If-None-Match"), cached.ETag) {
+				c.Status(http.StatusNotModified)
+				return
+			}
+		}
+		c.Header("X-Snapshot-Cache", "hit")
+		response.Success(c, cached.Payload)
+		return
+	}
+
+	stats, err := h.accountUsageService.GetTodayStatsBatch(c.Request.Context(), accountIDs)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	payload := gin.H{"stats": stats}
+	cached := accountTodayStatsBatchCache.Set(cacheKey, payload)
+	if cached.ETag != "" {
+		c.Header("ETag", cached.ETag)
+		c.Header("Vary", "If-None-Match")
+	}
+	c.Header("X-Snapshot-Cache", "miss")
+	response.Success(c, payload)
+}
+
 // SetSchedulableRequest represents the request body for setting schedulable status
 type SetSchedulableRequest struct {
 	Schedulable bool `json:"schedulable"`
@@ -1113,7 +1774,7 @@ func (h *AccountHandler) SetSchedulable(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.AccountFromService(account))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
 }
 
 // GetAvailableModels handles getting available models for an account
@@ -1133,13 +1794,12 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 
 	// Handle OpenAI accounts
 	if account.IsOpenAI() {
-		// For OAuth accounts: return default OpenAI models
-		if account.IsOAuth() {
+		// OpenAI 自动透传会绕过常规模型改写，测试/模型列表也应回落到默认模型集。
+		if account.IsOpenAIPassthroughEnabled() {
 			response.Success(c, openai.DefaultModels)
 			return
 		}
 
-		// For API Key accounts: check model_mapping
 		mapping := account.GetModelMapping()
 		if len(mapping) == 0 {
 			response.Success(c, openai.DefaultModels)
@@ -1210,32 +1870,14 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 
 	// Handle Antigravity accounts: return Claude + Gemini models
 	if account.Platform == service.PlatformAntigravity {
-		// Antigravity 支持 Claude 和部分 Gemini 模型
-		type UnifiedModel struct {
-			ID          string `json:"id"`
-			Type        string `json:"type"`
-			DisplayName string `json:"display_name"`
-		}
+		// 直接复用 antigravity.DefaultModels()，与 /v1/models 端点保持同步
+		response.Success(c, antigravity.DefaultModels())
+		return
+	}
 
-		var models []UnifiedModel
-
-		// 添加 Claude 模型
-		for _, m := range claude.DefaultModels {
-			models = append(models, UnifiedModel{
-				ID:          m.ID,
-				Type:        m.Type,
-				DisplayName: m.DisplayName,
-			})
-		}
-
-		// 添加 Gemini 3 系列模型用于测试
-		geminiTestModels := []UnifiedModel{
-			{ID: "gemini-3-flash", Type: "model", DisplayName: "Gemini 3 Flash"},
-			{ID: "gemini-3-pro-preview", Type: "model", DisplayName: "Gemini 3 Pro Preview"},
-		}
-		models = append(models, geminiTestModels...)
-
-		response.Success(c, models)
+	// Handle Sora accounts
+	if account.Platform == service.PlatformSora {
+		response.Success(c, service.DefaultSoraModels(nil))
 		return
 	}
 
@@ -1278,6 +1920,51 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 	}
 
 	response.Success(c, models)
+}
+
+// SetPrivacy handles setting privacy for a single OpenAI/Antigravity OAuth account
+// POST /api/v1/admin/accounts/:id/set-privacy
+func (h *AccountHandler) SetPrivacy(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.NotFound(c, "Account not found")
+		return
+	}
+	if account.Type != service.AccountTypeOAuth {
+		response.BadRequest(c, "Only OAuth accounts support privacy setting")
+		return
+	}
+	var mode string
+	switch account.Platform {
+	case service.PlatformOpenAI:
+		mode = h.adminService.ForceOpenAIPrivacy(c.Request.Context(), account)
+	case service.PlatformAntigravity:
+		mode = h.adminService.ForceAntigravityPrivacy(c.Request.Context(), account)
+	default:
+		response.BadRequest(c, "Only OpenAI and Antigravity OAuth accounts support privacy setting")
+		return
+	}
+	if mode == "" {
+		response.BadRequest(c, "Cannot set privacy: missing access_token")
+		return
+	}
+	// 从 DB 重新读取以确保返回最新状态
+	updated, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		// 隐私已设置成功但读取失败，回退到内存更新
+		if account.Extra == nil {
+			account.Extra = make(map[string]any)
+		}
+		account.Extra["privacy_mode"] = mode
+		response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+		return
+	}
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), updated))
 }
 
 // RefreshTier handles refreshing Google One tier for a single account
@@ -1348,7 +2035,7 @@ func (h *AccountHandler) BatchRefreshTier(c *gin.Context) {
 	accounts := make([]*service.Account, 0)
 
 	if len(req.AccountIDs) == 0 {
-		allAccounts, _, err := h.adminService.ListAccounts(ctx, 1, 10000, "gemini", "oauth", "", "")
+		allAccounts, _, err := h.adminService.ListAccounts(ctx, 1, 10000, "gemini", "oauth", "", "", 0, "")
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -1439,4 +2126,29 @@ func (h *AccountHandler) BatchRefreshTier(c *gin.Context) {
 	}
 
 	response.Success(c, results)
+}
+
+// GetAntigravityDefaultModelMapping 获取 Antigravity 平台的默认模型映射
+// GET /api/v1/admin/accounts/antigravity/default-model-mapping
+func (h *AccountHandler) GetAntigravityDefaultModelMapping(c *gin.Context) {
+	response.Success(c, domain.DefaultAntigravityModelMapping)
+}
+
+// sanitizeExtraBaseRPM 对 extra map 中的 base_rpm 值进行范围校验和归一化。
+// 负值归零，超过 10000 截断为 10000。extra 为 nil 或不含 base_rpm 时无操作。
+func sanitizeExtraBaseRPM(extra map[string]any) {
+	if extra == nil {
+		return
+	}
+	raw, ok := extra["base_rpm"]
+	if !ok {
+		return
+	}
+	v := service.ParseExtraInt(raw)
+	if v < 0 {
+		v = 0
+	} else if v > 10000 {
+		v = 10000
+	}
+	extra["base_rpm"] = v
 }

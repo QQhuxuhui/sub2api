@@ -7,9 +7,12 @@ import { apiClient } from '../client'
 import type {
   Proxy,
   ProxyAccountSummary,
+  ProxyQualityCheckResult,
   CreateProxyRequest,
   UpdateProxyRequest,
-  PaginatedResponse
+  PaginatedResponse,
+  AdminDataPayload,
+  AdminDataImportResult
 } from '@/types'
 
 /**
@@ -142,6 +145,16 @@ export async function testProxy(id: number): Promise<{
 }
 
 /**
+ * Check proxy quality across common AI targets
+ * @param id - Proxy ID
+ * @returns Quality check result
+ */
+export async function checkProxyQuality(id: number): Promise<ProxyQualityCheckResult> {
+  const { data } = await apiClient.post<ProxyQualityCheckResult>(`/admin/proxies/${id}/quality-check`)
+  return data
+}
+
+/**
  * Get proxy usage statistics
  * @param id - Proxy ID
  * @returns Proxy usage statistics
@@ -208,6 +221,34 @@ export async function batchDelete(ids: number[]): Promise<{
   return data
 }
 
+export async function exportData(options?: {
+  ids?: number[]
+  filters?: {
+    protocol?: string
+    status?: 'active' | 'inactive'
+    search?: string
+  }
+}): Promise<AdminDataPayload> {
+  const params: Record<string, string> = {}
+  if (options?.ids && options.ids.length > 0) {
+    params.ids = options.ids.join(',')
+  } else if (options?.filters) {
+    const { protocol, status, search } = options.filters
+    if (protocol) params.protocol = protocol
+    if (status) params.status = status
+    if (search) params.search = search
+  }
+  const { data } = await apiClient.get<AdminDataPayload>('/admin/proxies/data', { params })
+  return data
+}
+
+export async function importData(payload: {
+  data: AdminDataPayload
+}): Promise<AdminDataImportResult> {
+  const { data } = await apiClient.post<AdminDataImportResult>('/admin/proxies/data', payload)
+  return data
+}
+
 export const proxiesAPI = {
   list,
   getAll,
@@ -218,10 +259,13 @@ export const proxiesAPI = {
   delete: deleteProxy,
   toggleStatus,
   testProxy,
+  checkProxyQuality,
   getStats,
   getProxyAccounts,
   batchCreate,
-  batchDelete
+  batchDelete,
+  exportData,
+  importData
 }
 
 export default proxiesAPI

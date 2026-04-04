@@ -80,6 +80,16 @@ func Model(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldModel, v))
 }
 
+// RequestedModel applies equality check predicate on the "requested_model" field. It's identical to RequestedModelEQ.
+func RequestedModel(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRequestedModel, v))
+}
+
+// UpstreamModel applies equality check predicate on the "upstream_model" field. It's identical to UpstreamModelEQ.
+func UpstreamModel(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUpstreamModel, v))
+}
+
 // GroupID applies equality check predicate on the "group_id" field. It's identical to GroupIDEQ.
 func GroupID(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldGroupID, v))
@@ -198,6 +208,16 @@ func ImageCount(v int) predicate.UsageLog {
 // ImageSize applies equality check predicate on the "image_size" field. It's identical to ImageSizeEQ.
 func ImageSize(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldImageSize, v))
+}
+
+// MediaType applies equality check predicate on the "media_type" field. It's identical to MediaTypeEQ.
+func MediaType(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldMediaType, v))
+}
+
+// CacheTTLOverridden applies equality check predicate on the "cache_ttl_overridden" field. It's identical to CacheTTLOverriddenEQ.
+func CacheTTLOverridden(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldCacheTTLOverridden, v))
 }
 
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
@@ -393,6 +413,156 @@ func ModelEqualFold(v string) predicate.UsageLog {
 // ModelContainsFold applies the ContainsFold predicate on the "model" field.
 func ModelContainsFold(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldContainsFold(FieldModel, v))
+}
+
+// RequestedModelEQ applies the EQ predicate on the "requested_model" field.
+func RequestedModelEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRequestedModel, v))
+}
+
+// RequestedModelNEQ applies the NEQ predicate on the "requested_model" field.
+func RequestedModelNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldRequestedModel, v))
+}
+
+// RequestedModelIn applies the In predicate on the "requested_model" field.
+func RequestedModelIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldRequestedModel, vs...))
+}
+
+// RequestedModelNotIn applies the NotIn predicate on the "requested_model" field.
+func RequestedModelNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldRequestedModel, vs...))
+}
+
+// RequestedModelGT applies the GT predicate on the "requested_model" field.
+func RequestedModelGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldRequestedModel, v))
+}
+
+// RequestedModelGTE applies the GTE predicate on the "requested_model" field.
+func RequestedModelGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldRequestedModel, v))
+}
+
+// RequestedModelLT applies the LT predicate on the "requested_model" field.
+func RequestedModelLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldRequestedModel, v))
+}
+
+// RequestedModelLTE applies the LTE predicate on the "requested_model" field.
+func RequestedModelLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldRequestedModel, v))
+}
+
+// RequestedModelContains applies the Contains predicate on the "requested_model" field.
+func RequestedModelContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldRequestedModel, v))
+}
+
+// RequestedModelHasPrefix applies the HasPrefix predicate on the "requested_model" field.
+func RequestedModelHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldRequestedModel, v))
+}
+
+// RequestedModelHasSuffix applies the HasSuffix predicate on the "requested_model" field.
+func RequestedModelHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldRequestedModel, v))
+}
+
+// RequestedModelIsNil applies the IsNil predicate on the "requested_model" field.
+func RequestedModelIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldRequestedModel))
+}
+
+// RequestedModelNotNil applies the NotNil predicate on the "requested_model" field.
+func RequestedModelNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldRequestedModel))
+}
+
+// RequestedModelEqualFold applies the EqualFold predicate on the "requested_model" field.
+func RequestedModelEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldRequestedModel, v))
+}
+
+// RequestedModelContainsFold applies the ContainsFold predicate on the "requested_model" field.
+func RequestedModelContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldRequestedModel, v))
+}
+
+// UpstreamModelEQ applies the EQ predicate on the "upstream_model" field.
+func UpstreamModelEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUpstreamModel, v))
+}
+
+// UpstreamModelNEQ applies the NEQ predicate on the "upstream_model" field.
+func UpstreamModelNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldUpstreamModel, v))
+}
+
+// UpstreamModelIn applies the In predicate on the "upstream_model" field.
+func UpstreamModelIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldUpstreamModel, vs...))
+}
+
+// UpstreamModelNotIn applies the NotIn predicate on the "upstream_model" field.
+func UpstreamModelNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldUpstreamModel, vs...))
+}
+
+// UpstreamModelGT applies the GT predicate on the "upstream_model" field.
+func UpstreamModelGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldUpstreamModel, v))
+}
+
+// UpstreamModelGTE applies the GTE predicate on the "upstream_model" field.
+func UpstreamModelGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldUpstreamModel, v))
+}
+
+// UpstreamModelLT applies the LT predicate on the "upstream_model" field.
+func UpstreamModelLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldUpstreamModel, v))
+}
+
+// UpstreamModelLTE applies the LTE predicate on the "upstream_model" field.
+func UpstreamModelLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldUpstreamModel, v))
+}
+
+// UpstreamModelContains applies the Contains predicate on the "upstream_model" field.
+func UpstreamModelContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldUpstreamModel, v))
+}
+
+// UpstreamModelHasPrefix applies the HasPrefix predicate on the "upstream_model" field.
+func UpstreamModelHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldUpstreamModel, v))
+}
+
+// UpstreamModelHasSuffix applies the HasSuffix predicate on the "upstream_model" field.
+func UpstreamModelHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldUpstreamModel, v))
+}
+
+// UpstreamModelIsNil applies the IsNil predicate on the "upstream_model" field.
+func UpstreamModelIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldUpstreamModel))
+}
+
+// UpstreamModelNotNil applies the NotNil predicate on the "upstream_model" field.
+func UpstreamModelNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldUpstreamModel))
+}
+
+// UpstreamModelEqualFold applies the EqualFold predicate on the "upstream_model" field.
+func UpstreamModelEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldUpstreamModel, v))
+}
+
+// UpstreamModelContainsFold applies the ContainsFold predicate on the "upstream_model" field.
+func UpstreamModelContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldUpstreamModel, v))
 }
 
 // GroupIDEQ applies the EQ predicate on the "group_id" field.
@@ -1438,6 +1608,91 @@ func ImageSizeEqualFold(v string) predicate.UsageLog {
 // ImageSizeContainsFold applies the ContainsFold predicate on the "image_size" field.
 func ImageSizeContainsFold(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldContainsFold(FieldImageSize, v))
+}
+
+// MediaTypeEQ applies the EQ predicate on the "media_type" field.
+func MediaTypeEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldMediaType, v))
+}
+
+// MediaTypeNEQ applies the NEQ predicate on the "media_type" field.
+func MediaTypeNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldMediaType, v))
+}
+
+// MediaTypeIn applies the In predicate on the "media_type" field.
+func MediaTypeIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldMediaType, vs...))
+}
+
+// MediaTypeNotIn applies the NotIn predicate on the "media_type" field.
+func MediaTypeNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldMediaType, vs...))
+}
+
+// MediaTypeGT applies the GT predicate on the "media_type" field.
+func MediaTypeGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldMediaType, v))
+}
+
+// MediaTypeGTE applies the GTE predicate on the "media_type" field.
+func MediaTypeGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldMediaType, v))
+}
+
+// MediaTypeLT applies the LT predicate on the "media_type" field.
+func MediaTypeLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldMediaType, v))
+}
+
+// MediaTypeLTE applies the LTE predicate on the "media_type" field.
+func MediaTypeLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldMediaType, v))
+}
+
+// MediaTypeContains applies the Contains predicate on the "media_type" field.
+func MediaTypeContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldMediaType, v))
+}
+
+// MediaTypeHasPrefix applies the HasPrefix predicate on the "media_type" field.
+func MediaTypeHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldMediaType, v))
+}
+
+// MediaTypeHasSuffix applies the HasSuffix predicate on the "media_type" field.
+func MediaTypeHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldMediaType, v))
+}
+
+// MediaTypeIsNil applies the IsNil predicate on the "media_type" field.
+func MediaTypeIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldMediaType))
+}
+
+// MediaTypeNotNil applies the NotNil predicate on the "media_type" field.
+func MediaTypeNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldMediaType))
+}
+
+// MediaTypeEqualFold applies the EqualFold predicate on the "media_type" field.
+func MediaTypeEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldMediaType, v))
+}
+
+// MediaTypeContainsFold applies the ContainsFold predicate on the "media_type" field.
+func MediaTypeContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldMediaType, v))
+}
+
+// CacheTTLOverriddenEQ applies the EQ predicate on the "cache_ttl_overridden" field.
+func CacheTTLOverriddenEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldCacheTTLOverridden, v))
+}
+
+// CacheTTLOverriddenNEQ applies the NEQ predicate on the "cache_ttl_overridden" field.
+func CacheTTLOverriddenNEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldCacheTTLOverridden, v))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.

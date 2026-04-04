@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"log"
+	"fmt"
+	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
@@ -47,12 +49,21 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetNillableImagePrice1k(groupIn.ImagePrice1K).
 		SetNillableImagePrice2k(groupIn.ImagePrice2K).
 		SetNillableImagePrice4k(groupIn.ImagePrice4K).
+		SetNillableSoraImagePrice360(groupIn.SoraImagePrice360).
+		SetNillableSoraImagePrice540(groupIn.SoraImagePrice540).
+		SetNillableSoraVideoPricePerRequest(groupIn.SoraVideoPricePerRequest).
+		SetNillableSoraVideoPricePerRequestHd(groupIn.SoraVideoPricePerRequestHD).
 		SetDefaultValidityDays(groupIn.DefaultValidityDays).
 		SetClaudeCodeOnly(groupIn.ClaudeCodeOnly).
 		SetNillableFallbackGroupID(groupIn.FallbackGroupID).
 		SetNillableFallbackGroupIDOnInvalidRequest(groupIn.FallbackGroupIDOnInvalidRequest).
 		SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
-		SetMcpXMLInject(groupIn.MCPXMLInject)
+		SetMcpXMLInject(groupIn.MCPXMLInject).
+		SetSoraStorageQuotaBytes(groupIn.SoraStorageQuotaBytes).
+		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch).
+		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
+		SetRequirePrivacySet(groupIn.RequirePrivacySet).
+		SetDefaultMappedModel(groupIn.DefaultMappedModel)
 
 	// 设置模型路由配置
 	if groupIn.ModelRouting != nil {
@@ -68,7 +79,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		groupIn.CreatedAt = created.CreatedAt
 		groupIn.UpdatedAt = created.UpdatedAt
 		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
-			log.Printf("[SchedulerOutbox] enqueue group create failed: group=%d err=%v", groupIn.ID, err)
+			logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group create failed: group=%d err=%v", groupIn.ID, err)
 		}
 	}
 	return translatePersistenceError(err, nil, service.ErrGroupExists)
@@ -79,8 +90,9 @@ func (r *groupRepository) GetByID(ctx context.Context, id int64) (*service.Group
 	if err != nil {
 		return nil, err
 	}
-	count, _ := r.GetAccountCount(ctx, out.ID)
-	out.AccountCount = count
+	total, active, _ := r.GetAccountCount(ctx, out.ID)
+	out.AccountCount = total
+	out.ActiveAccountCount = active
 	return out, nil
 }
 
@@ -110,10 +122,51 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetNillableImagePrice1k(groupIn.ImagePrice1K).
 		SetNillableImagePrice2k(groupIn.ImagePrice2K).
 		SetNillableImagePrice4k(groupIn.ImagePrice4K).
+		SetNillableSoraImagePrice360(groupIn.SoraImagePrice360).
+		SetNillableSoraImagePrice540(groupIn.SoraImagePrice540).
+		SetNillableSoraVideoPricePerRequest(groupIn.SoraVideoPricePerRequest).
+		SetNillableSoraVideoPricePerRequestHd(groupIn.SoraVideoPricePerRequestHD).
 		SetDefaultValidityDays(groupIn.DefaultValidityDays).
 		SetClaudeCodeOnly(groupIn.ClaudeCodeOnly).
 		SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
-		SetMcpXMLInject(groupIn.MCPXMLInject)
+		SetMcpXMLInject(groupIn.MCPXMLInject).
+		SetSoraStorageQuotaBytes(groupIn.SoraStorageQuotaBytes).
+		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch).
+		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
+		SetRequirePrivacySet(groupIn.RequirePrivacySet).
+		SetDefaultMappedModel(groupIn.DefaultMappedModel)
+
+	// 显式处理可空字段：nil 需要 clear，非 nil 需要 set。
+	if groupIn.DailyLimitUSD != nil {
+		builder = builder.SetDailyLimitUsd(*groupIn.DailyLimitUSD)
+	} else {
+		builder = builder.ClearDailyLimitUsd()
+	}
+	if groupIn.WeeklyLimitUSD != nil {
+		builder = builder.SetWeeklyLimitUsd(*groupIn.WeeklyLimitUSD)
+	} else {
+		builder = builder.ClearWeeklyLimitUsd()
+	}
+	if groupIn.MonthlyLimitUSD != nil {
+		builder = builder.SetMonthlyLimitUsd(*groupIn.MonthlyLimitUSD)
+	} else {
+		builder = builder.ClearMonthlyLimitUsd()
+	}
+	if groupIn.ImagePrice1K != nil {
+		builder = builder.SetImagePrice1k(*groupIn.ImagePrice1K)
+	} else {
+		builder = builder.ClearImagePrice1k()
+	}
+	if groupIn.ImagePrice2K != nil {
+		builder = builder.SetImagePrice2k(*groupIn.ImagePrice2K)
+	} else {
+		builder = builder.ClearImagePrice2k()
+	}
+	if groupIn.ImagePrice4K != nil {
+		builder = builder.SetImagePrice4k(*groupIn.ImagePrice4K)
+	} else {
+		builder = builder.ClearImagePrice4k()
+	}
 
 	// 处理 FallbackGroupID：nil 时清除，否则设置
 	if groupIn.FallbackGroupID != nil {
@@ -144,7 +197,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	}
 	groupIn.UpdatedAt = updated.UpdatedAt
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
-		log.Printf("[SchedulerOutbox] enqueue group update failed: group=%d err=%v", groupIn.ID, err)
+		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group update failed: group=%d err=%v", groupIn.ID, err)
 	}
 	return nil
 }
@@ -155,7 +208,7 @@ func (r *groupRepository) Delete(ctx context.Context, id int64) error {
 		return translatePersistenceError(err, service.ErrGroupNotFound, nil)
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
-		log.Printf("[SchedulerOutbox] enqueue group delete failed: group=%d err=%v", id, err)
+		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group delete failed: group=%d err=%v", id, err)
 	}
 	return nil
 }
@@ -183,7 +236,7 @@ func (r *groupRepository) ListWithFilters(ctx context.Context, params pagination
 		q = q.Where(group.IsExclusiveEQ(*isExclusive))
 	}
 
-	total, err := q.Count(ctx)
+	total, err := q.Clone().Count(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -191,7 +244,7 @@ func (r *groupRepository) ListWithFilters(ctx context.Context, params pagination
 	groups, err := q.
 		Offset(params.Offset()).
 		Limit(params.Limit()).
-		Order(dbent.Asc(group.FieldID)).
+		Order(dbent.Asc(group.FieldSortOrder), dbent.Asc(group.FieldID)).
 		All(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -208,7 +261,10 @@ func (r *groupRepository) ListWithFilters(ctx context.Context, params pagination
 	counts, err := r.loadAccountCounts(ctx, groupIDs)
 	if err == nil {
 		for i := range outGroups {
-			outGroups[i].AccountCount = counts[outGroups[i].ID]
+			c := counts[outGroups[i].ID]
+			outGroups[i].AccountCount = c.Total
+			outGroups[i].ActiveAccountCount = c.Active
+			outGroups[i].RateLimitedAccountCount = c.RateLimited
 		}
 	}
 
@@ -218,7 +274,7 @@ func (r *groupRepository) ListWithFilters(ctx context.Context, params pagination
 func (r *groupRepository) ListActive(ctx context.Context) ([]service.Group, error) {
 	groups, err := r.client.Group.Query().
 		Where(group.StatusEQ(service.StatusActive)).
-		Order(dbent.Asc(group.FieldID)).
+		Order(dbent.Asc(group.FieldSortOrder), dbent.Asc(group.FieldID)).
 		All(ctx)
 	if err != nil {
 		return nil, err
@@ -235,7 +291,10 @@ func (r *groupRepository) ListActive(ctx context.Context) ([]service.Group, erro
 	counts, err := r.loadAccountCounts(ctx, groupIDs)
 	if err == nil {
 		for i := range outGroups {
-			outGroups[i].AccountCount = counts[outGroups[i].ID]
+			c := counts[outGroups[i].ID]
+			outGroups[i].AccountCount = c.Total
+			outGroups[i].ActiveAccountCount = c.Active
+			outGroups[i].RateLimitedAccountCount = c.RateLimited
 		}
 	}
 
@@ -245,7 +304,7 @@ func (r *groupRepository) ListActive(ctx context.Context) ([]service.Group, erro
 func (r *groupRepository) ListActiveByPlatform(ctx context.Context, platform string) ([]service.Group, error) {
 	groups, err := r.client.Group.Query().
 		Where(group.StatusEQ(service.StatusActive), group.PlatformEQ(platform)).
-		Order(dbent.Asc(group.FieldID)).
+		Order(dbent.Asc(group.FieldSortOrder), dbent.Asc(group.FieldID)).
 		All(ctx)
 	if err != nil {
 		return nil, err
@@ -262,7 +321,10 @@ func (r *groupRepository) ListActiveByPlatform(ctx context.Context, platform str
 	counts, err := r.loadAccountCounts(ctx, groupIDs)
 	if err == nil {
 		for i := range outGroups {
-			outGroups[i].AccountCount = counts[outGroups[i].ID]
+			c := counts[outGroups[i].ID]
+			outGroups[i].AccountCount = c.Total
+			outGroups[i].ActiveAccountCount = c.Active
+			outGroups[i].RateLimitedAccountCount = c.RateLimited
 		}
 	}
 
@@ -273,12 +335,68 @@ func (r *groupRepository) ExistsByName(ctx context.Context, name string) (bool, 
 	return r.client.Group.Query().Where(group.NameEQ(name)).Exist(ctx)
 }
 
-func (r *groupRepository) GetAccountCount(ctx context.Context, groupID int64) (int64, error) {
-	var count int64
-	if err := scanSingleRow(ctx, r.sql, "SELECT COUNT(*) FROM account_groups WHERE group_id = $1", []any{groupID}, &count); err != nil {
-		return 0, err
+// ExistsByIDs 批量检查分组是否存在（仅检查未软删除记录）。
+// 返回结构：map[groupID]exists。
+func (r *groupRepository) ExistsByIDs(ctx context.Context, ids []int64) (map[int64]bool, error) {
+	result := make(map[int64]bool, len(ids))
+	if len(ids) == 0 {
+		return result, nil
 	}
-	return count, nil
+
+	uniqueIDs := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniqueIDs = append(uniqueIDs, id)
+		result[id] = false
+	}
+	if len(uniqueIDs) == 0 {
+		return result, nil
+	}
+
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT id
+		FROM groups
+		WHERE id = ANY($1) AND deleted_at IS NULL
+	`, pq.Array(uniqueIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		result[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r *groupRepository) GetAccountCount(ctx context.Context, groupID int64) (total int64, active int64, err error) {
+	var rateLimited int64
+	err = scanSingleRow(ctx, r.sql,
+		`SELECT COUNT(*),
+			COUNT(*) FILTER (WHERE a.status = 'active' AND a.schedulable = true),
+			COUNT(*) FILTER (WHERE a.status = 'active' AND (
+				a.rate_limit_reset_at > NOW() OR
+				a.overload_until > NOW() OR
+				a.temp_unschedulable_until > NOW()
+			))
+		FROM account_groups ag JOIN accounts a ON a.id = ag.account_id
+		WHERE ag.group_id = $1`,
+		[]any{groupID}, &total, &active, &rateLimited)
+	return
 }
 
 func (r *groupRepository) DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error) {
@@ -288,7 +406,7 @@ func (r *groupRepository) DeleteAccountGroupsByGroupID(ctx context.Context, grou
 	}
 	affected, _ := res.RowsAffected()
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
-		log.Printf("[SchedulerOutbox] enqueue group account clear failed: group=%d err=%v", groupID, err)
+		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group account clear failed: group=%d err=%v", groupID, err)
 	}
 	return affected, nil
 }
@@ -398,21 +516,38 @@ func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64,
 		}
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
-		log.Printf("[SchedulerOutbox] enqueue group cascade delete failed: group=%d err=%v", id, err)
+		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group cascade delete failed: group=%d err=%v", id, err)
 	}
 
 	return affectedUserIDs, nil
 }
 
-func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int64) (counts map[int64]int64, err error) {
-	counts = make(map[int64]int64, len(groupIDs))
+type groupAccountCounts struct {
+	Total       int64
+	Active      int64
+	RateLimited int64
+}
+
+func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int64) (counts map[int64]groupAccountCounts, err error) {
+	counts = make(map[int64]groupAccountCounts, len(groupIDs))
 	if len(groupIDs) == 0 {
 		return counts, nil
 	}
 
 	rows, err := r.sql.QueryContext(
 		ctx,
-		"SELECT group_id, COUNT(*) FROM account_groups WHERE group_id = ANY($1) GROUP BY group_id",
+		`SELECT ag.group_id,
+			COUNT(*) AS total,
+			COUNT(*) FILTER (WHERE a.status = 'active' AND a.schedulable = true) AS active,
+			COUNT(*) FILTER (WHERE a.status = 'active' AND (
+				a.rate_limit_reset_at > NOW() OR
+				a.overload_until > NOW() OR
+				a.temp_unschedulable_until > NOW()
+			)) AS rate_limited
+		FROM account_groups ag
+		JOIN accounts a ON a.id = ag.account_id
+		WHERE ag.group_id = ANY($1)
+		GROUP BY ag.group_id`,
 		pq.Array(groupIDs),
 	)
 	if err != nil {
@@ -427,11 +562,11 @@ func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int6
 
 	for rows.Next() {
 		var groupID int64
-		var count int64
-		if err = rows.Scan(&groupID, &count); err != nil {
+		var c groupAccountCounts
+		if err = rows.Scan(&groupID, &c.Total, &c.Active, &c.RateLimited); err != nil {
 			return nil, err
 		}
-		counts[groupID] = count
+		counts[groupID] = c
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
@@ -492,8 +627,84 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 
 	// 发送调度器事件
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
-		log.Printf("[SchedulerOutbox] enqueue bind accounts to group failed: group=%d err=%v", groupID, err)
+		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue bind accounts to group failed: group=%d err=%v", groupID, err)
 	}
 
+	return nil
+}
+
+// UpdateSortOrders 批量更新分组排序
+func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []service.GroupSortOrderUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	// 去重后保留最后一次排序值，避免重复 ID 造成 CASE 分支冲突。
+	sortOrderByID := make(map[int64]int, len(updates))
+	groupIDs := make([]int64, 0, len(updates))
+	for _, u := range updates {
+		if u.ID <= 0 {
+			continue
+		}
+		if _, exists := sortOrderByID[u.ID]; !exists {
+			groupIDs = append(groupIDs, u.ID)
+		}
+		sortOrderByID[u.ID] = u.SortOrder
+	}
+	if len(groupIDs) == 0 {
+		return nil
+	}
+
+	// 与旧实现保持一致：任何不存在/已删除的分组都返回 not found，且不执行更新。
+	var existingCount int
+	if err := scanSingleRow(
+		ctx,
+		r.sql,
+		`SELECT COUNT(*) FROM groups WHERE deleted_at IS NULL AND id = ANY($1)`,
+		[]any{pq.Array(groupIDs)},
+		&existingCount,
+	); err != nil {
+		return err
+	}
+	if existingCount != len(groupIDs) {
+		return service.ErrGroupNotFound
+	}
+
+	args := make([]any, 0, len(groupIDs)*2+1)
+	caseClauses := make([]string, 0, len(groupIDs))
+	placeholder := 1
+	for _, id := range groupIDs {
+		caseClauses = append(caseClauses, fmt.Sprintf("WHEN $%d THEN $%d", placeholder, placeholder+1))
+		args = append(args, id, sortOrderByID[id])
+		placeholder += 2
+	}
+	args = append(args, pq.Array(groupIDs))
+
+	query := fmt.Sprintf(`
+		UPDATE groups
+		SET sort_order = CASE id
+			%s
+			ELSE sort_order
+		END
+		WHERE deleted_at IS NULL AND id = ANY($%d)
+	`, strings.Join(caseClauses, "\n\t\t\t"), placeholder)
+
+	result, err := r.sql.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != int64(len(groupIDs)) {
+		return service.ErrGroupNotFound
+	}
+
+	for _, id := range groupIDs {
+		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
+			logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group sort update failed: group=%d err=%v", id, err)
+		}
+	}
 	return nil
 }

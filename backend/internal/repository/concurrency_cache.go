@@ -147,64 +147,47 @@ var (
 			return 1
 		`)
 
-	// getAccountsLoadBatchScript - batch load query with expired slot cleanup
-	// ARGV[1] = slot TTL (seconds)
-	// ARGV[2..n] = accountID1, maxConcurrency1, accountID2, maxConcurrency2, ...
-	getAccountsLoadBatchScript = redis.NewScript(`
-			local result = {}
-			local slotTTL = tonumber(ARGV[1])
-
-			-- Get current server time
-			local timeResult = redis.call('TIME')
-			local nowSeconds = tonumber(timeResult[1])
-			local cutoffTime = nowSeconds - slotTTL
-
-			local i = 2
-			while i <= #ARGV do
-				local accountID = ARGV[i]
-				local maxConcurrency = tonumber(ARGV[i + 1])
-
-				local slotKey = 'concurrency:account:' .. accountID
-
-				-- Clean up expired slots before counting
-				redis.call('ZREMRANGEBYSCORE', slotKey, '-inf', cutoffTime)
-				local currentConcurrency = redis.call('ZCARD', slotKey)
-
-				local waitKey = 'wait:account:' .. accountID
-				local waitingCount = redis.call('GET', waitKey)
-				if waitingCount == false then
-					waitingCount = 0
-				else
-					waitingCount = tonumber(waitingCount)
-				end
-
-				local loadRate = 0
-				if maxConcurrency > 0 then
-					loadRate = math.floor((currentConcurrency + waitingCount) * 100 / maxConcurrency)
-				end
-
-				table.insert(result, accountID)
-				table.insert(result, currentConcurrency)
-				table.insert(result, waitingCount)
-				table.insert(result, loadRate)
-
-				i = i + 2
-			end
-
-			return result
-		`)
-
-	// cleanupExpiredSlotsScript - remove expired slots
-	// KEYS[1] = concurrency:account:{accountID}
-	// ARGV[1] = TTL (seconds)
+	// cleanupExpiredSlotsScript 清理单个账号/用户有序集合中过期槽位
+	// KEYS[1] = 有序集合键
+	// ARGV[1] = TTL（秒）
 	cleanupExpiredSlotsScript = redis.NewScript(`
-			local key = KEYS[1]
-			local ttl = tonumber(ARGV[1])
-			local timeResult = redis.call('TIME')
-			local now = tonumber(timeResult[1])
-			local expireBefore = now - ttl
-			return redis.call('ZREMRANGEBYSCORE', key, '-inf', expireBefore)
-		`)
+		local key = KEYS[1]
+		local ttl = tonumber(ARGV[1])
+		local timeResult = redis.call('TIME')
+		local now = tonumber(timeResult[1])
+		local expireBefore = now - ttl
+		redis.call('ZREMRANGEBYSCORE', key, '-inf', expireBefore)
+		if redis.call('ZCARD', key) == 0 then
+			redis.call('DEL', key)
+		else
+			redis.call('EXPIRE', key, ttl)
+		end
+		return 1
+	`)
+
+	// startupCleanupScript 清理非当前进程前缀的槽位成员。
+	// KEYS 是有序集合键列表，ARGV[1] 是当前进程前缀，ARGV[2] 是槽位 TTL。
+	// 遍历每个 KEYS[i]，移除前缀不匹配的成员，清空后删 key，否则刷新 EXPIRE。
+	startupCleanupScript = redis.NewScript(`
+		local activePrefix = ARGV[1]
+		local slotTTL = tonumber(ARGV[2])
+		local removed = 0
+		for i = 1, #KEYS do
+			local key = KEYS[i]
+			local members = redis.call('ZRANGE', key, 0, -1)
+			for _, member in ipairs(members) do
+				if string.sub(member, 1, string.len(activePrefix)) ~= activePrefix then
+					removed = removed + redis.call('ZREM', key, member)
+				end
+			end
+			if redis.call('ZCARD', key) == 0 then
+				redis.call('DEL', key)
+			else
+				redis.call('EXPIRE', key, slotTTL)
+			end
+		end
+		return removed
+	`)
 )
 
 type concurrencyCache struct {
@@ -270,6 +253,43 @@ func (c *concurrencyCache) GetAccountConcurrency(ctx context.Context, accountID 
 	result, err := getCountScript.Run(ctx, c.rdb, []string{key}, c.slotTTLSeconds).Int()
 	if err != nil {
 		return 0, err
+	}
+	return result, nil
+}
+
+func (c *concurrencyCache) GetAccountConcurrencyBatch(ctx context.Context, accountIDs []int64) (map[int64]int, error) {
+	if len(accountIDs) == 0 {
+		return map[int64]int{}, nil
+	}
+
+	now, err := c.rdb.Time(ctx).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redis TIME: %w", err)
+	}
+	cutoffTime := now.Unix() - int64(c.slotTTLSeconds)
+
+	pipe := c.rdb.Pipeline()
+	type accountCmd struct {
+		accountID int64
+		zcardCmd  *redis.IntCmd
+	}
+	cmds := make([]accountCmd, 0, len(accountIDs))
+	for _, accountID := range accountIDs {
+		slotKey := accountSlotKeyPrefix + strconv.FormatInt(accountID, 10)
+		pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10))
+		cmds = append(cmds, accountCmd{
+			accountID: accountID,
+			zcardCmd:  pipe.ZCard(ctx, slotKey),
+		})
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("pipeline exec: %w", err)
+	}
+
+	result := make(map[int64]int, len(accountIDs))
+	for _, cmd := range cmds {
+		result[cmd.accountID] = int(cmd.zcardCmd.Val())
 	}
 	return result, nil
 }
@@ -352,29 +372,113 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 		return map[int64]*service.AccountLoadInfo{}, nil
 	}
 
-	args := []any{c.slotTTLSeconds}
-	for _, acc := range accounts {
-		args = append(args, acc.ID, acc.MaxConcurrency)
-	}
-
-	result, err := getAccountsLoadBatchScript.Run(ctx, c.rdb, []string{}, args...).Slice()
+	// 使用 Pipeline 替代 Lua 脚本，兼容 Redis Cluster（Lua 内动态拼 key 会 CROSSSLOT）。
+	// 每个账号执行 3 个命令：ZREMRANGEBYSCORE（清理过期）、ZCARD（并发数）、GET（等待数）。
+	now, err := c.rdb.Time(ctx).Result()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("redis TIME: %w", err)
+	}
+	cutoffTime := now.Unix() - int64(c.slotTTLSeconds)
+
+	pipe := c.rdb.Pipeline()
+
+	type accountCmds struct {
+		id             int64
+		maxConcurrency int
+		zcardCmd       *redis.IntCmd
+		getCmd         *redis.StringCmd
+	}
+	cmds := make([]accountCmds, 0, len(accounts))
+	for _, acc := range accounts {
+		slotKey := accountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
+		waitKey := accountWaitKeyPrefix + strconv.FormatInt(acc.ID, 10)
+		pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10))
+		ac := accountCmds{
+			id:             acc.ID,
+			maxConcurrency: acc.MaxConcurrency,
+			zcardCmd:       pipe.ZCard(ctx, slotKey),
+			getCmd:         pipe.Get(ctx, waitKey),
+		}
+		cmds = append(cmds, ac)
 	}
 
-	loadMap := make(map[int64]*service.AccountLoadInfo)
-	for i := 0; i < len(result); i += 4 {
-		if i+3 >= len(result) {
-			break
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("pipeline exec: %w", err)
+	}
+
+	loadMap := make(map[int64]*service.AccountLoadInfo, len(accounts))
+	for _, ac := range cmds {
+		currentConcurrency := int(ac.zcardCmd.Val())
+		waitingCount := 0
+		if v, err := ac.getCmd.Int(); err == nil {
+			waitingCount = v
 		}
+		loadRate := 0
+		if ac.maxConcurrency > 0 {
+			loadRate = (currentConcurrency + waitingCount) * 100 / ac.maxConcurrency
+		}
+		loadMap[ac.id] = &service.AccountLoadInfo{
+			AccountID:          ac.id,
+			CurrentConcurrency: currentConcurrency,
+			WaitingCount:       waitingCount,
+			LoadRate:           loadRate,
+		}
+	}
 
-		accountID, _ := strconv.ParseInt(fmt.Sprintf("%v", result[i]), 10, 64)
-		currentConcurrency, _ := strconv.Atoi(fmt.Sprintf("%v", result[i+1]))
-		waitingCount, _ := strconv.Atoi(fmt.Sprintf("%v", result[i+2]))
-		loadRate, _ := strconv.Atoi(fmt.Sprintf("%v", result[i+3]))
+	return loadMap, nil
+}
 
-		loadMap[accountID] = &service.AccountLoadInfo{
-			AccountID:          accountID,
+func (c *concurrencyCache) GetUsersLoadBatch(ctx context.Context, users []service.UserWithConcurrency) (map[int64]*service.UserLoadInfo, error) {
+	if len(users) == 0 {
+		return map[int64]*service.UserLoadInfo{}, nil
+	}
+
+	// 使用 Pipeline 替代 Lua 脚本，兼容 Redis Cluster。
+	now, err := c.rdb.Time(ctx).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redis TIME: %w", err)
+	}
+	cutoffTime := now.Unix() - int64(c.slotTTLSeconds)
+
+	pipe := c.rdb.Pipeline()
+
+	type userCmds struct {
+		id             int64
+		maxConcurrency int
+		zcardCmd       *redis.IntCmd
+		getCmd         *redis.StringCmd
+	}
+	cmds := make([]userCmds, 0, len(users))
+	for _, u := range users {
+		slotKey := userSlotKeyPrefix + strconv.FormatInt(u.ID, 10)
+		waitKey := waitQueueKeyPrefix + strconv.FormatInt(u.ID, 10)
+		pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10))
+		uc := userCmds{
+			id:             u.ID,
+			maxConcurrency: u.MaxConcurrency,
+			zcardCmd:       pipe.ZCard(ctx, slotKey),
+			getCmd:         pipe.Get(ctx, waitKey),
+		}
+		cmds = append(cmds, uc)
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("pipeline exec: %w", err)
+	}
+
+	loadMap := make(map[int64]*service.UserLoadInfo, len(users))
+	for _, uc := range cmds {
+		currentConcurrency := int(uc.zcardCmd.Val())
+		waitingCount := 0
+		if v, err := uc.getCmd.Int(); err == nil {
+			waitingCount = v
+		}
+		loadRate := 0
+		if uc.maxConcurrency > 0 {
+			loadRate = (currentConcurrency + waitingCount) * 100 / uc.maxConcurrency
+		}
+		loadMap[uc.id] = &service.UserLoadInfo{
+			UserID:             uc.id,
 			CurrentConcurrency: currentConcurrency,
 			WaitingCount:       waitingCount,
 			LoadRate:           loadRate,
@@ -388,4 +492,73 @@ func (c *concurrencyCache) CleanupExpiredAccountSlots(ctx context.Context, accou
 	key := accountSlotKey(accountID)
 	_, err := cleanupExpiredSlotsScript.Run(ctx, c.rdb, []string{key}, c.slotTTLSeconds).Result()
 	return err
+}
+
+func (c *concurrencyCache) CleanupStaleProcessSlots(ctx context.Context, activeRequestPrefix string) error {
+	if activeRequestPrefix == "" {
+		return nil
+	}
+
+	// 1. 清理有序集合中非当前进程前缀的成员
+	slotPatterns := []string{accountSlotKeyPrefix + "*", userSlotKeyPrefix + "*"}
+	for _, pattern := range slotPatterns {
+		if err := c.cleanupSlotsByPattern(ctx, pattern, activeRequestPrefix); err != nil {
+			return err
+		}
+	}
+
+	// 2. 删除所有等待队列计数器（重启后计数器失效）
+	waitPatterns := []string{accountWaitKeyPrefix + "*", waitQueueKeyPrefix + "*"}
+	for _, pattern := range waitPatterns {
+		if err := c.deleteKeysByPattern(ctx, pattern); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// cleanupSlotsByPattern 扫描匹配 pattern 的有序集合键，批量调用 Lua 脚本清理非当前进程成员。
+func (c *concurrencyCache) cleanupSlotsByPattern(ctx context.Context, pattern, activePrefix string) error {
+	const scanCount = 200
+	var cursor uint64
+	for {
+		keys, nextCursor, err := c.rdb.Scan(ctx, cursor, pattern, scanCount).Result()
+		if err != nil {
+			return fmt.Errorf("scan %s: %w", pattern, err)
+		}
+		if len(keys) > 0 {
+			_, err := startupCleanupScript.Run(ctx, c.rdb, keys, activePrefix, c.slotTTLSeconds).Result()
+			if err != nil {
+				return fmt.Errorf("cleanup slots %s: %w", pattern, err)
+			}
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return nil
+}
+
+// deleteKeysByPattern 扫描匹配 pattern 的键并删除。
+func (c *concurrencyCache) deleteKeysByPattern(ctx context.Context, pattern string) error {
+	const scanCount = 200
+	var cursor uint64
+	for {
+		keys, nextCursor, err := c.rdb.Scan(ctx, cursor, pattern, scanCount).Result()
+		if err != nil {
+			return fmt.Errorf("scan %s: %w", pattern, err)
+		}
+		if len(keys) > 0 {
+			if err := c.rdb.Del(ctx, keys...).Err(); err != nil {
+				return fmt.Errorf("del %s: %w", pattern, err)
+			}
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return nil
 }

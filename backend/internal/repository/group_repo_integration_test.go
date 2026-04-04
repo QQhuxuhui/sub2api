@@ -352,6 +352,81 @@ func (s *GroupRepoSuite) TestListWithFilters_Search() {
 	})
 }
 
+func (s *GroupRepoSuite) TestUpdateSortOrders_BatchCaseWhen() {
+	g1 := &service.Group{
+		Name:             "sort-g1",
+		Platform:         service.PlatformAnthropic,
+		RateMultiplier:   1.0,
+		IsExclusive:      false,
+		Status:           service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeStandard,
+	}
+	g2 := &service.Group{
+		Name:             "sort-g2",
+		Platform:         service.PlatformAnthropic,
+		RateMultiplier:   1.0,
+		IsExclusive:      false,
+		Status:           service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeStandard,
+	}
+	g3 := &service.Group{
+		Name:             "sort-g3",
+		Platform:         service.PlatformAnthropic,
+		RateMultiplier:   1.0,
+		IsExclusive:      false,
+		Status:           service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeStandard,
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, g1))
+	s.Require().NoError(s.repo.Create(s.ctx, g2))
+	s.Require().NoError(s.repo.Create(s.ctx, g3))
+
+	err := s.repo.UpdateSortOrders(s.ctx, []service.GroupSortOrderUpdate{
+		{ID: g1.ID, SortOrder: 30},
+		{ID: g2.ID, SortOrder: 10},
+		{ID: g3.ID, SortOrder: 20},
+		{ID: g2.ID, SortOrder: 15}, // 重复 ID 应以最后一次为准
+	})
+	s.Require().NoError(err)
+
+	got1, err := s.repo.GetByID(s.ctx, g1.ID)
+	s.Require().NoError(err)
+	got2, err := s.repo.GetByID(s.ctx, g2.ID)
+	s.Require().NoError(err)
+	got3, err := s.repo.GetByID(s.ctx, g3.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(30, got1.SortOrder)
+	s.Require().Equal(15, got2.SortOrder)
+	s.Require().Equal(20, got3.SortOrder)
+}
+
+func (s *GroupRepoSuite) TestUpdateSortOrders_MissingGroupNoPartialUpdate() {
+	g1 := &service.Group{
+		Name:             "sort-no-partial",
+		Platform:         service.PlatformAnthropic,
+		RateMultiplier:   1.0,
+		IsExclusive:      false,
+		Status:           service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeStandard,
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, g1))
+
+	before, err := s.repo.GetByID(s.ctx, g1.ID)
+	s.Require().NoError(err)
+	beforeSort := before.SortOrder
+
+	err = s.repo.UpdateSortOrders(s.ctx, []service.GroupSortOrderUpdate{
+		{ID: g1.ID, SortOrder: 99},
+		{ID: 99999999, SortOrder: 1},
+	})
+	s.Require().Error(err)
+	s.Require().ErrorIs(err, service.ErrGroupNotFound)
+
+	after, err := s.repo.GetByID(s.ctx, g1.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(beforeSort, after.SortOrder)
+}
+
 func (s *GroupRepoSuite) TestListWithFilters_AccountCount() {
 	g1 := &service.Group{
 		Name:             "g1",
@@ -528,7 +603,7 @@ func (s *GroupRepoSuite) TestGetAccountCount() {
 	_, err = s.tx.ExecContext(s.ctx, "INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, $3, NOW())", a2, group.ID, 2)
 	s.Require().NoError(err)
 
-	count, err := s.repo.GetAccountCount(s.ctx, group.ID)
+	count, _, err := s.repo.GetAccountCount(s.ctx, group.ID)
 	s.Require().NoError(err, "GetAccountCount")
 	s.Require().Equal(int64(2), count)
 }
@@ -544,7 +619,7 @@ func (s *GroupRepoSuite) TestGetAccountCount_Empty() {
 	}
 	s.Require().NoError(s.repo.Create(s.ctx, group))
 
-	count, err := s.repo.GetAccountCount(s.ctx, group.ID)
+	count, _, err := s.repo.GetAccountCount(s.ctx, group.ID)
 	s.Require().NoError(err)
 	s.Require().Zero(count)
 }
@@ -576,7 +651,7 @@ func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupID() {
 	s.Require().NoError(err, "DeleteAccountGroupsByGroupID")
 	s.Require().Equal(int64(1), affected, "expected 1 affected row")
 
-	count, err := s.repo.GetAccountCount(s.ctx, g.ID)
+	count, _, err := s.repo.GetAccountCount(s.ctx, g.ID)
 	s.Require().NoError(err, "GetAccountCount")
 	s.Require().Equal(int64(0), count, "expected 0 account groups")
 }
@@ -617,7 +692,7 @@ func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupID_MultipleAccounts() {
 	s.Require().NoError(err)
 	s.Require().Equal(int64(3), affected)
 
-	count, _ := s.repo.GetAccountCount(s.ctx, g.ID)
+	count, _, _ := s.repo.GetAccountCount(s.ctx, g.ID)
 	s.Require().Zero(count)
 }
 

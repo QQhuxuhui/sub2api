@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -66,6 +67,18 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 	// 创建 Ent 客户端，绑定到已配置的数据库驱动。
 	client := ent.NewClient(ent.Driver(drv))
 
+	// 启动阶段：从配置或数据库中确保系统密钥可用。
+	if err := ensureBootstrapSecrets(migrationCtx, client, cfg); err != nil {
+		_ = client.Close()
+		return nil, nil, err
+	}
+
+	// 在密钥补齐后执行完整配置校验，避免空 jwt.secret 导致服务运行时失败。
+	if err := cfg.Validate(); err != nil {
+		_ = client.Close()
+		return nil, nil, fmt.Errorf("validate config after secret bootstrap: %w", err)
+	}
+
 	// SIMPLE 模式：启动时补齐各平台默认分组。
 	// - anthropic/openai/gemini: 确保存在 <platform>-default
 	// - antigravity: 仅要求存在 >=2 个未软删除分组（用于 claude/gemini 混合调度场景）
@@ -73,6 +86,10 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 		seedCtx, seedCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer seedCancel()
 		if err := ensureSimpleModeDefaultGroups(seedCtx, client); err != nil {
+			_ = client.Close()
+			return nil, nil, err
+		}
+		if err := ensureSimpleModeAdminConcurrency(seedCtx, client); err != nil {
 			_ = client.Close()
 			return nil, nil, err
 		}

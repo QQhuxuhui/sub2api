@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -17,8 +18,8 @@ var (
 	// User-Agent 匹配: claude-cli/x.x.x (仅支持官方 CLI，大小写不敏感)
 	claudeCodeUAPattern = regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+`)
 
-	// metadata.user_id 格式: user_{64位hex}_account__session_{uuid}
-	userIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`)
+	// 带捕获组的版本提取正则
+	claudeCodeUAVersionPattern = regexp.MustCompile(`(?i)^claude-cli/(\d+\.\d+\.\d+)`)
 
 	// System prompt 相似度阈值（默认 0.5，和 claude-relay-service 一致）
 	systemPromptThreshold = 0.5
@@ -56,7 +57,8 @@ func NewClaudeCodeValidator() *ClaudeCodeValidator {
 //
 //	Step 1: User-Agent 检查 (必需) - 必须是 claude-cli/x.x.x
 //	Step 2: 对于非 messages 路径，只要 UA 匹配就通过
-//	Step 3: 对于 messages 路径，进行严格验证：
+//	Step 3: 检查 max_tokens=1 + haiku 探测请求绕过（UA 已验证）
+//	Step 4: 对于 messages 路径，进行严格验证：
 //	        - System prompt 相似度检查
 //	        - X-App header 检查
 //	        - anthropic-beta header 检查
@@ -75,14 +77,20 @@ func (v *ClaudeCodeValidator) Validate(r *http.Request, body map[string]any) boo
 		return true
 	}
 
-	// Step 3: messages 路径，进行严格验证
+	// Step 3: 检查 max_tokens=1 + haiku 探测请求绕过
+	// 这类请求用于 Claude Code 验证 API 连通性，不携带 system prompt
+	if isMaxTokensOneHaiku, ok := IsMaxTokensOneHaikuRequestFromContext(r.Context()); ok && isMaxTokensOneHaiku {
+		return true // 绕过 system prompt 检查，UA 已在 Step 1 验证
+	}
 
-	// 3.1 检查 system prompt 相似度
+	// Step 4: messages 路径，进行严格验证
+
+	// 4.1 检查 system prompt 相似度
 	if !v.hasClaudeCodeSystemPrompt(body) {
 		return false
 	}
 
-	// 3.2 检查必需的 headers（值不为空即可）
+	// 4.2 检查必需的 headers（值不为空即可）
 	xApp := r.Header.Get("X-App")
 	if xApp == "" {
 		return false
@@ -98,7 +106,7 @@ func (v *ClaudeCodeValidator) Validate(r *http.Request, body map[string]any) boo
 		return false
 	}
 
-	// 3.3 验证 metadata.user_id
+	// 4.3 验证 metadata.user_id
 	if body == nil {
 		return false
 	}
@@ -113,7 +121,7 @@ func (v *ClaudeCodeValidator) Validate(r *http.Request, body map[string]any) boo
 		return false
 	}
 
-	if !userIDPattern.MatchString(userID) {
+	if ParseMetadataUserID(userID) == nil {
 		return false
 	}
 
@@ -262,4 +270,52 @@ func IsClaudeCodeClient(ctx context.Context) bool {
 // SetClaudeCodeClient 将 Claude Code 客户端标识设置到 context 中
 func SetClaudeCodeClient(ctx context.Context, isClaudeCode bool) context.Context {
 	return context.WithValue(ctx, ctxkey.IsClaudeCodeClient, isClaudeCode)
+}
+
+// ExtractVersion 从 User-Agent 中提取 Claude Code 版本号
+// 返回 "2.1.22" 形式的版本号，如果不匹配返回空字符串
+func (v *ClaudeCodeValidator) ExtractVersion(ua string) string {
+	return ExtractCLIVersion(ua)
+}
+
+// SetClaudeCodeVersion 将 Claude Code 版本号设置到 context 中
+func SetClaudeCodeVersion(ctx context.Context, version string) context.Context {
+	return context.WithValue(ctx, ctxkey.ClaudeCodeVersion, version)
+}
+
+// GetClaudeCodeVersion 从 context 中获取 Claude Code 版本号
+func GetClaudeCodeVersion(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxkey.ClaudeCodeVersion).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// CompareVersions 比较两个 semver 版本号
+// 返回: -1 (a < b), 0 (a == b), 1 (a > b)
+func CompareVersions(a, b string) int {
+	aParts := parseSemver(a)
+	bParts := parseSemver(b)
+	for i := 0; i < 3; i++ {
+		if aParts[i] < bParts[i] {
+			return -1
+		}
+		if aParts[i] > bParts[i] {
+			return 1
+		}
+	}
+	return 0
+}
+
+// parseSemver 解析 semver 版本号为 [major, minor, patch]
+func parseSemver(v string) [3]int {
+	v = strings.TrimPrefix(v, "v")
+	parts := strings.Split(v, ".")
+	result := [3]int{0, 0, 0}
+	for i := 0; i < len(parts) && i < 3; i++ {
+		if parsed, err := strconv.Atoi(parts[i]); err == nil {
+			result[i] = parsed
+		}
+	}
+	return result
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/imroc/req/v3"
@@ -25,7 +26,11 @@ func (c *geminiCliCodeAssistClient) LoadCodeAssist(ctx context.Context, accessTo
 	}
 
 	var out geminicli.LoadCodeAssistResponse
-	resp, err := createGeminiCliReqClient(proxyURL).R().
+	client, err := createGeminiCliReqClient(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("create HTTP client: %w", err)
+	}
+	resp, err := client.R().
 		SetContext(ctx).
 		SetHeader("Authorization", "Bearer "+accessToken).
 		SetHeader("Content-Type", "application/json").
@@ -38,9 +43,20 @@ func (c *geminiCliCodeAssistClient) LoadCodeAssist(ctx context.Context, accessTo
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	if !resp.IsSuccessState() {
-		body := geminicli.SanitizeBodyForLogs(resp.String())
-		fmt.Printf("[CodeAssist] LoadCodeAssist failed: status %d, body: %s\n", resp.StatusCode, body)
-		return nil, fmt.Errorf("loadCodeAssist failed: status %d, body: %s", resp.StatusCode, body)
+		body := resp.String()
+		sanitizedBody := geminicli.SanitizeBodyForLogs(body)
+		fmt.Printf("[CodeAssist] LoadCodeAssist failed: status %d, body: %s\n", resp.StatusCode, sanitizedBody)
+
+		// Check if this is a SERVICE_DISABLED error and extract activation URL
+		if googleapi.IsServiceDisabledError(body) {
+			activationURL := googleapi.ExtractActivationURL(body)
+			if activationURL != "" {
+				return nil, fmt.Errorf("gemini API not enabled for this project, please enable it by visiting: %s\n\nAfter enabling the API, wait a few minutes for the changes to propagate, then try again", activationURL)
+			}
+			return nil, fmt.Errorf("gemini API not enabled for this project, please enable it in the Google Cloud Console at: https://console.cloud.google.com/apis/library/cloudaicompanion.googleapis.com")
+		}
+
+		return nil, fmt.Errorf("loadCodeAssist failed: status %d, body: %s", resp.StatusCode, sanitizedBody)
 	}
 	fmt.Printf("[CodeAssist] LoadCodeAssist success: status %d, response: %+v\n", resp.StatusCode, out)
 	return &out, nil
@@ -54,7 +70,11 @@ func (c *geminiCliCodeAssistClient) OnboardUser(ctx context.Context, accessToken
 	fmt.Printf("[CodeAssist] OnboardUser request body: %+v\n", reqBody)
 
 	var out geminicli.OnboardUserResponse
-	resp, err := createGeminiCliReqClient(proxyURL).R().
+	client, err := createGeminiCliReqClient(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("create HTTP client: %w", err)
+	}
+	resp, err := client.R().
 		SetContext(ctx).
 		SetHeader("Authorization", "Bearer "+accessToken).
 		SetHeader("Content-Type", "application/json").
@@ -67,15 +87,26 @@ func (c *geminiCliCodeAssistClient) OnboardUser(ctx context.Context, accessToken
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	if !resp.IsSuccessState() {
-		body := geminicli.SanitizeBodyForLogs(resp.String())
-		fmt.Printf("[CodeAssist] OnboardUser failed: status %d, body: %s\n", resp.StatusCode, body)
-		return nil, fmt.Errorf("onboardUser failed: status %d, body: %s", resp.StatusCode, body)
+		body := resp.String()
+		sanitizedBody := geminicli.SanitizeBodyForLogs(body)
+		fmt.Printf("[CodeAssist] OnboardUser failed: status %d, body: %s\n", resp.StatusCode, sanitizedBody)
+
+		// Check if this is a SERVICE_DISABLED error and extract activation URL
+		if googleapi.IsServiceDisabledError(body) {
+			activationURL := googleapi.ExtractActivationURL(body)
+			if activationURL != "" {
+				return nil, fmt.Errorf("gemini API not enabled for this project, please enable it by visiting: %s\n\nAfter enabling the API, wait a few minutes for the changes to propagate, then try again", activationURL)
+			}
+			return nil, fmt.Errorf("gemini API not enabled for this project, please enable it in the Google Cloud Console at: https://console.cloud.google.com/apis/library/cloudaicompanion.googleapis.com")
+		}
+
+		return nil, fmt.Errorf("onboardUser failed: status %d, body: %s", resp.StatusCode, sanitizedBody)
 	}
 	fmt.Printf("[CodeAssist] OnboardUser success: status %d, response: %+v\n", resp.StatusCode, out)
 	return &out, nil
 }
 
-func createGeminiCliReqClient(proxyURL string) *req.Client {
+func createGeminiCliReqClient(proxyURL string) (*req.Client, error) {
 	return getSharedReqClient(reqClientOptions{
 		ProxyURL: proxyURL,
 		Timeout:  30 * time.Second,

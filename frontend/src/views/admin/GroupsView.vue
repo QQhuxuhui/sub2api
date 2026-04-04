@@ -53,6 +53,14 @@
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
             <button
+              @click="openSortModal"
+              class="btn btn-secondary"
+              :title="t('admin.groups.sortOrder')"
+            >
+              <Icon name="arrowsUpDown" size="md" class="mr-2" />
+              {{ t('admin.groups.sortOrder') }}
+            </button>
+            <button
               @click="showCreateModal = true"
               class="btn btn-primary"
               data-tour="groups-create-btn"
@@ -150,12 +158,51 @@
             </span>
           </template>
 
-          <template #cell-account_count="{ value }">
-            <span
-              class="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-            >
-              {{ t('admin.groups.accountsCount', { count: value || 0 }) }}
-            </span>
+          <template #cell-account_count="{ row }">
+            <div class="space-y-0.5 text-xs">
+              <div>
+                <span class="text-gray-500 dark:text-gray-400">{{ t('admin.groups.accountsAvailable') }}</span>
+                <span class="ml-1 font-medium text-emerald-600 dark:text-emerald-400">{{ (row.active_account_count || 0) - (row.rate_limited_account_count || 0) }}</span>
+                <span class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300">{{ t('admin.groups.accountsUnit') }}</span>
+              </div>
+              <div v-if="row.rate_limited_account_count">
+                <span class="text-gray-500 dark:text-gray-400">{{ t('admin.groups.accountsRateLimited') }}</span>
+                <span class="ml-1 font-medium text-amber-600 dark:text-amber-400">{{ row.rate_limited_account_count }}</span>
+                <span class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300">{{ t('admin.groups.accountsUnit') }}</span>
+              </div>
+              <div>
+                <span class="text-gray-500 dark:text-gray-400">{{ t('admin.groups.accountsTotal') }}</span>
+                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300">{{ row.account_count || 0 }}</span>
+                <span class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300">{{ t('admin.groups.accountsUnit') }}</span>
+              </div>
+            </div>
+          </template>
+
+          <template #cell-capacity="{ row }">
+            <GroupCapacityBadge
+              v-if="capacityMap.get(row.id)"
+              :concurrency-used="capacityMap.get(row.id)!.concurrencyUsed"
+              :concurrency-max="capacityMap.get(row.id)!.concurrencyMax"
+              :sessions-used="capacityMap.get(row.id)!.sessionsUsed"
+              :sessions-max="capacityMap.get(row.id)!.sessionsMax"
+              :rpm-used="capacityMap.get(row.id)!.rpmUsed"
+              :rpm-max="capacityMap.get(row.id)!.rpmMax"
+            />
+            <span v-else class="text-xs text-gray-400">—</span>
+          </template>
+
+          <template #cell-usage="{ row }">
+            <div v-if="usageLoading" class="text-xs text-gray-400">—</div>
+            <div v-else class="space-y-0.5 text-xs">
+              <div class="text-gray-500 dark:text-gray-400">
+                <span class="text-gray-400 dark:text-gray-500">{{ t('admin.groups.usageToday') }}</span>
+                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300">${{ formatCost(usageMap.get(row.id)?.today_cost ?? 0) }}</span>
+              </div>
+              <div class="text-gray-500 dark:text-gray-400">
+                <span class="text-gray-400 dark:text-gray-500">{{ t('admin.groups.usageTotal') }}</span>
+                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300">${{ formatCost(usageMap.get(row.id)?.total_cost ?? 0) }}</span>
+              </div>
+            </div>
           </template>
 
           <template #cell-status="{ value }">
@@ -172,6 +219,13 @@
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit') }}</span>
+              </button>
+              <button
+                @click="handleRateMultipliers(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
+              >
+                <Icon name="dollar" size="sm" />
+                <span class="text-xs">{{ t('admin.groups.rateMultipliers') }}</span>
               </button>
               <button
                 @click="handleDelete(row)"
@@ -451,7 +505,7 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.134"
+                placeholder="0.201"
               />
             </div>
             <div>
@@ -465,6 +519,81 @@
                 placeholder="0.268"
               />
             </div>
+          </div>
+        </div>
+
+        <!-- Sora 按次计费配置 -->
+        <div v-if="createForm.platform === 'sora'" class="border-t pt-4">
+          <label class="block mb-2 font-medium text-gray-700 dark:text-gray-300">
+            {{ t('admin.groups.soraPricing.title') }}
+          </label>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            {{ t('admin.groups.soraPricing.description') }}
+          </p>
+          <div class="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <label class="input-label">{{ t('admin.groups.soraPricing.image360') }}</label>
+              <input
+                v-model.number="createForm.sora_image_price_360"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                placeholder="0.05"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.groups.soraPricing.image540') }}</label>
+              <input
+                v-model.number="createForm.sora_image_price_540"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                placeholder="0.08"
+              />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="input-label">{{ t('admin.groups.soraPricing.video') }}</label>
+              <input
+                v-model.number="createForm.sora_video_price_per_request"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                placeholder="0.5"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.groups.soraPricing.videoHd') }}</label>
+              <input
+                v-model.number="createForm.sora_video_price_per_request_hd"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                placeholder="0.8"
+              />
+            </div>
+          </div>
+          <div class="mt-3">
+            <label class="input-label">{{ t('admin.groups.soraPricing.storageQuota') }}</label>
+            <div class="flex items-center gap-2">
+              <input
+                v-model.number="createForm.sora_storage_quota_gb"
+                type="number"
+                step="0.1"
+                min="0"
+                class="input"
+                placeholder="10"
+              />
+              <span class="shrink-0 text-sm text-gray-500">GB</span>
+            </div>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.groups.soraPricing.storageQuotaHint') }}
+            </p>
           </div>
         </div>
 
@@ -625,6 +754,99 @@
           </div>
         </div>
 
+        <!-- OpenAI Messages 调度配置（仅 openai 平台） -->
+        <div v-if="createForm.platform === 'openai'" class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4">
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{{ t('admin.groups.openaiMessages.title') }}</h4>
+
+          <!-- 允许 Messages 调度开关 -->
+          <div class="flex items-center justify-between">
+            <label class="text-sm text-gray-600 dark:text-gray-400">{{ t('admin.groups.openaiMessages.allowDispatch') }}</label>
+            <button
+              type="button"
+              @click="createForm.allow_messages_dispatch = !createForm.allow_messages_dispatch"
+              class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="
+                createForm.allow_messages_dispatch ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
+              "
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                :class="
+                  createForm.allow_messages_dispatch ? 'translate-x-6' : 'translate-x-1'
+                "
+              />
+            </button>
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ t('admin.groups.openaiMessages.allowDispatchHint') }}</p>
+
+          <!-- 默认映射模型（仅当开关打开时显示） -->
+          <div v-if="createForm.allow_messages_dispatch" class="mt-3">
+            <label class="input-label">{{ t('admin.groups.openaiMessages.defaultModel') }}</label>
+            <input
+              v-model="createForm.default_mapped_model"
+              type="text"
+              :placeholder="t('admin.groups.openaiMessages.defaultModelPlaceholder')"
+              class="input"
+            />
+            <p class="input-hint">{{ t('admin.groups.openaiMessages.defaultModelHint') }}</p>
+          </div>
+        </div>
+
+        <!-- 账号过滤控制 (OpenAI/Antigravity/Anthropic/Gemini) -->
+        <div v-if="['openai', 'antigravity', 'anthropic', 'gemini'].includes(createForm.platform)" class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 space-y-4">
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">账号过滤控制</h4>
+
+          <!-- require_oauth_only toggle -->
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-sm text-gray-600 dark:text-gray-400">仅允许 OAuth 账号</label>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {{ createForm.require_oauth_only ? '已启用 — 排除 API Key 类型账号' : '未启用' }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="createForm.require_oauth_only = !createForm.require_oauth_only"
+              class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="
+                createForm.require_oauth_only ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
+              "
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                :class="
+                  createForm.require_oauth_only ? 'translate-x-6' : 'translate-x-1'
+                "
+              />
+            </button>
+          </div>
+
+          <!-- require_privacy_set toggle -->
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-sm text-gray-600 dark:text-gray-400">仅允许隐私保护已设置的账号</label>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {{ createForm.require_privacy_set ? '已启用 — Privacy 未设置的账号将被排除' : '未启用' }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="createForm.require_privacy_set = !createForm.require_privacy_set"
+              class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="
+                createForm.require_privacy_set ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
+              "
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                :class="
+                  createForm.require_privacy_set ? 'translate-x-6' : 'translate-x-1'
+                "
+              />
+            </button>
+          </div>
+        </div>
+
         <!-- 无效请求兜底（仅 anthropic/antigravity 平台，且非订阅分组） -->
         <div
           v-if="['anthropic', 'antigravity'].includes(createForm.platform) && createForm.subscription_type !== 'subscription'"
@@ -693,8 +915,8 @@
           <!-- 路由规则列表（仅在启用时显示） -->
           <div v-if="createForm.model_routing_enabled" class="space-y-3">
             <div
-              v-for="(rule, index) in createModelRoutingRules"
-              :key="index"
+              v-for="rule in createModelRoutingRules"
+              :key="getCreateRuleRenderKey(rule)"
               class="rounded-lg border border-gray-200 p-3 dark:border-dark-600"
             >
               <div class="flex items-start gap-3">
@@ -720,7 +942,7 @@
                         {{ account.name }}
                         <button
                           type="button"
-                          @click="removeSelectedAccount(index, account.id, false)"
+                          @click="removeSelectedAccount(rule, account.id)"
                           class="ml-0.5 text-primary-500 hover:text-primary-700 dark:hover:text-primary-200"
                         >
                           <Icon name="x" size="xs" />
@@ -730,23 +952,23 @@
                     <!-- 账号搜索输入框 -->
                     <div class="relative account-search-container">
                       <input
-                        v-model="accountSearchKeyword[`create-${index}`]"
+                        v-model="accountSearchKeyword[getCreateRuleSearchKey(rule)]"
                         type="text"
                         class="input text-sm"
                         :placeholder="t('admin.groups.modelRouting.searchAccountPlaceholder')"
-                        @input="searchAccounts(`create-${index}`)"
-                        @focus="onAccountSearchFocus(index, false)"
+                        @input="searchAccountsByRule(rule)"
+                        @focus="onAccountSearchFocus(rule)"
                       />
                       <!-- 搜索结果下拉框 -->
                       <div
-                        v-if="showAccountDropdown[`create-${index}`] && accountSearchResults[`create-${index}`]?.length > 0"
+                        v-if="showAccountDropdown[getCreateRuleSearchKey(rule)] && accountSearchResults[getCreateRuleSearchKey(rule)]?.length > 0"
                         class="absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800"
                       >
                         <button
-                          v-for="account in accountSearchResults[`create-${index}`]"
+                          v-for="account in accountSearchResults[getCreateRuleSearchKey(rule)]"
                           :key="account.id"
                           type="button"
-                          @click="selectAccount(index, account, false)"
+                          @click="selectAccount(rule, account)"
                           class="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-700"
                           :class="{ 'opacity-50': rule.accounts.some(a => a.id === account.id) }"
                           :disabled="rule.accounts.some(a => a.id === account.id)"
@@ -761,7 +983,7 @@
                 </div>
                 <button
                   type="button"
-                  @click="removeCreateRoutingRule(index)"
+                  @click="removeCreateRoutingRule(rule)"
                   class="mt-5 p-1.5 text-gray-400 hover:text-red-500 transition-colors"
                   :title="t('admin.groups.modelRouting.removeRule')"
                 >
@@ -1073,7 +1295,7 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.134"
+                placeholder="0.201"
               />
             </div>
             <div>
@@ -1087,6 +1309,81 @@
                 placeholder="0.268"
               />
             </div>
+          </div>
+        </div>
+
+        <!-- Sora 按次计费配置 -->
+        <div v-if="editForm.platform === 'sora'" class="border-t pt-4">
+          <label class="block mb-2 font-medium text-gray-700 dark:text-gray-300">
+            {{ t('admin.groups.soraPricing.title') }}
+          </label>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            {{ t('admin.groups.soraPricing.description') }}
+          </p>
+          <div class="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <label class="input-label">{{ t('admin.groups.soraPricing.image360') }}</label>
+              <input
+                v-model.number="editForm.sora_image_price_360"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                placeholder="0.05"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.groups.soraPricing.image540') }}</label>
+              <input
+                v-model.number="editForm.sora_image_price_540"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                placeholder="0.08"
+              />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="input-label">{{ t('admin.groups.soraPricing.video') }}</label>
+              <input
+                v-model.number="editForm.sora_video_price_per_request"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                placeholder="0.5"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.groups.soraPricing.videoHd') }}</label>
+              <input
+                v-model.number="editForm.sora_video_price_per_request_hd"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                placeholder="0.8"
+              />
+            </div>
+          </div>
+          <div class="mt-3">
+            <label class="input-label">{{ t('admin.groups.soraPricing.storageQuota') }}</label>
+            <div class="flex items-center gap-2">
+              <input
+                v-model.number="editForm.sora_storage_quota_gb"
+                type="number"
+                step="0.1"
+                min="0"
+                class="input"
+                placeholder="10"
+              />
+              <span class="shrink-0 text-sm text-gray-500">GB</span>
+            </div>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.groups.soraPricing.storageQuotaHint') }}
+            </p>
           </div>
         </div>
 
@@ -1247,6 +1544,99 @@
           </div>
         </div>
 
+        <!-- OpenAI Messages 调度配置（仅 openai 平台） -->
+        <div v-if="editForm.platform === 'openai'" class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4">
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{{ t('admin.groups.openaiMessages.title') }}</h4>
+
+          <!-- 允许 Messages 调度开关 -->
+          <div class="flex items-center justify-between">
+            <label class="text-sm text-gray-600 dark:text-gray-400">{{ t('admin.groups.openaiMessages.allowDispatch') }}</label>
+            <button
+              type="button"
+              @click="editForm.allow_messages_dispatch = !editForm.allow_messages_dispatch"
+              class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="
+                editForm.allow_messages_dispatch ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
+              "
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                :class="
+                  editForm.allow_messages_dispatch ? 'translate-x-6' : 'translate-x-1'
+                "
+              />
+            </button>
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ t('admin.groups.openaiMessages.allowDispatchHint') }}</p>
+
+          <!-- 默认映射模型（仅当开关打开时显示） -->
+          <div v-if="editForm.allow_messages_dispatch" class="mt-3">
+            <label class="input-label">{{ t('admin.groups.openaiMessages.defaultModel') }}</label>
+            <input
+              v-model="editForm.default_mapped_model"
+              type="text"
+              :placeholder="t('admin.groups.openaiMessages.defaultModelPlaceholder')"
+              class="input"
+            />
+            <p class="input-hint">{{ t('admin.groups.openaiMessages.defaultModelHint') }}</p>
+          </div>
+        </div>
+
+        <!-- 账号过滤控制 (OpenAI/Antigravity/Anthropic/Gemini) -->
+        <div v-if="['openai', 'antigravity', 'anthropic', 'gemini'].includes(editForm.platform)" class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 space-y-4">
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">账号过滤控制</h4>
+
+          <!-- require_oauth_only toggle -->
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-sm text-gray-600 dark:text-gray-400">仅允许 OAuth 账号</label>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {{ editForm.require_oauth_only ? '已启用 — 排除 API Key 类型账号' : '未启用' }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="editForm.require_oauth_only = !editForm.require_oauth_only"
+              class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="
+                editForm.require_oauth_only ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
+              "
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                :class="
+                  editForm.require_oauth_only ? 'translate-x-6' : 'translate-x-1'
+                "
+              />
+            </button>
+          </div>
+
+          <!-- require_privacy_set toggle -->
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-sm text-gray-600 dark:text-gray-400">仅允许隐私保护已设置的账号</label>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {{ editForm.require_privacy_set ? '已启用 — Privacy 未设置的账号将被排除' : '未启用' }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="editForm.require_privacy_set = !editForm.require_privacy_set"
+              class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="
+                editForm.require_privacy_set ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
+              "
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                :class="
+                  editForm.require_privacy_set ? 'translate-x-6' : 'translate-x-1'
+                "
+              />
+            </button>
+          </div>
+        </div>
+
         <!-- 无效请求兜底（仅 anthropic/antigravity 平台，且非订阅分组） -->
         <div
           v-if="['anthropic', 'antigravity'].includes(editForm.platform) && editForm.subscription_type !== 'subscription'"
@@ -1315,8 +1705,8 @@
           <!-- 路由规则列表（仅在启用时显示） -->
           <div v-if="editForm.model_routing_enabled" class="space-y-3">
             <div
-              v-for="(rule, index) in editModelRoutingRules"
-              :key="index"
+              v-for="rule in editModelRoutingRules"
+              :key="getEditRuleRenderKey(rule)"
               class="rounded-lg border border-gray-200 p-3 dark:border-dark-600"
             >
               <div class="flex items-start gap-3">
@@ -1342,7 +1732,7 @@
                         {{ account.name }}
                         <button
                           type="button"
-                          @click="removeSelectedAccount(index, account.id, true)"
+                          @click="removeSelectedAccount(rule, account.id, true)"
                           class="ml-0.5 text-primary-500 hover:text-primary-700 dark:hover:text-primary-200"
                         >
                           <Icon name="x" size="xs" />
@@ -1352,23 +1742,23 @@
                     <!-- 账号搜索输入框 -->
                     <div class="relative account-search-container">
                       <input
-                        v-model="accountSearchKeyword[`edit-${index}`]"
+                        v-model="accountSearchKeyword[getEditRuleSearchKey(rule)]"
                         type="text"
                         class="input text-sm"
                         :placeholder="t('admin.groups.modelRouting.searchAccountPlaceholder')"
-                        @input="searchAccounts(`edit-${index}`)"
-                        @focus="onAccountSearchFocus(index, true)"
+                        @input="searchAccountsByRule(rule, true)"
+                        @focus="onAccountSearchFocus(rule, true)"
                       />
                       <!-- 搜索结果下拉框 -->
                       <div
-                        v-if="showAccountDropdown[`edit-${index}`] && accountSearchResults[`edit-${index}`]?.length > 0"
+                        v-if="showAccountDropdown[getEditRuleSearchKey(rule)] && accountSearchResults[getEditRuleSearchKey(rule)]?.length > 0"
                         class="absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800"
                       >
                         <button
-                          v-for="account in accountSearchResults[`edit-${index}`]"
+                          v-for="account in accountSearchResults[getEditRuleSearchKey(rule)]"
                           :key="account.id"
                           type="button"
-                          @click="selectAccount(index, account, true)"
+                          @click="selectAccount(rule, account, true)"
                           class="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-700"
                           :class="{ 'opacity-50': rule.accounts.some(a => a.id === account.id) }"
                           :disabled="rule.accounts.some(a => a.id === account.id)"
@@ -1383,7 +1773,7 @@
                 </div>
                 <button
                   type="button"
-                  @click="removeEditRoutingRule(index)"
+                  @click="removeEditRoutingRule(rule)"
                   class="mt-5 p-1.5 text-gray-400 hover:text-red-500 transition-colors"
                   :title="t('admin.groups.modelRouting.removeRule')"
                 >
@@ -1455,6 +1845,100 @@
       @confirm="confirmDelete"
       @cancel="showDeleteDialog = false"
     />
+
+    <!-- Sort Order Modal -->
+    <BaseDialog
+      :show="showSortModal"
+      :title="t('admin.groups.sortOrder')"
+      width="normal"
+      @close="closeSortModal"
+    >
+      <div class="space-y-4">
+        <p class="text-sm text-gray-500 dark:text-gray-400">
+          {{ t('admin.groups.sortOrderHint') }}
+        </p>
+        <VueDraggable
+          v-model="sortableGroups"
+          :animation="200"
+          class="space-y-2"
+        >
+          <div
+            v-for="group in sortableGroups"
+            :key="group.id"
+            class="flex cursor-grab items-center gap-3 rounded-lg border border-gray-200 bg-white p-3 transition-shadow hover:shadow-md active:cursor-grabbing dark:border-dark-600 dark:bg-dark-700"
+          >
+            <div class="text-gray-400">
+              <Icon name="menu" size="md" />
+            </div>
+            <div class="flex-1">
+              <div class="font-medium text-gray-900 dark:text-white">{{ group.name }}</div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">
+                <span
+                  :class="[
+                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+                    group.platform === 'anthropic'
+                      ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                      : group.platform === 'openai'
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                        : group.platform === 'antigravity'
+                          ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                          : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                  ]"
+                >
+                  {{ t('admin.groups.platforms.' + group.platform) }}
+                </span>
+              </div>
+            </div>
+            <div class="text-sm text-gray-400">
+              #{{ group.id }}
+            </div>
+          </div>
+        </VueDraggable>
+      </div>
+
+      <template #footer>
+        <div class="flex justify-end gap-3 pt-4">
+          <button @click="closeSortModal" type="button" class="btn btn-secondary">
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            @click="saveSortOrder"
+            :disabled="sortSubmitting"
+            class="btn btn-primary"
+          >
+            <svg
+              v-if="sortSubmitting"
+              class="-ml-1 mr-2 h-4 w-4 animate-spin"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+              ></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+            {{ sortSubmitting ? t('common.saving') : t('common.save') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <!-- Group Rate Multipliers Modal -->
+    <GroupRateMultipliersModal
+      :show="showRateMultipliersModal"
+      :group="rateMultipliersGroup"
+      @close="showRateMultipliersModal = false"
+      @success="loadGroups"
+    />
   </AppLayout>
 </template>
 
@@ -1476,6 +1960,12 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import Select from '@/components/common/Select.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
+import GroupRateMultipliersModal from '@/components/admin/group/GroupRateMultipliersModal.vue'
+import GroupCapacityBadge from '@/components/common/GroupCapacityBadge.vue'
+import { VueDraggable } from 'vue-draggable-plus'
+import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
+import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'
+import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -1488,6 +1978,8 @@ const columns = computed<Column[]>(() => [
   { key: 'rate_multiplier', label: t('admin.groups.columns.rateMultiplier'), sortable: true },
   { key: 'is_exclusive', label: t('admin.groups.columns.type'), sortable: true },
   { key: 'account_count', label: t('admin.groups.columns.accounts'), sortable: true },
+  { key: 'capacity', label: t('admin.groups.columns.capacity'), sortable: false },
+  { key: 'usage', label: t('admin.groups.columns.usage'), sortable: false },
   { key: 'status', label: t('admin.groups.columns.status'), sortable: true },
   { key: 'actions', label: t('admin.groups.columns.actions'), sortable: false }
 ])
@@ -1509,7 +2001,8 @@ const platformOptions = computed(() => [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' }
+  { value: 'antigravity', label: 'Antigravity' },
+  { value: 'sora', label: 'Sora' }
 ])
 
 const platformFilterOptions = computed(() => [
@@ -1517,7 +2010,8 @@ const platformFilterOptions = computed(() => [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' }
+  { value: 'antigravity', label: 'Antigravity' },
+  { value: 'sora', label: 'Sora' }
 ])
 
 const editStatusOptions = computed(() => [
@@ -1622,6 +2116,9 @@ const copyAccountsGroupOptionsForEdit = computed(() => {
 
 const groups = ref<AdminGroup[]>([])
 const loading = ref(false)
+const usageMap = ref<Map<number, { today_cost: number; total_cost: number }>>(new Map())
+const usageLoading = ref(false)
+const capacityMap = ref<Map<number, { concurrencyUsed: number; concurrencyMax: number; sessionsUsed: number; sessionsMax: number; rpmUsed: number; rpmMax: number }>>(new Map())
 const searchQuery = ref('')
 const filters = reactive({
   platform: '',
@@ -1630,7 +2127,7 @@ const filters = reactive({
 })
 const pagination = reactive({
   page: 1,
-  page_size: 20,
+  page_size: getPersistedPageSize(),
   total: 0,
   pages: 0
 })
@@ -1640,9 +2137,14 @@ let abortController: AbortController | null = null
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const showDeleteDialog = ref(false)
+const showSortModal = ref(false)
 const submitting = ref(false)
+const sortSubmitting = ref(false)
 const editingGroup = ref<AdminGroup | null>(null)
 const deletingGroup = ref<AdminGroup | null>(null)
+const showRateMultipliersModal = ref(false)
+const rateMultipliersGroup = ref<AdminGroup | null>(null)
+const sortableGroups = ref<AdminGroup[]>([])
 
 const createForm = reactive({
   name: '',
@@ -1658,10 +2160,22 @@ const createForm = reactive({
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
+  // Sora 按次计费配置
+  sora_image_price_360: null as number | null,
+  sora_image_price_540: null as number | null,
+  sora_video_price_per_request: null as number | null,
+  sora_video_price_per_request_hd: null as number | null,
+  sora_storage_quota_gb: null as number | null,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  // OpenAI Messages 调度配置（仅 openai 平台使用）
+  allow_messages_dispatch: false,
+  default_mapped_model: 'gpt-5.4',
+  // 账号过滤控制（OpenAI/Antigravity 平台）
+  require_oauth_only: false,
+  require_privacy_set: false,
   // 模型路由开关
   model_routing_enabled: false,
   // 支持的模型系列（仅 antigravity 平台）
@@ -1690,33 +2204,70 @@ const createModelRoutingRules = ref<ModelRoutingRule[]>([])
 // 编辑表单的模型路由规则
 const editModelRoutingRules = ref<ModelRoutingRule[]>([])
 
-// 账号搜索相关状态
-const accountSearchKeyword = ref<Record<string, string>>({}) // 每个规则的搜索关键词 (key: "create-0" 或 "edit-0")
-const accountSearchResults = ref<Record<string, SimpleAccount[]>>({}) // 每个规则的搜索结果
-const showAccountDropdown = ref<Record<string, boolean>>({}) // 每个规则的下拉框显示状态
-let accountSearchTimeout: ReturnType<typeof setTimeout> | null = null
+// 规则对象稳定 key（避免使用 index 导致状态错位）
+const resolveCreateRuleKey = createStableObjectKeyResolver<ModelRoutingRule>('create-rule')
+const resolveEditRuleKey = createStableObjectKeyResolver<ModelRoutingRule>('edit-rule')
 
-// 搜索账号（仅限 anthropic 平台）
-const searchAccounts = async (key: string) => {
-  if (accountSearchTimeout) clearTimeout(accountSearchTimeout)
-  accountSearchTimeout = setTimeout(async () => {
-    const keyword = accountSearchKeyword.value[key] || ''
-    try {
-      const res = await adminAPI.accounts.list(1, 20, {
+const getCreateRuleRenderKey = (rule: ModelRoutingRule) => resolveCreateRuleKey(rule)
+const getEditRuleRenderKey = (rule: ModelRoutingRule) => resolveEditRuleKey(rule)
+
+const getCreateRuleSearchKey = (rule: ModelRoutingRule) => `create-${resolveCreateRuleKey(rule)}`
+const getEditRuleSearchKey = (rule: ModelRoutingRule) => `edit-${resolveEditRuleKey(rule)}`
+
+const getRuleSearchKey = (rule: ModelRoutingRule, isEdit: boolean = false) => {
+  return isEdit ? getEditRuleSearchKey(rule) : getCreateRuleSearchKey(rule)
+}
+
+// 账号搜索相关状态
+const accountSearchKeyword = ref<Record<string, string>>({})
+const accountSearchResults = ref<Record<string, SimpleAccount[]>>({})
+const showAccountDropdown = ref<Record<string, boolean>>({})
+
+const clearAccountSearchStateByKey = (key: string) => {
+  delete accountSearchKeyword.value[key]
+  delete accountSearchResults.value[key]
+  delete showAccountDropdown.value[key]
+}
+
+const clearAllAccountSearchState = () => {
+  accountSearchKeyword.value = {}
+  accountSearchResults.value = {}
+  showAccountDropdown.value = {}
+}
+
+const accountSearchRunner = useKeyedDebouncedSearch<SimpleAccount[]>({
+  delay: 300,
+  search: async (keyword, { signal }) => {
+    const res = await adminAPI.accounts.list(
+      1,
+      20,
+      {
         search: keyword,
         platform: 'anthropic'
-      })
-      accountSearchResults.value[key] = res.items.map((a) => ({ id: a.id, name: a.name }))
-    } catch {
-      accountSearchResults.value[key] = []
-    }
-  }, 300)
+      },
+      { signal }
+    )
+    return res.items.map((account) => ({ id: account.id, name: account.name }))
+  },
+  onSuccess: (key, result) => {
+    accountSearchResults.value[key] = result
+  },
+  onError: (key) => {
+    accountSearchResults.value[key] = []
+  }
+})
+
+// 搜索账号（仅限 anthropic 平台）
+const searchAccounts = (key: string) => {
+  accountSearchRunner.trigger(key, accountSearchKeyword.value[key] || '')
+}
+
+const searchAccountsByRule = (rule: ModelRoutingRule, isEdit: boolean = false) => {
+  searchAccounts(getRuleSearchKey(rule, isEdit))
 }
 
 // 选择账号
-const selectAccount = (ruleIndex: number, account: SimpleAccount, isEdit: boolean = false) => {
-  const rules = isEdit ? editModelRoutingRules.value : createModelRoutingRules.value
-  const rule = rules[ruleIndex]
+const selectAccount = (rule: ModelRoutingRule, account: SimpleAccount, isEdit: boolean = false) => {
   if (!rule) return
 
   // 检查是否已选择
@@ -1725,15 +2276,13 @@ const selectAccount = (ruleIndex: number, account: SimpleAccount, isEdit: boolea
   }
 
   // 清空搜索
-  const key = `${isEdit ? 'edit' : 'create'}-${ruleIndex}`
+  const key = getRuleSearchKey(rule, isEdit)
   accountSearchKeyword.value[key] = ''
   showAccountDropdown.value[key] = false
 }
 
 // 移除已选账号
-const removeSelectedAccount = (ruleIndex: number, accountId: number, isEdit: boolean = false) => {
-  const rules = isEdit ? editModelRoutingRules.value : createModelRoutingRules.value
-  const rule = rules[ruleIndex]
+const removeSelectedAccount = (rule: ModelRoutingRule, accountId: number, _isEdit: boolean = false) => {
   if (!rule) return
 
   rule.accounts = rule.accounts.filter(a => a.id !== accountId)
@@ -1760,8 +2309,8 @@ const toggleEditScope = (scope: string) => {
 }
 
 // 处理账号搜索输入框聚焦
-const onAccountSearchFocus = (ruleIndex: number, isEdit: boolean = false) => {
-  const key = `${isEdit ? 'edit' : 'create'}-${ruleIndex}`
+const onAccountSearchFocus = (rule: ModelRoutingRule, isEdit: boolean = false) => {
+  const key = getRuleSearchKey(rule, isEdit)
   showAccountDropdown.value[key] = true
   // 如果没有搜索结果，触发一次搜索
   if (!accountSearchResults.value[key]?.length) {
@@ -1775,13 +2324,14 @@ const addCreateRoutingRule = () => {
 }
 
 // 删除创建表单的路由规则
-const removeCreateRoutingRule = (index: number) => {
+const removeCreateRoutingRule = (rule: ModelRoutingRule) => {
+  const index = createModelRoutingRules.value.indexOf(rule)
+  if (index === -1) return
+
+  const key = getCreateRuleSearchKey(rule)
+  accountSearchRunner.clearKey(key)
+  clearAccountSearchStateByKey(key)
   createModelRoutingRules.value.splice(index, 1)
-  // 清理相关的搜索状态
-  const key = `create-${index}`
-  delete accountSearchKeyword.value[key]
-  delete accountSearchResults.value[key]
-  delete showAccountDropdown.value[key]
 }
 
 // 添加编辑表单的路由规则
@@ -1790,13 +2340,14 @@ const addEditRoutingRule = () => {
 }
 
 // 删除编辑表单的路由规则
-const removeEditRoutingRule = (index: number) => {
+const removeEditRoutingRule = (rule: ModelRoutingRule) => {
+  const index = editModelRoutingRules.value.indexOf(rule)
+  if (index === -1) return
+
+  const key = getEditRuleSearchKey(rule)
+  accountSearchRunner.clearKey(key)
+  clearAccountSearchStateByKey(key)
   editModelRoutingRules.value.splice(index, 1)
-  // 清理相关的搜索状态
-  const key = `edit-${index}`
-  delete accountSearchKeyword.value[key]
-  delete accountSearchResults.value[key]
-  delete showAccountDropdown.value[key]
 }
 
 // 将 UI 格式的路由规则转换为 API 格式
@@ -1856,10 +2407,22 @@ const editForm = reactive({
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
+  // Sora 按次计费配置
+  sora_image_price_360: null as number | null,
+  sora_image_price_540: null as number | null,
+  sora_video_price_per_request: null as number | null,
+  sora_video_price_per_request_hd: null as number | null,
+  sora_storage_quota_gb: null as number | null,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  // OpenAI Messages 调度配置（仅 openai 平台使用）
+  allow_messages_dispatch: false,
+  default_mapped_model: '',
+  // 账号过滤控制（OpenAI/Antigravity 平台）
+  require_oauth_only: false,
+  require_privacy_set: false,
   // 模型路由开关
   model_routing_enabled: false,
   // 支持的模型系列（仅 antigravity 平台）
@@ -1900,6 +2463,8 @@ const loadGroups = async () => {
     groups.value = response.items
     pagination.total = response.total
     pagination.pages = response.pages
+    loadUsageSummary()
+    loadCapacitySummary()
   } catch (error: any) {
     if (signal.aborted || error?.name === 'AbortError' || error?.code === 'ERR_CANCELED') {
       return
@@ -1910,6 +2475,49 @@ const loadGroups = async () => {
     if (abortController === currentController && !signal.aborted) {
       loading.value = false
     }
+  }
+}
+
+const formatCost = (cost: number): string => {
+  if (cost >= 1000) return cost.toFixed(0)
+  if (cost >= 100) return cost.toFixed(1)
+  return cost.toFixed(2)
+}
+
+const loadUsageSummary = async () => {
+  usageLoading.value = true
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    const data = await adminAPI.groups.getUsageSummary(tz)
+    const map = new Map<number, { today_cost: number; total_cost: number }>()
+    for (const item of data) {
+      map.set(item.group_id, { today_cost: item.today_cost, total_cost: item.total_cost })
+    }
+    usageMap.value = map
+  } catch (error) {
+    console.error('Error loading group usage summary:', error)
+  } finally {
+    usageLoading.value = false
+  }
+}
+
+const loadCapacitySummary = async () => {
+  try {
+    const data = await adminAPI.groups.getCapacitySummary()
+    const map = new Map<number, { concurrencyUsed: number; concurrencyMax: number; sessionsUsed: number; sessionsMax: number; rpmUsed: number; rpmMax: number }>()
+    for (const item of data) {
+      map.set(item.group_id, {
+        concurrencyUsed: item.concurrency_used,
+        concurrencyMax: item.concurrency_max,
+        sessionsUsed: item.sessions_used,
+        sessionsMax: item.sessions_max,
+        rpmUsed: item.rpm_used,
+        rpmMax: item.rpm_max
+      })
+    }
+    capacityMap.value = map
+  } catch (error) {
+    console.error('Error loading group capacity summary:', error)
   }
 }
 
@@ -1935,6 +2543,10 @@ const handlePageSizeChange = (pageSize: number) => {
 
 const closeCreateModal = () => {
   showCreateModal.value = false
+  createModelRoutingRules.value.forEach((rule) => {
+    accountSearchRunner.clearKey(getCreateRuleSearchKey(rule))
+  })
+  clearAllAccountSearchState()
   createForm.name = ''
   createForm.description = ''
   createForm.platform = 'anthropic'
@@ -1947,13 +2559,39 @@ const closeCreateModal = () => {
   createForm.image_price_1k = null
   createForm.image_price_2k = null
   createForm.image_price_4k = null
+  createForm.sora_image_price_360 = null
+  createForm.sora_image_price_540 = null
+  createForm.sora_video_price_per_request = null
+  createForm.sora_video_price_per_request_hd = null
+  createForm.sora_storage_quota_gb = null
   createForm.claude_code_only = false
   createForm.fallback_group_id = null
   createForm.fallback_group_id_on_invalid_request = null
+  createForm.allow_messages_dispatch = false
+  createForm.require_oauth_only = false
+  createForm.require_privacy_set = false
+  createForm.default_mapped_model = 'gpt-5.4'
   createForm.supported_model_scopes = ['claude', 'gemini_text', 'gemini_image']
   createForm.mcp_xml_inject = true
   createForm.copy_accounts_from_group_ids = []
   createModelRoutingRules.value = []
+}
+
+const normalizeOptionalLimit = (value: number | string | null | undefined): number | null => {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      return null
+    }
+    const parsed = Number(trimmed)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }
+
+  return Number.isFinite(value) && value > 0 ? value : null
 }
 
 const handleCreateGroup = async () => {
@@ -1964,10 +2602,20 @@ const handleCreateGroup = async () => {
   submitting.value = true
   try {
     // 构建请求数据，包含模型路由配置
+    const { sora_storage_quota_gb: createQuotaGb, ...createRest } = createForm
     const requestData = {
-      ...createForm,
+      ...createRest,
+      daily_limit_usd: normalizeOptionalLimit(createForm.daily_limit_usd as number | string | null),
+      weekly_limit_usd: normalizeOptionalLimit(createForm.weekly_limit_usd as number | string | null),
+      monthly_limit_usd: normalizeOptionalLimit(createForm.monthly_limit_usd as number | string | null),
+      sora_storage_quota_bytes: createQuotaGb ? Math.round(createQuotaGb * 1024 * 1024 * 1024) : 0,
       model_routing: convertRoutingRulesToApiFormat(createModelRoutingRules.value)
     }
+    // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
+    const emptyToNull = (v: any) => v === '' ? null : v
+    requestData.daily_limit_usd = emptyToNull(requestData.daily_limit_usd)
+    requestData.weekly_limit_usd = emptyToNull(requestData.weekly_limit_usd)
+    requestData.monthly_limit_usd = emptyToNull(requestData.monthly_limit_usd)
     await adminAPI.groups.create(requestData)
     appStore.showSuccess(t('admin.groups.groupCreated'))
     closeCreateModal()
@@ -2000,9 +2648,18 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.image_price_1k = group.image_price_1k
   editForm.image_price_2k = group.image_price_2k
   editForm.image_price_4k = group.image_price_4k
+  editForm.sora_image_price_360 = group.sora_image_price_360
+  editForm.sora_image_price_540 = group.sora_image_price_540
+  editForm.sora_video_price_per_request = group.sora_video_price_per_request
+  editForm.sora_video_price_per_request_hd = group.sora_video_price_per_request_hd
+  editForm.sora_storage_quota_gb = group.sora_storage_quota_bytes ? Number((group.sora_storage_quota_bytes / (1024 * 1024 * 1024)).toFixed(2)) : null
   editForm.claude_code_only = group.claude_code_only || false
   editForm.fallback_group_id = group.fallback_group_id
   editForm.fallback_group_id_on_invalid_request = group.fallback_group_id_on_invalid_request
+  editForm.allow_messages_dispatch = group.allow_messages_dispatch || false
+  editForm.require_oauth_only = group.require_oauth_only ?? false
+  editForm.require_privacy_set = group.require_privacy_set ?? false
+  editForm.default_mapped_model = group.default_mapped_model || ''
   editForm.model_routing_enabled = group.model_routing_enabled || false
   editForm.supported_model_scopes = group.supported_model_scopes || ['claude', 'gemini_text', 'gemini_image']
   editForm.mcp_xml_inject = group.mcp_xml_inject ?? true
@@ -2013,6 +2670,10 @@ const handleEdit = async (group: AdminGroup) => {
 }
 
 const closeEditModal = () => {
+  editModelRoutingRules.value.forEach((rule) => {
+    accountSearchRunner.clearKey(getEditRuleSearchKey(rule))
+  })
+  clearAllAccountSearchState()
   showEditModal.value = false
   editingGroup.value = null
   editModelRoutingRules.value = []
@@ -2029,8 +2690,13 @@ const handleUpdateGroup = async () => {
   submitting.value = true
   try {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
+    const { sora_storage_quota_gb: editQuotaGb, ...editRest } = editForm
     const payload = {
-      ...editForm,
+      ...editRest,
+      daily_limit_usd: normalizeOptionalLimit(editForm.daily_limit_usd as number | string | null),
+      weekly_limit_usd: normalizeOptionalLimit(editForm.weekly_limit_usd as number | string | null),
+      monthly_limit_usd: normalizeOptionalLimit(editForm.monthly_limit_usd as number | string | null),
+      sora_storage_quota_bytes: editQuotaGb ? Math.round(editQuotaGb * 1024 * 1024 * 1024) : 0,
       fallback_group_id: editForm.fallback_group_id === null ? 0 : editForm.fallback_group_id,
       fallback_group_id_on_invalid_request:
         editForm.fallback_group_id_on_invalid_request === null
@@ -2038,6 +2704,11 @@ const handleUpdateGroup = async () => {
           : editForm.fallback_group_id_on_invalid_request,
       model_routing: convertRoutingRulesToApiFormat(editModelRoutingRules.value)
     }
+    // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
+    const emptyToNull = (v: any) => v === '' ? null : v
+    payload.daily_limit_usd = emptyToNull(payload.daily_limit_usd)
+    payload.weekly_limit_usd = emptyToNull(payload.weekly_limit_usd)
+    payload.monthly_limit_usd = emptyToNull(payload.monthly_limit_usd)
     await adminAPI.groups.update(editingGroup.value.id, payload)
     appStore.showSuccess(t('admin.groups.groupUpdated'))
     closeEditModal()
@@ -2048,6 +2719,11 @@ const handleUpdateGroup = async () => {
   } finally {
     submitting.value = false
   }
+}
+
+const handleRateMultipliers = (group: AdminGroup) => {
+  rateMultipliersGroup.value = group
+  showRateMultipliersModal.value = true
 }
 
 const handleDelete = (group: AdminGroup) => {
@@ -2087,6 +2763,14 @@ watch(
     if (!['anthropic', 'antigravity'].includes(newVal)) {
       createForm.fallback_group_id_on_invalid_request = null
     }
+    if (newVal !== 'openai') {
+      createForm.allow_messages_dispatch = false
+      createForm.default_mapped_model = ''
+    }
+    if (!['openai', 'antigravity', 'anthropic', 'gemini'].includes(newVal)) {
+      createForm.require_oauth_only = false
+      createForm.require_privacy_set = false
+    }
   }
 )
 
@@ -2101,6 +2785,46 @@ const handleClickOutside = (event: MouseEvent) => {
   }
 }
 
+// 打开排序弹窗
+const openSortModal = async () => {
+  try {
+    // 获取所有分组（不分页）
+    const allGroups = await adminAPI.groups.getAll()
+    // 按 sort_order 排序
+    sortableGroups.value = [...allGroups].sort((a, b) => a.sort_order - b.sort_order)
+    showSortModal.value = true
+  } catch (error) {
+    appStore.showError(t('admin.groups.failedToLoad'))
+    console.error('Error loading groups for sorting:', error)
+  }
+}
+
+// 关闭排序弹窗
+const closeSortModal = () => {
+  showSortModal.value = false
+  sortableGroups.value = []
+}
+
+// 保存排序
+const saveSortOrder = async () => {
+  sortSubmitting.value = true
+  try {
+    const updates = sortableGroups.value.map((g, index) => ({
+      id: g.id,
+      sort_order: index * 10
+    }))
+    await adminAPI.groups.updateSortOrder(updates)
+    appStore.showSuccess(t('admin.groups.sortOrderUpdated'))
+    closeSortModal()
+    loadGroups()
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.groups.failedToUpdateSortOrder'))
+    console.error('Error updating sort order:', error)
+  } finally {
+    sortSubmitting.value = false
+  }
+}
+
 onMounted(() => {
   loadGroups()
   document.addEventListener('click', handleClickOutside)
@@ -2108,5 +2832,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  accountSearchRunner.clearAll()
+  clearAllAccountSearchState()
 })
 </script>

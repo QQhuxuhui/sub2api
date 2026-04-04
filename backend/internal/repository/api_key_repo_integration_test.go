@@ -4,11 +4,14 @@ package repository
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -23,7 +26,7 @@ func (s *APIKeyRepoSuite) SetupTest() {
 	s.ctx = context.Background()
 	tx := testEntTx(s.T())
 	s.client = tx.Client()
-	s.repo = NewAPIKeyRepository(s.client).(*apiKeyRepository)
+	s.repo = newAPIKeyRepositoryWithSQL(s.client, tx)
 }
 
 func TestAPIKeyRepoSuite(t *testing.T) {
@@ -148,6 +151,31 @@ func (s *APIKeyRepoSuite) TestDelete() {
 	s.Require().Error(err, "expected error after delete")
 }
 
+func (s *APIKeyRepoSuite) TestCreate_AfterSoftDelete_AllowsSameKey() {
+	user := s.mustCreateUser("recreate-after-soft-delete@test.com")
+	const reusedKey = "sk-reuse-after-soft-delete"
+
+	first := &service.APIKey{
+		UserID: user.ID,
+		Key:    reusedKey,
+		Name:   "First Key",
+		Status: service.StatusActive,
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, first), "create first key")
+
+	s.Require().NoError(s.repo.Delete(s.ctx, first.ID), "soft delete first key")
+
+	second := &service.APIKey{
+		UserID: user.ID,
+		Key:    reusedKey,
+		Name:   "Second Key",
+		Status: service.StatusActive,
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, second), "create second key with same key")
+	s.Require().NotZero(second.ID)
+	s.Require().NotEqual(first.ID, second.ID, "recreated key should be a new row")
+}
+
 // --- ListByUserID / CountByUserID ---
 
 func (s *APIKeyRepoSuite) TestListByUserID() {
@@ -155,7 +183,7 @@ func (s *APIKeyRepoSuite) TestListByUserID() {
 	s.mustCreateApiKey(user.ID, "sk-list-1", "Key 1", nil)
 	s.mustCreateApiKey(user.ID, "sk-list-2", "Key 2", nil)
 
-	keys, page, err := s.repo.ListByUserID(s.ctx, user.ID, pagination.PaginationParams{Page: 1, PageSize: 10})
+	keys, page, err := s.repo.ListByUserID(s.ctx, user.ID, pagination.PaginationParams{Page: 1, PageSize: 10}, service.APIKeyListFilters{})
 	s.Require().NoError(err, "ListByUserID")
 	s.Require().Len(keys, 2)
 	s.Require().Equal(int64(2), page.Total)
@@ -167,7 +195,7 @@ func (s *APIKeyRepoSuite) TestListByUserID_Pagination() {
 		s.mustCreateApiKey(user.ID, "sk-page-"+string(rune('a'+i)), "Key", nil)
 	}
 
-	keys, page, err := s.repo.ListByUserID(s.ctx, user.ID, pagination.PaginationParams{Page: 1, PageSize: 2})
+	keys, page, err := s.repo.ListByUserID(s.ctx, user.ID, pagination.PaginationParams{Page: 1, PageSize: 2}, service.APIKeyListFilters{})
 	s.Require().NoError(err)
 	s.Require().Len(keys, 2)
 	s.Require().Equal(int64(5), page.Total)
@@ -311,7 +339,7 @@ func (s *APIKeyRepoSuite) TestCRUD_Search_ClearGroupID() {
 	s.Require().Equal(service.StatusDisabled, got2.Status)
 	s.Require().Nil(got2.GroupID)
 
-	keys, page, err := s.repo.ListByUserID(s.ctx, user.ID, pagination.PaginationParams{Page: 1, PageSize: 10})
+	keys, page, err := s.repo.ListByUserID(s.ctx, user.ID, pagination.PaginationParams{Page: 1, PageSize: 10}, service.APIKeyListFilters{})
 	s.Require().NoError(err, "ListByUserID")
 	s.Require().Equal(int64(1), page.Total)
 	s.Require().Len(keys, 1)
@@ -382,4 +410,109 @@ func (s *APIKeyRepoSuite) mustCreateApiKey(userID int64, key, name string, group
 	}
 	s.Require().NoError(s.repo.Create(s.ctx, k), "create api key")
 	return k
+}
+
+// --- IncrementQuotaUsed ---
+
+func (s *APIKeyRepoSuite) TestIncrementQuotaUsed_Basic() {
+	user := s.mustCreateUser("incr-basic@test.com")
+	key := s.mustCreateApiKey(user.ID, "sk-incr-basic", "Incr", nil)
+
+	newQuota, err := s.repo.IncrementQuotaUsed(s.ctx, key.ID, 1.5)
+	s.Require().NoError(err, "IncrementQuotaUsed")
+	s.Require().Equal(1.5, newQuota, "第一次递增后应为 1.5")
+
+	newQuota, err = s.repo.IncrementQuotaUsed(s.ctx, key.ID, 2.5)
+	s.Require().NoError(err, "IncrementQuotaUsed second")
+	s.Require().Equal(4.0, newQuota, "第二次递增后应为 4.0")
+}
+
+func (s *APIKeyRepoSuite) TestIncrementQuotaUsed_NotFound() {
+	_, err := s.repo.IncrementQuotaUsed(s.ctx, 999999, 1.0)
+	s.Require().ErrorIs(err, service.ErrAPIKeyNotFound, "不存在的 key 应返回 ErrAPIKeyNotFound")
+}
+
+func (s *APIKeyRepoSuite) TestIncrementQuotaUsed_DeletedKey() {
+	user := s.mustCreateUser("incr-deleted@test.com")
+	key := s.mustCreateApiKey(user.ID, "sk-incr-del", "Deleted", nil)
+
+	s.Require().NoError(s.repo.Delete(s.ctx, key.ID), "Delete")
+
+	_, err := s.repo.IncrementQuotaUsed(s.ctx, key.ID, 1.0)
+	s.Require().ErrorIs(err, service.ErrAPIKeyNotFound, "已删除的 key 应返回 ErrAPIKeyNotFound")
+}
+
+func (s *APIKeyRepoSuite) TestIncrementQuotaUsedAndGetState() {
+	user := s.mustCreateUser("quota-state@test.com")
+	key := s.mustCreateApiKey(user.ID, "sk-quota-state", "QuotaState", nil)
+	key.Quota = 3
+	key.QuotaUsed = 1
+	s.Require().NoError(s.repo.Update(s.ctx, key), "Update quota")
+
+	state, err := s.repo.IncrementQuotaUsedAndGetState(s.ctx, key.ID, 2.5)
+	s.Require().NoError(err, "IncrementQuotaUsedAndGetState")
+	s.Require().NotNil(state)
+	s.Require().Equal(3.5, state.QuotaUsed)
+	s.Require().Equal(3.0, state.Quota)
+	s.Require().Equal(service.StatusAPIKeyQuotaExhausted, state.Status)
+	s.Require().Equal(key.Key, state.Key)
+
+	got, err := s.repo.GetByID(s.ctx, key.ID)
+	s.Require().NoError(err, "GetByID")
+	s.Require().Equal(3.5, got.QuotaUsed)
+	s.Require().Equal(service.StatusAPIKeyQuotaExhausted, got.Status)
+}
+
+// TestIncrementQuotaUsed_Concurrent 使用真实数据库验证并发原子性。
+// 注意：此测试使用 testEntClient（非事务隔离），数据会真正写入数据库。
+func TestIncrementQuotaUsed_Concurrent(t *testing.T) {
+	client := testEntClient(t)
+	repo := NewAPIKeyRepository(client, integrationDB).(*apiKeyRepository)
+	ctx := context.Background()
+
+	// 创建测试用户和 API Key
+	u, err := client.User.Create().
+		SetEmail("concurrent-incr-" + time.Now().Format(time.RFC3339Nano) + "@test.com").
+		SetPasswordHash("hash").
+		SetStatus(service.StatusActive).
+		SetRole(service.RoleUser).
+		Save(ctx)
+	require.NoError(t, err, "create user")
+
+	k := &service.APIKey{
+		UserID: u.ID,
+		Key:    "sk-concurrent-" + time.Now().Format(time.RFC3339Nano),
+		Name:   "Concurrent",
+		Status: service.StatusActive,
+	}
+	require.NoError(t, repo.Create(ctx, k), "create api key")
+	t.Cleanup(func() {
+		_ = client.APIKey.DeleteOneID(k.ID).Exec(ctx)
+		_ = client.User.DeleteOneID(u.ID).Exec(ctx)
+	})
+
+	// 10 个 goroutine 各递增 1.0，总计应为 10.0
+	const goroutines = 10
+	const increment = 1.0
+	var wg sync.WaitGroup
+	errs := make([]error, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, errs[idx] = repo.IncrementQuotaUsed(ctx, k.ID, increment)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, e := range errs {
+		require.NoError(t, e, "goroutine %d failed", i)
+	}
+
+	// 验证最终结果
+	got, err := repo.GetByID(ctx, k.ID)
+	require.NoError(t, err, "GetByID")
+	require.Equal(t, float64(goroutines)*increment, got.QuotaUsed,
+		"并发递增后总和应为 %v，实际为 %v", float64(goroutines)*increment, got.QuotaUsed)
 }

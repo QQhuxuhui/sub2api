@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"strconv"
 	"strings"
 
@@ -11,27 +12,36 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// UserWithConcurrency wraps AdminUser with current concurrency info
+type UserWithConcurrency struct {
+	dto.AdminUser
+	CurrentConcurrency int `json:"current_concurrency"`
+}
+
 // UserHandler handles admin user management
 type UserHandler struct {
-	adminService service.AdminService
+	adminService       service.AdminService
+	concurrencyService *service.ConcurrencyService
 }
 
 // NewUserHandler creates a new admin user handler
-func NewUserHandler(adminService service.AdminService) *UserHandler {
+func NewUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService) *UserHandler {
 	return &UserHandler{
-		adminService: adminService,
+		adminService:       adminService,
+		concurrencyService: concurrencyService,
 	}
 }
 
 // CreateUserRequest represents admin create user request
 type CreateUserRequest struct {
-	Email         string  `json:"email" binding:"required,email"`
-	Password      string  `json:"password" binding:"required,min=6"`
-	Username      string  `json:"username"`
-	Notes         string  `json:"notes"`
-	Balance       float64 `json:"balance"`
-	Concurrency   int     `json:"concurrency"`
-	AllowedGroups []int64 `json:"allowed_groups"`
+	Email                 string  `json:"email" binding:"required,email"`
+	Password              string  `json:"password" binding:"required,min=6"`
+	Username              string  `json:"username"`
+	Notes                 string  `json:"notes"`
+	Balance               float64 `json:"balance"`
+	Concurrency           int     `json:"concurrency"`
+	AllowedGroups         []int64 `json:"allowed_groups"`
+	SoraStorageQuotaBytes int64   `json:"sora_storage_quota_bytes"`
 }
 
 // UpdateUserRequest represents admin update user request
@@ -45,6 +55,10 @@ type UpdateUserRequest struct {
 	Concurrency   *int     `json:"concurrency"`
 	Status        string   `json:"status" binding:"omitempty,oneof=active disabled"`
 	AllowedGroups *[]int64 `json:"allowed_groups"`
+	// GroupRates 用户专属分组倍率配置
+	// map[groupID]*rate，nil 表示删除该分组的专属倍率
+	GroupRates            map[int64]*float64 `json:"group_rates"`
+	SoraStorageQuotaBytes *int64             `json:"sora_storage_quota_bytes"`
 }
 
 // UpdateBalanceRequest represents balance update request
@@ -61,21 +75,27 @@ type UpdateBalanceRequest struct {
 //   - role: filter by user role
 //   - search: search in email, username
 //   - attr[{id}]: filter by custom attribute value, e.g. attr[1]=company
+//   - group_name: fuzzy filter by allowed group name
 func (h *UserHandler) List(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
 
 	search := c.Query("search")
 	// 标准化和验证 search 参数
 	search = strings.TrimSpace(search)
-	if len(search) > 100 {
-		search = search[:100]
+	if runes := []rune(search); len(runes) > 100 {
+		search = string(runes[:100])
 	}
 
 	filters := service.UserListFilters{
 		Status:     c.Query("status"),
 		Role:       c.Query("role"),
 		Search:     search,
+		GroupName:  strings.TrimSpace(c.Query("group_name")),
 		Attributes: parseAttributeFilters(c),
+	}
+	if raw, ok := c.GetQuery("include_subscriptions"); ok {
+		includeSubscriptions := parseBoolQueryWithDefault(raw, true)
+		filters.IncludeSubscriptions = &includeSubscriptions
 	}
 
 	users, total, err := h.adminService.ListUsers(c.Request.Context(), page, pageSize, filters)
@@ -84,10 +104,30 @@ func (h *UserHandler) List(c *gin.Context) {
 		return
 	}
 
-	out := make([]dto.AdminUser, 0, len(users))
-	for i := range users {
-		out = append(out, *dto.UserFromServiceAdmin(&users[i]))
+	// Batch get current concurrency (nil map if unavailable)
+	var loadInfo map[int64]*service.UserLoadInfo
+	if len(users) > 0 && h.concurrencyService != nil {
+		usersConcurrency := make([]service.UserWithConcurrency, len(users))
+		for i := range users {
+			usersConcurrency[i] = service.UserWithConcurrency{
+				ID:             users[i].ID,
+				MaxConcurrency: users[i].Concurrency,
+			}
+		}
+		loadInfo, _ = h.concurrencyService.GetUsersLoadBatch(c.Request.Context(), usersConcurrency)
 	}
+
+	// Build response with concurrency info
+	out := make([]UserWithConcurrency, len(users))
+	for i := range users {
+		out[i] = UserWithConcurrency{
+			AdminUser: *dto.UserFromServiceAdmin(&users[i]),
+		}
+		if info := loadInfo[users[i].ID]; info != nil {
+			out[i].CurrentConcurrency = info.CurrentConcurrency
+		}
+	}
+
 	response.Paginated(c, out, total, page, pageSize)
 }
 
@@ -142,13 +182,14 @@ func (h *UserHandler) Create(c *gin.Context) {
 	}
 
 	user, err := h.adminService.CreateUser(c.Request.Context(), &service.CreateUserInput{
-		Email:         req.Email,
-		Password:      req.Password,
-		Username:      req.Username,
-		Notes:         req.Notes,
-		Balance:       req.Balance,
-		Concurrency:   req.Concurrency,
-		AllowedGroups: req.AllowedGroups,
+		Email:                 req.Email,
+		Password:              req.Password,
+		Username:              req.Username,
+		Notes:                 req.Notes,
+		Balance:               req.Balance,
+		Concurrency:           req.Concurrency,
+		AllowedGroups:         req.AllowedGroups,
+		SoraStorageQuotaBytes: req.SoraStorageQuotaBytes,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -175,14 +216,16 @@ func (h *UserHandler) Update(c *gin.Context) {
 
 	// 使用指针类型直接传递，nil 表示未提供该字段
 	user, err := h.adminService.UpdateUser(c.Request.Context(), userID, &service.UpdateUserInput{
-		Email:         req.Email,
-		Password:      req.Password,
-		Username:      req.Username,
-		Notes:         req.Notes,
-		Balance:       req.Balance,
-		Concurrency:   req.Concurrency,
-		Status:        req.Status,
-		AllowedGroups: req.AllowedGroups,
+		Email:                 req.Email,
+		Password:              req.Password,
+		Username:              req.Username,
+		Notes:                 req.Notes,
+		Balance:               req.Balance,
+		Concurrency:           req.Concurrency,
+		Status:                req.Status,
+		AllowedGroups:         req.AllowedGroups,
+		GroupRates:            req.GroupRates,
+		SoraStorageQuotaBytes: req.SoraStorageQuotaBytes,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -225,13 +268,20 @@ func (h *UserHandler) UpdateBalance(c *gin.Context) {
 		return
 	}
 
-	user, err := h.adminService.UpdateUserBalance(c.Request.Context(), userID, req.Balance, req.Operation, req.Notes)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
+	idempotencyPayload := struct {
+		UserID int64                `json:"user_id"`
+		Body   UpdateBalanceRequest `json:"body"`
+	}{
+		UserID: userID,
+		Body:   req,
 	}
-
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	executeAdminIdempotentJSON(c, "admin.users.balance.update", idempotencyPayload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		user, execErr := h.adminService.UpdateUserBalance(ctx, userID, req.Balance, req.Operation, req.Notes)
+		if execErr != nil {
+			return nil, execErr
+		}
+		return dto.UserFromServiceAdmin(user), nil
+	})
 }
 
 // GetUserAPIKeys handles getting user's API keys
@@ -316,5 +366,37 @@ func (h *UserHandler) GetBalanceHistory(c *gin.Context) {
 		"page_size":       pageSize,
 		"pages":           pages,
 		"total_recharged": totalRecharged,
+	})
+}
+
+// ReplaceGroupRequest represents the request to replace a user's exclusive group
+type ReplaceGroupRequest struct {
+	OldGroupID int64 `json:"old_group_id" binding:"required,gt=0"`
+	NewGroupID int64 `json:"new_group_id" binding:"required,gt=0"`
+}
+
+// ReplaceGroup handles replacing a user's exclusive group
+// POST /api/v1/admin/users/:id/replace-group
+func (h *UserHandler) ReplaceGroup(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+
+	var req ReplaceGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	result, err := h.adminService.ReplaceUserGroup(c.Request.Context(), userID, req.OldGroupID, req.NewGroupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{
+		"migrated_keys": result.MigratedKeys,
 	})
 }

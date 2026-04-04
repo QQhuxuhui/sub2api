@@ -2,6 +2,7 @@ package handler
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
@@ -65,8 +66,17 @@ func (h *UsageHandler) List(c *gin.Context) {
 	// Parse additional filters
 	model := c.Query("model")
 
+	var requestType *int16
 	var stream *bool
-	if streamStr := c.Query("stream"); streamStr != "" {
+	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {
+		parsed, err := service.ParseUsageRequestType(requestTypeStr)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		value := int16(parsed)
+		requestType = &value
+	} else if streamStr := c.Query("stream"); streamStr != "" {
 		val, err := strconv.ParseBool(streamStr)
 		if err != nil {
 			response.BadRequest(c, "Invalid stream value, use true or false")
@@ -104,8 +114,8 @@ func (h *UsageHandler) List(c *gin.Context) {
 			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
 			return
 		}
-		// Set end time to end of day
-		t = t.Add(24*time.Hour - time.Nanosecond)
+		// Use half-open range [start, end), move to next calendar day start (DST-safe).
+		t = t.AddDate(0, 0, 1)
 		endTime = &t
 	}
 
@@ -114,6 +124,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		UserID:      subject.UserID, // Always filter by current user for security
 		APIKeyID:    apiKeyID,
 		Model:       model,
+		RequestType: requestType,
 		Stream:      stream,
 		BillingType: billingType,
 		StartTime:   startTime,
@@ -216,8 +227,8 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
 			return
 		}
-		// 设置结束时间为当天结束
-		endTime = endTime.Add(24*time.Hour - time.Nanosecond)
+		// 与 SQL 条件 created_at < end 对齐，使用次日 00:00 作为上边界（DST-safe）。
+		endTime = endTime.AddDate(0, 0, 1)
 	} else {
 		// 使用 period 参数
 		period := c.DefaultQuery("period", "today")
@@ -392,7 +403,7 @@ func (h *UsageHandler) DashboardAPIKeysUsage(c *gin.Context) {
 		return
 	}
 
-	stats, err := h.usageService.GetBatchAPIKeyUsageStats(c.Request.Context(), validAPIKeyIDs)
+	stats, err := h.usageService.GetBatchAPIKeyUsageStats(c.Request.Context(), validAPIKeyIDs, time.Time{}, time.Time{})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
