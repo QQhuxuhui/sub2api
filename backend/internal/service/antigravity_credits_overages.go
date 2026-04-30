@@ -45,7 +45,6 @@ var (
 		"minimumcreditamountforusage",
 		"minimum credit amount for usage",
 		"minimum credit",
-		"resource has been exhausted",
 	}
 )
 
@@ -148,9 +147,10 @@ func shouldMarkCreditsExhausted(resp *http.Response, respBody []byte, reqErr err
 	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusRequestTimeout {
 		return false
 	}
-	// 注意：不再检查 isURLLevelRateLimit。此函数仅在积分重试失败后调用，
-	// 如果注入 enabledCreditTypes 后仍返回 "Resource has been exhausted"，
-	// 说明积分也已耗尽，应该标记。clearCreditsExhausted 会在后续成功时自动清除。
+	// "Resource has been exhausted" 是 Google RESOURCE_EXHAUSTED 通用错误，
+	// 节点容量限流和积分耗尽都会触发，无法据此区分。仅当响应体匹配下面更具体的
+	// credit 关键词（insufficient credit / credit balance / google_one_ai 等）时才标记。
+	// clearCreditsExhausted 会在后续 credits 注入成功时自动清除。
 	if info := parseAntigravitySmartRetryInfo(respBody); info != nil {
 		return false
 	}

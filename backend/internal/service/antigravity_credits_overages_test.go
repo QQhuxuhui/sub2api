@@ -406,16 +406,16 @@ func TestShouldMarkCreditsExhausted(t *testing.T) {
 		require.False(t, shouldMarkCreditsExhausted(resp, []byte(`{"error":"Insufficient credits"}`), nil))
 	})
 
-	t.Run("Resource has been exhausted 应标记为积分耗尽", func(t *testing.T) {
+	t.Run("Resource has been exhausted 单独不应标记（节点级容量限流）", func(t *testing.T) {
 		resp := &http.Response{StatusCode: http.StatusTooManyRequests}
 		body := []byte(`{"error":{"message":"Resource has been exhausted"}}`)
-		require.True(t, shouldMarkCreditsExhausted(resp, body, nil))
+		require.False(t, shouldMarkCreditsExhausted(resp, body, nil))
 	})
 
-	t.Run("Resource has been exhausted (check quota) 完整格式应标记", func(t *testing.T) {
+	t.Run("Resource has been exhausted (check quota) 完整格式不应标记", func(t *testing.T) {
 		resp := &http.Response{StatusCode: http.StatusTooManyRequests}
 		body := []byte(`{"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}`)
-		require.True(t, shouldMarkCreditsExhausted(resp, body, nil))
+		require.False(t, shouldMarkCreditsExhausted(resp, body, nil))
 	})
 
 	t.Run("结构化限流不标记", func(t *testing.T) {
