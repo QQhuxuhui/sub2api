@@ -1,5 +1,16 @@
 package service
 
+import "strings"
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
 type SystemSettings struct {
 	RegistrationEnabled              bool
 	EmailVerifyEnabled               bool
@@ -31,6 +42,53 @@ type SystemSettings struct {
 	LinuxDoConnectClientSecretConfigured bool
 	LinuxDoConnectRedirectURL            string
 
+	// WeChat Connect OAuth 登录
+	WeChatConnectEnabled                   bool
+	WeChatConnectAppID                     string
+	WeChatConnectAppSecret                 string
+	WeChatConnectAppSecretConfigured       bool
+	WeChatConnectOpenAppID                 string
+	WeChatConnectOpenAppSecret             string
+	WeChatConnectOpenAppSecretConfigured   bool
+	WeChatConnectMPAppID                   string
+	WeChatConnectMPAppSecret               string
+	WeChatConnectMPAppSecretConfigured     bool
+	WeChatConnectMobileAppID               string
+	WeChatConnectMobileAppSecret           string
+	WeChatConnectMobileAppSecretConfigured bool
+	WeChatConnectOpenEnabled               bool
+	WeChatConnectMPEnabled                 bool
+	WeChatConnectMobileEnabled             bool
+	WeChatConnectMode                      string
+	WeChatConnectScopes                    string
+	WeChatConnectRedirectURL               string
+	WeChatConnectFrontendRedirectURL       string
+
+	// Generic OIDC OAuth 登录
+	OIDCConnectEnabled                bool
+	OIDCConnectProviderName           string
+	OIDCConnectClientID               string
+	OIDCConnectClientSecret           string
+	OIDCConnectClientSecretConfigured bool
+	OIDCConnectIssuerURL              string
+	OIDCConnectDiscoveryURL           string
+	OIDCConnectAuthorizeURL           string
+	OIDCConnectTokenURL               string
+	OIDCConnectUserInfoURL            string
+	OIDCConnectJWKSURL                string
+	OIDCConnectScopes                 string
+	OIDCConnectRedirectURL            string
+	OIDCConnectFrontendRedirectURL    string
+	OIDCConnectTokenAuthMethod        string
+	OIDCConnectUsePKCE                bool
+	OIDCConnectValidateIDToken        bool
+	OIDCConnectAllowedSigningAlgs     string
+	OIDCConnectClockSkewSeconds       int
+	OIDCConnectRequireEmailVerified   bool
+	OIDCConnectUserInfoEmailPath      string
+	OIDCConnectUserInfoIDPath         string
+	OIDCConnectUserInfoUsernamePath   string
+
 	SiteName                    string
 	SiteLogo                    string
 	SiteSubtitle                string
@@ -41,13 +99,20 @@ type SystemSettings struct {
 	HideCcsImportButton         bool
 	PurchaseSubscriptionEnabled bool
 	PurchaseSubscriptionURL     string
-	SoraClientEnabled           bool
+	TableDefaultPageSize        int
+	TablePageSizeOptions        []int
 	CustomMenuItems             string // JSON array of custom menu items
 	CustomEndpoints             string // JSON array of custom endpoints
 
-	DefaultConcurrency   int
-	DefaultBalance       float64
-	DefaultSubscriptions []DefaultSubscriptionSetting
+	DefaultConcurrency           int
+	DefaultBalance               float64
+	AffiliateEnabled             bool
+	AffiliateRebateRate          float64
+	AffiliateRebateFreezeHours   int
+	AffiliateRebateDurationDays  int
+	AffiliateRebatePerInviteeCap float64
+	DefaultUserRPMLimit          int
+	DefaultSubscriptions         []DefaultSubscriptionSetting
 
 	// Model fallback configuration
 	EnableModelFallback      bool   `json:"enable_model_fallback"`
@@ -66,6 +131,13 @@ type SystemSettings struct {
 	OpsQueryModeDefault          string
 	OpsMetricsIntervalSeconds    int
 
+	// Channel Monitor feature
+	ChannelMonitorEnabled                bool `json:"channel_monitor_enabled"`
+	ChannelMonitorDefaultIntervalSeconds int  `json:"channel_monitor_default_interval_seconds"`
+
+	// Available Channels feature (user-facing aggregate view)
+	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
+
 	// Claude Code version check
 	MinClaudeCodeVersion string
 	MaxClaudeCodeVersion string
@@ -77,8 +149,31 @@ type SystemSettings struct {
 	BackendModeEnabled bool
 
 	// Gateway forwarding behavior
-	EnableFingerprintUnification bool // 是否统一 OAuth 账号的指纹头（默认 true）
-	EnableMetadataPassthrough    bool // 是否透传客户端原始 metadata（默认 false）
+	EnableFingerprintUnification       bool // 是否统一 OAuth 账号的指纹头（默认 true）
+	EnableMetadataPassthrough          bool // 是否透传客户端原始 metadata（默认 false）
+	EnableCCHSigning                   bool // 是否对 billing header cch 进行签名（默认 false）
+	EnableAnthropicCacheTTL1hInjection bool // 是否对 Anthropic OAuth/SetupToken 请求体注入 1h cache_control ttl（默认 false）
+
+	// Web Search Emulation
+	WebSearchEmulationEnabled bool // 是否启用 web search 模拟
+
+	// Payment visible method routing
+	PaymentVisibleMethodAlipaySource  string
+	PaymentVisibleMethodWxpaySource   string
+	PaymentVisibleMethodAlipayEnabled bool
+	PaymentVisibleMethodWxpayEnabled  bool
+
+	// OpenAI account scheduling
+	OpenAIAdvancedSchedulerEnabled bool
+
+	// Balance low notification
+	BalanceLowNotifyEnabled     bool
+	BalanceLowNotifyThreshold   float64
+	BalanceLowNotifyRechargeURL string
+
+	// Account quota notification
+	AccountQuotaNotifyEnabled bool
+	AccountQuotaNotifyEmails  []NotifyEmailEntry
 }
 
 type DefaultSubscriptionSetting struct {
@@ -89,6 +184,7 @@ type DefaultSubscriptionSetting struct {
 type PublicSettings struct {
 	RegistrationEnabled              bool
 	EmailVerifyEnabled               bool
+	ForceEmailOnThirdPartySignup     bool
 	RegistrationEmailSuffixWhitelist []string
 	PromoCodeEnabled                 bool
 	PasswordResetEnabled             bool
@@ -107,53 +203,96 @@ type PublicSettings struct {
 
 	PurchaseSubscriptionEnabled bool
 	PurchaseSubscriptionURL     string
-	SoraClientEnabled           bool
+	TableDefaultPageSize        int
+	TablePageSizeOptions        []int
 	CustomMenuItems             string // JSON array of custom menu items
 	CustomEndpoints             string // JSON array of custom endpoints
 
-	LinuxDoOAuthEnabled bool
-	BackendModeEnabled  bool
-	Version             string
+	LinuxDoOAuthEnabled      bool
+	WeChatOAuthEnabled       bool
+	WeChatOAuthOpenEnabled   bool
+	WeChatOAuthMPEnabled     bool
+	WeChatOAuthMobileEnabled bool
+	BackendModeEnabled       bool
+	PaymentEnabled           bool
+	OIDCOAuthEnabled         bool
+	OIDCOAuthProviderName    string
+	Version                  string
+
+	BalanceLowNotifyEnabled     bool
+	AccountQuotaNotifyEnabled   bool
+	BalanceLowNotifyThreshold   float64
+	BalanceLowNotifyRechargeURL string
+
+	// Channel Monitor feature
+	ChannelMonitorEnabled                bool `json:"channel_monitor_enabled"`
+	ChannelMonitorDefaultIntervalSeconds int  `json:"channel_monitor_default_interval_seconds"`
+
+	// Available Channels feature (user-facing aggregate view)
+	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
+
+	// Affiliate (邀请返利) feature toggle
+	AffiliateEnabled bool `json:"affiliate_enabled"`
 }
 
-// SoraS3Settings Sora S3 存储配置
-type SoraS3Settings struct {
-	Enabled                   bool   `json:"enabled"`
-	Endpoint                  string `json:"endpoint"`
-	Region                    string `json:"region"`
-	Bucket                    string `json:"bucket"`
-	AccessKeyID               string `json:"access_key_id"`
-	SecretAccessKey           string `json:"secret_access_key"`            // 仅内部使用，不直接返回前端
-	SecretAccessKeyConfigured bool   `json:"secret_access_key_configured"` // 前端展示用
-	Prefix                    string `json:"prefix"`
-	ForcePathStyle            bool   `json:"force_path_style"`
-	CDNURL                    string `json:"cdn_url"`
-	DefaultStorageQuotaBytes  int64  `json:"default_storage_quota_bytes"`
+type WeChatConnectOAuthConfig struct {
+	Enabled             bool
+	LegacyAppID         string
+	LegacyAppSecret     string
+	OpenAppID           string
+	OpenAppSecret       string
+	MPAppID             string
+	MPAppSecret         string
+	MobileAppID         string
+	MobileAppSecret     string
+	OpenEnabled         bool
+	MPEnabled           bool
+	MobileEnabled       bool
+	Mode                string
+	Scopes              string
+	RedirectURL         string
+	FrontendRedirectURL string
 }
 
-// SoraS3Profile Sora S3 多配置项（服务内部模型）
-type SoraS3Profile struct {
-	ProfileID                 string `json:"profile_id"`
-	Name                      string `json:"name"`
-	IsActive                  bool   `json:"is_active"`
-	Enabled                   bool   `json:"enabled"`
-	Endpoint                  string `json:"endpoint"`
-	Region                    string `json:"region"`
-	Bucket                    string `json:"bucket"`
-	AccessKeyID               string `json:"access_key_id"`
-	SecretAccessKey           string `json:"-"`                            // 仅内部使用，不直接返回前端
-	SecretAccessKeyConfigured bool   `json:"secret_access_key_configured"` // 前端展示用
-	Prefix                    string `json:"prefix"`
-	ForcePathStyle            bool   `json:"force_path_style"`
-	CDNURL                    string `json:"cdn_url"`
-	DefaultStorageQuotaBytes  int64  `json:"default_storage_quota_bytes"`
-	UpdatedAt                 string `json:"updated_at"`
+func (cfg WeChatConnectOAuthConfig) SupportsMode(mode string) bool {
+	switch normalizeWeChatConnectModeSetting(mode) {
+	case "mp":
+		return cfg.MPEnabled
+	case "mobile":
+		return cfg.MobileEnabled
+	default:
+		return cfg.OpenEnabled
+	}
 }
 
-// SoraS3ProfileList Sora S3 多配置列表
-type SoraS3ProfileList struct {
-	ActiveProfileID string          `json:"active_profile_id"`
-	Items           []SoraS3Profile `json:"items"`
+func (cfg WeChatConnectOAuthConfig) ScopeForMode(mode string) string {
+	switch normalizeWeChatConnectModeSetting(mode) {
+	case "mp":
+		return normalizeWeChatConnectScopeSetting(cfg.Scopes, "mp")
+	case "mobile":
+		return ""
+	}
+	return defaultWeChatConnectScopeForMode("open")
+}
+
+func (cfg WeChatConnectOAuthConfig) AppIDForMode(mode string) string {
+	switch normalizeWeChatConnectModeSetting(mode) {
+	case "mp":
+		return strings.TrimSpace(firstNonEmpty(cfg.MPAppID, cfg.LegacyAppID))
+	case "mobile":
+		return strings.TrimSpace(firstNonEmpty(cfg.MobileAppID, cfg.LegacyAppID))
+	}
+	return strings.TrimSpace(firstNonEmpty(cfg.OpenAppID, cfg.LegacyAppID))
+}
+
+func (cfg WeChatConnectOAuthConfig) AppSecretForMode(mode string) string {
+	switch normalizeWeChatConnectModeSetting(mode) {
+	case "mp":
+		return strings.TrimSpace(firstNonEmpty(cfg.MPAppSecret, cfg.LegacyAppSecret))
+	case "mobile":
+		return strings.TrimSpace(firstNonEmpty(cfg.MobileAppSecret, cfg.LegacyAppSecret))
+	}
+	return strings.TrimSpace(firstNonEmpty(cfg.OpenAppSecret, cfg.LegacyAppSecret))
 }
 
 // StreamTimeoutSettings 流超时处理配置（仅控制超时后的处理方式，超时判定由网关配置控制）
@@ -220,10 +359,13 @@ const (
 
 // BetaPolicyRule 单条 Beta 策略规则
 type BetaPolicyRule struct {
-	BetaToken    string `json:"beta_token"`              // beta token 值
-	Action       string `json:"action"`                  // "pass" | "filter" | "block"
-	Scope        string `json:"scope"`                   // "all" | "oauth" | "apikey" | "bedrock"
-	ErrorMessage string `json:"error_message,omitempty"` // 自定义错误消息 (action=block 时生效)
+	BetaToken            string   `json:"beta_token"`                       // beta token 值
+	Action               string   `json:"action"`                           // "pass" | "filter" | "block"
+	Scope                string   `json:"scope"`                            // "all" | "oauth" | "apikey" | "bedrock"
+	ErrorMessage         string   `json:"error_message,omitempty"`          // 自定义错误消息 (action=block 时生效)
+	ModelWhitelist       []string `json:"model_whitelist,omitempty"`        // 模型匹配模式列表（为空=对所有模型生效）
+	FallbackAction       string   `json:"fallback_action,omitempty"`        // 未匹配白名单的模型的处理方式
+	FallbackErrorMessage string   `json:"fallback_error_message,omitempty"` // 未匹配白名单时的自定义错误消息 (fallback_action=block 时生效)
 }
 
 // BetaPolicySettings Beta 策略配置
@@ -260,6 +402,60 @@ func DefaultBetaPolicySettings() *BetaPolicySettings {
 				BetaToken: "context-1m-2025-08-07",
 				Action:    BetaPolicyActionFilter,
 				Scope:     BetaPolicyScopeAll,
+			},
+		},
+	}
+}
+
+// OpenAI Fast Policy 策略常量
+// OpenAI 的 "fast 模式" 通过请求体中的 service_tier 字段识别：
+//   - "priority"（客户端可传 "fast"，归一化为 "priority"）：fast 模式
+//   - "flex"：低优先级模式
+//   - 省略：normal 默认
+//
+// 本策略复用 BetaPolicyAction*/BetaPolicyScope* 常量语义，只是匹配键从
+// anthropic-beta header 换成 body 的 service_tier 字段。
+const (
+	OpenAIFastTierAny      = "all"      // 匹配任意已识别的 service_tier
+	OpenAIFastTierPriority = "priority" // 仅匹配 fast（priority）
+	OpenAIFastTierFlex     = "flex"     // 仅匹配 flex
+)
+
+// OpenAIFastPolicyRule 单条 OpenAI fast/flex 策略规则
+type OpenAIFastPolicyRule struct {
+	ServiceTier          string   `json:"service_tier"`                     // "priority" | "flex" | "auto" | "default" | "scale" | "all"
+	Action               string   `json:"action"`                           // "pass" | "filter" | "block"
+	Scope                string   `json:"scope"`                            // "all" | "oauth" | "apikey" | "bedrock"
+	ErrorMessage         string   `json:"error_message,omitempty"`          // 自定义错误消息 (action=block 时生效)
+	ModelWhitelist       []string `json:"model_whitelist,omitempty"`        // 模型匹配模式列表（为空=对所有模型生效）
+	FallbackAction       string   `json:"fallback_action,omitempty"`        // 未匹配白名单的模型的处理方式
+	FallbackErrorMessage string   `json:"fallback_error_message,omitempty"` // 未匹配白名单时的自定义错误消息 (fallback_action=block 时生效)
+}
+
+// OpenAIFastPolicySettings OpenAI fast 策略配置
+type OpenAIFastPolicySettings struct {
+	Rules []OpenAIFastPolicyRule `json:"rules"`
+}
+
+// DefaultOpenAIFastPolicySettings 返回默认的 OpenAI fast 策略配置。
+// 默认对所有模型的 priority（fast）请求执行 filter，即剔除 service_tier 字段，
+// 让上游按 normal 优先级处理。
+//
+// 为什么 ModelWhitelist 为空（=对所有模型生效）：
+// codex 客户端的 service_tier=fast 是用户级开关，与 model 字段正交。即使
+// 用户使用 gpt-4 + fast，priority 配额仍会被消耗。如果默认规则只锁
+// gpt-5.5*，"用 gpt-4 + fast 透传 priority 上游" 这条路径就会绕过策略。
+// 与 codex 真实语义对齐，默认对所有模型生效；管理员若需要只针对特定
+// 模型，可在 admin UI 中显式配置 model_whitelist。
+func DefaultOpenAIFastPolicySettings() *OpenAIFastPolicySettings {
+	return &OpenAIFastPolicySettings{
+		Rules: []OpenAIFastPolicyRule{
+			{
+				ServiceTier:    OpenAIFastTierPriority,
+				Action:         BetaPolicyActionFilter,
+				Scope:          BetaPolicyScopeAll,
+				ModelWhitelist: []string{},
+				FallbackAction: BetaPolicyActionPass,
 			},
 		},
 	}

@@ -27,13 +27,14 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 	}
 
 	out := &ResponsesRequest{
-		Model:       req.Model,
-		Input:       inputJSON,
-		Temperature: req.Temperature,
-		TopP:        req.TopP,
-		Stream:      true, // upstream always streams
-		Include:     []string{"reasoning.encrypted_content"},
-		ServiceTier: req.ServiceTier,
+		Model:        req.Model,
+		Instructions: req.Instructions,
+		Input:        inputJSON,
+		Temperature:  req.Temperature,
+		TopP:         req.TopP,
+		Stream:       true, // upstream always streams
+		Include:      []string{"reasoning.encrypted_content"},
+		ServiceTier:  req.ServiceTier,
 	}
 
 	storeFalse := false
@@ -339,7 +340,7 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 				})
 			}
 		case "image_url":
-			if p.ImageURL != nil && p.ImageURL.URL != "" {
+			if p.ImageURL != nil && p.ImageURL.URL != "" && !isEmptyBase64DataURI(p.ImageURL.URL) {
 				responseParts = append(responseParts, ResponsesContentPart{
 					Type:     "input_image",
 					ImageURL: p.ImageURL.URL,
@@ -348,6 +349,22 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 		}
 	}
 	return responseParts
+}
+
+func isEmptyBase64DataURI(raw string) bool {
+	if !strings.HasPrefix(raw, "data:") {
+		return false
+	}
+	rest := strings.TrimPrefix(raw, "data:")
+	semicolonIdx := strings.Index(rest, ";")
+	if semicolonIdx < 0 {
+		return false
+	}
+	rest = rest[semicolonIdx+1:]
+	if !strings.HasPrefix(rest, "base64,") {
+		return false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(rest, "base64,")) == ""
 }
 
 func flattenChatContentParts(parts []ChatContentPart) string {
@@ -403,7 +420,7 @@ func convertChatToolsToResponses(tools []ChatTool, functions []ChatFunction) []R
 //
 //	"auto" → "auto"
 //	"none" → "none"
-//	{"name":"X"} → {"type":"function","function":{"name":"X"}}
+//	{"name":"X"} → {"type":"function","name":"X"}
 func convertChatFunctionCallToToolChoice(raw json.RawMessage) (json.RawMessage, error) {
 	// Try string first ("auto", "none", etc.) — pass through as-is.
 	var s string
@@ -419,7 +436,7 @@ func convertChatFunctionCallToToolChoice(raw json.RawMessage) (json.RawMessage, 
 		return nil, err
 	}
 	return json.Marshal(map[string]any{
-		"type":     "function",
-		"function": map[string]string{"name": obj.Name},
+		"type": "function",
+		"name": obj.Name,
 	})
 }
