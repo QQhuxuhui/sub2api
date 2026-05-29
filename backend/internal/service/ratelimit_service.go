@@ -228,11 +228,20 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			shouldDisable = true
 			break
 		}
+		// Antigravity：401 多为上游瞬时误判（"Invalid bearer token"），凭证通常仍有效
+		// （手动恢复账号状态后即可继续使用）。策略：永不下线——既不 SetError 永久禁用，
+		// 也不临时不可调度，账号始终留在调度池；仅失效 token 缓存强制下次请求刷新。
+		// 请求路径上的 401 已由 antigravityRetryLoop 先做「强制刷新 + 原地重试一次」兜底。
+		if account.Platform == PlatformAntigravity {
+			if account.IsOAuth() && s.tokenCacheInvalidator != nil {
+				if err := s.tokenCacheInvalidator.InvalidateToken(ctx, account); err != nil {
+					slog.Warn("antigravity_401_invalidate_cache_failed", "account_id", account.ID, "error", err)
+				}
+			}
+			slog.Info("antigravity_401_kept_schedulable", "account_id", account.ID)
+			return false
+		}
 		// OAuth 账号在 401 错误时临时不可调度（给 token 刷新窗口）；非 OAuth 账号保持原有 SetError 行为。
-		// Antigravity 同样纳入此分支：上游偶发的 "Invalid bearer token" 多为误判（凭证仍有效，
-		// 手动恢复账号状态后即可继续使用），永久 SetError 会把可用账号错误下线。配置了
-		// temp_unschedulable_rules 的 antigravity 401 已在 applyErrorPolicy 阶段提前处理，
-		// 走到这里的是未命中规则的兜底情况，应失效 token 缓存 + 冷却期临时不可调度并自愈。
 		if account.Type == AccountTypeOAuth {
 			// 1. 失效缓存
 			if s.tokenCacheInvalidator != nil {
