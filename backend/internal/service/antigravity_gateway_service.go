@@ -1154,9 +1154,9 @@ func (s *AntigravityGatewayService) buildGeminiTestRequest(projectID, model stri
 				{"text": antigravity.GetDefaultIdentityPatch()},
 			},
 		},
-		"generationConfig": map[string]any{
-			"maxOutputTokens": 1,
-		},
+		// 不设置 generationConfig.maxOutputTokens：thinking 模型（如 gemini-3.1-pro-high/low）
+		// 需要为思考保留 output 预算，maxOutputTokens=1 会被上游判 INVALID_ARGUMENT。
+		// 交由上游使用默认值，连接测试只关心是否能成功建立请求。
 	}
 	payloadBytes, _ := json.Marshal(payload)
 	return s.wrapV1InternalRequest(projectID, model, payloadBytes)
