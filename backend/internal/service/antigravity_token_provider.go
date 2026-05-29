@@ -18,6 +18,9 @@ const (
 	// 超过此时间直接放弃刷新、标记账号临时不可调度并触发 failover，
 	// 让后台 TokenRefreshService 在下个周期继续重试。
 	antigravityRequestRefreshTimeout = 8 * time.Second
+	// antigravityForceRefreshWindow 强制刷新使用的极大刷新窗口，
+	// 使 executor.NeedsRefresh 恒为 true，从而忽略本地 expires_at 强制刷新。
+	antigravityForceRefreshWindow = 100 * 365 * 24 * time.Hour
 )
 
 // AntigravityTokenCache token cache interface.
@@ -175,6 +178,56 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 	}
 
 	return accessToken, nil
+}
+
+// ForceRefreshAccessToken 在上游返回 401（bearer token 失效/误判）后强制刷新 access_token：
+// 先失效缓存，再以极大刷新窗口走统一刷新流程（带分布式锁、DB 重读、竞争恢复），返回最新 token。
+// 与 GetAccessToken 不同，它忽略本地 expires_at（即使未到期也刷新），用于请求路径上的
+// 「401 → 刷新 → 原地重试一次」，避免把仍可用的账号直接判错。
+func (p *AntigravityTokenProvider) ForceRefreshAccessToken(ctx context.Context, account *Account) (string, error) {
+	if account == nil {
+		return "", errors.New("account is nil")
+	}
+	if account.Platform != PlatformAntigravity || account.Type != AccountTypeOAuth {
+		return "", errors.New("not an antigravity oauth account")
+	}
+	if p.refreshAPI == nil || p.executor == nil {
+		return "", errors.New("antigravity refresh api not configured")
+	}
+
+	// 失效缓存，避免后续读到被上游拒绝的旧 token
+	if p.tokenCache != nil {
+		_ = p.tokenCache.DeleteAccessToken(ctx, AntigravityTokenCacheKey(account))
+	}
+
+	refreshCtx, cancel := context.WithTimeout(ctx, antigravityRequestRefreshTimeout)
+	defer cancel()
+	result, err := p.refreshAPI.RefreshIfNeeded(refreshCtx, account, p.executor, antigravityForceRefreshWindow)
+	if err != nil {
+		return "", err
+	}
+
+	// 优先使用刚刷新得到的新凭证
+	if result.Refreshed && result.NewCredentials != nil {
+		if token, ok := result.NewCredentials["access_token"].(string); ok && strings.TrimSpace(token) != "" {
+			return token, nil
+		}
+	}
+
+	refreshed := account
+	if result.Account != nil {
+		refreshed = result.Account
+	} else if result.LockHeld && p.accountRepo != nil {
+		// 另一 worker 正持锁刷新：从 DB 读最新 token
+		if fresh, gerr := p.accountRepo.GetByID(ctx, account.ID); gerr == nil && fresh != nil {
+			refreshed = fresh
+		}
+	}
+	token := strings.TrimSpace(refreshed.GetCredential("access_token"))
+	if token == "" {
+		return "", errors.New("access_token empty after force refresh")
+	}
+	return token, nil
 }
 
 // shouldAttemptBackfill checks backfill cooldown.

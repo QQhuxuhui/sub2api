@@ -599,6 +599,7 @@ func (s *AntigravityGatewayService) antigravityRetryLoop(p antigravityRetryLoopP
 
 	var resp *http.Response
 	var usedBaseURL string
+	authRetried := false // 401 强制刷新原地重试仅执行一次
 	logBody := p.settingService != nil && p.settingService.cfg != nil && p.settingService.cfg.Gateway.LogUpstreamErrorBody
 	maxBytes := 2048
 	if p.settingService != nil && p.settingService.cfg != nil && p.settingService.cfg.Gateway.LogUpstreamErrorBodyMaxBytes > 0 {
@@ -768,6 +769,25 @@ urlFallbackLoop:
 						}
 						continue
 					}
+				}
+
+				// 401 鉴权失败兜底：未命中错误策略规则（applyErrorPolicy 已先行处理命中的情况）时，
+				// 上游拒绝 bearer token 多为 token 失效/误判（凭证通常仍有效）。先强制刷新一次 token
+				// 并用新 token 原地重试，避免把仍可用的账号直接判错。仅刷新重试一次（authRetried 守卫）。
+				if resp.StatusCode == http.StatusUnauthorized && !authRetried && s.tokenProvider != nil {
+					authRetried = true
+					newToken, refreshErr := s.tokenProvider.ForceRefreshAccessToken(p.ctx, p.account)
+					switch {
+					case refreshErr != nil:
+						logger.LegacyPrintf("service.antigravity_gateway", "%s status=401 force_refresh_failed account=%d error=%v (fall through)", p.prefix, p.account.ID, refreshErr)
+					case strings.TrimSpace(newToken) == "" || newToken == p.accessToken:
+						logger.LegacyPrintf("service.antigravity_gateway", "%s status=401 token_unchanged_after_refresh account=%d (fall through)", p.prefix, p.account.ID)
+					default:
+						p.accessToken = newToken
+						logger.LegacyPrintf("service.antigravity_gateway", "%s status=401 force_refreshed_token retry_in_place account=%d", p.prefix, p.account.ID)
+						continue
+					}
+					// 刷新失败或 token 未变 → 落入下方既有处理（由调用方 handleError → 冷却自愈）
 				}
 
 				// INTERNAL 500 渐进惩罚：3 次重试全部命中特定 500 时递增计数器并惩罚

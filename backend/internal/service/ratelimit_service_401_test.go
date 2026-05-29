@@ -106,9 +106,10 @@ func TestRateLimitService_HandleUpstreamError_OAuth401SetsTempUnschedulable(t *t
 		require.Len(t, invalidator.accounts, 1)
 	})
 
-	t.Run("antigravity_401_uses_SetError", func(t *testing.T) {
-		// Antigravity 401 由 applyErrorPolicy 的 temp_unschedulable_rules 控制，
-		// HandleUpstreamError 中走 SetError 路径。
+	t.Run("antigravity_401_self_heals_with_refresh_token", func(t *testing.T) {
+		// Antigravity OAuth 401（如上游误判 "Invalid bearer token"）不应永久禁用：
+		// 凭证通常仍有效（手动恢复账号状态后即可继续使用），应失效 token 缓存并进入
+		// 冷却期临时不可调度，由后台刷新服务在冷却结束后自愈，而非 SetError 永久禁用。
 		repo := &rateLimitAccountRepoStub{}
 		invalidator := &tokenCacheInvalidatorRecorder{}
 		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
@@ -117,14 +118,37 @@ func TestRateLimitService_HandleUpstreamError_OAuth401SetsTempUnschedulable(t *t
 			ID:       100,
 			Platform: PlatformAntigravity,
 			Type:     AccountTypeOAuth,
+			Credentials: map[string]any{
+				"refresh_token": "rt-100",
+			},
 		}
 
-		shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("unauthorized"))
+		shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Invalid bearer token"))
+
+		require.True(t, shouldDisable)
+		require.Equal(t, 0, repo.setErrorCalls, "antigravity 401 with refresh_token must NOT permanently disable")
+		require.Equal(t, 1, repo.tempCalls, "antigravity 401 should enter cooldown temp-unschedulable")
+		require.Equal(t, 0, repo.updateCredentialsCalls, "401 handler must not write credentials back")
+		require.Len(t, invalidator.accounts, 1, "antigravity 401 should invalidate token cache to force refresh")
+	})
+
+	t.Run("antigravity_401_no_refresh_token_sets_error", func(t *testing.T) {
+		// 缺 refresh_token 的 antigravity 账号冷却期内无人能刷新，无法自愈，仍直接禁用。
+		repo := &rateLimitAccountRepoStub{}
+		invalidator := &tokenCacheInvalidatorRecorder{}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		service.SetTokenCacheInvalidator(invalidator)
+		account := &Account{
+			ID:       101,
+			Platform: PlatformAntigravity,
+			Type:     AccountTypeOAuth,
+		}
+
+		shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Invalid bearer token"))
 
 		require.True(t, shouldDisable)
 		require.Equal(t, 1, repo.setErrorCalls)
 		require.Equal(t, 0, repo.tempCalls)
-		require.Empty(t, invalidator.accounts)
 	})
 }
 

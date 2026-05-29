@@ -229,8 +229,11 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			break
 		}
 		// OAuth 账号在 401 错误时临时不可调度（给 token 刷新窗口）；非 OAuth 账号保持原有 SetError 行为。
-		// Antigravity 除外：其 401 由 applyErrorPolicy 的 temp_unschedulable_rules 自行控制。
-		if account.Type == AccountTypeOAuth && account.Platform != PlatformAntigravity {
+		// Antigravity 同样纳入此分支：上游偶发的 "Invalid bearer token" 多为误判（凭证仍有效，
+		// 手动恢复账号状态后即可继续使用），永久 SetError 会把可用账号错误下线。配置了
+		// temp_unschedulable_rules 的 antigravity 401 已在 applyErrorPolicy 阶段提前处理，
+		// 走到这里的是未命中规则的兜底情况，应失效 token 缓存 + 冷却期临时不可调度并自愈。
+		if account.Type == AccountTypeOAuth {
 			// 1. 失效缓存
 			if s.tokenCacheInvalidator != nil {
 				if err := s.tokenCacheInvalidator.InvalidateToken(ctx, account); err != nil {
