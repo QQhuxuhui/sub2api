@@ -1,0 +1,1 @@
+{"delta": {"stop_reason": "end_turn", "stop_sequence": null}, "type": "message_delta", "usage": {"input_tokens": 25183, "output_tokens": 76}}

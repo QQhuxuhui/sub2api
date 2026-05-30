@@ -2194,6 +2194,10 @@ export default {
         fallbackHint: 'Non-Claude Code requests will use this group. Leave empty to reject directly.',
         noFallback: 'No Fallback (Reject)'
       },
+      normalizeEnvelope: {
+        title: "Normalize Anthropic Envelope",
+        desc: "Rewrite Vertex/non-native channel responses to first-party Anthropic shape for this group",
+      },
       openaiMessages: {
         title: 'OpenAI Messages Dispatch',
         allowDispatch: 'Allow /v1/messages dispatch',
