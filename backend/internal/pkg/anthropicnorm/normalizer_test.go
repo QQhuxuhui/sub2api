@@ -72,3 +72,36 @@ func TestRewriteMessageStart(t *testing.T) {
 	}
 	_ = json.Valid
 }
+
+func TestRewriteMessageDelta(t *testing.T) {
+	in := loadFixture(t, "b_message_delta.json")
+	n := newNormalizer()
+	out, injectPing := n.RewriteStreamEvent("message_delta", in)
+	if injectPing {
+		t.Fatal("message_delta 不应触发 ping 注入")
+	}
+	g := gjson.ParseBytes(out)
+	var top []string
+	g.ForEach(func(k, _ gjson.Result) bool { top = append(top, k.String()); return true })
+	wantTop := []string{"type", "delta", "usage", "context_management"}
+	for i := range wantTop {
+		if i >= len(top) || top[i] != wantTop[i] {
+			t.Fatalf("顶层序=%v want %v", top, wantTop)
+		}
+	}
+	if g.Get("delta.stop_details").Type != gjson.Null {
+		t.Fatalf("delta.stop_details 应为 null")
+	}
+	if g.Get("context_management.applied_edits").String() != "[]" {
+		t.Fatalf("context_management.applied_edits 应为 []，得到 %q", g.Get("context_management.applied_edits").String())
+	}
+	if !g.Get("usage.output_tokens_details.thinking_tokens").Exists() {
+		t.Fatal("usage 缺 output_tokens_details.thinking_tokens")
+	}
+	if !g.Get("usage.iterations.0.type").Exists() {
+		t.Fatal("usage.iterations 应有单元素且含 type")
+	}
+	if g.Get("usage.server_tool_use").Exists() {
+		t.Fatal("不应补 server_tool_use")
+	}
+}

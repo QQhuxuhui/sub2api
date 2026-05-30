@@ -98,5 +98,40 @@ func (n *Normalizer) rewriteMessageStart(data []byte) ([]byte, error) {
 }
 
 func (n *Normalizer) rewriteMessageDelta(data []byte) ([]byte, error) {
-	return data, nil // TEMP: 由下个任务实现
+	g := gjson.ParseBytes(data)
+	d := g.Get("delta")
+	u := g.Get("usage")
+	in := u.Get("input_tokens").Int()
+	outTok := u.Get("output_tokens").Int()
+	ccIn := u.Get("cache_creation_input_tokens").Int()
+	crIn := u.Get("cache_read_input_tokens").Int()
+	cc := cacheCreation{
+		Ephemeral5m: u.Get("cache_creation.ephemeral_5m_input_tokens").Int(),
+		Ephemeral1h: u.Get("cache_creation.ephemeral_1h_input_tokens").Int(),
+	}
+	ev := messageDeltaEvent{
+		Type: "message_delta",
+		Delta: deltaBody{
+			StopReason:   rawOrNull(d.Get("stop_reason")),
+			StopSequence: rawOrNull(d.Get("stop_sequence")),
+			StopDetails:  rawOrNull(d.Get("stop_details")),
+		},
+		Usage: deltaUsage{
+			InputTokens:              in,
+			CacheCreationInputTokens: ccIn,
+			CacheReadInputTokens:     crIn,
+			OutputTokens:             outTok,
+			OutputTokensDetails:      outputTokensDetails{ThinkingTokens: u.Get("output_tokens_details.thinking_tokens").Int()},
+			Iterations: []iteration{{
+				InputTokens:              in,
+				OutputTokens:             outTok,
+				CacheReadInputTokens:     crIn,
+				CacheCreationInputTokens: ccIn,
+				CacheCreation:            cc,
+				Type:                     "message",
+			}},
+		},
+		ContextManagement: emptyContextManagement,
+	}
+	return json.Marshal(ev)
 }
