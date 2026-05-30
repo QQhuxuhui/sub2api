@@ -101,6 +101,11 @@ func (Group) Fields() []ent.Field {
 		field.Bool("claude_code_only").
 			Default(false).
 			Comment("是否仅允许 Claude Code 客户端"),
+
+		// 非原生渠道响应信封规范化开关 (added by migration 145)
+		field.Bool("normalize_anthropic_envelope").
+			Default(false).
+			Comment("是否对该分组的非原生渠道(Vertex等)响应做原生信封规范化"),
 		field.Int64("fallback_group_id").
 			Optional().
 			Nillable().

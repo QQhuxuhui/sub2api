@@ -712,6 +712,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		ImagePrice4K:                    g.ImagePrice4k,
 		DefaultValidityDays:             g.DefaultValidityDays,
 		ClaudeCodeOnly:                  g.ClaudeCodeOnly,
+		NormalizeAnthropicEnvelope:      g.NormalizeAnthropicEnvelope,
 		FallbackGroupID:                 g.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: g.FallbackGroupIDOnInvalidRequest,
 		ModelRouting:                    g.ModelRouting,
