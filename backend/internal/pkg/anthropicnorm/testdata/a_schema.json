@@ -1,0 +1,65 @@
+{
+  "channel": "A",
+  "event_types": {
+    "message_start": 6,
+    "content_block_start": 36,
+    "ping": 7,
+    "content_block_delta": 193,
+    "content_block_stop": 36,
+    "message_delta": 6,
+    "message_stop": 6
+  },
+  "has_ping": true,
+  "message_start.message.field_order": [
+    "model",
+    "id",
+    "type",
+    "role",
+    "content",
+    "stop_reason",
+    "stop_sequence",
+    "stop_details",
+    "usage"
+  ],
+  "message_start.message.keys": [
+    "content",
+    "id",
+    "model",
+    "role",
+    "stop_details",
+    "stop_reason",
+    "stop_sequence",
+    "type",
+    "usage"
+  ],
+  "message_start.usage.keys": [
+    "cache_creation",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+    "inference_geo",
+    "input_tokens",
+    "output_tokens",
+    "service_tier"
+  ],
+  "message_delta.keys": [
+    "context_management",
+    "delta",
+    "type",
+    "usage"
+  ],
+  "message_delta.usage.keys": [
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+    "input_tokens",
+    "iterations",
+    "output_tokens",
+    "output_tokens_details",
+    "server_tool_use"
+  ],
+  "content_block.types": [
+    "server_tool_use",
+    "text",
+    "thinking",
+    "web_search_tool_result"
+  ]
+}
