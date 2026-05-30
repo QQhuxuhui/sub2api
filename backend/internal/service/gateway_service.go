@@ -8098,6 +8098,14 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 
 	body = reverseToolNamesIfPresent(c, body)
 
+	if v, ok := c.Get(NormalizeEnvelopeContextKey); ok {
+		if enabled, _ := v.(bool); enabled {
+			if envNorm := anthropicnorm.For(account, true); envNorm != nil {
+				body = envNorm.RewriteNonStreamingBody(body)
+			}
+		}
+	}
+
 	// 写入响应
 	c.Data(resp.StatusCode, contentType, body)
 
