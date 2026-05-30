@@ -63,6 +63,11 @@ const (
 )
 
 const (
+	// NormalizeEnvelopeContextKey 由 handler 设置，标记本请求所属分组是否开启信封规范化。
+	NormalizeEnvelopeContextKey = "normalize_anthropic_envelope"
+)
+
+const (
 	cacheTTLTarget5m = "5m"
 	cacheTTLTarget1h = "1h"
 )
