@@ -35,11 +35,11 @@ type Group struct {
 	ImagePrice4K         *float64
 
 	// Claude Code 客户端限制
-	ClaudeCodeOnly  bool
+	ClaudeCodeOnly bool
 
 	// 非原生渠道响应信封规范化开关
 	NormalizeAnthropicEnvelope bool
-	FallbackGroupID *int64
+	FallbackGroupID            *int64
 	// 无效请求兜底分组（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64
 

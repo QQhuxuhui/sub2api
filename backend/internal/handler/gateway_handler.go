@@ -754,7 +754,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// 转发请求 - 根据账号平台分流
 			c.Set(service.NormalizeEnvelopeContextKey,
-				apiKey.Group != nil && apiKey.Group.NormalizeAnthropicEnvelope)
+				currentAPIKey.Group != nil && currentAPIKey.Group.NormalizeAnthropicEnvelope)
 			c.Set("parsed_request", parsedReq)
 			var result *service.ForwardResult
 			requestCtx := c.Request.Context()
