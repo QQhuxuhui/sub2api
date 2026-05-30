@@ -97,6 +97,57 @@ func (n *Normalizer) rewriteMessageStart(data []byte) ([]byte, error) {
 	return json.Marshal(ev)
 }
 
+// RewriteNonStreamingBody 把非流式 Anthropic 响应体重建为原生形状。失败回退原样。
+func (n *Normalizer) RewriteNonStreamingBody(body []byte) []byte {
+	g := gjson.ParseBytes(body)
+	if g.Get("type").String() != "message" {
+		return body
+	}
+	u := g.Get("usage")
+	ccIn := u.Get("cache_creation_input_tokens").Int()
+	crIn := u.Get("cache_read_input_tokens").Int()
+	inTok := u.Get("input_tokens").Int()
+	outTok := u.Get("output_tokens").Int()
+	cc := cacheCreation{
+		Ephemeral5m: u.Get("cache_creation.ephemeral_5m_input_tokens").Int(),
+		Ephemeral1h: u.Get("cache_creation.ephemeral_1h_input_tokens").Int(),
+	}
+	msg := nonStreamMessage{
+		Model:        g.Get("model").String(),
+		ID:           n.messageID(),
+		Type:         "message",
+		Role:         "assistant",
+		Content:      rawOrNull(g.Get("content")),
+		StopReason:   rawOrNull(g.Get("stop_reason")),
+		StopSequence: rawOrNull(g.Get("stop_sequence")),
+		StopDetails:  rawOrNull(g.Get("stop_details")),
+		Usage: fullUsage{
+			InputTokens:              inTok,
+			CacheCreationInputTokens: ccIn,
+			CacheReadInputTokens:     crIn,
+			CacheCreation:            cc,
+			Iterations: []iteration{{
+				InputTokens:              inTok,
+				OutputTokens:             outTok,
+				CacheReadInputTokens:     crIn,
+				CacheCreationInputTokens: ccIn,
+				CacheCreation:            cc,
+				Type:                     "message",
+			}},
+			OutputTokens:        outTok,
+			OutputTokensDetails: outputTokensDetails{ThinkingTokens: u.Get("output_tokens_details.thinking_tokens").Int()},
+			ServiceTier:         serviceTierStandard,
+			InferenceGeo:        inferenceGeoDefault,
+		},
+		ContextManagement: emptyContextManagement,
+	}
+	out, err := json.Marshal(msg)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
 func (n *Normalizer) rewriteMessageDelta(data []byte) ([]byte, error) {
 	g := gjson.ParseBytes(data)
 	d := g.Get("delta")

@@ -105,3 +105,41 @@ func TestRewriteMessageDelta(t *testing.T) {
 		t.Fatal("不应补 server_tool_use")
 	}
 }
+
+func TestRewriteNonStreamingBody(t *testing.T) {
+	in := loadFixture(t, "b_nonstream.json")
+	n := newNormalizer()
+	out := n.RewriteNonStreamingBody(in)
+	g := gjson.ParseBytes(out)
+	var top []string
+	g.ForEach(func(k, _ gjson.Result) bool { top = append(top, k.String()); return true })
+	want := []string{"model", "id", "type", "role", "content", "stop_reason", "stop_sequence", "stop_details", "usage", "context_management"}
+	if len(top) != len(want) {
+		t.Fatalf("顶层字段数 %d != %d: %v", len(top), len(want), top)
+	}
+	for i := range want {
+		if top[i] != want[i] {
+			t.Fatalf("顶层序[%d]=%q want %q (%v)", i, top[i], want[i], top)
+		}
+	}
+	if !msgIDRe.MatchString(g.Get("id").String()) {
+		t.Fatalf("id 未改写: %q", g.Get("id").String())
+	}
+	if g.Get("stop_sequence").Type != gjson.Null {
+		t.Fatal("stop_sequence 应补 null")
+	}
+	if g.Get("context_management.applied_edits").String() != "[]" {
+		t.Fatal("context_management 应补")
+	}
+	var uk []string
+	g.Get("usage").ForEach(func(k, _ gjson.Result) bool { uk = append(uk, k.String()); return true })
+	wantU := []string{"input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "cache_creation", "iterations", "output_tokens", "output_tokens_details", "service_tier", "inference_geo"}
+	for i := range wantU {
+		if i >= len(uk) || uk[i] != wantU[i] {
+			t.Fatalf("usage 序=%v want %v", uk, wantU)
+		}
+	}
+	if !g.Get("content").IsArray() {
+		t.Fatal("content 应原样保留为数组")
+	}
+}
