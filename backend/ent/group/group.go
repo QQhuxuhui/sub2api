@@ -58,6 +58,8 @@ const (
 	FieldImagePrice4k = "image_price_4k"
 	// FieldClaudeCodeOnly holds the string denoting the claude_code_only field in the database.
 	FieldClaudeCodeOnly = "claude_code_only"
+	// FieldNormalizeAnthropicEnvelope holds the string denoting the normalize_anthropic_envelope field in the database.
+	FieldNormalizeAnthropicEnvelope = "normalize_anthropic_envelope"
 	// FieldFallbackGroupID holds the string denoting the fallback_group_id field in the database.
 	FieldFallbackGroupID = "fallback_group_id"
 	// FieldFallbackGroupIDOnInvalidRequest holds the string denoting the fallback_group_id_on_invalid_request field in the database.
@@ -182,6 +184,7 @@ var Columns = []string{
 	FieldImagePrice2k,
 	FieldImagePrice4k,
 	FieldClaudeCodeOnly,
+	FieldNormalizeAnthropicEnvelope,
 	FieldFallbackGroupID,
 	FieldFallbackGroupIDOnInvalidRequest,
 	FieldModelRouting,
@@ -259,6 +262,8 @@ var (
 	DefaultImageRateMultiplier float64
 	// DefaultClaudeCodeOnly holds the default value on creation for the "claude_code_only" field.
 	DefaultClaudeCodeOnly bool
+	// DefaultNormalizeAnthropicEnvelope holds the default value on creation for the "normalize_anthropic_envelope" field.
+	DefaultNormalizeAnthropicEnvelope bool
 	// DefaultModelRoutingEnabled holds the default value on creation for the "model_routing_enabled" field.
 	DefaultModelRoutingEnabled bool
 	// DefaultMcpXMLInject holds the default value on creation for the "mcp_xml_inject" field.
@@ -396,6 +401,11 @@ func ByImagePrice4k(opts ...sql.OrderTermOption) OrderOption {
 // ByClaudeCodeOnly orders the results by the claude_code_only field.
 func ByClaudeCodeOnly(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldClaudeCodeOnly, opts...).ToFunc()
+}
+
+// ByNormalizeAnthropicEnvelope orders the results by the normalize_anthropic_envelope field.
+func ByNormalizeAnthropicEnvelope(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldNormalizeAnthropicEnvelope, opts...).ToFunc()
 }
 
 // ByFallbackGroupID orders the results by the fallback_group_id field.

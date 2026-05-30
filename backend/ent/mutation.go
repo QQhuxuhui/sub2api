@@ -14885,6 +14885,7 @@ type GroupMutation struct {
 	image_price_4k                          *float64
 	addimage_price_4k                       *float64
 	claude_code_only                        *bool
+	normalize_anthropic_envelope            *bool
 	fallback_group_id                       *int64
 	addfallback_group_id                    *int64
 	fallback_group_id_on_invalid_request    *int64
@@ -16072,6 +16073,42 @@ func (m *GroupMutation) ResetClaudeCodeOnly() {
 	m.claude_code_only = nil
 }
 
+// SetNormalizeAnthropicEnvelope sets the "normalize_anthropic_envelope" field.
+func (m *GroupMutation) SetNormalizeAnthropicEnvelope(b bool) {
+	m.normalize_anthropic_envelope = &b
+}
+
+// NormalizeAnthropicEnvelope returns the value of the "normalize_anthropic_envelope" field in the mutation.
+func (m *GroupMutation) NormalizeAnthropicEnvelope() (r bool, exists bool) {
+	v := m.normalize_anthropic_envelope
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldNormalizeAnthropicEnvelope returns the old "normalize_anthropic_envelope" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldNormalizeAnthropicEnvelope(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldNormalizeAnthropicEnvelope is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldNormalizeAnthropicEnvelope requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldNormalizeAnthropicEnvelope: %w", err)
+	}
+	return oldValue.NormalizeAnthropicEnvelope, nil
+}
+
+// ResetNormalizeAnthropicEnvelope resets all changes to the "normalize_anthropic_envelope" field.
+func (m *GroupMutation) ResetNormalizeAnthropicEnvelope() {
+	m.normalize_anthropic_envelope = nil
+}
+
 // SetFallbackGroupID sets the "fallback_group_id" field.
 func (m *GroupMutation) SetFallbackGroupID(i int64) {
 	m.fallback_group_id = &i
@@ -17070,7 +17107,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 35)
+	fields := make([]string, 0, 36)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -17133,6 +17170,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.claude_code_only != nil {
 		fields = append(fields, group.FieldClaudeCodeOnly)
+	}
+	if m.normalize_anthropic_envelope != nil {
+		fields = append(fields, group.FieldNormalizeAnthropicEnvelope)
 	}
 	if m.fallback_group_id != nil {
 		fields = append(fields, group.FieldFallbackGroupID)
@@ -17226,6 +17266,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.ImagePrice4k()
 	case group.FieldClaudeCodeOnly:
 		return m.ClaudeCodeOnly()
+	case group.FieldNormalizeAnthropicEnvelope:
+		return m.NormalizeAnthropicEnvelope()
 	case group.FieldFallbackGroupID:
 		return m.FallbackGroupID()
 	case group.FieldFallbackGroupIDOnInvalidRequest:
@@ -17305,6 +17347,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldImagePrice4k(ctx)
 	case group.FieldClaudeCodeOnly:
 		return m.OldClaudeCodeOnly(ctx)
+	case group.FieldNormalizeAnthropicEnvelope:
+		return m.OldNormalizeAnthropicEnvelope(ctx)
 	case group.FieldFallbackGroupID:
 		return m.OldFallbackGroupID(ctx)
 	case group.FieldFallbackGroupIDOnInvalidRequest:
@@ -17488,6 +17532,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetClaudeCodeOnly(v)
+		return nil
+	case group.FieldNormalizeAnthropicEnvelope:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetNormalizeAnthropicEnvelope(v)
 		return nil
 	case group.FieldFallbackGroupID:
 		v, ok := value.(int64)
@@ -17926,6 +17977,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldClaudeCodeOnly:
 		m.ResetClaudeCodeOnly()
+		return nil
+	case group.FieldNormalizeAnthropicEnvelope:
+		m.ResetNormalizeAnthropicEnvelope()
 		return nil
 	case group.FieldFallbackGroupID:
 		m.ResetFallbackGroupID()
