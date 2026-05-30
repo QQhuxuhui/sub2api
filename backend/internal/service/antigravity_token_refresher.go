@@ -36,8 +36,10 @@ func (r *AntigravityTokenRefresher) CanRefresh(account *Account) bool {
 }
 
 // NeedsRefresh 检查账户是否需要刷新
-// Antigravity 使用固定的15分钟刷新窗口，忽略全局配置
-func (r *AntigravityTokenRefresher) NeedsRefresh(account *Account, _ time.Duration) bool {
+// Antigravity 默认使用固定的 15 分钟刷新窗口；但当调用方传入更大的窗口时（如强制刷新
+// 路径 ForceRefreshAccessToken 传入的极大窗口）必须尊重它，否则"401 但本地未过期"的
+// 强制刷新会被这里挡下、返回旧 token，导致 401 原地重试失效。取二者较大值。
+func (r *AntigravityTokenRefresher) NeedsRefresh(account *Account, refreshWindow time.Duration) bool {
 	if !r.CanRefresh(account) {
 		return false
 	}
@@ -45,11 +47,15 @@ func (r *AntigravityTokenRefresher) NeedsRefresh(account *Account, _ time.Durati
 	if expiresAt == nil {
 		return false
 	}
+	window := antigravityRefreshWindow
+	if refreshWindow > window {
+		window = refreshWindow
+	}
 	timeUntilExpiry := time.Until(*expiresAt)
-	needsRefresh := timeUntilExpiry < antigravityRefreshWindow
+	needsRefresh := timeUntilExpiry < window
 	if needsRefresh {
 		fmt.Printf("[AntigravityTokenRefresher] Account %d needs refresh: expires_at=%s, time_until_expiry=%v, window=%v\n",
-			account.ID, expiresAt.Format("2006-01-02 15:04:05"), timeUntilExpiry, antigravityRefreshWindow)
+			account.ID, expiresAt.Format("2006-01-02 15:04:05"), timeUntilExpiry, window)
 	}
 	return needsRefresh
 }
