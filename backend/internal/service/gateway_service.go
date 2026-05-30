@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/anthropicnorm"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -7408,6 +7409,12 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	}
 
 	usage := &ClaudeUsage{}
+	var envNorm *anthropicnorm.Normalizer
+	if v, ok := c.Get(NormalizeEnvelopeContextKey); ok {
+		if enabled, _ := v.(bool); enabled {
+			envNorm = anthropicnorm.For(account, true)
+		}
+	}
 	var firstTokenMs *int
 	scanner := bufio.NewScanner(resp.Body)
 	// 设置更大的buffer以处理长行
@@ -7611,6 +7618,27 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		usagePatch := s.extractSSEUsagePatch(event)
 		if anthropicStreamEventIsTerminal(eventName, dataLine) {
 			sawTerminalEvent = true
+		}
+		// 信封规范化：启用且为目标事件时，用有序重写替换默认（map 字母序）序列化，并按需注入 ping。
+		if envNorm != nil && (eventType == "message_start" || eventType == "message_delta") {
+			src := []byte(dataLine)
+			if eventChanged {
+				if nb, mErr := json.Marshal(event); mErr == nil {
+					src = nb
+				}
+			}
+			if rewritten, injectPing := envNorm.RewriteStreamEvent(eventType, src); rewritten != nil {
+				block := ""
+				if eventName != "" {
+					block = "event: " + eventName + "\n"
+				}
+				block += "data: " + string(rewritten) + "\n\n"
+				blocks := []string{block}
+				if injectPing {
+					blocks = append(blocks, "event: ping\ndata: {\"type\": \"ping\"}\n\n")
+				}
+				return blocks, string(rewritten), usagePatch, nil
+			}
 		}
 		if !eventChanged {
 			block := ""
