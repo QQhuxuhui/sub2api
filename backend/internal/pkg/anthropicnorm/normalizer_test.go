@@ -143,3 +143,22 @@ func TestRewriteNonStreamingBody(t *testing.T) {
 		t.Fatal("content 应原样保留为数组")
 	}
 }
+
+func TestRewriteFallbackOnBadJSON(t *testing.T) {
+	n := newNormalizer()
+	bad := []byte(`{not json`)
+	if out, _ := n.RewriteStreamEvent("message_start", bad); string(out) != string(bad) {
+		t.Fatal("坏 JSON 应原样透传")
+	}
+	if out := n.RewriteNonStreamingBody(bad); string(out) != string(bad) {
+		t.Fatal("坏 JSON 非流式应原样透传")
+	}
+}
+
+func TestRewriteUntouchedEvents(t *testing.T) {
+	n := newNormalizer()
+	in := []byte(`{"type":"content_block_delta","index":0}`)
+	if out, ping := n.RewriteStreamEvent("content_block_delta", in); string(out) != string(in) || ping {
+		t.Fatal("非目标事件应零接触")
+	}
+}

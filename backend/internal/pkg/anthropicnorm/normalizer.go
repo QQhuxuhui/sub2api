@@ -47,6 +47,9 @@ func rawOrNull(r gjson.Result) json.RawMessage {
 // 其余类型原样返回。injectPing 为 true 时调用方应在该事件块后注入一个 ping。
 // 任何解析/序列化失败均回退为原样透传。
 func (n *Normalizer) RewriteStreamEvent(eventType string, data []byte) (out []byte, injectPing bool) {
+	if !json.Valid(data) {
+		return data, false
+	}
 	switch eventType {
 	case "message_start":
 		b, err := n.rewriteMessageStart(data)
