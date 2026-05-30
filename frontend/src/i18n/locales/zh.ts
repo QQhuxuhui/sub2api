@@ -2278,6 +2278,10 @@ export default {
         fallbackHint: '非 Claude Code 请求将使用此分组，留空则直接拒绝',
         noFallback: '不降级（直接拒绝）'
       },
+      normalizeEnvelope: {
+        title: "原生响应信封规范化",
+        desc: "对该分组的 Vertex 等非原生渠道，将响应规范化为第一方 Anthropic 形状",
+      },
       openaiMessages: {
         title: 'OpenAI Messages 调度配置',
         allowDispatch: '允许 /v1/messages 调度',
