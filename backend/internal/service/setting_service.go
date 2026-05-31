@@ -2762,8 +2762,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyFallbackModelOpenAI:      "gpt-4o",
 		SettingKeyFallbackModelGemini:      "gemini-2.5-pro",
 		SettingKeyFallbackModelAntigravity: "gemini-2.5-pro",
-		// Identity patch defaults
-		SettingKeyEnableIdentityPatch: "true",
+		// Identity patch defaults (opt-in; default off)
+		SettingKeyEnableIdentityPatch: "false",
 		SettingKeyIdentityPatchPrompt: "",
 
 		// Ops monitoring defaults (vNext)
@@ -3252,11 +3252,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.FallbackModelGemini = s.getStringOrDefault(settings, SettingKeyFallbackModelGemini, "gemini-2.5-pro")
 	result.FallbackModelAntigravity = s.getStringOrDefault(settings, SettingKeyFallbackModelAntigravity, "gemini-2.5-pro")
 
-	// Identity patch settings (default: enabled, to preserve existing behavior)
+	// Identity patch settings (default: disabled; opt-in via setting)
 	if v, ok := settings[SettingKeyEnableIdentityPatch]; ok && v != "" {
 		result.EnableIdentityPatch = v == "true"
 	} else {
-		result.EnableIdentityPatch = true
+		result.EnableIdentityPatch = false
 	}
 	result.IdentityPatchPrompt = settings[SettingKeyIdentityPatchPrompt]
 
@@ -3590,8 +3590,8 @@ func (s *SettingService) GetTurnstileSecretKey(ctx context.Context) string {
 func (s *SettingService) IsIdentityPatchEnabled(ctx context.Context) bool {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyEnableIdentityPatch)
 	if err != nil {
-		// 默认开启，保持兼容
-		return true
+		// 默认关闭：仅在显式开启时注入身份提示词
+		return false
 	}
 	return value == "true"
 }

@@ -7167,7 +7167,7 @@ const form = reactive<SettingsForm>({
   fallback_model_gemini: "gemini-2.5-pro",
   fallback_model_antigravity: "gemini-2.5-pro",
   // Identity patch (Claude -> Gemini)
-  enable_identity_patch: true,
+  enable_identity_patch: false,
   identity_patch_prompt: "",
   // Ops monitoring (vNext)
   ops_monitoring_enabled: true,

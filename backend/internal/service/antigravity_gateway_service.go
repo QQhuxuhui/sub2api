@@ -1396,9 +1396,8 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	}
 
 	// 获取转换选项
-	// Antigravity 上游要求必须包含身份提示词，否则会返回 429
+	// 身份提示词注入由 enable_identity_patch 设置控制（默认关闭）
 	transformOpts := s.getClaudeTransformOptions(ctx)
-	transformOpts.EnableIdentityPatch = true // 强制启用，Antigravity 上游必需
 
 	// 转换 Claude 请求为 Gemini 格式
 	geminiBody, err := antigravity.TransformClaudeToGeminiWithOptions(&claudeReq, projectID, mappedModel, transformOpts)
@@ -2143,10 +2142,14 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		proxyURL = account.Proxy.URL()
 	}
 
-	// Antigravity 上游要求必须包含身份提示词，注入到请求中
-	injectedBody, err := injectIdentityPatchToGeminiRequest(body)
-	if err != nil {
-		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Invalid request body")
+	// 身份提示词注入由 enable_identity_patch 设置控制（默认关闭）
+	injectedBody := body
+	if s.settingService != nil && s.settingService.IsIdentityPatchEnabled(ctx) {
+		patched, perr := injectIdentityPatchToGeminiRequest(body)
+		if perr != nil {
+			return nil, s.writeGoogleError(c, http.StatusBadRequest, "Invalid request body")
+		}
+		injectedBody = patched
 	}
 
 	// 清理 Schema
