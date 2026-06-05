@@ -3961,6 +3961,19 @@
                 </div>
                 <Toggle v-model="form.openai_allow_claude_code_codex_plugin" />
               </div>
+
+              <!-- OpenAI 生图 Chrome 指纹伪装（全局开关） -->
+              <div class="flex items-center justify-between">
+                <div class="pr-4">
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.gatewayForwarding.openaiImageChromeImpersonation") }}
+                  </label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayForwarding.openaiImageChromeImpersonationDesc") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.openai_image_chrome_impersonation" />
+              </div>
             </div>
           </div>
           <!-- Web Search Emulation -->
@@ -7176,6 +7189,7 @@ const form = reactive<SettingsForm>({
   antigravity_user_agent_version: "",
   openai_codex_user_agent: "",
   openai_allow_claude_code_codex_plugin: false,
+  openai_image_chrome_impersonation: false,
   // 余额、订阅到期与账号限额通知
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
@@ -8282,6 +8296,7 @@ async function saveSettings() {
       openai_codex_user_agent:
         form.openai_codex_user_agent?.trim() || "",
       openai_allow_claude_code_codex_plugin: form.openai_allow_claude_code_codex_plugin,
+      openai_image_chrome_impersonation: form.openai_image_chrome_impersonation,
       // Payment configuration
       payment_enabled: form.payment_enabled,
       risk_control_enabled: form.risk_control_enabled,

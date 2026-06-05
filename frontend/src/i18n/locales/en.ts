@@ -5621,6 +5621,9 @@ export default {
         openaiAllowClaudeCodeCodexPlugin: "Allow using the Codex plugin in Claude Code",
         openaiAllowClaudeCodeCodexPluginDesc:
           "Global switch; only affects OpenAI OAuth accounts that have 'Codex official clients only' enabled. When on, all such accounts additionally allow requests from the Claude Code Codex plugin (exact match on originator=Claude Code) without per-account config; upstream requests remain pass-through.",
+        openaiImageChromeImpersonation: 'Chrome TLS fingerprint for image generation',
+        openaiImageChromeImpersonationDesc:
+          'Global switch. When on, OpenAI OAuth/Codex image-generation requests (to chatgpt.com) are sent through a Chrome-impersonating client (JA3/JA4 TLS + HTTP/2 fingerprint) to bypass Cloudflare checks. Does not affect API-key image requests (api.openai.com) or text traffic. Default off.',
       },
       webSearchEmulation: {
         title: 'Web Search Emulation',

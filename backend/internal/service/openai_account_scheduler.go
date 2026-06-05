@@ -975,6 +975,12 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.C
 	if s != nil && s.service != nil && s.service.isOpenAIAccountRuntimeBlocked(account) {
 		return false
 	}
+	// 组织级生图限流：在冷却窗口内跳过同一 org 的账号（转移到同 org 账号无法绕开组织级配额）。
+	if req.RequiredImageCapability != "" && s != nil && s.service != nil {
+		if org := account.GetOpenAIOrganizationID(); org != "" && s.service.isOrgImageScheduleBlocked(org) {
+			return false
+		}
+	}
 	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
 		return false
 	}

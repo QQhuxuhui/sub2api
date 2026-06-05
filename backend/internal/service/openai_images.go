@@ -595,17 +595,22 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	if err != nil {
 		return nil, err
 	}
-	upstreamReq, err := s.buildOpenAIImagesRequest(upstreamCtx, c, account, forwardBody, forwardContentType, token, parsed.Endpoint)
-	if err != nil {
-		return nil, err
-	}
-
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	upstreamURL := ""
+	buildReq := func() (*http.Request, error) {
+		req, buildErr := s.buildOpenAIImagesRequest(upstreamCtx, c, account, forwardBody, forwardContentType, token, parsed.Endpoint)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		upstreamURL = req.URL.String()
+		return req, nil
+	}
+	// API-key 生图直连 api.openai.com（无 Cloudflare 前置），不启用 Chrome 指纹伪装。
 	upstreamStart := time.Now()
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.doImageUpstreamWithRateLimitRetry(upstreamCtx, buildReq, proxyURL, account.ID, account.Concurrency, false)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -615,7 +620,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			AccountID:          account.ID,
 			AccountName:        account.Name,
 			UpstreamStatusCode: 0,
-			UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+			UpstreamURL:        safeUpstreamURL(upstreamURL),
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
@@ -634,11 +639,14 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 				AccountName:        account.Name,
 				UpstreamStatusCode: resp.StatusCode,
 				UpstreamRequestID:  resp.Header.Get("x-request-id"),
-				UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+				UpstreamURL:        safeUpstreamURL(upstreamURL),
 				Kind:               "failover",
 				Message:            upstreamMsg,
 			})
 			s.handleFailoverSideEffects(upstreamCtx, resp, account, upstreamModel)
+			if resp.StatusCode == http.StatusTooManyRequests {
+				s.recordImageOrgRateLimit(account, resp.Header, respBody)
+			}
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,

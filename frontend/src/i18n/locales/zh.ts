@@ -5775,6 +5775,9 @@ export default {
         openaiAllowClaudeCodeCodexPlugin: '允许在 Claude Code 中使用 Codex 插件',
         openaiAllowClaudeCodeCodexPluginDesc:
           '全局开关，仅对已开启「仅允许 Codex 官方客户端」的 OpenAI OAuth 账号生效。开启后，所有此类账号都额外放行通过 Claude Code 的 Codex 插件发起的请求（精确匹配 originator=Claude Code），无需逐账号配置；上游请求仍保持透传。',
+        openaiImageChromeImpersonation: '生图 Chrome 指纹伪装',
+        openaiImageChromeImpersonationDesc:
+          '全局开关。开启后，OpenAI OAuth/Codex 的生图请求（打到 chatgpt.com）将通过模拟 Chrome 的客户端发送（JA3/JA4 TLS + HTTP/2 指纹），用于绕过 Cloudflare 检测。不影响 API-key 生图（api.openai.com）及文本流量。默认关闭。',
       },
       webSearchEmulation: {
         title: 'Web Search 模拟',

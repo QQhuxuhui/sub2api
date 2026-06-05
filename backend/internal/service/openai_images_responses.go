@@ -1143,19 +1143,25 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	if err != nil {
 		return nil, err
 	}
-	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, parsed.StickySessionSeed(), false)
-	if err != nil {
-		return nil, err
-	}
-	upstreamReq.Header.Set("Content-Type", "application/json")
-	upstreamReq.Header.Set("Accept", "text/event-stream")
-
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	upstreamURL := ""
+	buildReq := func() (*http.Request, error) {
+		req, buildErr := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, parsed.StickySessionSeed(), false)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		upstreamURL = req.URL.String()
+		return req, nil
+	}
+	// 全局开关：对 OAuth/Codex 生图（chatgpt.com，Cloudflare 前置）启用 Chrome TLS/HTTP2 指纹伪装。
+	useImpersonate := s.settingService != nil && s.settingService.IsOpenAIImageChromeImpersonationEnabled(ctx)
 	upstreamStart := time.Now()
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.doImageUpstreamWithRateLimitRetry(upstreamCtx, buildReq, proxyURL, account.ID, account.Concurrency, useImpersonate)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -1165,7 +1171,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			AccountID:          account.ID,
 			AccountName:        account.Name,
 			UpstreamStatusCode: 0,
-			UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+			UpstreamURL:        safeUpstreamURL(upstreamURL),
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
@@ -1184,11 +1190,14 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 				AccountName:        account.Name,
 				UpstreamStatusCode: resp.StatusCode,
 				UpstreamRequestID:  resp.Header.Get("x-request-id"),
-				UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+				UpstreamURL:        safeUpstreamURL(upstreamURL),
 				Kind:               "failover",
 				Message:            upstreamMsg,
 			})
 			s.handleFailoverSideEffects(upstreamCtx, resp, account, requestModel)
+			if resp.StatusCode == http.StatusTooManyRequests {
+				s.recordImageOrgRateLimit(account, resp.Header, respBody)
+			}
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
