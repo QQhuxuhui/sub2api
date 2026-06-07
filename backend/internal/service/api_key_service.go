@@ -316,12 +316,16 @@ func (s *APIKeyService) incrementAPIKeyErrorCount(ctx context.Context, userID in
 // 对于订阅类型分组：检查用户是否有有效订阅
 // 对于标准类型分组：使用原有的 AllowedGroups 和 IsExclusive 逻辑
 func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group *Group) bool {
-	// 订阅类型分组：需要有效订阅
+	// 订阅类型分组：始终要求有效订阅（管理员也不例外，与运行时中间件 api_key_auth 保持一致，
+	// 否则会生成创建得了、运行时 403 的“幽灵 key”）
 	if group.IsSubscriptionType() {
 		_, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, user.ID, group.ID)
 		return err == nil // 有有效订阅则允许
 	}
-	// 标准类型分组：使用原有逻辑
+	// 标准类型分组：管理员可绑定全部（含专属分组），运行时不会再对标准分组做归属校验
+	if user.IsAdmin() {
+		return true
+	}
 	return user.CanBindGroup(group.ID, group.IsExclusive)
 }
 
@@ -777,11 +781,14 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 
 // canUserBindGroupInternal 内部方法，检查用户是否可以绑定分组（使用预加载的订阅数据）
 func (s *APIKeyService) canUserBindGroupInternal(user *User, group *Group, subscribedGroupIDs map[int64]bool) bool {
-	// 订阅类型分组：需要有效订阅
+	// 订阅类型分组：始终要求有效订阅（管理员也不例外，与运行时中间件 api_key_auth 保持一致）
 	if group.IsSubscriptionType() {
 		return subscribedGroupIDs[group.ID]
 	}
-	// 标准类型分组：使用原有逻辑
+	// 标准类型分组：管理员可绑定全部（含专属分组）
+	if user.IsAdmin() {
+		return true
+	}
 	return user.CanBindGroup(group.ID, group.IsExclusive)
 }
 
