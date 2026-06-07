@@ -2052,6 +2052,7 @@ export default {
       nonExclusive: 'Non-Exclusive',
       public: 'Public',
       columns: {
+        id: 'ID',
         name: 'Name',
         platform: 'Platform',
         rateMultiplier: 'Rate Multiplier',

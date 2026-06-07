@@ -3150,6 +3150,7 @@ const appStore = useAppStore();
 const onboardingStore = useOnboardingStore();
 
 const columns = computed<Column[]>(() => [
+  { key: "id", label: t("admin.groups.columns.id"), sortable: true },
   { key: "name", label: t("admin.groups.columns.name"), sortable: true },
   {
     key: "platform",
