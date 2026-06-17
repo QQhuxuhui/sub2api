@@ -78,10 +78,26 @@ BUILD_ARGS=(
     -t "${FULL_IMAGE}:latest"
 )
 
+# 可选：通过环境变量 BUILD_HTTP_PROXY 注入构建期代理
+# （用于在国内环境访问 Docker Hub / npm 官方源等；不设置则行为不变）
+DOCKER_NET_ARGS=()
+if [ -n "$BUILD_HTTP_PROXY" ]; then
+    echo -e "${GREEN}使用构建代理: ${BUILD_HTTP_PROXY}（--network=host）${NC}"
+    BUILD_ARGS+=(
+        --build-arg "HTTP_PROXY=${BUILD_HTTP_PROXY}"
+        --build-arg "HTTPS_PROXY=${BUILD_HTTP_PROXY}"
+        --build-arg "http_proxy=${BUILD_HTTP_PROXY}"
+        --build-arg "https_proxy=${BUILD_HTTP_PROXY}"
+        --build-arg "NO_PROXY=localhost,127.0.0.1,goproxy.cn,sum.golang.google.cn,.aliyuncs.com"
+        --build-arg "no_proxy=localhost,127.0.0.1,goproxy.cn,sum.golang.google.cn,.aliyuncs.com"
+    )
+    DOCKER_NET_ARGS=(--network=host)
+fi
+
 if [ "$USE_CACHE" = false ]; then
-    docker build --no-cache "${BUILD_ARGS[@]}" .
+    docker build --no-cache "${DOCKER_NET_ARGS[@]}" "${BUILD_ARGS[@]}" .
 else
-    docker build "${BUILD_ARGS[@]}" .
+    docker build "${DOCKER_NET_ARGS[@]}" "${BUILD_ARGS[@]}" .
 fi
 
 if [ $? -ne 0 ]; then
