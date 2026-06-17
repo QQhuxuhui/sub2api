@@ -103,12 +103,15 @@ const backendModeDBTimeout = 5 * time.Second
 
 // cachedGatewayForwardingSettings 缓存网关转发行为设置（进程内缓存，60s TTL）
 type cachedGatewayForwardingSettings struct {
-	fingerprintUnification       bool
-	metadataPassthrough          bool
-	cchSigning                   bool
-	anthropicCacheTTL1hInjection bool
-	rewriteMessageCacheControl   bool
-	expiresAt                    int64 // unix nano
+	fingerprintUnification           bool
+	metadataPassthrough              bool
+	cchSigning                       bool
+	claudeOAuthSystemPromptInjection bool
+	claudeOAuthSystemPrompt          string
+	claudeOAuthSystemPromptBlocks    string
+	anthropicCacheTTL1hInjection     bool
+	rewriteMessageCacheControl       bool
+	expiresAt                        int64 // unix nano
 }
 
 var gatewayForwardingCache atomic.Value // *cachedGatewayForwardingSettings
@@ -137,6 +140,11 @@ type cachedOpenAICodexUserAgent struct {
 	expiresAt int64 // unix nano
 }
 
+type cachedOpenAIQuotaAutoPauseSettings struct {
+	settings  OpsOpenAIAccountQuotaAutoPauseSettings
+	expiresAt int64
+}
+
 const openAICodexUserAgentCacheTTL = 60 * time.Second
 const openAICodexUserAgentErrorTTL = 5 * time.Second
 const openAICodexUserAgentDBTimeout = 5 * time.Second
@@ -151,6 +159,24 @@ type cachedOpenAIAllowCodexPlugin struct {
 const openAIAllowCodexPluginCacheTTL = 60 * time.Second
 const openAIAllowCodexPluginErrorTTL = 5 * time.Second
 const openAIAllowCodexPluginDBTimeout = 5 * time.Second
+
+// cachedCyberSessionBlockRuntime cyber 会话屏蔽开关+TTL 进程内缓存（60s TTL）。
+// GetCyberSessionBlockRuntime 在网关请求热路径上被调用，避免每次访问 DB。
+type cachedCyberSessionBlockRuntime struct {
+	enabled   bool
+	ttl       time.Duration
+	expiresAt int64 // unix nano
+}
+
+const cyberSessionBlockRuntimeCacheTTL = 60 * time.Second
+const cyberSessionBlockRuntimeErrorTTL = 5 * time.Second
+const cyberSessionBlockRuntimeDBTimeout = 5 * time.Second
+
+const openAIQuotaAutoPauseSettingsCacheTTL = 60 * time.Second
+const openAIQuotaAutoPauseSettingsErrorTTL = 5 * time.Second
+const openAIQuotaAutoPauseSettingsDBTimeout = 5 * time.Second
+
+const openAIQuotaAutoPauseSettingsRefreshKey = "openai_quota_auto_pause_settings"
 
 // DefaultSubscriptionGroupReader validates group references used by default subscriptions.
 type DefaultSubscriptionGroupReader interface {
@@ -176,6 +202,18 @@ type SettingService struct {
 	openAICodexUASF             singleflight.Group
 	openAIAllowCodexPluginCache atomic.Value // *cachedOpenAIAllowCodexPlugin
 	openAIAllowCodexPluginSF    singleflight.Group
+
+	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime
+	cyberSessionBlockRuntimeSF    singleflight.Group
+
+	// openAIQuotaAutoPauseSettingsCache holds the most recently observed quota auto-pause
+	// settings. GetOpenAIQuotaAutoPauseSettings reads this atomic.Value on the request hot
+	// path without ever blocking on the DB; when the cached entry expires, a background
+	// goroutine refreshes it via openAIQuotaAutoPauseSettingsSF (stale-while-revalidate).
+	// This per-service field also gives tests natural isolation — each SettingService
+	// instance owns its own cache, no shared package-level state.
+	openAIQuotaAutoPauseSettingsCache atomic.Value // *cachedOpenAIQuotaAutoPauseSettings
+	openAIQuotaAutoPauseSettingsSF    singleflight.Group
 }
 
 // DefaultPlatformQuotaSetting 单 platform 三档限额（nil = 沿用上层；0 = 显式禁用；>0 = 上限）
@@ -672,6 +710,62 @@ func (s *SettingService) GetFrontendURL(ctx context.Context) string {
 	return s.cfg.Server.FrontendURL
 }
 
+// GetCyberSessionBlockRuntime 返回 (开关, TTL)，进程内缓存 ~60s，
+// 模式对齐 IsOpenAIAllowClaudeCodeCodexPluginEnabled（热路径零 DB 往返）。
+// 两个 setting key 在单次 singleflight 里一起读取，减少 DB 往返。
+// 默认值：开关 false，TTL 1h（与粘性会话对齐）。
+func (s *SettingService) GetCyberSessionBlockRuntime(ctx context.Context) (bool, time.Duration) {
+	if cached, ok := s.cyberSessionBlockRuntimeCache.Load().(*cachedCyberSessionBlockRuntime); ok && cached != nil {
+		if time.Now().UnixNano() < cached.expiresAt {
+			return cached.enabled, cached.ttl
+		}
+	}
+	result, _, _ := s.cyberSessionBlockRuntimeSF.Do("cyber_session_block_runtime", func() (any, error) {
+		if cached, ok := s.cyberSessionBlockRuntimeCache.Load().(*cachedCyberSessionBlockRuntime); ok && cached != nil {
+			if time.Now().UnixNano() < cached.expiresAt {
+				return cached, nil
+			}
+		}
+		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cyberSessionBlockRuntimeDBTimeout)
+		defer cancel()
+
+		enabledVal, enabledErr := s.settingRepo.GetValue(dbCtx, SettingKeyCyberSessionBlockEnabled)
+		ttlVal, ttlErr := s.settingRepo.GetValue(dbCtx, SettingKeyCyberSessionBlockTTLSeconds)
+
+		if enabledErr != nil && !errors.Is(enabledErr, ErrSettingNotFound) {
+			slog.Warn("failed to get cyber_session_block_enabled setting", "error", enabledErr)
+			entry := &cachedCyberSessionBlockRuntime{
+				enabled:   false,
+				ttl:       time.Hour,
+				expiresAt: time.Now().Add(cyberSessionBlockRuntimeErrorTTL).UnixNano(),
+			}
+			s.cyberSessionBlockRuntimeCache.Store(entry)
+			return entry, nil
+		}
+
+		enabled := enabledErr == nil && strings.TrimSpace(enabledVal) == "true"
+
+		ttl := time.Hour
+		if ttlErr == nil {
+			if n, perr := strconv.Atoi(strings.TrimSpace(ttlVal)); perr == nil && n > 0 {
+				ttl = time.Duration(n) * time.Second
+			}
+		}
+
+		entry := &cachedCyberSessionBlockRuntime{
+			enabled:   enabled,
+			ttl:       ttl,
+			expiresAt: time.Now().Add(cyberSessionBlockRuntimeCacheTTL).UnixNano(),
+		}
+		s.cyberSessionBlockRuntimeCache.Store(entry)
+		return entry, nil
+	})
+	if entry, ok := result.(*cachedCyberSessionBlockRuntime); ok && entry != nil {
+		return entry.enabled, entry.ttl
+	}
+	return false, time.Hour
+}
+
 // GetPublicSettings 获取公开设置（无需登录）
 func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings, error) {
 	keys := []string{
@@ -741,6 +835,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyAvailableChannelsEnabled,
 		SettingKeyAffiliateEnabled,
 		SettingKeyRiskControlEnabled,
+		SettingKeyAllowUserViewErrorRequests,
 	}
 
 	settings, err := s.settingRepo.GetMultiple(ctx, keys)
@@ -853,6 +948,8 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		AffiliateEnabled: settings[SettingKeyAffiliateEnabled] == "true",
 
 		RiskControlEnabled: settings[SettingKeyRiskControlEnabled] == "true",
+
+		AllowUserViewErrorRequests: settings[SettingKeyAllowUserViewErrorRequests] == "true",
 	}, nil
 }
 
@@ -928,6 +1025,17 @@ func (s *SettingService) GetAvailableChannelsRuntime(ctx context.Context) Availa
 	return AvailableChannelsRuntime{
 		Enabled: vals[SettingKeyAvailableChannelsEnabled] == "true",
 	}
+}
+
+// IsUserErrorViewAllowed reads the user-facing error-requests visibility switch
+// directly from the settings store. Fail-closed: on error returns false (opt-in default).
+func (s *SettingService) IsUserErrorViewAllowed(ctx context.Context) bool {
+	vals, err := s.settingRepo.GetMultiple(ctx, []string{SettingKeyAllowUserViewErrorRequests})
+	if err != nil {
+		slog.Warn("failed to get allow_user_view_error_requests setting, defaulting to false", "error", err)
+		return false
+	}
+	return vals[SettingKeyAllowUserViewErrorRequests] == "true"
 }
 
 // GetAntigravityUserAgentVersion 返回 Antigravity 上游请求使用的版本号。
@@ -1155,6 +1263,7 @@ type PublicSettingsInjectionPayload struct {
 	AvailableChannelsEnabled             bool `json:"available_channels_enabled"`
 	AffiliateEnabled                     bool `json:"affiliate_enabled"`
 	RiskControlEnabled                   bool `json:"risk_control_enabled"`
+	AllowUserViewErrorRequests           bool `json:"allow_user_view_error_requests"`
 }
 
 // GetPublicSettingsForInjection returns public settings in a format suitable for HTML injection.
@@ -1217,6 +1326,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		AvailableChannelsEnabled:             settings.AvailableChannelsEnabled,
 		AffiliateEnabled:                     settings.AffiliateEnabled,
 		RiskControlEnabled:                   settings.RiskControlEnabled,
+		AllowUserViewErrorRequests:           settings.AllowUserViewErrorRequests,
 	}, nil
 }
 
@@ -1859,6 +1969,12 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// 风控中心功能开关
 	updates[SettingKeyRiskControlEnabled] = strconv.FormatBool(settings.RiskControlEnabled)
 
+	// cyber 会话屏蔽开关 + TTL
+	updates[SettingKeyCyberSessionBlockEnabled] = strconv.FormatBool(settings.CyberSessionBlockEnabled)
+	if settings.CyberSessionBlockTTLSeconds > 0 {
+		updates[SettingKeyCyberSessionBlockTTLSeconds] = strconv.Itoa(settings.CyberSessionBlockTTLSeconds)
+	}
+
 	// Claude Code version check
 	updates[SettingKeyMinClaudeCodeVersion] = settings.MinClaudeCodeVersion
 	updates[SettingKeyMaxClaudeCodeVersion] = settings.MaxClaudeCodeVersion
@@ -1873,6 +1989,12 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyEnableFingerprintUnification] = strconv.FormatBool(settings.EnableFingerprintUnification)
 	updates[SettingKeyEnableMetadataPassthrough] = strconv.FormatBool(settings.EnableMetadataPassthrough)
 	updates[SettingKeyEnableCCHSigning] = strconv.FormatBool(settings.EnableCCHSigning)
+	updates[SettingKeyEnableClaudeOAuthSystemPromptInjection] = strconv.FormatBool(settings.EnableClaudeOAuthSystemPromptInjection)
+	updates[SettingKeyClaudeOAuthSystemPrompt] = settings.ClaudeOAuthSystemPrompt
+	if err := ValidateClaudeOAuthSystemPromptBlocksConfig(settings.ClaudeOAuthSystemPromptBlocks); err != nil {
+		return nil, err
+	}
+	updates[SettingKeyClaudeOAuthSystemPromptBlocks] = settings.ClaudeOAuthSystemPromptBlocks
 	updates[SettingKeyEnableAnthropicCacheTTL1hInjection] = strconv.FormatBool(settings.EnableAnthropicCacheTTL1hInjection)
 	updates[SettingKeyRewriteMessageCacheControl] = strconv.FormatBool(settings.RewriteMessageCacheControl)
 	updates[SettingKeyAntigravityUserAgentVersion] = antigravity.NormalizeUserAgentVersion(settings.AntigravityUserAgentVersion)
@@ -1904,6 +2026,8 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		}
 		updates[SettingKeyDefaultPlatformQuotas] = string(blob)
 	}
+
+	updates[SettingKeyAllowUserViewErrorRequests] = strconv.FormatBool(settings.AllowUserViewErrorRequests)
 
 	return updates, nil
 }
@@ -1998,12 +2122,15 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	})
 	gatewayForwardingSF.Forget("gateway_forwarding")
 	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
-		fingerprintUnification:       settings.EnableFingerprintUnification,
-		metadataPassthrough:          settings.EnableMetadataPassthrough,
-		cchSigning:                   settings.EnableCCHSigning,
-		anthropicCacheTTL1hInjection: settings.EnableAnthropicCacheTTL1hInjection,
-		rewriteMessageCacheControl:   settings.RewriteMessageCacheControl,
-		expiresAt:                    time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
+		fingerprintUnification:           settings.EnableFingerprintUnification,
+		metadataPassthrough:              settings.EnableMetadataPassthrough,
+		cchSigning:                       settings.EnableCCHSigning,
+		claudeOAuthSystemPromptInjection: settings.EnableClaudeOAuthSystemPromptInjection,
+		claudeOAuthSystemPrompt:          settings.ClaudeOAuthSystemPrompt,
+		claudeOAuthSystemPromptBlocks:    settings.ClaudeOAuthSystemPromptBlocks,
+		anthropicCacheTTL1hInjection:     settings.EnableAnthropicCacheTTL1hInjection,
+		rewriteMessageCacheControl:       settings.RewriteMessageCacheControl,
+		expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 	})
 	s.antigravityUAVersionSF.Forget("antigravity_user_agent_version")
 	antigravityUserAgentVersion := antigravity.NormalizeUserAgentVersion(settings.AntigravityUserAgentVersion)
@@ -2028,6 +2155,17 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		enabled:   settings.OpenAIAdvancedSchedulerEnabled,
 		expiresAt: time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
 	})
+	// Invalidate the quota auto-pause cache and let the next read trigger a fresh load.
+	// We can't know from here whether ops_advanced_settings was also touched, so be
+	// defensive: store an expired entry — GetOpenAIQuotaAutoPauseSettings will serve
+	// stale and kick off an async refresh, never blocking the request that follows.
+	s.openAIQuotaAutoPauseSettingsSF.Forget(openAIQuotaAutoPauseSettingsRefreshKey)
+	if cached, _ := s.openAIQuotaAutoPauseSettingsCache.Load().(*cachedOpenAIQuotaAutoPauseSettings); cached != nil {
+		s.openAIQuotaAutoPauseSettingsCache.Store(&cachedOpenAIQuotaAutoPauseSettings{
+			settings:  cached.settings,
+			expiresAt: 0,
+		})
+	}
 	if s.cfg != nil {
 		s.cfg.SetTrustForwardedIPForAPIKeyACL(settings.APIKeyACLTrustForwardedIP)
 	}
@@ -2210,18 +2348,22 @@ func (s *SettingService) IsBackendModeEnabled(ctx context.Context) bool {
 }
 
 type gatewayForwardingSettingsResult struct {
-	fp, mp, cch, cacheTTL1h, rewriteMessageCacheControl bool
+	fp, mp, cch, claudeOAuthSystemPromptInjection, cacheTTL1h, rewriteMessageCacheControl bool
+	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks                                string
 }
 
 func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context) gatewayForwardingSettingsResult {
 	if cached, ok := gatewayForwardingCache.Load().(*cachedGatewayForwardingSettings); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
 			return gatewayForwardingSettingsResult{
-				fp:                         cached.fingerprintUnification,
-				mp:                         cached.metadataPassthrough,
-				cch:                        cached.cchSigning,
-				cacheTTL1h:                 cached.anthropicCacheTTL1hInjection,
-				rewriteMessageCacheControl: cached.rewriteMessageCacheControl,
+				fp:                               cached.fingerprintUnification,
+				mp:                               cached.metadataPassthrough,
+				cch:                              cached.cchSigning,
+				claudeOAuthSystemPromptInjection: cached.claudeOAuthSystemPromptInjection,
+				claudeOAuthSystemPrompt:          cached.claudeOAuthSystemPrompt,
+				claudeOAuthSystemPromptBlocks:    cached.claudeOAuthSystemPromptBlocks,
+				cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
+				rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
 			}
 		}
 	}
@@ -2229,11 +2371,14 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		if cached, ok := gatewayForwardingCache.Load().(*cachedGatewayForwardingSettings); ok && cached != nil {
 			if time.Now().UnixNano() < cached.expiresAt {
 				return gatewayForwardingSettingsResult{
-					fp:                         cached.fingerprintUnification,
-					mp:                         cached.metadataPassthrough,
-					cch:                        cached.cchSigning,
-					cacheTTL1h:                 cached.anthropicCacheTTL1hInjection,
-					rewriteMessageCacheControl: cached.rewriteMessageCacheControl,
+					fp:                               cached.fingerprintUnification,
+					mp:                               cached.metadataPassthrough,
+					cch:                              cached.cchSigning,
+					claudeOAuthSystemPromptInjection: cached.claudeOAuthSystemPromptInjection,
+					claudeOAuthSystemPrompt:          cached.claudeOAuthSystemPrompt,
+					claudeOAuthSystemPromptBlocks:    cached.claudeOAuthSystemPromptBlocks,
+					cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
+					rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
 				}, nil
 			}
 		}
@@ -2243,20 +2388,24 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			SettingKeyEnableFingerprintUnification,
 			SettingKeyEnableMetadataPassthrough,
 			SettingKeyEnableCCHSigning,
+			SettingKeyEnableClaudeOAuthSystemPromptInjection,
+			SettingKeyClaudeOAuthSystemPrompt,
+			SettingKeyClaudeOAuthSystemPromptBlocks,
 			SettingKeyEnableAnthropicCacheTTL1hInjection,
 			SettingKeyRewriteMessageCacheControl,
 		})
 		if err != nil {
 			slog.Warn("failed to get gateway forwarding settings", "error", err)
 			gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
-				fingerprintUnification:       true,
-				metadataPassthrough:          false,
-				cchSigning:                   false,
-				anthropicCacheTTL1hInjection: false,
-				rewriteMessageCacheControl:   s.defaultRewriteMessageCacheControl(),
-				expiresAt:                    time.Now().Add(gatewayForwardingErrorTTL).UnixNano(),
+				fingerprintUnification:           true,
+				metadataPassthrough:              false,
+				cchSigning:                       false,
+				claudeOAuthSystemPromptInjection: true,
+				anthropicCacheTTL1hInjection:     false,
+				rewriteMessageCacheControl:       s.defaultRewriteMessageCacheControl(),
+				expiresAt:                        time.Now().Add(gatewayForwardingErrorTTL).UnixNano(),
 			})
-			return gatewayForwardingSettingsResult{fp: true, rewriteMessageCacheControl: s.defaultRewriteMessageCacheControl()}, nil
+			return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, rewriteMessageCacheControl: s.defaultRewriteMessageCacheControl()}, nil
 		}
 		fp := true
 		if v, ok := values[SettingKeyEnableFingerprintUnification]; ok && v != "" {
@@ -2264,31 +2413,43 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		}
 		mp := values[SettingKeyEnableMetadataPassthrough] == "true"
 		cch := values[SettingKeyEnableCCHSigning] == "true"
+		systemPromptInjection := true
+		if v, ok := values[SettingKeyEnableClaudeOAuthSystemPromptInjection]; ok && v != "" {
+			systemPromptInjection = v == "true"
+		}
+		systemPrompt := values[SettingKeyClaudeOAuthSystemPrompt]
+		systemPromptBlocks := values[SettingKeyClaudeOAuthSystemPromptBlocks]
 		cacheTTL1h := values[SettingKeyEnableAnthropicCacheTTL1hInjection] == "true"
 		rewriteMessageCacheControl := s.defaultRewriteMessageCacheControl()
 		if v, ok := values[SettingKeyRewriteMessageCacheControl]; ok && v != "" {
 			rewriteMessageCacheControl = v == "true"
 		}
 		gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
-			fingerprintUnification:       fp,
-			metadataPassthrough:          mp,
-			cchSigning:                   cch,
-			anthropicCacheTTL1hInjection: cacheTTL1h,
-			rewriteMessageCacheControl:   rewriteMessageCacheControl,
-			expiresAt:                    time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
+			fingerprintUnification:           fp,
+			metadataPassthrough:              mp,
+			cchSigning:                       cch,
+			claudeOAuthSystemPromptInjection: systemPromptInjection,
+			claudeOAuthSystemPrompt:          systemPrompt,
+			claudeOAuthSystemPromptBlocks:    systemPromptBlocks,
+			anthropicCacheTTL1hInjection:     cacheTTL1h,
+			rewriteMessageCacheControl:       rewriteMessageCacheControl,
+			expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 		})
 		return gatewayForwardingSettingsResult{
-			fp:                         fp,
-			mp:                         mp,
-			cch:                        cch,
-			cacheTTL1h:                 cacheTTL1h,
-			rewriteMessageCacheControl: rewriteMessageCacheControl,
+			fp:                               fp,
+			mp:                               mp,
+			cch:                              cch,
+			claudeOAuthSystemPromptInjection: systemPromptInjection,
+			claudeOAuthSystemPrompt:          systemPrompt,
+			claudeOAuthSystemPromptBlocks:    systemPromptBlocks,
+			cacheTTL1h:                       cacheTTL1h,
+			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 		}, nil
 	})
 	if r, ok := val.(gatewayForwardingSettingsResult); ok {
 		return r
 	}
-	return gatewayForwardingSettingsResult{fp: true}
+	return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true}
 }
 
 // GetGatewayForwardingSettings returns cached gateway forwarding settings.
@@ -2307,6 +2468,14 @@ func (s *SettingService) IsAnthropicCacheTTL1hInjectionEnabled(ctx context.Conte
 // IsRewriteMessageCacheControlEnabled 检查是否启用 messages cache_control 改写。
 func (s *SettingService) IsRewriteMessageCacheControlEnabled(ctx context.Context) bool {
 	return s.getGatewayForwardingSettingsCached(ctx).rewriteMessageCacheControl
+}
+
+// GetClaudeOAuthSystemPromptInjectionSettings returns the Claude OAuth mimic
+// system block switch, legacy custom expansion prompt, and configurable blocks JSON.
+// Empty values mean use the built-in Claude Code default blocks.
+func (s *SettingService) GetClaudeOAuthSystemPromptInjectionSettings(ctx context.Context) (enabled bool, prompt string, blocks string) {
+	result := s.getGatewayForwardingSettingsCached(ctx)
+	return result.claudeOAuthSystemPromptInjection, result.claudeOAuthSystemPrompt, result.claudeOAuthSystemPromptBlocks
 }
 
 // IsEmailVerifyEnabled 检查是否开启邮件验证
@@ -2785,6 +2954,10 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		// 风控中心功能（默认关闭，显式启用）
 		SettingKeyRiskControlEnabled: "false",
 
+		// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
+		SettingKeyCyberSessionBlockEnabled:    "false",
+		SettingKeyCyberSessionBlockTTLSeconds: "3600",
+
 		// Claude Code version check (default: empty = disabled)
 		SettingKeyMinClaudeCodeVersion: "",
 		SettingKeyMaxClaudeCodeVersion: "",
@@ -2800,6 +2973,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingPaymentVisibleMethodAlipayEnabled:     "false",
 		SettingPaymentVisibleMethodWxpayEnabled:      "false",
 		openAIAdvancedSchedulerSettingKey:            "false",
+
+		SettingKeyAllowUserViewErrorRequests: "false",
 	}
 
 	return s.settingRepo.SetMultiple(ctx, defaults)
@@ -3292,6 +3467,14 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// 风控中心功能（默认关闭，严格 true 才启用）
 	result.RiskControlEnabled = settings[SettingKeyRiskControlEnabled] == "true"
 
+	// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
+	result.CyberSessionBlockEnabled = settings[SettingKeyCyberSessionBlockEnabled] == "true"
+	if v, err := strconv.Atoi(strings.TrimSpace(settings[SettingKeyCyberSessionBlockTTLSeconds])); err == nil && v > 0 {
+		result.CyberSessionBlockTTLSeconds = v
+	} else {
+		result.CyberSessionBlockTTLSeconds = 3600
+	}
+
 	// Claude Code version check
 	result.MinClaudeCodeVersion = settings[SettingKeyMinClaudeCodeVersion]
 	result.MaxClaudeCodeVersion = settings[SettingKeyMaxClaudeCodeVersion]
@@ -3299,7 +3482,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// 分组隔离
 	result.AllowUngroupedKeyScheduling = settings[SettingKeyAllowUngroupedKeyScheduling] == "true"
 
-	// Gateway forwarding behavior (defaults: fingerprint=true, metadata_passthrough=false, cch_signing=false)
+	// Gateway forwarding behavior (defaults: fingerprint=true, metadata_passthrough=false,
+	// cch_signing=false, claude_oauth_system_prompt_injection=true)
 	if v, ok := settings[SettingKeyEnableFingerprintUnification]; ok && v != "" {
 		result.EnableFingerprintUnification = v == "true"
 	} else {
@@ -3307,6 +3491,13 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	result.EnableMetadataPassthrough = settings[SettingKeyEnableMetadataPassthrough] == "true"
 	result.EnableCCHSigning = settings[SettingKeyEnableCCHSigning] == "true"
+	if v, ok := settings[SettingKeyEnableClaudeOAuthSystemPromptInjection]; ok && v != "" {
+		result.EnableClaudeOAuthSystemPromptInjection = v == "true"
+	} else {
+		result.EnableClaudeOAuthSystemPromptInjection = true
+	}
+	result.ClaudeOAuthSystemPrompt = settings[SettingKeyClaudeOAuthSystemPrompt]
+	result.ClaudeOAuthSystemPromptBlocks = settings[SettingKeyClaudeOAuthSystemPromptBlocks]
 	result.EnableAnthropicCacheTTL1hInjection = settings[SettingKeyEnableAnthropicCacheTTL1hInjection] == "true"
 	if v, ok := settings[SettingKeyRewriteMessageCacheControl]; ok && v != "" {
 		result.RewriteMessageCacheControl = v == "true"
@@ -3357,6 +3548,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 			result.DefaultPlatformQuotas = parsed
 		}
 	}
+
+	result.AllowUserViewErrorRequests = settings[SettingKeyAllowUserViewErrorRequests] == "true" // default false
 
 	return result
 }
@@ -4462,6 +4655,106 @@ func (s *SettingService) GetClaudeCodeVersionBounds(ctx context.Context) (min, m
 		return "", ""
 	}
 	return b.min, b.max
+}
+
+// GetOpenAIQuotaAutoPauseSettings returns the current global default quota auto-pause
+// settings. It is invoked on the OpenAI scheduling hot path (once per request) and is
+// therefore designed to never block on the DB:
+//
+//   - Fresh cached value → returned immediately.
+//   - Stale or empty cache → the last known value is returned, and a background
+//     goroutine refreshes the cache via singleflight (stale-while-revalidate).
+//   - First call with no cache yet → zero defaults are returned and the same async
+//     refresh is kicked off; the next call gets the freshly populated value.
+//
+// Callers that need the freshly persisted value synchronously (tests, post-update
+// confirmation, optional startup warm-up) should call WarmOpenAIQuotaAutoPauseSettings.
+func (s *SettingService) GetOpenAIQuotaAutoPauseSettings(ctx context.Context) OpsOpenAIAccountQuotaAutoPauseSettings {
+	if s == nil {
+		return OpsOpenAIAccountQuotaAutoPauseSettings{}
+	}
+	cached, _ := s.openAIQuotaAutoPauseSettingsCache.Load().(*cachedOpenAIQuotaAutoPauseSettings)
+	now := time.Now().UnixNano()
+	if cached != nil && now < cached.expiresAt {
+		return cached.settings
+	}
+	// Stale or unset: trigger background refresh without blocking this request.
+	// singleflight.DoChan dedupes concurrent refreshes; we deliberately ignore the
+	// returned channel — the result is observable via the atomic cache.
+	s.openAIQuotaAutoPauseSettingsSF.DoChan(openAIQuotaAutoPauseSettingsRefreshKey, func() (any, error) {
+		s.refreshOpenAIQuotaAutoPauseSettings(context.Background())
+		return nil, nil
+	})
+	if cached != nil {
+		return cached.settings // serve stale value while revalidating
+	}
+	return OpsOpenAIAccountQuotaAutoPauseSettings{}
+}
+
+// WarmOpenAIQuotaAutoPauseSettings synchronously loads the quota auto-pause settings
+// into the in-memory cache. Useful for application startup (so the first request hits
+// a warm cache) and for tests that need deterministic reads immediately after
+// constructing the service.
+func (s *SettingService) WarmOpenAIQuotaAutoPauseSettings(ctx context.Context) OpsOpenAIAccountQuotaAutoPauseSettings {
+	if s == nil {
+		return OpsOpenAIAccountQuotaAutoPauseSettings{}
+	}
+	s.refreshOpenAIQuotaAutoPauseSettings(ctx)
+	cached, _ := s.openAIQuotaAutoPauseSettingsCache.Load().(*cachedOpenAIQuotaAutoPauseSettings)
+	if cached == nil {
+		return OpsOpenAIAccountQuotaAutoPauseSettings{}
+	}
+	return cached.settings
+}
+
+// refreshOpenAIQuotaAutoPauseSettings reads the latest settings from the DB and stores
+// them into the in-memory cache. On error it stores the prior value (or zero defaults
+// if nothing is cached yet) with the shorter error TTL so the next refresh comes
+// sooner. Always uses its own timeout-bounded context to keep refresh latency
+// predictable regardless of the caller.
+func (s *SettingService) refreshOpenAIQuotaAutoPauseSettings(ctx context.Context) {
+	if s == nil || s.settingRepo == nil {
+		return
+	}
+	dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIQuotaAutoPauseSettingsDBTimeout)
+	defer cancel()
+
+	settings := OpsOpenAIAccountQuotaAutoPauseSettings{}
+	ttl := openAIQuotaAutoPauseSettingsCacheTTL
+	raw, err := s.settingRepo.GetValue(dbCtx, SettingKeyOpsAdvancedSettings)
+	if err == nil {
+		cfg := defaultOpsAdvancedSettings()
+		if strings.TrimSpace(raw) != "" {
+			if jsonErr := json.Unmarshal([]byte(raw), cfg); jsonErr == nil {
+				normalizeOpsAdvancedSettings(cfg)
+			}
+		}
+		settings = cfg.OpenAIAccountQuotaAutoPause
+	} else if !errors.Is(err, ErrSettingNotFound) {
+		// Real error: keep serving prior value but refresh sooner.
+		if prior, _ := s.openAIQuotaAutoPauseSettingsCache.Load().(*cachedOpenAIQuotaAutoPauseSettings); prior != nil {
+			settings = prior.settings
+		}
+		ttl = openAIQuotaAutoPauseSettingsErrorTTL
+	}
+
+	s.openAIQuotaAutoPauseSettingsCache.Store(&cachedOpenAIQuotaAutoPauseSettings{
+		settings:  settings,
+		expiresAt: time.Now().Add(ttl).UnixNano(),
+	})
+}
+
+// SetOpenAIQuotaAutoPauseSettings writes the given settings directly into the in-memory
+// cache. Called from settings-write code paths so that the next read reflects the new
+// value immediately, without waiting for the background refresh.
+func (s *SettingService) SetOpenAIQuotaAutoPauseSettings(settings OpsOpenAIAccountQuotaAutoPauseSettings) {
+	if s == nil {
+		return
+	}
+	s.openAIQuotaAutoPauseSettingsCache.Store(&cachedOpenAIQuotaAutoPauseSettings{
+		settings:  settings,
+		expiresAt: time.Now().Add(openAIQuotaAutoPauseSettingsCacheTTL).UnixNano(),
+	})
 }
 
 // GetRectifierSettings 获取请求整流器配置
