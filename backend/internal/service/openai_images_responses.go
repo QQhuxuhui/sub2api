@@ -354,7 +354,10 @@ func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel st
 		return nil, fmt.Errorf("image input is required")
 	}
 
-	req := []byte(`{"instructions":"","stream":true,"reasoning":{"effort":"medium","summary":"auto"},"parallel_tool_calls":true,"include":["reasoning.encrypted_content"],"model":"","store":false,"tool_choice":{"type":"image_generation"}}`)
+	// 图像生成请求不携带 reasoning/thinking：顶层 model 已是 gpt-5.4-mini、gpt-image 降为
+	// image_generation 工具，推理对出图无贡献，反而会把请求归类到 Codex/推理路径。去掉
+	// reasoning 与 include(reasoning.encrypted_content)，即"不走 thinking"。
+	req := []byte(`{"instructions":"","stream":true,"parallel_tool_calls":true,"model":"","store":false,"tool_choice":{"type":"image_generation"}}`)
 	req, _ = sjson.SetBytes(req, "model", openAIImagesResponsesMainModel)
 
 	input := []byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":""}]}]`)

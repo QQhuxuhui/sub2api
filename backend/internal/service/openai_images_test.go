@@ -1528,6 +1528,26 @@ func TestBuildOpenAIImagesResponsesRequest_StripsInputFidelity(t *testing.T) {
 	require.Equal(t, "edit", gjson.GetBytes(body, "tools.0.action").String())
 }
 
+// 图像生成请求体不得携带 reasoning/thinking：顶层 model 应为 gpt-5.4-mini、gpt-image 作为
+// image_generation 工具执行。带 reasoning/include 会把请求归类到 Codex/推理路径，徒增推理
+// 开销且无益于出图。此断言固化"不走 thinking"，防止后续回归重新注入。
+func TestBuildOpenAIImagesResponsesRequest_OmitsReasoningAndInclude(t *testing.T) {
+	parsed := &OpenAIImagesRequest{
+		Endpoint: openAIImagesGenerationsEndpoint,
+		Model:    "gpt-image-2",
+		Prompt:   "draw a cat",
+		N:        1,
+	}
+
+	body, err := buildOpenAIImagesResponsesRequest(parsed, "gpt-image-2")
+	require.NoError(t, err)
+	require.NotNil(t, body)
+	require.False(t, gjson.GetBytes(body, "reasoning").Exists(), "image request must not carry reasoning/thinking")
+	require.False(t, gjson.GetBytes(body, "include").Exists(), "image request must not request reasoning.encrypted_content")
+	require.Equal(t, openAIImagesResponsesMainModel, gjson.GetBytes(body, "model").String())
+	require.Equal(t, "gpt-image-2", gjson.GetBytes(body, "tools.0.model").String())
+}
+
 func TestCollectOpenAIImagesFromResponsesBody_FallsBackToOutputItemDone(t *testing.T) {
 	body := []byte(
 		"data: {\"type\":\"response.created\",\"response\":{\"created_at\":1710000004}}\n\n" +
