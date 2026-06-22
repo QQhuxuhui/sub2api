@@ -535,6 +535,12 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 	}
 	keys := []string{
 		"mixed_scheduling",
+		// Antigravity overage/credits 调度依赖：调度器选号时 IsOveragesEnabled() 读 allow_overages、
+		// IsPrivacySet() 读 privacy_mode。若不放进快照，被模型限流的 overage 账号会因
+		// IsOveragesEnabled()==false 而无法触发 overage 放行分支，被错误踢出调度
+		// （DB 里 allow_overages=true，但快照里被剥掉了），表现为"测试能用但网关 no available accounts"。
+		"allow_overages",
+		"privacy_mode",
 		"window_cost_limit",
 		"window_cost_sticky_reserve",
 		"max_sessions",
