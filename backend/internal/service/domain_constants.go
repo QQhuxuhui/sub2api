@@ -373,6 +373,10 @@ const (
 	// SettingKeyRateLimit429CooldownSettings stores JSON config for 429 fallback cooldown handling.
 	SettingKeyRateLimit429CooldownSettings = "rate_limit_429_cooldown_settings"
 
+	// SettingKeyModelMappingTemplatePrefix 平台模型映射模板（按平台拼 key，如
+	// model_mapping_template_antigravity）；写入式快照来源，运行时不读。
+	SettingKeyModelMappingTemplatePrefix = "model_mapping_template_"
+
 	// =========================
 	// Stream Timeout Handling
 	// =========================

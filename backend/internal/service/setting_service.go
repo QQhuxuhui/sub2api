@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/imroc/req/v3"
@@ -4214,6 +4215,67 @@ func (s *SettingService) SetOverloadCooldownSettings(ctx context.Context, settin
 	}
 
 	return s.settingRepo.Set(ctx, SettingKeyOverloadCooldownSettings, string(data))
+}
+
+// modelMappingTemplatePlatforms 支持模型映射模板的平台白名单（防止任意 :platform 造任意 setting key）。
+var modelMappingTemplatePlatforms = map[string]struct{}{
+	domain.PlatformAnthropic:   {},
+	domain.PlatformOpenAI:      {},
+	domain.PlatformGemini:      {},
+	domain.PlatformAntigravity: {},
+}
+
+// DefaultModelMappingTemplate 返回某平台模型映射模板的默认值（未配置时回落）。
+// antigravity 回落到内置默认映射的 COPY（绝不返回可变包变量，避免被调用方改写）；其余平台为空 map。
+func DefaultModelMappingTemplate(platform string) map[string]string {
+	out := make(map[string]string)
+	if platform == domain.PlatformAntigravity {
+		for k, v := range domain.DefaultAntigravityModelMapping {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// GetModelMappingTemplate 获取某平台的模型映射模板（写入式快照来源，运行时不读）。
+// 未配置 / 空值 / 损坏值均宽容回落默认（与 OverloadCooldown 一致）。
+func (s *SettingService) GetModelMappingTemplate(ctx context.Context, platform string) (map[string]string, error) {
+	if _, ok := modelMappingTemplatePlatforms[platform]; !ok {
+		return nil, fmt.Errorf("unsupported platform: %s", platform)
+	}
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyModelMappingTemplatePrefix+platform)
+	if err != nil {
+		if errors.Is(err, ErrSettingNotFound) {
+			return DefaultModelMappingTemplate(platform), nil
+		}
+		return nil, fmt.Errorf("get model mapping template: %w", err)
+	}
+	if value == "" {
+		return DefaultModelMappingTemplate(platform), nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(value), &m); err != nil {
+		return DefaultModelMappingTemplate(platform), nil
+	}
+	if m == nil {
+		m = map[string]string{}
+	}
+	return m, nil
+}
+
+// SetModelMappingTemplate 设置某平台的模型映射模板。
+func (s *SettingService) SetModelMappingTemplate(ctx context.Context, platform string, mapping map[string]string) error {
+	if _, ok := modelMappingTemplatePlatforms[platform]; !ok {
+		return fmt.Errorf("unsupported platform: %s", platform)
+	}
+	if mapping == nil {
+		mapping = map[string]string{}
+	}
+	data, err := json.Marshal(mapping)
+	if err != nil {
+		return fmt.Errorf("marshal model mapping template: %w", err)
+	}
+	return s.settingRepo.Set(ctx, SettingKeyModelMappingTemplatePrefix+platform, string(data))
 }
 
 // GetRateLimit429CooldownSettings 获取429默认回避配置

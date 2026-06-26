@@ -634,12 +634,14 @@ export async function importCodexSession(payload: CodexSessionImportRequest): Pr
 }
 
 /**
- * Get Antigravity default model mapping from backend
+ * Get Antigravity default model mapping.
+ * 现读「平台模型映射模板」(antigravity)，后端未配置时回落内置默认映射，
+ * 使新建账号预填跟随已保存的模板。保留原函数名以兼容既有调用方/测试。
  * @returns Default model mapping (from -> to)
  */
 export async function getAntigravityDefaultModelMapping(): Promise<Record<string, string>> {
   const { data } = await apiClient.get<Record<string, string>>(
-    '/admin/accounts/antigravity/default-model-mapping'
+    '/admin/settings/model-mapping-template/antigravity'
   )
   return data
 }

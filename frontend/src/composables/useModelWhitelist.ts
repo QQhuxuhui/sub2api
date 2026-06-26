@@ -320,8 +320,8 @@ const bedrockPresetMappings = [
   { label: 'Haiku 4.5', from: 'claude-haiku-4-5', to: 'us.anthropic.claude-haiku-4-5-20251001-v1:0', color: 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400' },
 ]
 
-// Antigravity 默认映射（从后端 API 获取，与 constants.go 保持一致）
-// 使用 fetchAntigravityDefaultMappings() 异步获取
+// Antigravity 默认映射（getAntigravityDefaultModelMapping 现读「平台模型映射模板」antigravity，
+// 后端未配置时回落内置默认）。用 fetchAntigravityDefaultMappings() 异步获取；模板保存后调 invalidate 重新拉取
 import { getAntigravityDefaultModelMapping } from '@/api/admin/accounts'
 
 let _antigravityDefaultMappingsCache: { from: string; to: string }[] | null = null
@@ -338,6 +338,11 @@ export async function fetchAntigravityDefaultMappings(): Promise<{ from: string;
     _antigravityDefaultMappingsCache = []
   }
   return _antigravityDefaultMappingsCache
+}
+
+// 模板保存后调用，使下次 fetchAntigravityDefaultMappings 重新拉取最新模板
+export function invalidateAntigravityDefaultMappings(): void {
+  _antigravityDefaultMappingsCache = null
 }
 
 // =====================
