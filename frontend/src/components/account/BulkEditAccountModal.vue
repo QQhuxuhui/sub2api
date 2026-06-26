@@ -1630,9 +1630,14 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   // 批量应用模板（单平台）：apply=拷模板进 model_mapping；clear=置空对象覆盖既有映射。
   // 与上面的 model restriction 互斥（见 enableModelRestriction 条件的 !enableApplyTemplate）。
   if (enableApplyTemplate.value && singleSelectedPlatform.value) {
-    credentials.model_mapping =
-      applyTemplateMode.value === 'clear' ? {} : { ...templateMapping.value }
-    credentialsChanged = true
+    if (applyTemplateMode.value === 'clear') {
+      credentials.model_mapping = {}
+      credentialsChanged = true
+    } else if (!templateLoading.value) {
+      // apply：仅在模板已加载后写入，避免拉取中误写空对象清空映射（提交前另有 templateLoading 守卫）
+      credentials.model_mapping = { ...templateMapping.value }
+      credentialsChanged = true
+    }
   }
 
   if (enableCustomErrorCodes.value) {
@@ -1759,6 +1764,12 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 const handleSubmit = async () => {
   if (targetMode.value === 'selected' && props.accountIds.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
+    return
+  }
+
+  // 应用模板模式下若模板仍在拉取中，阻止提交，避免误写空映射清空所选账号
+  if (enableApplyTemplate.value && applyTemplateMode.value === 'apply' && templateLoading.value) {
+    appStore.showError(t('admin.accounts.bulkEdit.applyTemplate.stillLoading'))
     return
   }
 

@@ -3496,7 +3496,8 @@ export default {
           clear: '清除映射',
           applyHint: '把「{platform}」平台模板拷入所选账号的模型映射（写入式快照，仅作用于这些账号）。',
           clearHint: '清空所选账号的模型映射（antigravity 将回落系统内置默认）。',
-          empty: '该平台模板为空，应用后将清空所选账号的映射。'
+          empty: '该平台模板为空，应用后将清空所选账号的映射。',
+          stillLoading: '模板正在加载，请稍候再提交。'
         },
         baseUrlPlaceholder: 'https://api.anthropic.com 或 https://api.openai.com',
         baseUrlNotice: '仅适用于 API Key 账号，留空则不修改',
