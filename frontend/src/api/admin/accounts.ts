@@ -234,9 +234,30 @@ export async function applyOAuthCredentials(
  * @param days - Number of days (default: 30)
  * @returns Account usage statistics with history, summary, and models
  */
-export async function getStats(id: number, days: number = 30): Promise<AccountUsageStatsResponse> {
+export interface AccountStatsParams {
+  days?: number
+  startDate?: string
+  endDate?: string
+  timezone?: string
+}
+
+export async function getStats(
+  id: number,
+  params: number | AccountStatsParams = 30
+): Promise<AccountUsageStatsResponse> {
+  const query: Record<string, string | number> = {}
+  if (typeof params === 'number') {
+    query.days = params
+  } else if (params.startDate && params.endDate) {
+    // 自定义区间：传 start_date/end_date(+timezone)，与全站其他统计一致
+    query.start_date = params.startDate
+    query.end_date = params.endDate
+    if (params.timezone) query.timezone = params.timezone
+  } else {
+    query.days = params.days ?? 30
+  }
   const { data } = await apiClient.get<AccountUsageStatsResponse>(`/admin/accounts/${id}/stats`, {
-    params: { days }
+    params: query
   })
   return data
 }
