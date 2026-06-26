@@ -6295,6 +6295,17 @@ export default {
         saved: 'Overload cooldown settings saved',
         saveFailed: 'Failed to save overload cooldown settings'
       },
+      modelMappingTemplate: {
+        title: 'Model Mapping Template',
+        description: 'Configure the default model-mapping template per platform. New accounts are pre-filled from it; apply it to existing accounts via bulk edit.',
+        platform: 'Platform',
+        json: 'Mapping JSON (source → target)',
+        jsonHint: 'e.g. {"gemini-3-pro-preview": "gemini-3-pro-high"}; keys and values must be strings.',
+        writeTimeWarning: 'Write-time snapshot: saving only sets the default for create/apply; it does not auto-sync runtime mappings of existing accounts.',
+        invalidJson: 'Invalid JSON: must be an object of string → string',
+        saved: 'Model mapping template saved',
+        saveFailed: 'Failed to save model mapping template'
+      },
       rateLimit429Cooldown: {
         title: '429 Default Cooldown',
         description: 'Configure the default account cooldown when upstream returns 429 without an explicit reset time',
