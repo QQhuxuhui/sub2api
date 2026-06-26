@@ -234,9 +234,30 @@ export async function applyOAuthCredentials(
  * @param days - Number of days (default: 30)
  * @returns Account usage statistics with history, summary, and models
  */
-export async function getStats(id: number, days: number = 30): Promise<AccountUsageStatsResponse> {
+export interface AccountStatsParams {
+  days?: number
+  startDate?: string
+  endDate?: string
+  timezone?: string
+}
+
+export async function getStats(
+  id: number,
+  params: number | AccountStatsParams = 30
+): Promise<AccountUsageStatsResponse> {
+  const query: Record<string, string | number> = {}
+  if (typeof params === 'number') {
+    query.days = params
+  } else if (params.startDate && params.endDate) {
+    // 自定义区间：传 start_date/end_date(+timezone)，与全站其他统计一致
+    query.start_date = params.startDate
+    query.end_date = params.endDate
+    if (params.timezone) query.timezone = params.timezone
+  } else {
+    query.days = params.days ?? 30
+  }
   const { data } = await apiClient.get<AccountUsageStatsResponse>(`/admin/accounts/${id}/stats`, {
-    params: { days }
+    params: query
   })
   return data
 }
@@ -613,12 +634,14 @@ export async function importCodexSession(payload: CodexSessionImportRequest): Pr
 }
 
 /**
- * Get Antigravity default model mapping from backend
+ * Get Antigravity default model mapping.
+ * 现读「平台模型映射模板」(antigravity)，后端未配置时回落内置默认映射，
+ * 使新建账号预填跟随已保存的模板。保留原函数名以兼容既有调用方/测试。
  * @returns Default model mapping (from -> to)
  */
 export async function getAntigravityDefaultModelMapping(): Promise<Record<string, string>> {
   const { data } = await apiClient.get<Record<string, string>>(
-    '/admin/accounts/antigravity/default-model-mapping'
+    '/admin/settings/model-mapping-template/antigravity'
   )
   return data
 }

@@ -3166,6 +3166,47 @@ func (h *SettingHandler) UpdateOverloadCooldownSettings(c *gin.Context) {
 	})
 }
 
+// GetModelMappingTemplate 获取某平台的模型映射模板
+// GET /api/v1/admin/settings/model-mapping-template/:platform
+func (h *SettingHandler) GetModelMappingTemplate(c *gin.Context) {
+	platform := c.Param("platform")
+	mapping, err := h.settingService.GetModelMappingTemplate(c.Request.Context(), platform)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, mapping)
+}
+
+// UpdateModelMappingTemplateRequest 更新模型映射模板请求
+type UpdateModelMappingTemplateRequest struct {
+	Mapping map[string]string `json:"mapping"`
+}
+
+// UpdateModelMappingTemplate 更新某平台的模型映射模板
+// PUT /api/v1/admin/settings/model-mapping-template/:platform
+func (h *SettingHandler) UpdateModelMappingTemplate(c *gin.Context) {
+	platform := c.Param("platform")
+	var req UpdateModelMappingTemplateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	if err := h.settingService.SetModelMappingTemplate(c.Request.Context(), platform, req.Mapping); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	updated, err := h.settingService.GetModelMappingTemplate(c.Request.Context(), platform)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, updated)
+}
+
 // GetRateLimit429CooldownSettings 获取429默认回避配置
 // GET /api/v1/admin/settings/rate-limit-429-cooldown
 func (h *SettingHandler) GetRateLimit429CooldownSettings(c *gin.Context) {

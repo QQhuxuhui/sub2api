@@ -1115,6 +1115,31 @@ export async function updateOverloadCooldownSettings(
   return data;
 }
 
+// ==================== Model Mapping Template ====================
+
+/** 某平台的模型映射模板（写入式快照来源）。key=原模型，value=映射目标模型。 */
+export type ModelMappingTemplate = Record<string, string>;
+
+export async function getModelMappingTemplate(
+  platform: PlatformType,
+): Promise<ModelMappingTemplate> {
+  const { data } = await apiClient.get<ModelMappingTemplate>(
+    `/admin/settings/model-mapping-template/${platform}`,
+  );
+  return data;
+}
+
+export async function updateModelMappingTemplate(
+  platform: PlatformType,
+  mapping: ModelMappingTemplate,
+): Promise<ModelMappingTemplate> {
+  const { data } = await apiClient.put<ModelMappingTemplate>(
+    `/admin/settings/model-mapping-template/${platform}`,
+    { mapping },
+  );
+  return data;
+}
+
 // ==================== 429 Rate Limit Cooldown Settings ====================
 
 export interface RateLimit429CooldownSettings {
@@ -1363,6 +1388,8 @@ export const settingsAPI = {
   deleteAdminApiKey,
   getOverloadCooldownSettings,
   updateOverloadCooldownSettings,
+  getModelMappingTemplate,
+  updateModelMappingTemplate,
   getRateLimit429CooldownSettings,
   updateRateLimit429CooldownSettings,
   getStreamTimeoutSettings,

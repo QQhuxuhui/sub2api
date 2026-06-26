@@ -3333,6 +3333,17 @@ export default {
         title: 'Bulk Edit Accounts',
         selectionInfo:
           '{count} account(s) selected. Only checked or filled fields will be updated; others stay unchanged.',
+        applyTemplate: {
+          label: 'Apply Model Mapping Template',
+          apply: 'Apply Template',
+          clear: 'Clear Mapping',
+          applyHint:
+            "Copy the \"{platform}\" platform template into the selected accounts' model mapping (write-time snapshot; affects these accounts only).",
+          clearHint:
+            "Clear the selected accounts' model mapping (antigravity falls back to the built-in default).",
+          empty: "This platform's template is empty; applying will clear the selected accounts' mapping.",
+          stillLoading: 'Template is still loading; please wait before submitting.'
+        },
         baseUrlPlaceholder: 'https://api.anthropic.com or https://api.openai.com',
         baseUrlNotice: 'Applies to API Key accounts only; leave empty to keep existing value',
         submit: 'Update Accounts',
@@ -6294,6 +6305,17 @@ export default {
         cooldownMinutesHint: 'Duration to pause account scheduling (1-120 minutes)',
         saved: 'Overload cooldown settings saved',
         saveFailed: 'Failed to save overload cooldown settings'
+      },
+      modelMappingTemplate: {
+        title: 'Model Mapping Template',
+        description: 'Configure the default model-mapping template per platform. New accounts are pre-filled from it; apply it to existing accounts via bulk edit.',
+        platform: 'Platform',
+        json: 'Mapping JSON (source → target)',
+        jsonHint: 'e.g. {"gemini-3-pro-preview": "gemini-3-pro-high"}; keys and values must be strings.',
+        writeTimeWarning: 'Write-time snapshot: saving only sets the default for create/apply; it does not auto-sync runtime mappings of existing accounts.',
+        invalidJson: 'Invalid JSON: must be an object of string → string',
+        saved: 'Model mapping template saved',
+        saveFailed: 'Failed to save model mapping template'
       },
       rateLimit429Cooldown: {
         title: '429 Default Cooldown',

@@ -5096,15 +5096,53 @@ const handleOpenAIValidateRT = (rt: string) => handleOpenAIBatchRT(rt)
 // 手动输入 Mobile RT
 const handleOpenAIValidateMobileRT = (rt: string) => handleOpenAIBatchRT(rt, OPENAI_MOBILE_RT_CLIENT_ID)
 
-// Antigravity 手动 RT 批量验证和创建
+// 解析 antigravity 快捷导入输入：支持裸 token（每行一个）、单个 JSON 对象、
+// JSON 数组、JSONL（每行一个 JSON）。从每项提取 refresh_token。
+const parseAntigravityImportRefreshTokens = (input: string): string[] => {
+  const trimmed = input.trim()
+  if (!trimmed) return []
+  const extractRt = (v: unknown): string | null => {
+    if (typeof v === 'string') return v.trim() || null
+    if (v && typeof v === 'object' && typeof (v as Record<string, unknown>).refresh_token === 'string') {
+      return ((v as Record<string, unknown>).refresh_token as string).trim() || null
+    }
+    return null
+  }
+  // 1) 整体 JSON（对象或数组）
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (Array.isArray(parsed)) {
+      return parsed.map(extractRt).filter((x): x is string => !!x)
+    }
+    const rt = extractRt(parsed)
+    if (rt) return [rt]
+  } catch {
+    /* 非整体 JSON，逐行处理 */
+  }
+  // 2) 逐行：每行可能是裸 token 或单行 JSON
+  const out: string[] = []
+  for (const line of trimmed.split('\n')) {
+    const l = line.trim()
+    if (!l) continue
+    try {
+      const rt = extractRt(JSON.parse(l))
+      if (rt) {
+        out.push(rt)
+        continue
+      }
+    } catch {
+      /* 非 JSON 行，当作裸 token */
+    }
+    out.push(l)
+  }
+  return out
+}
+
+// Antigravity 手动 RT 批量验证和创建（含快捷导入：JSON blob → refresh_token，名称用 email，映射用默认模板）
 const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
   if (!refreshTokenInput.trim()) return
 
-  // Parse multiple refresh tokens (one per line)
-  const refreshTokens = refreshTokenInput
-    .split('\n')
-    .map((rt) => rt.trim())
-    .filter((rt) => rt)
+  const refreshTokens = parseAntigravityImportRefreshTokens(refreshTokenInput)
 
   if (refreshTokens.length === 0) {
     antigravityOAuth.error.value = t('admin.accounts.oauth.antigravity.pleaseEnterRefreshToken')
@@ -5113,6 +5151,14 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
 
   antigravityOAuth.loading.value = true
   antigravityOAuth.error.value = ''
+
+  // 快捷导入：模型映射用 antigravity 默认模板（写入式快照）
+  let templateMapping: Record<string, string> = {}
+  try {
+    templateMapping = await adminAPI.settings.getModelMappingTemplate('antigravity')
+  } catch {
+    templateMapping = {}
+  }
 
   let successCount = 0
   let failedCount = 0
@@ -5132,10 +5178,17 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           continue
         }
 
-        const credentials = antigravityOAuth.buildCredentials(tokenInfo)
-        
-        // Generate account name with index for batch
-        const accountName = refreshTokens.length > 1 ? `${form.name} #${i + 1}` : form.name
+        const credentials = antigravityOAuth.buildCredentials(tokenInfo) as Record<string, unknown>
+        // 快捷导入：模型映射用默认模板（非空时写入；空则依赖运行时回落）
+        if (Object.keys(templateMapping).length > 0) {
+          credentials.model_mapping = { ...templateMapping }
+        }
+
+        // 账号名用 email；缺失回落 project_id；再不行回落表单名+序号
+        const accountName =
+          (typeof tokenInfo.email === 'string' && tokenInfo.email.trim()) ||
+          (typeof tokenInfo.project_id === 'string' && tokenInfo.project_id.trim()) ||
+          (refreshTokens.length > 1 ? `${form.name} #${i + 1}` : form.name)
 
         // Note: Antigravity doesn't have buildExtraInfo, so we pass empty extra or rely on credentials
         const createPayload = withAntigravityConfirmFlag({

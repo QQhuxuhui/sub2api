@@ -452,6 +452,9 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// 529过载冷却配置
 		adminSettings.GET("/overload-cooldown", h.Admin.Setting.GetOverloadCooldownSettings)
 		adminSettings.PUT("/overload-cooldown", h.Admin.Setting.UpdateOverloadCooldownSettings)
+		// 平台模型映射模板（写入式快照来源）
+		adminSettings.GET("/model-mapping-template/:platform", h.Admin.Setting.GetModelMappingTemplate)
+		adminSettings.PUT("/model-mapping-template/:platform", h.Admin.Setting.UpdateModelMappingTemplate)
 		// 429默认回避配置
 		adminSettings.GET("/rate-limit-429-cooldown", h.Admin.Setting.GetRateLimit429CooldownSettings)
 		adminSettings.PUT("/rate-limit-429-cooldown", h.Admin.Setting.UpdateRateLimit429CooldownSettings)
