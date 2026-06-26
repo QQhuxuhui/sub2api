@@ -115,6 +115,89 @@
         </p>
       </div>
 
+      <!-- Apply model-mapping template (single platform only) -->
+      <div
+        v-if="singleSelectedPlatform"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="mb-3 flex items-center justify-between">
+          <label class="input-label mb-0" for="bulk-edit-apply-template-enabled">
+            {{ t('admin.accounts.bulkEdit.applyTemplate.label') }}
+          </label>
+          <input
+            v-model="enableApplyTemplate"
+            id="bulk-edit-apply-template-enabled"
+            type="checkbox"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+
+        <div :class="!enableApplyTemplate && 'pointer-events-none opacity-50'">
+          <div class="mb-3 flex gap-2">
+            <button
+              type="button"
+              @click="applyTemplateMode = 'apply'"
+              :class="[
+                'flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-all',
+                applyTemplateMode === 'apply'
+                  ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              {{ t('admin.accounts.bulkEdit.applyTemplate.apply') }}
+            </button>
+            <button
+              type="button"
+              @click="applyTemplateMode = 'clear'"
+              :class="[
+                'flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-all',
+                applyTemplateMode === 'clear'
+                  ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              {{ t('admin.accounts.bulkEdit.applyTemplate.clear') }}
+            </button>
+          </div>
+
+          <p class="text-xs text-gray-500 dark:text-gray-400">
+            {{
+              applyTemplateMode === 'apply'
+                ? t('admin.accounts.bulkEdit.applyTemplate.applyHint', {
+                    platform: singleSelectedPlatform
+                  })
+                : t('admin.accounts.bulkEdit.applyTemplate.clearHint')
+            }}
+          </p>
+
+          <div
+            v-if="applyTemplateMode === 'apply'"
+            class="mt-2 rounded-lg bg-gray-50 p-2 dark:bg-dark-700"
+          >
+            <p v-if="templateLoading" class="text-xs text-gray-500">
+              {{ t('common.loading') }}
+            </p>
+            <p
+              v-else-if="Object.keys(templateMapping).length === 0"
+              class="text-xs text-gray-400"
+            >
+              {{ t('admin.accounts.bulkEdit.applyTemplate.empty') }}
+            </p>
+            <div v-else class="max-h-32 space-y-0.5 overflow-y-auto">
+              <div
+                v-for="(to, from) in templateMapping"
+                :key="from"
+                class="flex items-center gap-2 text-xs"
+              >
+                <span class="font-mono text-gray-600 dark:text-gray-300">{{ from }}</span>
+                <span class="text-gray-400">→</span>
+                <span class="font-mono text-gray-600 dark:text-gray-300">{{ to }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Model restriction -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1137,6 +1220,7 @@ import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
+import type { PlatformType } from '@/api/admin/settings'
 import type { Proxy as ProxyConfig, AdminGroup, AccountPlatform, AccountType, OpenAICompactMode } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -1188,6 +1272,10 @@ const targetPreviewCount = computed(() => props.target?.previewCount ?? props.ac
 const targetSelectedPlatforms = computed(() => props.target?.selectedPlatforms ?? props.selectedPlatforms)
 const targetSelectedTypes = computed(() => props.target?.selectedTypes ?? props.selectedTypes)
 const isMixedPlatform = computed(() => targetSelectedPlatforms.value.length > 1)
+// 单平台选择（模板按平台，批量应用模板仅在单平台时启用）
+const singleSelectedPlatform = computed(() =>
+  targetSelectedPlatforms.value.length === 1 ? targetSelectedPlatforms.value[0] : null
+)
 
 const allOpenAIPassthroughCapable = computed(() => {
   return (
@@ -1277,6 +1365,31 @@ const baseUrl = ref('')
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
 const modelMappings = ref<ModelMapping[]>([])
+
+// 批量应用平台模型映射模板（写入式：把模板拷进所选账号 credentials.model_mapping）
+const enableApplyTemplate = ref(false)
+const applyTemplateMode = ref<'apply' | 'clear'>('apply')
+const templateMapping = ref<Record<string, string>>({})
+const templateLoading = ref(false)
+
+// 启用「应用模板」且单平台时，拉取该平台模板用于预览/应用
+watch(
+  [enableApplyTemplate, applyTemplateMode, singleSelectedPlatform],
+  async ([on, mode, platform]) => {
+    if (on && mode === 'apply' && platform) {
+      templateLoading.value = true
+      try {
+        templateMapping.value = await adminAPI.settings.getModelMappingTemplate(
+          platform as PlatformType
+        )
+      } catch {
+        templateMapping.value = {}
+      } finally {
+        templateLoading.value = false
+      }
+    }
+  }
+)
 const selectedErrorCodes = ref<number[]>([])
 const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
@@ -1491,7 +1604,11 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
-  if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value) {
+  if (
+    enableModelRestriction.value &&
+    !enableApplyTemplate.value &&
+    !isOpenAIModelRestrictionDisabled.value
+  ) {
     // 统一使用 model_mapping 字段
     if (modelRestrictionMode.value === 'whitelist') {
       // 白名单模式：将模型转换为 model_mapping 格式（key=value）
@@ -1508,6 +1625,14 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
       credentials.model_mapping = modelMapping ?? {}
       credentialsChanged = true
     }
+  }
+
+  // 批量应用模板（单平台）：apply=拷模板进 model_mapping；clear=置空对象覆盖既有映射。
+  // 与上面的 model restriction 互斥（见 enableModelRestriction 条件的 !enableApplyTemplate）。
+  if (enableApplyTemplate.value && singleSelectedPlatform.value) {
+    credentials.model_mapping =
+      applyTemplateMode.value === 'clear' ? {} : { ...templateMapping.value }
+    credentialsChanged = true
   }
 
   if (enableCustomErrorCodes.value) {
@@ -1641,6 +1766,7 @@ const handleSubmit = async () => {
     enableBaseUrl.value ||
     enableOpenAIPassthrough.value ||
     enableModelRestriction.value ||
+    enableApplyTemplate.value ||
     enableCustomErrorCodes.value ||
     enableInterceptWarmup.value ||
     enableProxy.value ||
@@ -1743,6 +1869,7 @@ watch(
       // Reset all enable flags
       enableBaseUrl.value = false
       enableModelRestriction.value = false
+      enableApplyTemplate.value = false
       enableCustomErrorCodes.value = false
       enableInterceptWarmup.value = false
       enableProxy.value = false
@@ -1767,6 +1894,9 @@ watch(
       modelRestrictionMode.value = 'whitelist'
       allowedModels.value = []
       modelMappings.value = []
+      applyTemplateMode.value = 'apply'
+      templateMapping.value = {}
+      templateLoading.value = false
       selectedErrorCodes.value = []
       customErrorCodeInput.value = null
       interceptWarmupRequests.value = false

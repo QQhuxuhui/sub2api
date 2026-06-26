@@ -3333,6 +3333,16 @@ export default {
         title: 'Bulk Edit Accounts',
         selectionInfo:
           '{count} account(s) selected. Only checked or filled fields will be updated; others stay unchanged.',
+        applyTemplate: {
+          label: 'Apply Model Mapping Template',
+          apply: 'Apply Template',
+          clear: 'Clear Mapping',
+          applyHint:
+            "Copy the \"{platform}\" platform template into the selected accounts' model mapping (write-time snapshot; affects these accounts only).",
+          clearHint:
+            "Clear the selected accounts' model mapping (antigravity falls back to the built-in default).",
+          empty: "This platform's template is empty; applying will clear the selected accounts' mapping."
+        },
         baseUrlPlaceholder: 'https://api.anthropic.com or https://api.openai.com',
         baseUrlNotice: 'Applies to API Key accounts only; leave empty to keep existing value',
         submit: 'Update Accounts',

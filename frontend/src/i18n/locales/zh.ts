@@ -3490,6 +3490,14 @@ export default {
       bulkEdit: {
         title: '批量编辑账号',
         selectionInfo: '已选择 {count} 个账号。只更新您勾选或填写的字段，未勾选的字段保持不变。',
+        applyTemplate: {
+          label: '应用模型映射模板',
+          apply: '应用模板',
+          clear: '清除映射',
+          applyHint: '把「{platform}」平台模板拷入所选账号的模型映射（写入式快照，仅作用于这些账号）。',
+          clearHint: '清空所选账号的模型映射（antigravity 将回落系统内置默认）。',
+          empty: '该平台模板为空，应用后将清空所选账号的映射。'
+        },
         baseUrlPlaceholder: 'https://api.anthropic.com 或 https://api.openai.com',
         baseUrlNotice: '仅适用于 API Key 账号，留空则不修改',
         submit: '批量更新',
