@@ -55,6 +55,7 @@ const (
 	googleRPCTypeErrorInfo                = "type.googleapis.com/google.rpc.ErrorInfo"
 	googleRPCReasonModelCapacityExhausted = "MODEL_CAPACITY_EXHAUSTED"
 	googleRPCReasonRateLimitExceeded      = "RATE_LIMIT_EXCEEDED"
+	googleRPCReasonQuotaExhausted         = "QUOTA_EXHAUSTED"
 
 	// 单账号 503 退避重试：Service 层原地重试的最大次数
 	// 在 handleSmartRetry 中，对于 shouldRateLimitModel（长延迟 ≥ 7s）的情况，
@@ -2746,6 +2747,12 @@ func parseAntigravitySmartRetryInfo(body []byte) *antigravitySmartRetryInfo {
 					hasModelCapacityExhausted = true
 				}
 				if reason == googleRPCReasonRateLimitExceeded {
+					hasRateLimitExceeded = true
+				}
+				// QUOTA_EXHAUSTED（按模型配额耗尽，例如 gemini 图像模型几小时一轮的配额）
+				// 与 RATE_LIMIT_EXCEEDED 同样按「模型级限流 + 切换账号」处理：
+				// 让调度器把请求切到组内仍有配额的账号，而不是耗尽重试后把 429 透传给下游。
+				if reason == googleRPCReasonQuotaExhausted {
 					hasRateLimitExceeded = true
 				}
 			}
