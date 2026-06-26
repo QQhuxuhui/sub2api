@@ -75,7 +75,9 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 	keys := []string{modelKey}
 	switch a.Platform {
 	case PlatformAntigravity:
-		if isAntigravityGeminiModel(modelKey) && modelKey != antigravityGeminiModelRateLimitKey {
+		// 图像生成模型(gemini-*-image)在上游按模型独立计配额，不与文本 gemini 共享，
+		// 故不参与 antigravity:gemini 共享桶（与写入侧 antigravityModelRateLimitKeys 对称）。
+		if isAntigravityGeminiModel(modelKey) && !isImageGenerationModel(modelKey) && modelKey != antigravityGeminiModelRateLimitKey {
 			keys = append(keys, antigravityGeminiModelRateLimitKey)
 		}
 	case PlatformOpenAI:
@@ -130,7 +132,9 @@ func antigravityModelRateLimitKeys(model string) []string {
 		return nil
 	}
 	keys := []string{model}
-	if isAntigravityGeminiModel(model) && model != antigravityGeminiModelRateLimitKey {
+	// 图像生成模型按模型独立计配额，不写入 antigravity:gemini 共享桶，
+	// 避免单个图像模型限流误封同账号下的全部 gemini 模型（与读取侧对称）。
+	if isAntigravityGeminiModel(model) && !isImageGenerationModel(model) && model != antigravityGeminiModelRateLimitKey {
 		keys = append(keys, antigravityGeminiModelRateLimitKey)
 	}
 	return keys

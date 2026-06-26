@@ -193,6 +193,17 @@ func (s *OpenAIGatewayService) isOrgImageScheduleBlocked(org string) bool {
 	return false
 }
 
+// isImageOrgBlockedForSelection 判断生图请求下，某账号是否因「所属 org 处于组织级生图冷却」而应在选号时被跳过。
+// 仅对生图请求（requiredImageCapability != ""）生效。供高级调度器与兜底负载感知选号共用，
+// 确保两条选号路径对组织级生图限流处理一致（修复：兜底路径此前漏检该冷却，默认调度下会空切同 org 账号）。
+func (s *OpenAIGatewayService) isImageOrgBlockedForSelection(account *Account, requiredImageCapability OpenAIImagesCapability) bool {
+	if s == nil || account == nil || requiredImageCapability == "" {
+		return false
+	}
+	org := account.GetOpenAIOrganizationID()
+	return org != "" && s.isOrgImageScheduleBlocked(org)
+}
+
 // recordImageOrgRateLimit 在生图请求遭遇「组织级」429 限流时，按 org 设置调度冷却窗口，
 // 使调度器在窗口内跳过同一 org 的账号——对组织级配额而言，转移到同 org 账号是无效的。
 func (s *OpenAIGatewayService) recordImageOrgRateLimit(account *Account, headers http.Header, body []byte) {

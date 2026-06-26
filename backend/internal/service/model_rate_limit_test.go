@@ -226,6 +226,70 @@ func TestIsModelRateLimited(t *testing.T) {
 			requestedModel: "gpt-5.4",
 			expected:       false,
 		},
+		{
+			name: "antigravity platform - image model own key blocks the image model",
+			account: &Account{
+				Platform: PlatformAntigravity,
+				Extra: map[string]any{
+					modelRateLimitsKey: map[string]any{
+						"gemini-3.1-flash-image": map[string]any{
+							"rate_limit_reset_at": future,
+						},
+					},
+				},
+			},
+			requestedModel: "gemini-3.1-flash-image",
+			expected:       true,
+		},
+		{
+			name: "antigravity platform - image model limit does NOT block text gemini",
+			account: &Account{
+				Platform: PlatformAntigravity,
+				Extra: map[string]any{
+					modelRateLimitsKey: map[string]any{
+						"gemini-3.1-flash-image": map[string]any{
+							"rate_limit_reset_at": future,
+						},
+					},
+				},
+			},
+			requestedModel: "gemini-3-pro-preview",
+			expected:       false,
+		},
+		{
+			// 关键回归：图像模型不参与 antigravity:gemini 共享桶，
+			// 故共享桶生效时不应误封图像模型（修复前此用例会为 true）。
+			name: "antigravity platform - gemini family bucket does NOT block image model",
+			account: &Account{
+				Platform: PlatformAntigravity,
+				Extra: map[string]any{
+					modelRateLimitsKey: map[string]any{
+						antigravityGeminiModelRateLimitKey: map[string]any{
+							"rate_limit_reset_at": future,
+						},
+					},
+				},
+			},
+			requestedModel: "gemini-3.1-flash-image",
+			expected:       false,
+		},
+		{
+			// 别名解析：客户端请求 gemini-3-pro-image 映射到 gemini-3.1-flash-image，
+			// 同样应被排除出共享桶（修复前此用例为 true）。
+			name: "antigravity platform - gemini family bucket does NOT block image alias gemini-3-pro-image",
+			account: &Account{
+				Platform: PlatformAntigravity,
+				Extra: map[string]any{
+					modelRateLimitsKey: map[string]any{
+						antigravityGeminiModelRateLimitKey: map[string]any{
+							"rate_limit_reset_at": future,
+						},
+					},
+				},
+			},
+			requestedModel: "gemini-3-pro-image",
+			expected:       false,
+		},
 	}
 
 	for _, tt := range tests {

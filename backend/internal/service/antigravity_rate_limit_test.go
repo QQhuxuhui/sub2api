@@ -191,6 +191,39 @@ func TestHandleUpstreamError_429_ModelRateLimit(t *testing.T) {
 	require.Equal(t, "claude-sonnet-4-5", repo.modelRateLimitCalls[0].modelKey)
 }
 
+// TestHandleUpstreamError_429_QuotaExhausted_ImageModel_SwitchesAndIsolated 端到端验证：
+// gemini 图像模型的 QUOTA_EXHAUSTED 429 会触发账号切换信号（不再把 429 透传给下游），
+// 且只限流该图像模型自身，不写入 antigravity:gemini 共享桶（不波及同账号其他 gemini 模型）。
+func TestHandleUpstreamError_429_QuotaExhausted_ImageModel_SwitchesAndIsolated(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	svc := &AntigravityGatewayService{accountRepo: repo}
+	account := &Account{ID: 7, Name: "acc-7", Platform: PlatformAntigravity}
+
+	// 429 + QUOTA_EXHAUSTED + 图像模型 + 长 retryDelay → 模型级限流并切换账号
+	body := []byte(`{
+		"error": {
+			"status": "RESOURCE_EXHAUSTED",
+			"message": "You have exhausted your capacity on this model.",
+			"details": [
+				{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "metadata": {"model": "gemini-3.1-flash-image"}, "reason": "QUOTA_EXHAUSTED"},
+				{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "9403s"}
+			]
+		}
+	}`)
+
+	result := svc.handleUpstreamError(context.Background(), "[test]", account, http.StatusTooManyRequests, http.Header{}, body, "gemini-3.1-flash-image", 0, "", false)
+
+	// 应触发账号切换（QUOTA_EXHAUSTED 现已被识别为模型级限流）
+	require.NotNil(t, result)
+	require.True(t, result.Handled)
+	require.NotNil(t, result.SwitchError, "QUOTA_EXHAUSTED should trigger account switch, not leak 429 downstream")
+	require.Equal(t, "gemini-3.1-flash-image", result.SwitchError.RateLimitedModel)
+
+	// 隔离性：只写入图像模型自身 key，不写入 antigravity:gemini 共享桶
+	require.Len(t, repo.modelRateLimitCalls, 1, "image model must not write the shared gemini bucket")
+	require.Equal(t, "gemini-3.1-flash-image", repo.modelRateLimitCalls[0].modelKey)
+}
+
 // TestHandleUpstreamError_429_NonModelRateLimit 测试 429 非模型限流场景（走模型级限流兜底）
 func TestHandleUpstreamError_429_NonModelRateLimit(t *testing.T) {
 	repo := &stubAntigravityAccountRepo{}
@@ -481,6 +514,38 @@ func TestParseAntigravitySmartRetryInfo(t *testing.T) {
 			expectedModel: "gemini-3-pro",
 		},
 		{
+			// 注意：retryDelay 与 quotaResetDelay 故意取不同值，断言解析读取的是
+			// RetryInfo.retryDelay（120s），而非 metadata.quotaResetDelay。
+			name: "429 RESOURCE_EXHAUSTED with QUOTA_EXHAUSTED (image model) - recognized, reads retryDelay",
+			body: `{
+				"error": {
+					"code": 429,
+					"message": "You have exhausted your capacity on this model. Your quota will reset after 2h36m43s.",
+					"status": "RESOURCE_EXHAUSTED",
+					"details": [
+						{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "QUOTA_EXHAUSTED", "metadata": {"model": "gemini-3.1-flash-image", "quotaResetDelay": "2h36m43.076985488s"}},
+						{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "120s"}
+					]
+				}
+			}`,
+			expectedDelay: 120 * time.Second,
+			expectedModel: "gemini-3.1-flash-image",
+		},
+		{
+			name: "429 RESOURCE_EXHAUSTED with QUOTA_EXCEEDED (different reason) - still returns nil",
+			body: `{
+				"error": {
+					"code": 429,
+					"status": "RESOURCE_EXHAUSTED",
+					"details": [
+						{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "metadata": {"model": "gemini-3-pro"}, "reason": "QUOTA_EXCEEDED"},
+						{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "3s"}
+					]
+				}
+			}`,
+			expectedNil: true,
+		},
+		{
 			name: "missing model name - should return nil",
 			body: `{
 				"error": {
@@ -698,6 +763,23 @@ func TestShouldTriggerAntigravitySmartRetry(t *testing.T) {
 			minWait:                 30 * time.Second,
 			modelName:               "claude-sonnet-4-5",
 		},
+		{
+			name:    "OAuth account QUOTA_EXHAUSTED image model (long delay) - rate limit + switch",
+			account: oauthAccount,
+			body: `{
+				"error": {
+					"status": "RESOURCE_EXHAUSTED",
+					"details": [
+						{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "metadata": {"model": "gemini-3.1-flash-image"}, "reason": "QUOTA_EXHAUSTED"},
+						{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "9403s"}
+					]
+				}
+			}`,
+			expectedShouldRetry:     false,
+			expectedShouldRateLimit: true,
+			minWait:                 9403 * time.Second,
+			modelName:               "gemini-3.1-flash-image",
+		},
 	}
 
 	for _, tt := range tests {
@@ -864,6 +946,30 @@ func TestSetAntigravityModelRateLimits_ClaudeDoesNotWriteGeminiScope(t *testing.
 	require.True(t, success)
 	require.Len(t, repo.modelRateLimitCalls, 1)
 	require.Equal(t, "claude-sonnet-4-5", repo.modelRateLimitCalls[0].modelKey)
+}
+
+// TestSetAntigravityModelRateLimits_ImageModelDoesNotWriteGeminiScope 验证图像生成模型
+// 只写入自身 key，不写入 antigravity:gemini 共享桶（图像配额按模型独立计，不应误封整组 gemini）。
+func TestSetAntigravityModelRateLimits_ImageModelDoesNotWriteGeminiScope(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	svc := &AntigravityGatewayService{}
+	account := &Account{ID: 791, Platform: PlatformAntigravity}
+	resetAt := time.Now().Add(2 * time.Hour)
+
+	success := svc.setAntigravityModelRateLimits(
+		context.Background(),
+		repo,
+		account,
+		"gemini-3.1-flash-image",
+		"[test]",
+		429,
+		resetAt,
+		false,
+	)
+
+	require.True(t, success)
+	require.Len(t, repo.modelRateLimitCalls, 1, "image model must not also write the shared gemini bucket")
+	require.Equal(t, "gemini-3.1-flash-image", repo.modelRateLimitCalls[0].modelKey)
 }
 
 func TestAntigravityRetryLoop_PreCheck_SwitchesWhenRateLimited(t *testing.T) {
