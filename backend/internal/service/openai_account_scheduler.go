@@ -1080,10 +1080,8 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.C
 		return false
 	}
 	// 组织级生图限流：在冷却窗口内跳过同一 org 的账号（转移到同 org 账号无法绕开组织级配额）。
-	if req.RequiredImageCapability != "" && s != nil && s.service != nil {
-		if org := account.GetOpenAIOrganizationID(); org != "" && s.service.isOrgImageScheduleBlocked(org) {
-			return false
-		}
+	if s != nil && s.service != nil && s.service.isImageOrgBlockedForSelection(account, req.RequiredImageCapability) {
+		return false
 	}
 	// Quota auto-pause must be evaluated during the initial filter too. Without it the
 	// TopK candidate pool can be filled with paused accounts and the later fresh/DB
@@ -1286,7 +1284,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 				if selection == nil || selection.Account == nil {
 					return selection, decision, nil
 				}
-				if accountSupportsOpenAICapabilities(selection.Account, requiredCapability, requiredImageCapability) {
+				// 组织级生图限流：兜底路径同样需跳过冷却中的同 org 账号（与高级调度器一致）。
+				if accountSupportsOpenAICapabilities(selection.Account, requiredCapability, requiredImageCapability) &&
+					!s.isImageOrgBlockedForSelection(selection.Account, requiredImageCapability) {
 					return selection, decision, nil
 				}
 				if selection.ReleaseFunc != nil {
@@ -1312,7 +1312,8 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 				return selection, decision, nil
 			}
 			if s.isOpenAIAccountTransportCompatible(selection.Account, requiredTransport) &&
-				accountSupportsOpenAICapabilities(selection.Account, requiredCapability, requiredImageCapability) {
+				accountSupportsOpenAICapabilities(selection.Account, requiredCapability, requiredImageCapability) &&
+				!s.isImageOrgBlockedForSelection(selection.Account, requiredImageCapability) {
 				return selection, decision, nil
 			}
 			if selection.ReleaseFunc != nil {
