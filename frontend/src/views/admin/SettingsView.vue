@@ -304,6 +304,93 @@
             </div>
           </div>
 
+          <!-- Model Mapping Template -->
+          <div class="card">
+            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.modelMappingTemplate.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.modelMappingTemplate.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div class="flex items-center gap-3">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t("admin.settings.modelMappingTemplate.platform") }}
+                </label>
+                <select
+                  v-model="modelMappingTemplatePlatform"
+                  @change="loadModelMappingTemplate(modelMappingTemplatePlatform)"
+                  class="input w-48"
+                >
+                  <option value="antigravity">antigravity</option>
+                  <option value="openai">openai</option>
+                  <option value="gemini">gemini</option>
+                  <option value="anthropic">anthropic</option>
+                </select>
+              </div>
+
+              <div
+                v-if="modelMappingTemplateLoading"
+                class="flex items-center gap-2 text-gray-500"
+              >
+                <div
+                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
+                ></div>
+                {{ t("common.loading") }}
+              </div>
+
+              <template v-else>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.modelMappingTemplate.json") }}
+                  </label>
+                  <textarea
+                    v-model="modelMappingTemplateJson"
+                    rows="10"
+                    spellcheck="false"
+                    class="input w-full font-mono text-xs"
+                  ></textarea>
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.modelMappingTemplate.jsonHint") }}
+                  </p>
+                  <p
+                    v-if="modelMappingTemplateError"
+                    class="mt-1 text-xs text-red-600"
+                  >
+                    {{ modelMappingTemplateError }}
+                  </p>
+                </div>
+
+                <div
+                  class="rounded-lg bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+                >
+                  {{ t("admin.settings.modelMappingTemplate.writeTimeWarning") }}
+                </div>
+
+                <div
+                  class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700"
+                >
+                  <button
+                    type="button"
+                    @click="saveModelMappingTemplate"
+                    :disabled="modelMappingTemplateSaving"
+                    class="btn btn-primary btn-sm"
+                  >
+                    {{
+                      modelMappingTemplateSaving
+                        ? t("common.saving")
+                        : t("common.save")
+                    }}
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+
           <!-- Rate Limit Cooldown (429) Settings -->
           <div class="card">
             <div
@@ -7011,6 +7098,8 @@ import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue"
 import { useClipboard } from "@/composables/useClipboard";
 import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSimpleUser } from "@/api/admin/affiliates";
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
+import type { PlatformType } from "@/api/admin/settings";
+import { invalidateAntigravityDefaultMappings } from "@/composables/useModelWhitelist";
 import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
@@ -7143,6 +7232,13 @@ const overloadCooldownForm = reactive({
   enabled: true,
   cooldown_minutes: 10,
 });
+
+// Model Mapping Template 状态
+const modelMappingTemplateLoading = ref(false);
+const modelMappingTemplateSaving = ref(false);
+const modelMappingTemplatePlatform = ref<PlatformType>("antigravity");
+const modelMappingTemplateJson = ref("{}");
+const modelMappingTemplateError = ref("");
 
 // Rate Limit Cooldown (429) 状态
 const rateLimit429CooldownLoading = ref(true);
@@ -9303,6 +9399,64 @@ async function saveOverloadCooldownSettings() {
   }
 }
 
+// Model Mapping Template 方法
+async function loadModelMappingTemplate(platform: PlatformType) {
+  modelMappingTemplateLoading.value = true;
+  modelMappingTemplateError.value = "";
+  try {
+    const mapping = await adminAPI.settings.getModelMappingTemplate(platform);
+    modelMappingTemplateJson.value = JSON.stringify(mapping, null, 2);
+  } catch (_error: unknown) {
+    modelMappingTemplateJson.value = "{}";
+  } finally {
+    modelMappingTemplateLoading.value = false;
+  }
+}
+
+async function saveModelMappingTemplate() {
+  let parsed: Record<string, string>;
+  try {
+    parsed = JSON.parse(modelMappingTemplateJson.value || "{}");
+  } catch {
+    modelMappingTemplateError.value = t(
+      "admin.settings.modelMappingTemplate.invalidJson",
+    );
+    return;
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    Array.isArray(parsed) ||
+    Object.values(parsed).some((v) => typeof v !== "string")
+  ) {
+    modelMappingTemplateError.value = t(
+      "admin.settings.modelMappingTemplate.invalidJson",
+    );
+    return;
+  }
+  modelMappingTemplateError.value = "";
+  modelMappingTemplateSaving.value = true;
+  try {
+    const updated = await adminAPI.settings.updateModelMappingTemplate(
+      modelMappingTemplatePlatform.value,
+      parsed,
+    );
+    modelMappingTemplateJson.value = JSON.stringify(updated, null, 2);
+    // 模板变更后清前端默认映射缓存，使新建账号预填用最新模板
+    invalidateAntigravityDefaultMappings();
+    appStore.showSuccess(t("admin.settings.modelMappingTemplate.saved"));
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(
+        error,
+        t("admin.settings.modelMappingTemplate.saveFailed"),
+      ),
+    );
+  } finally {
+    modelMappingTemplateSaving.value = false;
+  }
+}
+
 // Rate Limit Cooldown (429) 方法
 async function loadRateLimit429CooldownSettings() {
   rateLimit429CooldownLoading.value = true;
@@ -9950,6 +10104,7 @@ onMounted(() => {
   loadSubscriptionGroups();
   loadAdminApiKey();
   loadOverloadCooldownSettings();
+  loadModelMappingTemplate(modelMappingTemplatePlatform.value);
   loadRateLimit429CooldownSettings();
   loadStreamTimeoutSettings();
   loadRectifierSettings();

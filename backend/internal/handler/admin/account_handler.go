@@ -1084,18 +1084,48 @@ func (h *AccountHandler) GetStats(c *gin.Context) {
 		return
 	}
 
-	// Parse days parameter (default 30)
-	days := 30
-	if daysStr := c.Query("days"); daysStr != "" {
-		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 90 {
-			days = d
+	// Time range: prefer an explicit start_date/end_date window (DST-safe, mirrors
+	// admin usage_handler.go); otherwise fall back to the legacy `days` window so the
+	// default render is byte-identical to the previous behavior.
+	var startTime, endTime time.Time
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+	if startDateStr != "" && endDateStr != "" {
+		userTZ := c.Query("timezone")
+		var perr error
+		startTime, perr = timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
+		if perr != nil {
+			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
+			return
 		}
+		endTime, perr = timezone.ParseInUserLocation("2006-01-02", endDateStr, userTZ)
+		if perr != nil {
+			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
+			return
+		}
+		// 与 SQL 条件 created_at < end 对齐，使用次日 00:00 作为上边界（DST-safe）。
+		endTime = endTime.AddDate(0, 0, 1)
+		if !endTime.After(startTime) {
+			response.BadRequest(c, "end_date must be on or after start_date")
+			return
+		}
+		// 限制最大跨度（约 90 天），避免巨量聚合；含 DST 余量。
+		if endTime.Sub(startTime) > 92*24*time.Hour {
+			response.BadRequest(c, "date range too large, max 90 days")
+			return
+		}
+	} else {
+		// Parse days parameter (default 30)
+		days := 30
+		if daysStr := c.Query("days"); daysStr != "" {
+			if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 90 {
+				days = d
+			}
+		}
+		now := timezone.Now()
+		endTime = timezone.StartOfDay(now.AddDate(0, 0, 1))
+		startTime = timezone.StartOfDay(now.AddDate(0, 0, -days+1))
 	}
-
-	// Calculate time range
-	now := timezone.Now()
-	endTime := timezone.StartOfDay(now.AddDate(0, 0, 1))
-	startTime := timezone.StartOfDay(now.AddDate(0, 0, -days+1))
 
 	stats, err := h.accountUsageService.GetAccountUsageStats(c.Request.Context(), accountID, startTime, endTime)
 	if err != nil {

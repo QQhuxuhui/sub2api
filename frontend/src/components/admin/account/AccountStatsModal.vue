@@ -19,9 +19,7 @@
           </div>
           <div>
             <div class="font-semibold text-gray-900 dark:text-gray-100">{{ account.name }}</div>
-            <div class="text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.last30DaysUsage') }}
-            </div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">{{ startDate }} ~ {{ endDate }}</div>
           </div>
         </div>
         <span
@@ -34,6 +32,15 @@
         >
           {{ account.status }}
         </span>
+      </div>
+
+      <!-- Time range filter -->
+      <div v-if="account" class="flex justify-end">
+        <DateRangePicker
+          v-model:start-date="startDate"
+          v-model:end-date="endDate"
+          @change="loadStats"
+        />
       </div>
 
       <!-- Loading State -->
@@ -157,7 +164,7 @@
         <!-- Row 2: Today, Highest Cost, Highest Requests -->
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <!-- Today Overview -->
-          <div class="card p-4">
+          <div v-if="rangeIncludesToday" class="card p-4">
             <div class="mb-3 flex items-center gap-2">
               <div class="rounded-lg bg-cyan-100 p-1.5 dark:bg-cyan-900/30">
                 <Icon name="clock" size="sm" class="text-cyan-600 dark:text-cyan-400" />
@@ -350,7 +357,7 @@
           </div>
 
           <!-- Recent Activity -->
-          <div class="card p-4">
+          <div v-if="rangeIncludesToday" class="card p-4">
             <div class="mb-3 flex items-center gap-2">
               <div class="rounded-lg bg-lime-100 p-1.5 dark:bg-lime-900/30">
                 <Icon
@@ -467,6 +474,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import Icon from '@/components/icons/Icon.vue'
+import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import { adminAPI } from '@/api/admin'
 import type { Account, AccountUsageStatsResponse } from '@/types'
 
@@ -494,6 +502,24 @@ const emit = defineEmits<{
 
 const loading = ref(false)
 const stats = ref<AccountUsageStatsResponse | null>(null)
+
+// 时间区间筛选（默认近 30 天，与原行为一致）
+const toDateStr = (d: Date): string => {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+const defaultStartDate = (): string => {
+  const d = new Date()
+  d.setDate(d.getDate() - 29)
+  return toDateStr(d)
+}
+const startDate = ref(defaultStartDate())
+const endDate = ref(toDateStr(new Date()))
+const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+// 区间是否包含今天（end_date >= 今天）；不含则隐藏依赖"今天"的卡片
+const rangeIncludesToday = computed(() => endDate.value >= toDateStr(new Date()))
 
 // Dark mode detection
 const isDarkMode = computed(() => {
@@ -647,6 +673,9 @@ watch(
   () => props.show,
   async (newVal) => {
     if (newVal && props.account) {
+      // 每次打开重置为近 30 天，保持默认行为不变
+      startDate.value = defaultStartDate()
+      endDate.value = toDateStr(new Date())
       await loadStats()
     } else {
       stats.value = null
@@ -659,7 +688,11 @@ const loadStats = async () => {
 
   loading.value = true
   try {
-    stats.value = await adminAPI.accounts.getStats(props.account.id, 30)
+    stats.value = await adminAPI.accounts.getStats(props.account.id, {
+      startDate: startDate.value,
+      endDate: endDate.value,
+      timezone: browserTimezone
+    })
   } catch (error) {
     console.error('Failed to load account stats:', error)
     stats.value = null
