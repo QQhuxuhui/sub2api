@@ -6243,12 +6243,39 @@ func (s *GatewayService) invalidNonStreamingJSONFailoverError(
 	}
 }
 
-// claudeErrorBodyIn2xxFailover 检测 2xx 响应体是否实为 Claude 错误对象
-// （{"type":"error","error":{...}}）。部分中转 / 号池（例如经 CLIProxyAPIPlus 的
-// antigravity 号池）会把上游错误包装成 HTTP 200 + 错误体返回；若不识别，这类失败会被
-// 当成 usage 全 0 的“成功”写入 usage_logs，既污染统计又完全不进 Ops 错误日志。命中时
-// 记录 Ops 错误并返回 failover error，交由上层切换账号 / 透传错误。返回 nil 表示非错误体，
-// 调用方继续正常处理。
+// detectDisguisedClaudeError 判断 2xx 响应体是否实为一个被伪装的上游错误。识别两种形态：
+//  1. 标准 Claude 错误对象 {"type":"error","error":{...}}；
+//  2. 被伪装成合法回复的错误：{"type":"message"} 但 id 与 model 均为空且 usage 全 0。
+//     合法 assistant 消息必带非空 id 与 model，某些中转 / 号池（如 cli-proxy-api 的 antigravity
+//     号池）会把 Google "This version of Antigravity is no longer supported" 这类错误塞进
+//     content 文本、以 HTTP 200 + 空 id/model + 0 usage 的 message 回传。据此识别，不依赖具体错误串。
+// 命中返回 (true, 错误消息)，否则返回 (false, "")。
+func detectDisguisedClaudeError(body []byte) (bool, string) {
+	root := gjson.ParseBytes(body)
+	switch root.Get("type").String() {
+	case "error":
+		return true, extractUpstreamErrorMessage(body)
+	case "message":
+		id := strings.TrimSpace(root.Get("id").String())
+		model := strings.TrimSpace(root.Get("model").String())
+		if id == "" && model == "" &&
+			root.Get("usage.input_tokens").Int() == 0 &&
+			root.Get("usage.output_tokens").Int() == 0 {
+			msg := strings.TrimSpace(root.Get("content.0.text").String())
+			if msg == "" {
+				msg = "upstream returned empty message with no id/model"
+			}
+			return true, msg
+		}
+	}
+	return false, ""
+}
+
+// claudeErrorBodyIn2xxFailover 检测 2xx 响应体是否实为被伪装的上游错误（见
+// detectDisguisedClaudeError）。部分中转 / 号池（例如经 cli-proxy-api 的 antigravity 号池）
+// 会把上游错误包装成 HTTP 200 回传；若不识别，这类失败会被当成 usage 全 0 的“成功”写入
+// usage_logs，既污染统计又完全不进 Ops 错误日志。命中时记录 Ops 错误并返回 failover error，
+// 交由上层切换账号 / 透传错误。返回 nil 表示非错误体，调用方继续正常处理。
 func (s *GatewayService) claudeErrorBodyIn2xxFailover(
 	ctx context.Context,
 	resp *http.Response,
@@ -6261,12 +6288,13 @@ func (s *GatewayService) claudeErrorBodyIn2xxFailover(
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil
 	}
-	if gjson.GetBytes(body, "type").String() != "error" {
+	isErr, rawMessage := detectDisguisedClaudeError(body)
+	if !isErr {
 		return nil
 	}
 
 	const statusCode = http.StatusBadGateway
-	message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	message := sanitizeUpstreamErrorMessage(strings.TrimSpace(rawMessage))
 
 	accountID := int64(0)
 	accountName := ""

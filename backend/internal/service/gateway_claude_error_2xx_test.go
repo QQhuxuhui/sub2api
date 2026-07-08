@@ -46,13 +46,35 @@ func TestClaudeErrorBodyIn2xxFailover(t *testing.T) {
 		require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
 	})
 
+	t.Run("200 disguised error message (empty id/model, 0 usage) triggers failover", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		// cli-proxy-api 把 Google 版本错误伪装成 type:message 回传：id/model 空、usage 全 0
+		resp, body := newClaudeErr2xxResp(http.StatusOK,
+			`{"id":"","type":"message","role":"assistant","model":"","content":[{"type":"text","text":"This version of Antigravity is no longer supported. Please upgrade to receive the latest features."}],"stop_reason":"end_turn","usage":{"input_tokens":0,"output_tokens":0}}`)
+
+		err := svc.claudeErrorBodyIn2xxFailover(context.Background(), resp, c, acct, body, true)
+		require.Error(t, err, "伪装成 message 的版本错误必须被识别为上游错误")
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr, "应为 UpstreamFailoverError 以触发账号切换")
+	})
+
 	t.Run("200 normal message returns nil", func(t *testing.T) {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		resp, body := newClaudeErr2xxResp(http.StatusOK,
-			`{"type":"message","role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":10,"output_tokens":5}}`)
+			`{"id":"msg_01ABC","type":"message","role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":10,"output_tokens":5}}`)
 
 		err := svc.claudeErrorBodyIn2xxFailover(context.Background(), resp, c, acct, body, true)
-		require.NoError(t, err, "正常 assistant 消息不应被误判为错误")
+		require.NoError(t, err, "正常 assistant 消息（有 id/model/usage）不应被误判为错误")
+	})
+
+	t.Run("200 zero-usage but valid id/model returns nil", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		// 边界：即便 usage 为 0，只要有合法 id/model 就是真实响应，不应误判
+		resp, body := newClaudeErr2xxResp(http.StatusOK,
+			`{"id":"msg_01XYZ","type":"message","role":"assistant","model":"claude-opus-4-6","content":[],"usage":{"input_tokens":0,"output_tokens":0}}`)
+
+		err := svc.claudeErrorBodyIn2xxFailover(context.Background(), resp, c, acct, body, true)
+		require.NoError(t, err, "有 id/model 的响应即使 0 usage 也不应误判为错误")
 	})
 
 	t.Run("non-2xx error body returns nil (handled elsewhere)", func(t *testing.T) {
