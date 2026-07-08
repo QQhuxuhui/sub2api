@@ -6243,6 +6243,89 @@ func (s *GatewayService) invalidNonStreamingJSONFailoverError(
 	}
 }
 
+// claudeErrorBodyIn2xxFailover 检测 2xx 响应体是否实为 Claude 错误对象
+// （{"type":"error","error":{...}}）。部分中转 / 号池（例如经 CLIProxyAPIPlus 的
+// antigravity 号池）会把上游错误包装成 HTTP 200 + 错误体返回；若不识别，这类失败会被
+// 当成 usage 全 0 的“成功”写入 usage_logs，既污染统计又完全不进 Ops 错误日志。命中时
+// 记录 Ops 错误并返回 failover error，交由上层切换账号 / 透传错误。返回 nil 表示非错误体，
+// 调用方继续正常处理。
+func (s *GatewayService) claudeErrorBodyIn2xxFailover(
+	ctx context.Context,
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	passthrough bool,
+	requestedModel ...string,
+) error {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil
+	}
+	if gjson.GetBytes(body, "type").String() != "error" {
+		return nil
+	}
+
+	const statusCode = http.StatusBadGateway
+	message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+
+	accountID := int64(0)
+	accountName := ""
+	platform := ""
+	retryableOnSameAccount := false
+	if account != nil {
+		accountID = account.ID
+		accountName = account.Name
+		platform = account.Platform
+		retryableOnSameAccount = account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode)
+	}
+
+	logger.LegacyPrintf(
+		"service.gateway",
+		"Account %d(%s): upstream returned 2xx with Claude error body, attempting failover: status=%d request_id=%s message=%s",
+		accountID,
+		accountName,
+		resp.StatusCode,
+		resp.Header.Get("x-request-id"),
+		truncateString(message, 500),
+	)
+
+	upstreamDetail := ""
+	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
+		if maxBytes <= 0 {
+			maxBytes = 2048
+		}
+		upstreamDetail = truncateString(string(body), maxBytes)
+	}
+	setOpsUpstreamError(c, resp.StatusCode, message, upstreamDetail)
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:           platform,
+		AccountID:          accountID,
+		AccountName:        accountName,
+		UpstreamStatusCode: resp.StatusCode,
+		UpstreamRequestID:  resp.Header.Get("x-request-id"),
+		Passthrough:        passthrough,
+		Kind:               "http_error",
+		Message:            message,
+		Detail:             upstreamDetail,
+	})
+
+	if s.rateLimitService != nil && account != nil {
+		if len(requestedModel) > 0 {
+			s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body, requestedModel[0])
+		} else {
+			s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body)
+		}
+	}
+
+	return &UpstreamFailoverError{
+		StatusCode:             statusCode,
+		ResponseBody:           body,
+		ResponseHeaders:        resp.Header,
+		RetryableOnSameAccount: retryableOnSameAccount,
+	}
+}
+
 func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	ctx context.Context,
 	resp *http.Response,
@@ -6263,6 +6346,12 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 		if err := json.Unmarshal(body, &raw); err != nil {
 			return nil, s.invalidNonStreamingJSONFailoverError(ctx, resp, account, body, err)
 		}
+	}
+
+	// 200 但 body 实为 Claude 错误对象（中转把上游错误包成 200 返回）时按上游错误处理，
+	// 避免记成 0 token 的“成功”用量并确保进入 Ops 错误日志。
+	if ferr := s.claudeErrorBodyIn2xxFailover(ctx, resp, c, account, body, true); ferr != nil {
+		return nil, ferr
 	}
 
 	usage := parseClaudeUsageFromResponseBody(body)
@@ -8697,6 +8786,12 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 			return nil, s.invalidNonStreamingJSONFailoverError(ctx, resp, account, body, err, mappedModel)
 		}
 		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	// 200 但 body 实为 Claude 错误对象（中转把上游错误包成 200 返回）时按上游错误处理，
+	// 避免记成 0 token 的“成功”用量并确保进入 Ops 错误日志。
+	if ferr := s.claudeErrorBodyIn2xxFailover(ctx, resp, c, account, body, false, mappedModel); ferr != nil {
+		return nil, ferr
 	}
 
 	// 解析嵌套的 cache_creation 对象中的 5m/1h 明细
