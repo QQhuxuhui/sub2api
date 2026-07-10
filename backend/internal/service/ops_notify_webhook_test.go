@@ -81,3 +81,21 @@ func TestWebhookSendErrorOnNon2xx(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "500")
 }
+
+func TestWebhookSendBoundedTimeout(t *testing.T) {
+	t.Parallel()
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release // 挂住请求直到测试结束,验证客户端侧超时生效
+	}))
+	defer func() {
+		close(release)
+		srv.Close()
+	}()
+
+	ch := &OpsNotifyChannelConfig{Type: OpsNotifyChannelTypeWebhook, WebhookURL: srv.URL, TimeoutSeconds: 1}
+	start := time.Now()
+	err := webhookNotifySender{}.Send(context.Background(), ch, webhookTestMessage())
+	require.Error(t, err)
+	require.Less(t, time.Since(start), 3*time.Second)
+}
