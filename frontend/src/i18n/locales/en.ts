@@ -5113,6 +5113,7 @@ export default {
           successRate: 'Success Rate (%)',
           errorRate: 'Error Rate (%)',
           upstreamErrorRate: 'Upstream Error Rate (%)',
+          errorCount: 'Error Count',
           p95: 'P95 Latency (ms)',
           p99: 'P99 Latency (ms)',
           cpu: 'CPU Usage (%)',
@@ -5131,6 +5132,7 @@ export default {
           successRate: 'Percentage of successful requests in the window (0-100).',
           errorRate: 'Percentage of failed requests in the window (0-100).',
           upstreamErrorRate: 'Percentage of upstream failures in the window (0-100).',
+          errorCount: 'Number of error records matching filters (status code / error type / phase / owner) in the window; business-limited errors excluded by default.',
           p95: 'P95 request latency within the window (ms).',
           p99: 'P99 request latency within the window (ms).',
           cpu: 'Current instance CPU usage (0-100).',
@@ -5144,6 +5146,18 @@ export default {
           accountErrorRatio: 'Error account ratio within the window (0-100).',
           accountTempUnscheduledCount: 'Number of accounts currently temporarily unschedulable (e.g. proxy/credential failure auto-eviction).',
           overloadAccountCount: 'Number of overloaded accounts within the window.'
+        },
+        errorFilter: {
+          any: 'Any',
+          statusCodes: 'Status codes (comma separated)',
+          errorTypes: 'Error types (comma separated)',
+          errorPhase: 'Error phase',
+          errorOwner: 'Error owner',
+          ownerProvider: 'Upstream (provider)',
+          ownerClient: 'Client',
+          ownerPlatform: 'Platform',
+          includeBusinessLimited: 'Include business-limited errors',
+          hint: 'By default uses the same scope as error rate: excludes business-limit errors like insufficient balance / quota exhausted.'
         },
         hints: {
           recommended: 'Recommended: operator {operator}, threshold {threshold}{unit}',

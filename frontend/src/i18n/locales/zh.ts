@@ -5270,6 +5270,7 @@ export default {
           successRate: '成功率 (%)',
           errorRate: '错误率 (%)',
           upstreamErrorRate: '上游错误率 (%)',
+          errorCount: '错误条数',
           p95: 'P95 请求时长 (ms)',
           p99: 'P99 请求时长 (ms)',
           cpu: 'CPU 使用率 (%)',
@@ -5288,6 +5289,7 @@ export default {
           successRate: '统计窗口内成功请求占比（0~100）。',
           errorRate: '统计窗口内失败请求占比（0~100）。',
           upstreamErrorRate: '统计窗口内上游错误占比（0~100）。',
+          errorCount: '统计窗口内匹配条件(状态码/错误类型/阶段/归因)的错误记录条数;默认排除用户业务限制类错误。',
           p95: '统计窗口内 P95 请求耗时（毫秒）。',
           p99: '统计窗口内 P99 请求耗时（毫秒）。',
           cpu: '当前实例 CPU 使用率（0~100）。',
@@ -5301,6 +5303,18 @@ export default {
           accountErrorRatio: '统计窗口内错误账号占比（0~100）。',
           accountTempUnscheduledCount: '当前处于临时不可调度状态的账号数量（如代理/凭据故障被自动摘除）。',
           overloadAccountCount: '统计窗口内过载账号数量。'
+        },
+        errorFilter: {
+          any: '不限',
+          statusCodes: '状态码过滤(逗号分隔)',
+          errorTypes: '错误类型过滤(逗号分隔)',
+          errorPhase: '错误阶段',
+          errorOwner: '错误归因',
+          ownerProvider: '上游(provider)',
+          ownerClient: '客户端(client)',
+          ownerPlatform: '平台(platform)',
+          includeBusinessLimited: '包含业务限制类错误',
+          hint: '默认与错误率同口径,排除余额不足/配额用尽等用户业务限制错误。'
         },
         hints: {
           recommended: '推荐：运算符 {operator}，阈值 {threshold}{unit}',
