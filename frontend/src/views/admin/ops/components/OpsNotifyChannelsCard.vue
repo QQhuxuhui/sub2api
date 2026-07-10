@@ -37,7 +37,7 @@ async function loadConfig() {
     config.value = await opsAPI.getNotifyChannelConfig()
   } catch (err: any) {
     console.error('[OpsNotifyChannelsCard] Failed to load config', err)
-    appStore.showError(err?.response?.data?.message || t('admin.ops.notifyChannels.loadFailed'))
+    appStore.showError(err?.message || t('admin.ops.notifyChannels.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -89,7 +89,7 @@ async function saveConfig() {
     appStore.showSuccess(t('admin.ops.notifyChannels.saveSuccess'))
   } catch (err: any) {
     console.error('[OpsNotifyChannelsCard] Failed to save config', err)
-    appStore.showError(err?.response?.data?.message || t('admin.ops.notifyChannels.saveFailed'))
+    appStore.showError(err?.message || t('admin.ops.notifyChannels.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -102,7 +102,22 @@ async function testChannel(ch: NotifyChannel) {
     appStore.showSuccess(t('admin.ops.notifyChannels.testSuccess'))
   } catch (err: any) {
     console.error('[OpsNotifyChannelsCard] Test send failed', err)
-    appStore.showError(err?.response?.data?.message || t('admin.ops.notifyChannels.testFailed'))
+    appStore.showError(err?.message || t('admin.ops.notifyChannels.testFailed'))
+  } finally {
+    testingId.value = ''
+  }
+}
+
+// 编辑器内测试:始终发送行内 channel 对象(未保存的新通道 id 为空,后端按原样测试;
+// 已存通道 secret 留空时后端会按 ID 回填已存密钥)
+async function testDraftChannel(ch: NotifyChannel, index: number) {
+  testingId.value = ch.id || `draft-${index}`
+  try {
+    await opsAPI.testNotifyChannel({ channel: ch })
+    appStore.showSuccess(t('admin.ops.notifyChannels.testSuccess'))
+  } catch (err: any) {
+    console.error('[OpsNotifyChannelsCard] Test send failed', err)
+    appStore.showError(err?.message || t('admin.ops.notifyChannels.testFailed'))
   } finally {
     testingId.value = ''
   }
@@ -225,7 +240,12 @@ onMounted(() => {
                 <span>{{ t('admin.ops.notifyChannels.notifyResolved') }}</span>
               </label>
             </div>
-            <button class="btn btn-sm btn-danger" @click="removeChannel(i)">{{ t('common.delete') }}</button>
+            <div class="flex items-center gap-2">
+              <button class="btn btn-sm btn-secondary" :disabled="testingId !== ''" @click="testDraftChannel(ch, i)">
+                {{ testingId === (ch.id || `draft-${i}`) ? t('admin.ops.notifyChannels.testing') : t('admin.ops.notifyChannels.testSend') }}
+              </button>
+              <button class="btn btn-sm btn-danger" @click="removeChannel(i)">{{ t('common.delete') }}</button>
+            </div>
           </div>
         </div>
 
