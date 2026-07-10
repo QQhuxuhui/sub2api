@@ -192,3 +192,24 @@ func TestDispatchDegradesToNoChannelsOnConfigError(t *testing.T) {
 	d.dispatch(firingMsg("P0"))
 	require.Equal(t, 1, fake.callCount())
 }
+
+type panickingNotifySender struct{}
+
+func (panickingNotifySender) Send(ctx context.Context, ch *OpsNotifyChannelConfig, msg *OpsNotifyMessage) error {
+	panic("sender boom")
+}
+
+func TestDispatchRecoversFromSenderPanic(t *testing.T) {
+	t.Parallel()
+	d, fake := newDispatcherForTest(t, &OpsNotifyChannelSettings{
+		Channels: []OpsNotifyChannelConfig{
+			{ID: "panics", Name: "a", Type: "feishu", Enabled: true, WebhookURL: "https://x/1", TimeoutSeconds: 5},
+			{ID: "ok", Name: "b", Type: "webhook", Enabled: true, WebhookURL: "https://x/2", TimeoutSeconds: 5},
+		},
+	})
+	d.senders[OpsNotifyChannelTypeFeishu] = panickingNotifySender{}
+	// webhook 通道仍是 fake(newDispatcherForTest 已设置)
+
+	d.dispatch(firingMsg("P0")) // 不应 panic
+	require.Equal(t, 1, fake.callCount())
+}

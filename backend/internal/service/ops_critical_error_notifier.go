@@ -8,11 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/redis/go-redis/v9"
 )
 
 const (
-	opsNotifyCooldownKeyPrefix    = "ops:notify:cooldown:"
+	opsNotifyCooldownKeyPrefix     = "ops:notify:cooldown:"
 	opsCriticalErrorProcessTimeout = 20 * time.Second
 )
 
@@ -52,6 +53,12 @@ func (n *OpsCriticalErrorNotifier) Observe(entries []*OpsInsertErrorLogInput) {
 }
 
 func (n *OpsCriticalErrorNotifier) process(entries []*OpsInsertErrorLogInput) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.LegacyPrintf("service.ops_notify", "[OpsNotify] critical error notifier panic recovered: %v", r)
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), opsCriticalErrorProcessTimeout)
 	defer cancel()
 
@@ -62,6 +69,12 @@ func (n *OpsCriticalErrorNotifier) process(entries []*OpsInsertErrorLogInput) {
 	cooldown := time.Duration(cfg.CriticalError.CooldownMinutes) * time.Minute
 
 	for _, e := range entries {
+		select {
+		case <-ctx.Done():
+			// 20s 总预算用尽,放弃剩余条目(best-effort,不阻塞不累积)
+			return
+		default:
+		}
 		code, ok := matchOpsCriticalError(&cfg.CriticalError, e)
 		if !ok {
 			continue

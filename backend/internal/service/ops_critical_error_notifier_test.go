@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -10,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func opsNotifyIntPtr(v int) *int       { return &v }
-func opsNotifyI64Ptr(v int64) *int64   { return &v }
+func opsNotifyIntPtr(v int) *int     { return &v }
+func opsNotifyI64Ptr(v int64) *int64 { return &v }
 
 func criticalCfg() *OpsCriticalErrorNotifyConfig {
 	return &OpsCriticalErrorNotifyConfig{Enabled: true, StatusCodes: []int{401, 403, 529}, CooldownMinutes: 10}
@@ -117,4 +118,33 @@ func TestCriticalErrorProcessDisabledConfigNoDispatch(t *testing.T) {
 		{ErrorOwner: "provider", StatusCode: 401, Platform: "anthropic", CreatedAt: time.Now()},
 	})
 	require.Equal(t, 0, fake.callCount())
+}
+
+type panickingAccountRepo struct{ AccountRepository }
+
+func (panickingAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	panic("account repo boom")
+}
+
+func TestCriticalErrorProcessRecoversFromPanic(t *testing.T) {
+	t.Parallel()
+	repo := newOpsNotifySettingRepoStub()
+	cfgJSON, err := json.Marshal(&OpsNotifyChannelSettings{
+		Channels: []OpsNotifyChannelConfig{
+			{ID: "c1", Name: "a", Type: "feishu", Enabled: true, WebhookURL: "https://x/1", TimeoutSeconds: 5},
+		},
+		CriticalError: *criticalCfg(),
+	})
+	require.NoError(t, err)
+	repo.values[SettingKeyOpsNotifyChannelConfig] = string(cfgJSON)
+
+	opsSvc := &OpsService{settingRepo: repo}
+	d := NewOpsNotifyDispatcher(opsSvc)
+	d.senders[OpsNotifyChannelTypeFeishu] = &fakeNotifySender{}
+	n := NewOpsCriticalErrorNotifier(opsSvc, d, nil, panickingAccountRepo{})
+
+	// buildMessage 里的 accountRepo.GetByID panic 应被 process 的 recover 吞掉,不崩测试进程
+	n.process([]*OpsInsertErrorLogInput{
+		{ErrorOwner: "provider", StatusCode: 401, AccountID: opsNotifyI64Ptr(7), Platform: "anthropic", CreatedAt: time.Now()},
+	})
 }

@@ -103,7 +103,14 @@ func (d *OpsNotifyDispatcher) Dispatch(msg *OpsNotifyMessage) {
 	if d == nil || msg == nil {
 		return
 	}
-	go d.dispatch(msg)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.LegacyPrintf("service.ops_notify", "[OpsNotify] dispatch panic recovered: %v", r)
+			}
+		}()
+		d.dispatch(msg)
+	}()
 }
 
 // dispatch 同步执行一次分发(测试直接调它)。
@@ -123,6 +130,12 @@ func (d *OpsNotifyDispatcher) dispatch(msg *OpsNotifyMessage) {
 		wg.Add(1)
 		go func(ch OpsNotifyChannelConfig) {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					logger.LegacyPrintf("service.ops_notify",
+						"[OpsNotify] channel send panic recovered (channel=%s type=%s): %v", ch.Name, ch.Type, r)
+				}
+			}()
 			sender := d.senders[ch.Type]
 			if err := sender.Send(ctx, &ch, msg); err != nil {
 				logger.LegacyPrintf("service.ops_notify",
