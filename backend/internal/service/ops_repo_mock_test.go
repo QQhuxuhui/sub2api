@@ -14,6 +14,13 @@ type opsRepoMock struct {
 	DeleteSystemLogsFn            func(ctx context.Context, filter *OpsSystemLogCleanupFilter) (int64, error)
 	InsertSystemLogCleanupAuditFn func(ctx context.Context, input *OpsSystemLogCleanupAudit) error
 	LookupDeletedKeyAuditFn       func(ctx context.Context, key string) (*DeletedKeyAuditResult, error)
+	CountErrorLogsFn              func(ctx context.Context, filter *OpsErrorLogFilter) (int64, error)
+	ListAlertRulesFn              func(ctx context.Context) ([]*OpsAlertRule, error)
+	GetLatestSystemMetricsFn      func(ctx context.Context, windowMinutes int) (*OpsSystemMetricsSnapshot, error)
+	GetActiveAlertEventFn         func(ctx context.Context, ruleID int64) (*OpsAlertEvent, error)
+	GetLatestAlertEventFn         func(ctx context.Context, ruleID int64) (*OpsAlertEvent, error)
+	CreateAlertEventFn            func(ctx context.Context, event *OpsAlertEvent) (*OpsAlertEvent, error)
+	UpdateAlertEventStatusFn      func(ctx context.Context, eventID int64, status string, resolvedAt *time.Time) error
 }
 
 func (m *opsRepoMock) InsertErrorLog(ctx context.Context, input *OpsInsertErrorLogInput) (int64, error) {
@@ -32,6 +39,13 @@ func (m *opsRepoMock) BatchInsertErrorLogs(ctx context.Context, inputs []*OpsIns
 
 func (m *opsRepoMock) ListErrorLogs(ctx context.Context, filter *OpsErrorLogFilter) (*OpsErrorLogList, error) {
 	return &OpsErrorLogList{Errors: []*OpsErrorLog{}, Page: 1, PageSize: 20}, nil
+}
+
+func (m *opsRepoMock) CountErrorLogs(ctx context.Context, filter *OpsErrorLogFilter) (int64, error) {
+	if m.CountErrorLogsFn != nil {
+		return m.CountErrorLogsFn(ctx, filter)
+	}
+	return 0, nil
 }
 
 func (m *opsRepoMock) GetErrorLogByID(ctx context.Context, id int64) (*OpsErrorLogDetail, error) {
@@ -111,6 +125,9 @@ func (m *opsRepoMock) InsertSystemMetrics(ctx context.Context, input *OpsInsertS
 }
 
 func (m *opsRepoMock) GetLatestSystemMetrics(ctx context.Context, windowMinutes int) (*OpsSystemMetricsSnapshot, error) {
+	if m.GetLatestSystemMetricsFn != nil {
+		return m.GetLatestSystemMetricsFn(ctx, windowMinutes)
+	}
 	return &OpsSystemMetricsSnapshot{}, nil
 }
 
@@ -123,6 +140,9 @@ func (m *opsRepoMock) ListJobHeartbeats(ctx context.Context) ([]*OpsJobHeartbeat
 }
 
 func (m *opsRepoMock) ListAlertRules(ctx context.Context) ([]*OpsAlertRule, error) {
+	if m.ListAlertRulesFn != nil {
+		return m.ListAlertRulesFn(ctx)
+	}
 	return []*OpsAlertRule{}, nil
 }
 
@@ -147,18 +167,30 @@ func (m *opsRepoMock) GetAlertEventByID(ctx context.Context, eventID int64) (*Op
 }
 
 func (m *opsRepoMock) GetActiveAlertEvent(ctx context.Context, ruleID int64) (*OpsAlertEvent, error) {
+	if m.GetActiveAlertEventFn != nil {
+		return m.GetActiveAlertEventFn(ctx, ruleID)
+	}
 	return nil, nil
 }
 
 func (m *opsRepoMock) GetLatestAlertEvent(ctx context.Context, ruleID int64) (*OpsAlertEvent, error) {
+	if m.GetLatestAlertEventFn != nil {
+		return m.GetLatestAlertEventFn(ctx, ruleID)
+	}
 	return nil, nil
 }
 
 func (m *opsRepoMock) CreateAlertEvent(ctx context.Context, event *OpsAlertEvent) (*OpsAlertEvent, error) {
+	if m.CreateAlertEventFn != nil {
+		return m.CreateAlertEventFn(ctx, event)
+	}
 	return event, nil
 }
 
 func (m *opsRepoMock) UpdateAlertEventStatus(ctx context.Context, eventID int64, status string, resolvedAt *time.Time) error {
+	if m.UpdateAlertEventStatusFn != nil {
+		return m.UpdateAlertEventStatusFn(ctx, eventID, status, resolvedAt)
+	}
 	return nil
 }
 

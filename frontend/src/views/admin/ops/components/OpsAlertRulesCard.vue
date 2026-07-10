@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -110,6 +110,97 @@ const groupOptions = computed<SelectOption[]>(() => {
   return [{ value: null, label: t('admin.ops.alertRules.form.allGroups') }, ...groupOptionsBase.value]
 })
 
+const isErrorCountMetric = computed(() => draft.value?.metric_type === 'error_count')
+
+function getFilterString(key: string): string {
+  const v = draft.value?.filters?.[key]
+  return typeof v === 'string' ? v : ''
+}
+
+function setFilterValue(key: string, value: unknown) {
+  if (!draft.value) return
+  if (value === '' || value === null || value === undefined || (Array.isArray(value) && value.length === 0) || value === false) {
+    if (!draft.value.filters) return
+    delete draft.value.filters[key]
+    if (Object.keys(draft.value.filters).length === 0) delete draft.value.filters
+    return
+  }
+  if (!draft.value.filters) draft.value.filters = {}
+  draft.value.filters[key] = value
+}
+
+const draftStatusCodes = computed<string>({
+  get() {
+    const arr = draft.value?.filters?.status_codes
+    return Array.isArray(arr) ? arr.join(', ') : ''
+  },
+  set(v) {
+    const codes = v
+      .split(/[,，\s]+/)
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => Number.isFinite(n) && n >= 100 && n <= 599)
+    setFilterValue('status_codes', codes)
+  }
+})
+
+const draftErrorTypes = computed<string>({
+  get() {
+    const arr = draft.value?.filters?.error_types
+    return Array.isArray(arr) ? arr.join(', ') : ''
+  },
+  set(v) {
+    const types = v
+      .split(/[,，\s]+/)
+      .map((s) => s.trim())
+      .filter((s) => s !== '')
+    setFilterValue('error_types', types)
+  }
+})
+
+const draftErrorPhase = computed<string>({
+  get: () => getFilterString('error_phase'),
+  set: (v) => setFilterValue('error_phase', v)
+})
+
+const draftErrorOwner = computed<string>({
+  get: () => getFilterString('error_owner'),
+  set: (v) => setFilterValue('error_owner', v)
+})
+
+const draftIncludeBusinessLimited = computed<boolean>({
+  get: () => draft.value?.filters?.include_business_limited === true,
+  set: (v) => setFilterValue('include_business_limited', v)
+})
+
+const errorPhaseOptions = computed(() => [
+  { value: '', label: t('admin.ops.alertRules.errorFilter.any') },
+  ...['request', 'auth', 'routing', 'upstream', 'network', 'billing', 'concurrency', 'internal'].map((p) => ({
+    value: p,
+    label: p
+  }))
+])
+
+const errorOwnerOptions = computed(() => [
+  { value: '', label: t('admin.ops.alertRules.errorFilter.any') },
+  { value: 'provider', label: t('admin.ops.alertRules.errorFilter.ownerProvider') },
+  { value: 'client', label: t('admin.ops.alertRules.errorFilter.ownerClient') },
+  { value: 'platform', label: t('admin.ops.alertRules.errorFilter.ownerPlatform') }
+])
+
+// 切换到非 error_count 指标时清理错误过滤键,避免把无关过滤条件随规则提交
+watch(
+  () => draft.value?.metric_type,
+  (next, prev) => {
+    if (prev === 'error_count' && next !== 'error_count' && next !== undefined) {
+      setFilterValue('status_codes', '')
+      setFilterValue('error_types', '')
+      setFilterValue('error_phase', '')
+      setFilterValue('error_owner', '')
+      setFilterValue('include_business_limited', false)
+    }
+  }
+)
+
 const metricDefinitions = computed(() => {
   return [
     // System-level metrics
@@ -139,6 +230,14 @@ const metricDefinitions = computed(() => {
       recommendedOperator: '>',
       recommendedThreshold: 1,
       unit: '%'
+    },
+    {
+      type: 'error_count',
+      group: 'system',
+      label: t('admin.ops.alertRules.metrics.errorCount'),
+      description: t('admin.ops.alertRules.metricDescriptions.errorCount'),
+      recommendedOperator: '>',
+      recommendedThreshold: 10
     },
     {
       type: 'cpu_usage_percent',
@@ -536,6 +635,32 @@ function cancelDelete() {
               {{ isGroupMetricSelected ? t('admin.ops.alertRules.hints.groupRequired') : t('admin.ops.alertRules.hints.groupOptional') }}
             </p>
           </div>
+
+          <template v-if="isErrorCountMetric">
+            <div>
+              <label class="input-label">{{ t('admin.ops.alertRules.errorFilter.statusCodes') }}</label>
+              <input v-model="draftStatusCodes" type="text" class="input" placeholder="502, 529" />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.ops.alertRules.errorFilter.errorTypes') }}</label>
+              <input v-model="draftErrorTypes" type="text" class="input" placeholder="overloaded_error" />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.ops.alertRules.errorFilter.errorPhase') }}</label>
+              <Select v-model="draftErrorPhase" :options="errorPhaseOptions" />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.ops.alertRules.errorFilter.errorOwner') }}</label>
+              <Select v-model="draftErrorOwner" :options="errorOwnerOptions" />
+            </div>
+            <div class="md:col-span-2">
+              <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input v-model="draftIncludeBusinessLimited" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
+                <span>{{ t('admin.ops.alertRules.errorFilter.includeBusinessLimited') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.ops.alertRules.errorFilter.hint') }}</p>
+            </div>
+          </template>
 
           <div>
             <label class="input-label">{{ t('admin.ops.alertRules.form.threshold') }}</label>

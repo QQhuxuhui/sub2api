@@ -158,6 +158,11 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		ops.GET("/email-notification/config", h.Admin.Ops.GetEmailNotificationConfig)
 		ops.PUT("/email-notification/config", h.Admin.Ops.UpdateEmailNotificationConfig)
 
+		// Notify channels (feishu/webhook) config + test send (DB-backed)
+		ops.GET("/notify-channels/config", h.Admin.Ops.GetNotifyChannelConfig)
+		ops.PUT("/notify-channels/config", h.Admin.Ops.UpdateNotifyChannelConfig)
+		ops.POST("/notify-channels/test", h.Admin.Ops.TestNotifyChannel)
+
 		// Runtime settings (DB-backed)
 		runtime := ops.Group("/runtime")
 		{

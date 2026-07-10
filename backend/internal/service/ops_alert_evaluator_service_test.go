@@ -252,3 +252,11 @@ func TestComputeRuleMetricNewIndicators(t *testing.T) {
 		})
 	}
 }
+
+func TestEvaluatorConstructorAcceptsDispatcher(t *testing.T) {
+	t.Parallel()
+	d := NewOpsNotifyDispatcher(&OpsService{})
+	svc := NewOpsAlertEvaluatorService(nil, nil, nil, nil, nil, nil, d)
+	require.NotNil(t, svc)
+	require.Same(t, d, svc.dispatcher)
+}

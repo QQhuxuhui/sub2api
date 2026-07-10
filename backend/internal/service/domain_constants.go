@@ -334,6 +334,9 @@ const (
 	// SettingKeyOpsEmailNotificationConfig stores JSON config for ops email notifications.
 	SettingKeyOpsEmailNotificationConfig = "ops_email_notification_config"
 
+	// SettingKeyOpsNotifyChannelConfig stores JSON config for ops notify channels (feishu/webhook) + critical error instant notify.
+	SettingKeyOpsNotifyChannelConfig = "ops_notify_channel_config"
+
 	// SettingKeyOpsAlertRuntimeSettings stores JSON config for ops alert evaluator runtime settings.
 	SettingKeyOpsAlertRuntimeSettings = "ops_alert_runtime_settings"
 

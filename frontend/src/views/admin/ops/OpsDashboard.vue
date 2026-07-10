@@ -109,6 +109,9 @@
 
         <BaseDialog :show="showAlertRulesCard" :title="t('admin.ops.alertRules.title')" width="extra-wide" @close="showAlertRulesCard = false">
           <OpsAlertRulesCard />
+          <div class="mt-6">
+            <OpsNotifyChannelsCard />
+          </div>
         </BaseDialog>
 
         <OpsErrorDetailsModal
@@ -169,6 +172,7 @@ import OpsSystemLogTable from './components/OpsSystemLogTable.vue'
 import OpsRequestDetailsModal, { type OpsRequestDetailsPreset } from './components/OpsRequestDetailsModal.vue'
 import OpsSettingsDialog from './components/OpsSettingsDialog.vue'
 import OpsAlertRulesCard from './components/OpsAlertRulesCard.vue'
+import OpsNotifyChannelsCard from './components/OpsNotifyChannelsCard.vue'
 
 const route = useRoute()
 const router = useRouter()
