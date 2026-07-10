@@ -155,3 +155,40 @@ func TestSendTestUsesChannelType(t *testing.T) {
 	err = d.SendTest(context.Background(), &OpsNotifyChannelConfig{Type: "unknown"})
 	require.Error(t, err)
 }
+
+type opsNotifyErroringSettingRepo struct {
+	*opsNotifySettingRepoStub
+	fail bool
+}
+
+func (r *opsNotifyErroringSettingRepo) GetValue(ctx context.Context, key string) (string, error) {
+	if r.fail {
+		return "", errors.New("db down")
+	}
+	return r.opsNotifySettingRepoStub.GetValue(ctx, key)
+}
+
+func TestDispatchDegradesToNoChannelsOnConfigError(t *testing.T) {
+	t.Parallel()
+	inner := newOpsNotifySettingRepoStub()
+	cfg := &OpsNotifyChannelSettings{Channels: []OpsNotifyChannelConfig{
+		{ID: "c1", Name: "a", Type: "feishu", Enabled: true, WebhookURL: "https://x/1", TimeoutSeconds: 5},
+	}}
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	inner.values[SettingKeyOpsNotifyChannelConfig] = string(raw)
+	repo := &opsNotifyErroringSettingRepo{opsNotifySettingRepoStub: inner, fail: true}
+
+	d := NewOpsNotifyDispatcher(&OpsService{settingRepo: repo})
+	fake := &fakeNotifySender{}
+	d.senders[OpsNotifyChannelTypeFeishu] = fake
+
+	// 读配置失败 → 按"无通道"降级:不发送、不 panic
+	d.dispatch(firingMsg("P0"))
+	require.Equal(t, 0, fake.callCount())
+
+	// 错误结果不缓存:仓储恢复后下一次分发立即生效
+	repo.fail = false
+	d.dispatch(firingMsg("P0"))
+	require.Equal(t, 1, fake.callCount())
+}
