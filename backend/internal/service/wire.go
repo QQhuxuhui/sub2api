@@ -293,6 +293,20 @@ func ProvideOpsAggregationService(
 	return svc
 }
 
+// ProvideOpsNotifyDispatcher creates the notify channel dispatcher and hooks the
+// critical-error notifier into OpsService via setter (constructor-cycle decoupling,
+// 同 SetCleanupReloader;notifier 不被其他构造函数消费,必须在此顺带构造,否则被 Wire 剪枝).
+func ProvideOpsNotifyDispatcher(
+	opsService *OpsService,
+	redisClient *redis.Client,
+	accountRepo AccountRepository,
+) *OpsNotifyDispatcher {
+	d := NewOpsNotifyDispatcher(opsService)
+	notifier := NewOpsCriticalErrorNotifier(opsService, d, redisClient, accountRepo)
+	opsService.SetCriticalErrorNotifier(notifier)
+	return d
+}
+
 // ProvideOpsAlertEvaluatorService creates and starts OpsAlertEvaluatorService.
 func ProvideOpsAlertEvaluatorService(
 	opsService *OpsService,
@@ -301,8 +315,9 @@ func ProvideOpsAlertEvaluatorService(
 	redisClient *redis.Client,
 	cfg *config.Config,
 	proxyRepo ProxyRepository,
+	dispatcher *OpsNotifyDispatcher,
 ) *OpsAlertEvaluatorService {
-	svc := NewOpsAlertEvaluatorService(opsService, opsRepo, emailService, redisClient, cfg, proxyRepo)
+	svc := NewOpsAlertEvaluatorService(opsService, opsRepo, emailService, redisClient, cfg, proxyRepo, dispatcher)
 	svc.Start()
 	return svc
 }
@@ -558,6 +573,7 @@ var ProviderSet = wire.NewSet(
 	ProvideOpsService,
 	ProvideOpsMetricsCollector,
 	ProvideOpsAggregationService,
+	ProvideOpsNotifyDispatcher,
 	ProvideOpsAlertEvaluatorService,
 	ProvideOpsCleanupService,
 	ProvideOpsScheduledReportService,

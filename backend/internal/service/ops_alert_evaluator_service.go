@@ -36,6 +36,7 @@ type OpsAlertEvaluatorService struct {
 	opsRepo      OpsRepository
 	emailService *EmailService
 	proxyRepo    ProxyRepository
+	dispatcher   *OpsNotifyDispatcher
 
 	redisClient *redis.Client
 	cfg         *config.Config
@@ -69,6 +70,7 @@ func NewOpsAlertEvaluatorService(
 	redisClient *redis.Client,
 	cfg *config.Config,
 	proxyRepo ProxyRepository,
+	dispatcher *OpsNotifyDispatcher,
 ) *OpsAlertEvaluatorService {
 	return &OpsAlertEvaluatorService{
 		opsService:   opsService,
@@ -77,6 +79,7 @@ func NewOpsAlertEvaluatorService(
 		proxyRepo:    proxyRepo,
 		redisClient:  redisClient,
 		cfg:          cfg,
+		dispatcher:   dispatcher,
 		instanceID:   uuid.NewString(),
 		ruleStates:   map[int64]*opsAlertRuleState{},
 		emailLimiter: newSlidingWindowLimiter(0, time.Hour),
@@ -295,6 +298,12 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 				if s.maybeSendAlertEmail(ctx, runtimeCfg, rule, created) {
 					emailsSent++
 				}
+				// webhook 通道分发;运行时静默与邮件路径同一判定。
+				silenced := runtimeCfg != nil && runtimeCfg.Silencing.Enabled &&
+					isOpsAlertSilenced(time.Now().UTC(), rule, created, runtimeCfg.Silencing)
+				if !silenced && s.dispatcher != nil {
+					s.dispatcher.DispatchAlertEvent(rule, created, OpsNotifyKindAlertFiring)
+				}
 			}
 			continue
 		}
@@ -306,6 +315,12 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 				logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] resolve event failed (event=%d): %v", activeEvent.ID, err)
 			} else {
 				eventsResolved++
+				if s.dispatcher != nil {
+					resolvedEvent := *activeEvent
+					resolvedEvent.Status = OpsAlertStatusResolved
+					resolvedEvent.ResolvedAt = &resolvedAt
+					s.dispatcher.DispatchAlertEvent(rule, &resolvedEvent, OpsNotifyKindAlertResolved)
+				}
 			}
 		}
 	}
