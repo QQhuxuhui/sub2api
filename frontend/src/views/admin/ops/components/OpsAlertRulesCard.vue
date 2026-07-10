@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -186,6 +186,20 @@ const errorOwnerOptions = computed(() => [
   { value: 'client', label: t('admin.ops.alertRules.errorFilter.ownerClient') },
   { value: 'platform', label: t('admin.ops.alertRules.errorFilter.ownerPlatform') }
 ])
+
+// 切换到非 error_count 指标时清理错误过滤键,避免把无关过滤条件随规则提交
+watch(
+  () => draft.value?.metric_type,
+  (next, prev) => {
+    if (prev === 'error_count' && next !== 'error_count' && next !== undefined) {
+      setFilterValue('status_codes', '')
+      setFilterValue('error_types', '')
+      setFilterValue('error_phase', '')
+      setFilterValue('error_owner', '')
+      setFilterValue('include_business_limited', false)
+    }
+  }
+)
 
 const metricDefinitions = computed(() => {
   return [
