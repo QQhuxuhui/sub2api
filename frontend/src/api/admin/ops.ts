@@ -676,6 +676,7 @@ export type MetricType =
   | 'success_rate'
   | 'error_rate'
   | 'upstream_error_rate'
+  | 'error_count'
   | 'cpu_usage_percent'
   | 'memory_usage_percent'
   | 'concurrency_queue_depth'
@@ -747,6 +748,33 @@ export interface EmailNotificationConfig {
     account_health_schedule: string
     account_health_error_rate_threshold: number
   }
+}
+
+export type NotifyChannelType = 'feishu' | 'webhook'
+
+export interface NotifyChannel {
+  id: string
+  name: string
+  type: NotifyChannelType
+  enabled: boolean
+  webhook_url: string
+  secret?: string
+  secret_configured: boolean
+  min_severity: AlertSeverity | ''
+  rate_limit_per_hour: number
+  notify_resolved: boolean
+  timeout_seconds: number
+}
+
+export interface CriticalErrorNotifyConfig {
+  enabled: boolean
+  status_codes: number[]
+  cooldown_minutes: number
+}
+
+export interface NotifyChannelSettings {
+  channels: NotifyChannel[]
+  critical_error: CriticalErrorNotifyConfig
 }
 
 export interface OpsMetricThresholds {
@@ -1234,6 +1262,22 @@ export async function updateEmailNotificationConfig(config: EmailNotificationCon
   return data
 }
 
+// Notify channels (feishu/webhook)
+export async function getNotifyChannelConfig(): Promise<NotifyChannelSettings> {
+  const { data } = await apiClient.get<NotifyChannelSettings>('/admin/ops/notify-channels/config')
+  return data
+}
+
+export async function updateNotifyChannelConfig(config: NotifyChannelSettings): Promise<NotifyChannelSettings> {
+  const { data } = await apiClient.put<NotifyChannelSettings>('/admin/ops/notify-channels/config', config)
+  return data
+}
+
+export async function testNotifyChannel(req: { channel_id?: string; channel?: NotifyChannel }): Promise<{ ok: boolean }> {
+  const { data } = await apiClient.post<{ ok: boolean }>('/admin/ops/notify-channels/test', req)
+  return data
+}
+
 // Runtime settings (DB-backed)
 export async function getAlertRuntimeSettings(): Promise<OpsAlertRuntimeSettings> {
   const { data } = await apiClient.get<OpsAlertRuntimeSettings>('/admin/ops/runtime/alert')
@@ -1336,6 +1380,9 @@ export const opsAPI = {
   createAlertSilence,
   getEmailNotificationConfig,
   updateEmailNotificationConfig,
+  getNotifyChannelConfig,
+  updateNotifyChannelConfig,
+  testNotifyChannel,
   getAlertRuntimeSettings,
   updateAlertRuntimeSettings,
   getRuntimeLogConfig,
