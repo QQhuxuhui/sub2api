@@ -46,6 +46,10 @@ type OpsService struct {
 	// UpdateOpsAdvancedSettings 写入新配置后调用，把最新的 quota auto-pause 全局默认阈值
 	// 立即同步到调度热路径读取的内存缓存，避免下次请求才能感知新值。
 	quotaAutoPauseSink func(OpsOpenAIAccountQuotaAutoPauseSettings)
+
+	// criticalErrorNotifier 由 wire 通过 SetCriticalErrorNotifier 注入(构造期循环依赖的解耦点,
+	// 同 SetCleanupReloader)。错误落库成功后触发严重错误即时通知,best-effort。
+	criticalErrorNotifier *OpsCriticalErrorNotifier
 }
 
 // CleanupReloader 由 OpsCleanupService 实现。
@@ -70,6 +74,14 @@ func (s *OpsService) SetOpenAIQuotaAutoPauseSettingsSink(sink func(OpsOpenAIAcco
 		return
 	}
 	s.quotaAutoPauseSink = sink
+}
+
+// SetCriticalErrorNotifier 由 wire 注入严重错误即时通知器。
+func (s *OpsService) SetCriticalErrorNotifier(n *OpsCriticalErrorNotifier) {
+	if s == nil {
+		return
+	}
+	s.criticalErrorNotifier = n
 }
 
 func NewOpsService(
@@ -151,6 +163,9 @@ func (s *OpsService) RecordError(ctx context.Context, entry *OpsInsertErrorLogIn
 		log.Printf("[Ops] RecordError failed: %v", err)
 		return err
 	}
+	if s.criticalErrorNotifier != nil {
+		s.criticalErrorNotifier.Observe([]*OpsInsertErrorLogInput{prepared})
+	}
 	return nil
 }
 
@@ -176,22 +191,35 @@ func (s *OpsService) RecordErrorBatch(ctx context.Context, entries []*OpsInsertE
 		_, err := s.opsRepo.InsertErrorLog(ctx, prepared[0])
 		if err != nil {
 			log.Printf("[Ops] RecordErrorBatch single insert failed: %v", err)
+			return err
 		}
-		return err
+		if s.criticalErrorNotifier != nil {
+			s.criticalErrorNotifier.Observe(prepared)
+		}
+		return nil
 	}
 
 	if _, err := s.opsRepo.BatchInsertErrorLogs(ctx, prepared); err != nil {
 		log.Printf("[Ops] RecordErrorBatch failed, fallback to single inserts: %v", err)
 		var firstErr error
+		inserted := make([]*OpsInsertErrorLogInput, 0, len(prepared))
 		for _, entry := range prepared {
 			if _, insertErr := s.opsRepo.InsertErrorLog(ctx, entry); insertErr != nil {
 				log.Printf("[Ops] RecordErrorBatch fallback insert failed: %v", insertErr)
 				if firstErr == nil {
 					firstErr = insertErr
 				}
+				continue
 			}
+			inserted = append(inserted, entry)
+		}
+		if s.criticalErrorNotifier != nil && len(inserted) > 0 {
+			s.criticalErrorNotifier.Observe(inserted)
 		}
 		return firstErr
+	}
+	if s.criticalErrorNotifier != nil {
+		s.criticalErrorNotifier.Observe(prepared)
 	}
 	return nil
 }
