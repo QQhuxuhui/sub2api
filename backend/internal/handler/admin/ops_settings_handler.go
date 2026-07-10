@@ -345,24 +345,40 @@ func (h *OpsHandler) TestNotifyChannel(c *gin.Context) {
 		return
 	}
 
+	// 行内 channel 对象优先;channel_id 仅在未提供行内对象时用于查找已存通道。
 	ch := req.Channel
-	if strings.TrimSpace(req.ChannelID) != "" || (ch != nil && strings.TrimSpace(ch.Secret) == "" && strings.TrimSpace(ch.ID) != "") {
+	channelID := strings.TrimSpace(req.ChannelID)
+	needLookup := (ch == nil && channelID != "") ||
+		(ch != nil && strings.TrimSpace(ch.Secret) == "" && strings.TrimSpace(ch.ID) != "")
+	if needLookup {
 		stored, err := h.opsService.GetNotifyChannelSettings(c.Request.Context())
 		if err != nil {
 			response.Error(c, http.StatusInternalServerError, "Failed to load notify channel config")
 			return
 		}
+		found := false
 		for i := range stored.Channels {
 			s := &stored.Channels[i]
-			if ch == nil && s.ID == strings.TrimSpace(req.ChannelID) {
-				ch = s
+			if ch == nil {
+				if s.ID == channelID {
+					ch = s
+					found = true
+					break
+				}
+				continue
+			}
+			if s.ID == strings.TrimSpace(ch.ID) {
+				// 行内通道对象 secret 为空 → 用已存 secret 补全(前端脱敏回传场景)
+				if strings.TrimSpace(ch.Secret) == "" {
+					ch.Secret = s.Secret
+				}
+				found = true
 				break
 			}
-			// 行内通道对象 secret 为空 → 用已存 secret 补全(前端脱敏回传场景)
-			if ch != nil && s.ID == strings.TrimSpace(ch.ID) && strings.TrimSpace(ch.Secret) == "" {
-				ch.Secret = s.Secret
-				break
-			}
+		}
+		if !found {
+			response.NotFound(c, "Notify channel not found")
+			return
 		}
 	}
 	if ch == nil {
