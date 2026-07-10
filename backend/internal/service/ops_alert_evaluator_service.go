@@ -447,6 +447,70 @@ func parseOpsAlertRuleScope(filters map[string]any) (platform string, groupID *i
 	return platform, groupID, region
 }
 
+type opsAlertRuleErrorFilter struct {
+	StatusCodes            []int
+	ErrorTypes             []string
+	ErrorPhase             string
+	ErrorOwner             string
+	IncludeBusinessLimited bool
+}
+
+// parseOpsAlertRuleErrorFilter 解析 error_count 规则的 filters 扩展字段。
+// JSONB 反序列化后数字为 float64;畸形值一律忽略(容错优先,不让告警评估失败)。
+func parseOpsAlertRuleErrorFilter(filters map[string]any) opsAlertRuleErrorFilter {
+	out := opsAlertRuleErrorFilter{}
+	if filters == nil {
+		return out
+	}
+	if v, ok := filters["status_codes"]; ok {
+		if arr, ok := v.([]any); ok {
+			for _, item := range arr {
+				switch t := item.(type) {
+				case float64:
+					if t > 0 {
+						out.StatusCodes = append(out.StatusCodes, int(t))
+					}
+				case int:
+					if t > 0 {
+						out.StatusCodes = append(out.StatusCodes, t)
+					}
+				case string:
+					if n, err := strconv.Atoi(strings.TrimSpace(t)); err == nil && n > 0 {
+						out.StatusCodes = append(out.StatusCodes, n)
+					}
+				}
+			}
+		}
+	}
+	if v, ok := filters["error_types"]; ok {
+		if arr, ok := v.([]any); ok {
+			for _, item := range arr {
+				if s, ok := item.(string); ok {
+					if trimmed := strings.TrimSpace(s); trimmed != "" {
+						out.ErrorTypes = append(out.ErrorTypes, trimmed)
+					}
+				}
+			}
+		}
+	}
+	if v, ok := filters["error_phase"]; ok {
+		if s, ok := v.(string); ok {
+			out.ErrorPhase = strings.TrimSpace(s)
+		}
+	}
+	if v, ok := filters["error_owner"]; ok {
+		if s, ok := v.(string); ok {
+			out.ErrorOwner = strings.TrimSpace(s)
+		}
+	}
+	if v, ok := filters["include_business_limited"]; ok {
+		if b, ok := v.(bool); ok {
+			out.IncludeBusinessLimited = b
+		}
+	}
+	return out
+}
+
 func (s *OpsAlertEvaluatorService) computeRuleMetric(
 	ctx context.Context,
 	rule *OpsAlertRule,
@@ -460,6 +524,30 @@ func (s *OpsAlertEvaluatorService) computeRuleMetric(
 		return 0, false
 	}
 	switch strings.TrimSpace(rule.MetricType) {
+	case "error_count":
+		if s == nil || s.opsRepo == nil {
+			return 0, false
+		}
+		ef := parseOpsAlertRuleErrorFilter(rule.Filters)
+		view := ""
+		if ef.IncludeBusinessLimited {
+			view = "all"
+		}
+		n, err := s.opsRepo.CountErrorLogs(ctx, &OpsErrorLogFilter{
+			StartTime:     &start,
+			EndTime:       &end,
+			Platform:      platform,
+			GroupID:       groupID,
+			StatusCodes:   ef.StatusCodes,
+			Phase:         ef.ErrorPhase,
+			Owner:         ef.ErrorOwner,
+			ErrorTypesAny: ef.ErrorTypes,
+			View:          view,
+		})
+		if err != nil {
+			return 0, false
+		}
+		return float64(n), true
 	case "cpu_usage_percent":
 		if systemMetrics != nil && systemMetrics.CPUUsagePercent != nil {
 			return *systemMetrics.CPUUsagePercent, true

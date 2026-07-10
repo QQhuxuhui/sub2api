@@ -177,6 +177,21 @@ func opsInsertErrorLogArgs(input *service.OpsInsertErrorLogInput) []any {
 	}
 }
 
+func (r *opsRepository) CountErrorLogs(ctx context.Context, filter *service.OpsErrorLogFilter) (int64, error) {
+	if r == nil || r.db == nil {
+		return 0, fmt.Errorf("nil ops repository")
+	}
+	if filter == nil {
+		filter = &service.OpsErrorLogFilter{}
+	}
+	where, args := buildOpsErrorLogsWhere(filter)
+	var total int64
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM ops_error_logs e "+where, args...).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
 func (r *opsRepository) ListErrorLogs(ctx context.Context, filter *service.OpsErrorLogFilter) (*service.OpsErrorLogList, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("nil ops repository")

@@ -14,6 +14,7 @@ type opsRepoMock struct {
 	DeleteSystemLogsFn            func(ctx context.Context, filter *OpsSystemLogCleanupFilter) (int64, error)
 	InsertSystemLogCleanupAuditFn func(ctx context.Context, input *OpsSystemLogCleanupAudit) error
 	LookupDeletedKeyAuditFn       func(ctx context.Context, key string) (*DeletedKeyAuditResult, error)
+	CountErrorLogsFn              func(ctx context.Context, filter *OpsErrorLogFilter) (int64, error)
 }
 
 func (m *opsRepoMock) InsertErrorLog(ctx context.Context, input *OpsInsertErrorLogInput) (int64, error) {
@@ -32,6 +33,13 @@ func (m *opsRepoMock) BatchInsertErrorLogs(ctx context.Context, inputs []*OpsIns
 
 func (m *opsRepoMock) ListErrorLogs(ctx context.Context, filter *OpsErrorLogFilter) (*OpsErrorLogList, error) {
 	return &OpsErrorLogList{Errors: []*OpsErrorLog{}, Page: 1, PageSize: 20}, nil
+}
+
+func (m *opsRepoMock) CountErrorLogs(ctx context.Context, filter *OpsErrorLogFilter) (int64, error) {
+	if m.CountErrorLogsFn != nil {
+		return m.CountErrorLogsFn(ctx, filter)
+	}
+	return 0, nil
 }
 
 func (m *opsRepoMock) GetErrorLogByID(ctx context.Context, id int64) (*OpsErrorLogDetail, error) {

@@ -20,6 +20,7 @@ var validOpsAlertMetricTypes = []string{
 	"success_rate",
 	"error_rate",
 	"upstream_error_rate",
+	"error_count",
 	"cpu_usage_percent",
 	"memory_usage_percent",
 	"concurrency_queue_depth",
