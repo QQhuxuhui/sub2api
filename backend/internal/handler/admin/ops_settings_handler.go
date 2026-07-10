@@ -388,6 +388,14 @@ func (h *OpsHandler) TestNotifyChannel(c *gin.Context) {
 		response.BadRequest(c, "channel or channel_id is required")
 		return
 	}
+	// 行内通道对象与保存路径走同一套归一化+校验(URL 格式、飞书前缀等),
+	// 避免"测试发送成功但保存配置失败"的体验偏差。channel_id 查到的已存通道保存时已校验,跳过。
+	if req.Channel != nil {
+		if err := service.ValidateOpsNotifyChannel(ch); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()

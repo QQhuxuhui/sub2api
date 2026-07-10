@@ -319,7 +319,12 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 					resolvedEvent := *activeEvent
 					resolvedEvent.Status = OpsAlertStatusResolved
 					resolvedEvent.ResolvedAt = &resolvedAt
-					s.dispatcher.DispatchAlertEvent(rule, &resolvedEvent, OpsNotifyKindAlertResolved)
+					// 恢复通知与触发通知走同一运行时静默判定:维护窗口全局静默期间不打扰。
+					silenced := runtimeCfg != nil && runtimeCfg.Silencing.Enabled &&
+						isOpsAlertSilenced(time.Now().UTC(), rule, &resolvedEvent, runtimeCfg.Silencing)
+					if !silenced {
+						s.dispatcher.DispatchAlertEvent(rule, &resolvedEvent, OpsNotifyKindAlertResolved)
+					}
 				}
 			}
 		}

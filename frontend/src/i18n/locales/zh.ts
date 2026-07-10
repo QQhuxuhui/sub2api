@@ -5449,7 +5449,7 @@ export default {
           '上游账号错误(如 401/403 失效、529 过载)落库时立即推送,不等告警评估周期;仅上游归因错误触发,客户端调用错误不报。',
         statusCodes: '触发状态码',
         statusCodesHint: '逗号分隔;匹配上游状态码,默认 401, 403, 529',
-        cooldownMinutes: '冷却时间(分钟,按账号+状态码)'
+        cooldownMinutes: '冷却时间(分钟,按账号+状态码,0 表示不冷却)'
       },
       email: {
         title: '邮件通知配置',

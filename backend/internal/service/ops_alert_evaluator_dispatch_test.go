@@ -180,3 +180,42 @@ func TestEvaluateOnceSkipsDispatchWhenGloballySilenced(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	require.Equal(t, 0, fake.callCount())
 }
+
+// TestEvaluateOnceSkipsResolvedDispatchWhenGloballySilenced 全局静默期间,
+// 告警事件仍会正常恢复(状态落库),但恢复通知与触发通知一样不分发。
+func TestEvaluateOnceSkipsResolvedDispatchWhenGloballySilenced(t *testing.T) {
+	t.Parallel()
+	dispatcher, fake := newDispatcherWithFeishuChannel(t)
+	opsService := newOpsServiceForEvaluatorTest(t, true)
+
+	firedAt := time.Now().UTC().Add(-10 * time.Minute)
+	activeEvent := &OpsAlertEvent{
+		ID: 100, RuleID: 1, Severity: "P0", Status: OpsAlertStatusFiring,
+		Title: "P0: High CPU", FiredAt: firedAt,
+	}
+
+	var updateCalled bool
+	repo := &opsRepoMock{
+		ListAlertRulesFn: func(ctx context.Context) ([]*OpsAlertRule, error) {
+			return []*OpsAlertRule{newTestAlertRule()}, nil
+		},
+		GetLatestSystemMetricsFn: func(ctx context.Context, windowMinutes int) (*OpsSystemMetricsSnapshot, error) {
+			return &OpsSystemMetricsSnapshot{CPUUsagePercent: float64Ptr(10)}, nil
+		},
+		GetActiveAlertEventFn: func(ctx context.Context, ruleID int64) (*OpsAlertEvent, error) {
+			return activeEvent, nil
+		},
+		UpdateAlertEventStatusFn: func(ctx context.Context, eventID int64, status string, resolvedAt *time.Time) error {
+			updateCalled = true
+			return nil
+		},
+	}
+
+	s := newEvaluatorForTest(opsService, repo, dispatcher)
+	s.evaluateOnce(time.Minute)
+
+	// 事件仍应恢复(供 UI 展示),但静默期间不发恢复通知。
+	require.True(t, updateCalled)
+	time.Sleep(300 * time.Millisecond)
+	require.Equal(t, 0, fake.callCount())
+}

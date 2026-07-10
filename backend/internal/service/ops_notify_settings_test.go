@@ -196,3 +196,55 @@ func TestGetNotifyChannelSettingsCorruptedJSONFallsBack(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, cfg.Channels)
 }
+
+func TestUpdateNotifyChannelSettingsPreservesZeroCooldown(t *testing.T) {
+	t.Parallel()
+	svc, _ := newOpsServiceForNotifyTest()
+
+	// 显式 0 = 不冷却,必须原样保留(不能被归一化改成 10)
+	updated, err := svc.UpdateNotifyChannelSettings(context.Background(), &OpsNotifyChannelSettings{
+		CriticalError: OpsCriticalErrorNotifyConfig{Enabled: true, StatusCodes: []int{401}, CooldownMinutes: 0},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 0, updated.CriticalError.CooldownMinutes)
+
+	raw, err := svc.GetNotifyChannelSettings(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0, raw.CriticalError.CooldownMinutes)
+
+	// 负数无意义,归一化为 0
+	updated, err = svc.UpdateNotifyChannelSettings(context.Background(), &OpsNotifyChannelSettings{
+		CriticalError: OpsCriticalErrorNotifyConfig{Enabled: true, StatusCodes: []int{401}, CooldownMinutes: -5},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 0, updated.CriticalError.CooldownMinutes)
+}
+
+func TestValidateOpsNotifyChannel(t *testing.T) {
+	t.Parallel()
+
+	// 与保存校验同一套规则:非法飞书 URL 被拒
+	err := ValidateOpsNotifyChannel(&OpsNotifyChannelConfig{
+		Name: "a", Type: "feishu", WebhookURL: "https://evil.example.com/hook",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "feishu")
+
+	// 缺名称被拒
+	err = ValidateOpsNotifyChannel(&OpsNotifyChannelConfig{
+		Type: "webhook", WebhookURL: "https://x.example.com/",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "name")
+
+	// 合法通道通过,且归一化写回(类型小写、超时补默认)
+	ch := &OpsNotifyChannelConfig{
+		Name: "a", Type: "Feishu",
+		WebhookURL: "https://open.feishu.cn/open-apis/bot/v2/hook/x", TimeoutSeconds: 0,
+	}
+	require.NoError(t, ValidateOpsNotifyChannel(ch))
+	require.Equal(t, OpsNotifyChannelTypeFeishu, ch.Type)
+	require.Equal(t, 5, ch.TimeoutSeconds)
+
+	require.Error(t, ValidateOpsNotifyChannel(nil))
+}

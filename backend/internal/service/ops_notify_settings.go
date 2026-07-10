@@ -45,8 +45,10 @@ func normalizeOpsNotifyChannelSettings(cfg *OpsNotifyChannelSettings) {
 	if cfg.CriticalError.StatusCodes == nil {
 		cfg.CriticalError.StatusCodes = []int{}
 	}
-	if cfg.CriticalError.CooldownMinutes <= 0 {
-		cfg.CriticalError.CooldownMinutes = 10
+	// 0 表示不冷却(与 allowCooldown 的 ttl<=0 语义一致),必须原样保留;
+	// 仅把无意义的负数归 0。新配置的默认值 10 由 defaultOpsNotifyChannelSettings 提供。
+	if cfg.CriticalError.CooldownMinutes < 0 {
+		cfg.CriticalError.CooldownMinutes = 0
 	}
 }
 
@@ -204,4 +206,20 @@ func (s *OpsService) UpdateNotifyChannelSettings(ctx context.Context, incoming *
 		return nil, err
 	}
 	return redactOpsNotifyChannelSettings(incoming), nil
+}
+
+// ValidateOpsNotifyChannel 归一化并校验单个通道,与保存路径同一套规则
+// (测试发送等不落库路径复用,避免"测试发送成功但保存配置失败"的偏差)。
+// 归一化结果(类型小写、超时默认值等)写回 ch。
+func ValidateOpsNotifyChannel(ch *OpsNotifyChannelConfig) error {
+	if ch == nil {
+		return errors.New("invalid channel")
+	}
+	tmp := &OpsNotifyChannelSettings{Channels: []OpsNotifyChannelConfig{*ch}}
+	normalizeOpsNotifyChannelSettings(tmp)
+	if err := validateOpsNotifyChannelSettings(tmp); err != nil {
+		return err
+	}
+	*ch = tmp.Channels[0]
+	return nil
 }

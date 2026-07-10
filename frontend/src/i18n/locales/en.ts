@@ -5292,7 +5292,7 @@ export default {
           'Push immediately when upstream account errors (e.g. 401/403 invalid, 529 overloaded) are recorded, without waiting for the evaluation cycle; only provider-attributed errors trigger, client-side errors never do.',
         statusCodes: 'Trigger status codes',
         statusCodesHint: 'Comma separated; matches upstream status code, default 401, 403, 529',
-        cooldownMinutes: 'Cooldown (minutes, per account + status code)'
+        cooldownMinutes: 'Cooldown (minutes, per account + status code, 0 = none)'
       },
       email: {
         title: 'Email Notification',
