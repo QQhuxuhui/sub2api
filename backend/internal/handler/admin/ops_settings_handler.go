@@ -319,6 +319,9 @@ func (h *OpsHandler) UpdateNotifyChannelConfig(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	if h.notifyDispatcher != nil {
+		h.notifyDispatcher.InvalidateConfigCache()
+	}
 	response.Success(c, updated)
 }
 

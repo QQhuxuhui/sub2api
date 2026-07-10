@@ -120,6 +120,40 @@ func TestCriticalErrorProcessDisabledConfigNoDispatch(t *testing.T) {
 	require.Equal(t, 0, fake.callCount())
 }
 
+func TestCriticalErrorNoCooldownBurnWhenNoEnabledChannel(t *testing.T) {
+	t.Parallel()
+	repo := newOpsNotifySettingRepoStub()
+	cfg := &OpsNotifyChannelSettings{
+		Channels:      []OpsNotifyChannelConfig{{ID: "c1", Name: "a", Type: "feishu", Enabled: false, WebhookURL: "https://x/1", TimeoutSeconds: 5}},
+		CriticalError: *criticalCfg(),
+	}
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	repo.values[SettingKeyOpsNotifyChannelConfig] = string(raw)
+
+	opsSvc := &OpsService{settingRepo: repo}
+	d := NewOpsNotifyDispatcher(opsSvc)
+	fake := &fakeNotifySender{}
+	d.senders[OpsNotifyChannelTypeFeishu] = fake
+	n := NewOpsCriticalErrorNotifier(opsSvc, d, nil, nil)
+
+	entry := &OpsInsertErrorLogInput{ErrorOwner: "provider", StatusCode: 401, AccountID: opsNotifyI64Ptr(7), Platform: "anthropic", CreatedAt: time.Now()}
+
+	// 全部通道禁用 → 不发送且不占用冷却
+	n.process([]*OpsInsertErrorLogInput{entry})
+	require.Equal(t, 0, fake.callCount())
+
+	// 启用通道后,同一账号+状态码应立即可通知(证明冷却窗口未被白白占用)
+	cfg.Channels[0].Enabled = true
+	raw2, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	repo.values[SettingKeyOpsNotifyChannelConfig] = string(raw2)
+	d.InvalidateConfigCache()
+
+	n.process([]*OpsInsertErrorLogInput{entry})
+	require.Equal(t, 1, fake.callCount())
+}
+
 type panickingAccountRepo struct{ AccountRepository }
 
 func (panickingAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {

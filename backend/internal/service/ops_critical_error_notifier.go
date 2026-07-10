@@ -63,7 +63,19 @@ func (n *OpsCriticalErrorNotifier) process(entries []*OpsInsertErrorLogInput) {
 	defer cancel()
 
 	cfg := n.dispatcher.getSettings(ctx)
-	if cfg == nil || !cfg.CriticalError.Enabled || len(cfg.Channels) == 0 {
+	if cfg == nil || !cfg.CriticalError.Enabled {
+		return
+	}
+	hasEnabledChannel := false
+	for i := range cfg.Channels {
+		if cfg.Channels[i].Enabled && strings.TrimSpace(cfg.Channels[i].WebhookURL) != "" {
+			hasEnabledChannel = true
+			break
+		}
+	}
+	if !hasEnabledChannel {
+		// 没有可发送的通道时直接返回,不占用冷却窗口——
+		// 否则管理员启用通道后,冷却期内的账号错误会被静默吞掉。
 		return
 	}
 	cooldown := time.Duration(cfg.CriticalError.CooldownMinutes) * time.Minute

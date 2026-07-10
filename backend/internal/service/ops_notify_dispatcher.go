@@ -65,6 +65,14 @@ func (d *OpsNotifyDispatcher) getSettings(ctx context.Context) *OpsNotifyChannel
 	return cfg
 }
 
+// InvalidateConfigCache 使配置缓存立即失效;配置保存成功后调用,下一次分发即读取最新配置。
+func (d *OpsNotifyDispatcher) InvalidateConfigCache() {
+	if d == nil {
+		return
+	}
+	d.cache.Store(&opsNotifySettingsSnapshot{})
+}
+
 func (d *OpsNotifyDispatcher) limiterFor(channelID string) *slidingWindowLimiter {
 	d.mu.Lock()
 	defer d.mu.Unlock()

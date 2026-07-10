@@ -14,15 +14,17 @@ import (
 )
 
 type fakeNotifySender struct {
-	mu    sync.Mutex
-	calls []string // channel ID 列表
-	err   error
+	mu      sync.Mutex
+	calls   []string // channel ID 列表
+	err     error
+	lastMsg *OpsNotifyMessage
 }
 
 func (f *fakeNotifySender) Send(ctx context.Context, ch *OpsNotifyChannelConfig, msg *OpsNotifyMessage) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, ch.ID)
+	f.lastMsg = msg
 	return f.err
 }
 
@@ -30,6 +32,12 @@ func (f *fakeNotifySender) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.calls)
+}
+
+func (f *fakeNotifySender) lastMessage() *OpsNotifyMessage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastMsg
 }
 
 // newDispatcherForTest 构造带内存配置的 dispatcher,并把两种 sender 都换成 fake。
@@ -212,4 +220,35 @@ func TestDispatchRecoversFromSenderPanic(t *testing.T) {
 
 	d.dispatch(firingMsg("P0")) // 不应 panic
 	require.Equal(t, 1, fake.callCount())
+}
+
+func TestInvalidateConfigCacheTakesEffectImmediately(t *testing.T) {
+	t.Parallel()
+	repo := newOpsNotifySettingRepoStub()
+	enabled := &OpsNotifyChannelSettings{Channels: []OpsNotifyChannelConfig{
+		{ID: "c1", Name: "a", Type: "feishu", Enabled: true, WebhookURL: "https://x/1", TimeoutSeconds: 5},
+	}}
+	raw, err := json.Marshal(enabled)
+	require.NoError(t, err)
+	repo.values[SettingKeyOpsNotifyChannelConfig] = string(raw)
+
+	d := NewOpsNotifyDispatcher(&OpsService{settingRepo: repo})
+	fake := &fakeNotifySender{}
+	d.senders[OpsNotifyChannelTypeFeishu] = fake
+
+	d.dispatch(firingMsg("P0"))
+	require.Equal(t, 1, fake.callCount())
+
+	// 直接改库:通道禁用。缓存未失效 → 下一次分发仍按旧配置发送
+	enabled.Channels[0].Enabled = false
+	raw2, err := json.Marshal(enabled)
+	require.NoError(t, err)
+	repo.values[SettingKeyOpsNotifyChannelConfig] = string(raw2)
+	d.dispatch(firingMsg("P0"))
+	require.Equal(t, 2, fake.callCount())
+
+	// 失效后立即生效 → 不再发送
+	d.InvalidateConfigCache()
+	d.dispatch(firingMsg("P0"))
+	require.Equal(t, 2, fake.callCount())
 }
