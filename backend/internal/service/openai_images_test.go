@@ -334,6 +334,28 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_RejectsNonImageModel(t *te
 	require.ErrorContains(t, err, `images endpoint requires an image model, got "gpt-5.4"`)
 }
 
+func TestOpenAIGatewayServiceParseOpenAIImagesRequest_AllowsGrokImageModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, model := range []string{"grok-imagine", "grok-imagine-image", "grok-imagine-image-quality", "grok-imagine-edit"} {
+		t.Run(model, func(t *testing.T) {
+			body := []byte(fmt.Sprintf(`{"model":%q,"prompt":"draw a cat","response_format":"b64_json"}`, model))
+			req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = req
+
+			svc := &OpenAIGatewayService{}
+			parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+			require.NoError(t, err)
+			require.NotNil(t, parsed)
+			require.Equal(t, model, parsed.Model)
+			require.Equal(t, OpenAIImagesCapabilityNative, parsed.RequiredCapability)
+		})
+	}
+}
+
 func TestOpenAIGatewayServiceParseOpenAIImagesRequest_JSONEditURLs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{
@@ -440,6 +462,16 @@ func TestAccountSupportsOpenAIImageCapability_OAuthSupportsNative(t *testing.T) 
 
 	require.True(t, account.SupportsOpenAIImageCapability(OpenAIImagesCapabilityBasic))
 	require.True(t, account.SupportsOpenAIImageCapability(OpenAIImagesCapabilityNative))
+}
+
+func TestAccountSupportsOpenAIImageCapability_EmptyRequirementDoesNotRejectGrok(t *testing.T) {
+	account := &Account{
+		Platform: PlatformGrok,
+		Type:     AccountTypeOAuth,
+	}
+
+	require.True(t, account.SupportsOpenAIImageCapability(""))
+	require.False(t, account.SupportsOpenAIImageCapability(OpenAIImagesCapabilityBasic))
 }
 
 func TestAccountSupportsOpenAIEndpointCapability(t *testing.T) {
@@ -822,6 +854,47 @@ func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamServerErrorReturnsFailo
 	require.Equal(t, "failover", events[0].Kind)
 	require.Equal(t, account.ID, events[0].AccountID)
 	require.Equal(t, http.StatusBadGateway, events[0].UpstreamStatusCode)
+}
+
+func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamRateLimitBlocksOrganization(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","response_format":"b64_json"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	svc := &OpenAIGatewayService{
+		httpUpstream: &httpUpstreamRecorder{
+			resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader(
+					"data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"type\":\"rate_limit_exceeded\",\"code\":\"rate_limit_exceeded\",\"message\":\"Rate limit reached for gpt-image-2-codex (for limit gpt-image) in organization org-BOvpEHVcDPTe8h4lZnwMO5Ly on input-images per min: Limit 4000, Used 4000, Requested 1. Please try again in 15ms.\"}}}\n\n",
+				)),
+			},
+		},
+	}
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+	account := &Account{
+		ID:       23,
+		Name:     "openai-oauth-rate-limit",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "token-123",
+		},
+	}
+
+	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+
+	require.Nil(t, result)
+	var upstreamErr *OpenAIImagesUpstreamError
+	require.ErrorAs(t, err, &upstreamErr)
+	require.Equal(t, http.StatusTooManyRequests, upstreamErr.StatusCode)
+	require.True(t, svc.isOrgImageScheduleBlocked("org-BOvpEHVcDPTe8h4lZnwMO5Ly"))
 }
 
 func TestOpenAIGatewayServiceForwardImages_OAuthStreamServerErrorAfterFlushDoesNotFailover(t *testing.T) {
