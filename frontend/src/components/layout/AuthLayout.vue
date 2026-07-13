@@ -1,159 +1,236 @@
 <template>
-  <div class="flex min-h-screen flex-col overflow-x-clip bg-gray-50 dark:bg-dark-950">
-    <div class="flex flex-1 flex-col lg:grid lg:grid-cols-[0.9fr_1.1fr]">
-      <!-- Left: Brand Panel -->
-      <aside class="auth-brand relative overflow-hidden px-6 py-6 text-white lg:flex lg:flex-col lg:justify-between lg:px-14 lg:py-12">
-        <div ref="gridLayer" class="auth-gridlayer" aria-hidden="true"></div>
-        <div ref="glowLayer" class="auth-glow" aria-hidden="true"></div>
-
-        <!-- Top: brand + description + code chip -->
-        <div class="relative">
-          <router-link to="/home" class="brand-row flex items-center gap-4">
-            <template v-if="settingsLoaded">
-              <div
-                class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]"
-              >
-                <img
-                  :src="siteLogo || '/logo.png'"
-                  alt="Logo"
-                  class="h-full w-full object-contain"
-                />
-              </div>
-              <div class="min-w-0">
-                <h1 class="truncate text-2xl font-bold tracking-tight">{{ siteName }}</h1>
-                <p class="mt-0.5 truncate text-sm text-primary-50/85">{{ siteSubtitle }}</p>
-              </div>
-            </template>
-          </router-link>
-
-          <p class="brand-desc mt-7 hidden max-w-sm text-[15px] leading-relaxed text-primary-50/90 lg:block">
-            {{ t('home.heroDescription') }}
-          </p>
-
-          <div
-            class="brand-code mt-6 hidden items-center gap-2 rounded-full border border-primary-200/25 bg-[rgba(2,44,34,0.45)] px-4 py-2.5 font-mono text-xs text-primary-200 lg:inline-flex"
-          >
-            <span class="code-wipe">base_url = "{{ baseOrigin }}/v1"</span>
-          </div>
-        </div>
-
-        <!-- Middle: AI chat vignette -->
-        <div class="auth-chat relative mt-8 hidden max-w-md flex-col gap-3 lg:flex" aria-hidden="true">
-          <div class="bub-user self-end rounded-2xl rounded-br-md border border-white/20 bg-white/15 px-4 py-3 text-[13.5px] leading-relaxed text-primary-50">
-            <span
-              class="mb-2 inline-flex items-center gap-1.5 rounded-lg border border-primary-200/25 bg-[rgba(2,44,34,0.4)] px-2.5 py-1 font-mono text-[11.5px] text-primary-200"
-            >
-              <Icon name="document" size="xs" />
-              diagram.png
-            </span>
-            <p>{{ t('home.authPanel.chatQuestion') }}</p>
-          </div>
-          <div
-            class="bub-ai flex items-start gap-2.5 self-start rounded-2xl rounded-bl-md border border-primary-200/20 bg-[rgba(2,44,34,0.45)] px-4 py-3 text-[13.5px] text-primary-100"
-          >
-            <span class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/15">
-              <svg class="h-3.5 w-3.5 text-primary-50" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
-                <path v-for="(d, i) in BRAND_PATHS.anthropic" :key="i" :d="d" />
-              </svg>
-            </span>
-            <span class="flex min-h-6 items-center">
-              <span class="ai-wipe">{{ t('home.authPanel.chatAnswer') }}</span>
-              <span class="stream-caret ml-1.5"></span>
-            </span>
-          </div>
-          <div class="cap-row mt-1 flex flex-wrap gap-2">
-            <span v-for="cap in capabilities" :key="cap.key" class="cap inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-xs text-primary-50/95">
-              <Icon :name="cap.icon" size="xs" />
-              {{ t(`home.authPanel.capabilities.${cap.key}`) }}
-            </span>
-          </div>
-        </div>
-
-        <!-- Bottom: providers + contact -->
-        <div class="relative mt-8 hidden flex-col gap-4 lg:flex">
-          <div class="brand-dots flex">
-            <span
-              v-for="(paths, key) in BRAND_PATHS"
-              :key="key"
-              class="flex h-9 w-9 items-center justify-center rounded-full border border-white/25 bg-white/10 text-primary-50"
-            >
-              <svg class="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
-                <path v-for="(d, i) in paths" :key="i" :d="d" />
-              </svg>
-            </span>
-          </div>
-          <div v-if="telegramUrl || qqGroupUrl" class="contact-row flex flex-wrap items-center gap-2.5">
-            <span class="text-[13px] text-primary-50/75">{{ t('home.authPanel.contact') }}</span>
-            <a
-              v-if="telegramUrl"
-              :href="telegramUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="contact-pill inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/12 px-4 py-2 text-[13px] font-medium text-primary-50 transition-all hover:-translate-y-0.5 hover:border-white/55"
-            >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path :d="TELEGRAM_PATH" /></svg>
-              Telegram
-            </a>
-            <a
-              v-if="qqGroupUrl"
-              :href="qqGroupUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="contact-pill inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/12 px-4 py-2 text-[13px] font-medium text-primary-50 transition-all hover:-translate-y-0.5 hover:border-white/55"
-            >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path :d="QQ_PATH" /></svg>
-              QQ 群
-            </a>
-          </div>
-        </div>
-      </aside>
-
-      <!-- Right: Form Side -->
-      <main class="flex flex-1 items-center justify-center px-4 py-10 sm:px-8">
-        <div class="auth-form-zone w-full max-w-sm">
-          <slot />
-
-          <!-- Footer Links -->
-          <div class="mt-6 text-center text-sm">
-            <slot name="footer" />
-          </div>
-
-          <!-- Mobile contact entries -->
-          <div v-if="telegramUrl || qqGroupUrl" class="mt-6 flex justify-center gap-2.5 lg:hidden">
-            <a
-              v-if="telegramUrl"
-              :href="telegramUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-[13px] font-medium text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200"
-            >
-              <svg class="h-4 w-4 text-[#26A5E4]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path :d="TELEGRAM_PATH" /></svg>
-              Telegram
-            </a>
-            <a
-              v-if="qqGroupUrl"
-              :href="qqGroupUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-[13px] font-medium text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200"
-            >
-              <svg class="h-4 w-4 text-[#1EBAFC]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path :d="QQ_PATH" /></svg>
-              QQ 群
-            </a>
-          </div>
-
-          <!-- Copyright -->
-          <p class="mt-8 text-center text-xs text-gray-400 dark:text-dark-500">
-            &copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}
-          </p>
-        </div>
-      </main>
+  <div
+    class="relative flex min-h-screen flex-col overflow-x-clip bg-[linear-gradient(180deg,#f0fdfa_0%,#ffffff_46%,#f0f9ff_100%)] dark:bg-[linear-gradient(180deg,#0a1e1c_0%,#020617_46%,#071522_100%)]"
+  >
+    <!-- Background Decorations -->
+    <div class="pointer-events-none absolute inset-0 overflow-hidden">
+      <div
+        class="absolute -left-32 -top-32 h-[28rem] w-[28rem] rounded-full bg-primary-300/25 blur-3xl dark:bg-primary-500/10"
+      ></div>
+      <div
+        class="absolute -right-40 top-1/4 h-[26rem] w-[26rem] rounded-full bg-cyan-200/30 blur-3xl dark:bg-cyan-500/10"
+      ></div>
+      <div
+        class="absolute inset-x-0 top-0 h-full bg-[linear-gradient(rgba(20,184,166,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(20,184,166,0.05)_1px,transparent_1px)] bg-[size:56px_56px] [mask-image:radial-gradient(ellipse_75%_65%_at_50%_0%,#000,transparent)] dark:bg-[linear-gradient(rgba(45,212,191,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(45,212,191,0.06)_1px,transparent_1px)]"
+      ></div>
     </div>
+
+    <main class="relative z-10 flex flex-1 items-center justify-center px-4 py-10 sm:px-6">
+      <!-- 玻璃大面板 -->
+      <div
+        class="auth-panel w-full max-w-6xl rounded-[2rem] border border-white/80 bg-white/55 p-6 shadow-2xl shadow-primary-500/10 backdrop-blur-2xl dark:border-dark-700/50 dark:bg-dark-900/50 sm:p-10 lg:p-14"
+      >
+        <div class="grid items-center gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14">
+          <!-- 左栏：品牌叙事 -->
+          <div class="hidden lg:block">
+            <router-link to="/home" class="brand-row flex items-center gap-4">
+              <template v-if="settingsLoaded">
+                <div
+                  class="h-14 w-14 shrink-0 overflow-hidden rounded-2xl shadow-lg shadow-primary-500/20"
+                >
+                  <img
+                    :src="siteLogo || '/logo.png'"
+                    alt="Logo"
+                    class="h-full w-full object-contain"
+                  />
+                </div>
+                <div class="min-w-0">
+                  <h1 class="auth-gradient-text truncate text-3xl font-bold tracking-tight">
+                    {{ siteName }}
+                  </h1>
+                  <p class="mt-1 truncate text-sm text-gray-500 dark:text-dark-400">
+                    {{ siteSubtitle }}
+                  </p>
+                </div>
+              </template>
+            </router-link>
+
+            <!-- 终端心跳：循环重演一次登录叙事 -->
+            <div class="auth-term mt-6" aria-hidden="true">
+              <div class="term-bar">
+                <span class="dot-r"></span>
+                <span class="dot-y"></span>
+                <span class="dot-g"></span>
+              </div>
+              <div class="term-body">
+                <div class="tline tl-1">
+                  <span class="tk-p">$</span>
+                  <span class="tk-c">curl</span>
+                  <span class="tk-t">{{ baseOrigin }}/v1/messages</span>
+                </div>
+                <div class="tline tl-2">
+                  <span class="tk-ok">200 OK</span>
+                  <span class="tk-d">claude-sonnet-4-6 · stream</span>
+                </div>
+                <div class="tline tl-3">
+                  <span class="tk-d">data: {"content": "Hello!"}</span>
+                </div>
+                <div class="tline tl-4">
+                  <span class="tk-p">$</span>
+                  <span class="term-caret"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- AI 对话与多模态能力 -->
+            <div class="auth-chat mt-5 flex max-w-md flex-col gap-2.5" aria-hidden="true">
+              <div
+                class="bub-user self-end rounded-2xl rounded-br-md border border-primary-200/70 bg-white/80 px-4 py-3 text-[13.5px] leading-relaxed text-gray-800 dark:border-primary-500/25 dark:bg-dark-800/70 dark:text-gray-100"
+              >
+                <span
+                  class="mb-2 inline-flex items-center gap-1.5 rounded-lg border border-primary-200 bg-primary-50 px-2.5 py-1 font-mono text-[11.5px] text-primary-700 dark:border-primary-500/25 dark:bg-primary-500/10 dark:text-primary-300"
+                >
+                  <Icon name="document" size="xs" />
+                  diagram.png
+                </span>
+                <p>{{ t('home.authPanel.chatQuestion') }}</p>
+              </div>
+              <div
+                class="bub-ai flex items-start gap-2.5 self-start rounded-2xl rounded-bl-md border border-gray-200/80 bg-white/80 px-4 py-3 text-[13.5px] text-gray-700 dark:border-dark-700/70 dark:bg-dark-800/70 dark:text-gray-200"
+              >
+                <span
+                  class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-900 text-white dark:bg-dark-700"
+                >
+                  <svg
+                    class="h-3.5 w-3.5"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    fill-rule="evenodd"
+                    aria-hidden="true"
+                  >
+                    <path v-for="(d, i) in BRAND_PATHS.anthropic" :key="i" :d="d" />
+                  </svg>
+                </span>
+                <span class="flex min-h-6 items-center">
+                  <span class="ai-wipe">{{ t('home.authPanel.chatAnswer') }}</span>
+                  <span class="stream-caret ml-1.5"></span>
+                </span>
+              </div>
+              <div class="cap-row mt-1 flex flex-wrap gap-2">
+                <span
+                  v-for="cap in capabilities"
+                  :key="cap.key"
+                  class="cap inline-flex items-center gap-1.5 rounded-full border border-gray-200/80 bg-white/70 px-3 py-1.5 text-xs text-gray-700 dark:border-dark-700/70 dark:bg-dark-800/60 dark:text-gray-300"
+                >
+                  <Icon :name="cap.icon" size="xs" />
+                  {{ t(`home.authPanel.capabilities.${cap.key}`) }}
+                </span>
+              </div>
+            </div>
+
+            <!-- 联系我们 -->
+            <div
+              v-if="telegramUrl || qqGroupUrl"
+              class="contact-row mt-6 flex flex-wrap items-center gap-2.5"
+            >
+              <span class="text-[13px] text-gray-500 dark:text-dark-400">
+                {{ t('home.authPanel.contact') }}
+              </span>
+              <a
+                v-if="telegramUrl"
+                :href="telegramUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="contact-pill inline-flex items-center gap-2 rounded-full border border-gray-200/90 bg-white/75 px-4 py-2 text-[13px] font-medium text-gray-700 backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md hover:shadow-primary-500/10 dark:border-dark-700/80 dark:bg-dark-800/75 dark:text-gray-200 dark:hover:border-primary-500/40"
+              >
+                <svg class="h-4 w-4 text-[#26A5E4]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path :d="TELEGRAM_PATH" />
+                </svg>
+                Telegram
+              </a>
+              <a
+                v-if="qqGroupUrl"
+                :href="qqGroupUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="contact-pill inline-flex items-center gap-2 rounded-full border border-gray-200/90 bg-white/75 px-4 py-2 text-[13px] font-medium text-gray-700 backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md hover:shadow-primary-500/10 dark:border-dark-700/80 dark:bg-dark-800/75 dark:text-gray-200 dark:hover:border-primary-500/40"
+              >
+                <svg class="h-4 w-4 text-[#1EBAFC]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path :d="QQ_PATH" />
+                </svg>
+                QQ 群
+              </a>
+            </div>
+          </div>
+
+          <!-- 右栏：表单卡 -->
+          <div class="mx-auto w-full max-w-md">
+            <!-- 移动端品牌 -->
+            <div class="mb-8 text-center lg:hidden">
+              <template v-if="settingsLoaded">
+                <div
+                  class="inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl shadow-lg shadow-primary-500/20"
+                >
+                  <img
+                    :src="siteLogo || '/logo.png'"
+                    alt="Logo"
+                    class="h-full w-full object-contain"
+                  />
+                </div>
+                <h1 class="auth-gradient-text mt-4 text-2xl font-bold tracking-tight">
+                  {{ siteName }}
+                </h1>
+                <p class="mt-1.5 text-sm text-gray-500 dark:text-dark-400">
+                  {{ siteSubtitle }}
+                </p>
+              </template>
+            </div>
+
+            <div
+              class="auth-card rounded-3xl border border-gray-100 bg-white p-8 shadow-lg shadow-gray-900/5 dark:border-dark-700/60 dark:bg-dark-800/80 dark:shadow-black/20"
+            >
+              <slot />
+            </div>
+
+            <!-- Footer Links -->
+            <div class="auth-card-foot mt-6 text-center text-sm">
+              <slot name="footer" />
+            </div>
+
+            <!-- 移动端联系入口 -->
+            <div
+              v-if="telegramUrl || qqGroupUrl"
+              class="mt-6 flex justify-center gap-2.5 lg:hidden"
+            >
+              <a
+                v-if="telegramUrl"
+                :href="telegramUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-[13px] font-medium text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200"
+              >
+                <svg class="h-4 w-4 text-[#26A5E4]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path :d="TELEGRAM_PATH" />
+                </svg>
+                Telegram
+              </a>
+              <a
+                v-if="qqGroupUrl"
+                :href="qqGroupUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-[13px] font-medium text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200"
+              >
+                <svg class="h-4 w-4 text-[#1EBAFC]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path :d="QQ_PATH" />
+                </svg>
+                QQ 群
+              </a>
+            </div>
+
+            <!-- Copyright -->
+            <p class="mt-8 text-center text-xs text-gray-400 dark:text-dark-500">
+              &copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}
+            </p>
+          </div>
+        </div>
+      </div>
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import { sanitizeUrl } from '@/utils/url'
@@ -189,87 +266,52 @@ const capabilities = [
   { key: 'stream', icon: 'bolt' },
 ] as const
 
-// Pointer parallax on the brand panel decoration layers
-const gridLayer = ref<HTMLElement | null>(null)
-const glowLayer = ref<HTMLElement | null>(null)
-let parallaxHandler: ((e: PointerEvent) => void) | null = null
-
-function initParallax() {
-  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const finePointer = window.matchMedia('(pointer: fine)').matches
-  if (reduce || !finePointer) return
-  parallaxHandler = (e: PointerEvent) => {
-    const nx = e.clientX / window.innerWidth - 0.5
-    const ny = e.clientY / window.innerHeight - 0.5
-    if (gridLayer.value) gridLayer.value.style.transform = `translate(${(nx * 14).toFixed(1)}px, ${(ny * 14).toFixed(1)}px)`
-    if (glowLayer.value) glowLayer.value.style.transform = `translate(${(nx * 30).toFixed(1)}px, ${(ny * 30).toFixed(1)}px)`
-  }
-  window.addEventListener('pointermove', parallaxHandler, { passive: true })
-}
-
 onMounted(() => {
   appStore.fetchPublicSettings()
-  initParallax()
-})
-
-onUnmounted(() => {
-  if (parallaxHandler) {
-    window.removeEventListener('pointermove', parallaxHandler)
-    parallaxHandler = null
-  }
 })
 </script>
 
 <style scoped>
-/* ============ 品牌面板 ============ */
-.auth-brand {
-  background: linear-gradient(160deg, #0f766e 0%, #115e59 45%, #164e63 100%);
-  background-size: 170% 170%;
-  animation: pan-grad 18s ease-in-out infinite alternate;
+.auth-gradient-text {
+  background: linear-gradient(100deg, #0d9488 0%, #06b6d4 55%, #0ea5e9 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
-@keyframes pan-grad {
+:global(.dark) .auth-gradient-text {
+  background: linear-gradient(100deg, #2dd4bf 0%, #22d3ee 55%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* ============ 叙事入场 ============ */
+@keyframes panel-in {
   from {
-    background-position: 0% 0%;
+    opacity: 0;
+    transform: translateY(26px) scale(0.97);
   }
   to {
-    background-position: 100% 100%;
+    opacity: 1;
+    transform: none;
   }
 }
 
-.auth-gridlayer {
-  position: absolute;
-  inset: -24px;
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 48px 48px;
-  -webkit-mask-image: radial-gradient(ellipse 90% 70% at 30% 20%, #000, transparent);
-  mask-image: radial-gradient(ellipse 90% 70% at 30% 20%, #000, transparent);
-  pointer-events: none;
-  will-change: transform;
-  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.auth-glow {
-  position: absolute;
-  right: -100px;
-  bottom: -120px;
-  width: 340px;
-  height: 340px;
-  border-radius: 50%;
-  background: rgba(103, 232, 249, 0.18);
-  filter: blur(70px);
-  pointer-events: none;
-  will-change: transform;
-  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* ============ 入场编排 ============ */
 @keyframes rise {
   from {
     opacity: 0;
     transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateX(26px);
   }
   to {
     opacity: 1;
@@ -291,23 +333,31 @@ onUnmounted(() => {
   }
 }
 
-.brand-row {
-  animation: rise 0.6s 0.05s cubic-bezier(0.16, 1, 0.3, 1) both;
+.auth-panel {
+  animation: panel-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-.brand-desc {
+.brand-row {
   animation: rise 0.6s 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-.brand-code {
+.auth-term {
   animation: rise 0.6s 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-.code-wipe {
+.bub-user {
+  animation: rise 0.6s 0.85s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.bub-ai {
+  animation: rise 0.6s 1.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.ai-wipe {
   display: inline-block;
   white-space: nowrap;
   clip-path: inset(0 100% 0 0);
-  animation: wipe-in 1.4s ease-out 0.7s forwards;
+  animation: wipe-in 1.3s ease-out 1.8s forwards;
 }
 
 @keyframes wipe-in {
@@ -316,27 +366,160 @@ onUnmounted(() => {
   }
 }
 
-.bub-user {
-  animation: rise 0.6s 1s cubic-bezier(0.16, 1, 0.3, 1) both;
+.cap-row .cap {
+  opacity: 0;
+  animation: pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
-.bub-ai {
-  animation: rise 0.6s 1.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+.cap-row .cap:nth-child(1) {
+  animation-delay: 2.5s;
+}
+.cap-row .cap:nth-child(2) {
+  animation-delay: 2.62s;
+}
+.cap-row .cap:nth-child(3) {
+  animation-delay: 2.74s;
+}
+.cap-row .cap:nth-child(4) {
+  animation-delay: 2.86s;
 }
 
-.ai-wipe {
-  display: inline-block;
-  white-space: nowrap;
-  clip-path: inset(0 100% 0 0);
-  animation: wipe-in 1.3s ease-out 2s forwards;
+.contact-row {
+  animation: rise 0.6s 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.auth-card {
+  animation: card-in 0.7s 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.auth-card-foot {
+  animation: rise 0.6s 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ============ 终端心跳 ============ */
+.auth-term {
+  background: linear-gradient(150deg, #10222b 0%, #0a1420 100%);
+  border: 1px solid rgba(45, 212, 191, 0.16);
+  border-radius: 18px;
+  box-shadow:
+    0 24px 50px -14px rgba(2, 44, 34, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.term-bar {
+  display: flex;
+  gap: 7px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.term-bar span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.dot-r {
+  background: #f87171;
+}
+.dot-y {
+  background: #fbbf24;
+}
+.dot-g {
+  background: #34d399;
+}
+
+.term-body {
+  padding: 16px 18px 18px;
+  font-family: ui-monospace, 'Fira Code', Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.95;
+  color: #cbd5e1;
+  word-break: break-all;
+}
+
+.tline {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+  opacity: 0;
+}
+
+/* 心跳：10 秒一轮，循环重演登录叙事 */
+.tl-1 {
+  animation: beat-1 10s infinite;
+}
+.tl-2 {
+  animation: beat-2 10s infinite;
+}
+.tl-3 {
+  animation: beat-3 10s infinite;
+}
+.tl-4 {
+  animation: beat-4 10s infinite;
+}
+
+@keyframes beat-1 {
+  0%, 4% { opacity: 0; transform: translateY(4px); }
+  9%, 92% { opacity: 1; transform: none; }
+  97%, 100% { opacity: 0; transform: none; }
+}
+
+@keyframes beat-2 {
+  0%, 18% { opacity: 0; transform: translateY(4px); }
+  24%, 92% { opacity: 1; transform: none; }
+  97%, 100% { opacity: 0; transform: none; }
+}
+
+@keyframes beat-3 {
+  0%, 28% { opacity: 0; transform: translateY(4px); }
+  34%, 92% { opacity: 1; transform: none; }
+  97%, 100% { opacity: 0; transform: none; }
+}
+
+@keyframes beat-4 {
+  0%, 38% { opacity: 0; transform: translateY(4px); }
+  44%, 92% { opacity: 1; transform: none; }
+  97%, 100% { opacity: 0; transform: none; }
+}
+
+.tk-p {
+  color: #34d399;
+  font-weight: 700;
+}
+.tk-c {
+  color: #38bdf8;
+}
+.tk-t {
+  color: #cbd5e1;
+}
+.tk-d {
+  color: #64748b;
+}
+.tk-ok {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.term-caret,
 .stream-caret {
   display: inline-block;
   width: 7px;
   height: 13px;
-  background: #5eead4;
+  background: #34d399;
+  transform: translateY(2px);
   animation: caret-blink 1s step-end infinite;
+}
+
+.stream-caret {
+  background: #14b8a6;
+  transform: none;
 }
 
 @keyframes caret-blink {
@@ -350,93 +533,39 @@ onUnmounted(() => {
   }
 }
 
-.cap-row .cap {
-  opacity: 0;
-  animation: pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-}
-
-.cap-row .cap:nth-child(1) {
-  animation-delay: 2.7s;
-}
-.cap-row .cap:nth-child(2) {
-  animation-delay: 2.82s;
-}
-.cap-row .cap:nth-child(3) {
-  animation-delay: 2.94s;
-}
-.cap-row .cap:nth-child(4) {
-  animation-delay: 3.06s;
-}
-
-.brand-dots span {
-  opacity: 0;
-  animation: pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-}
-
-.brand-dots span:nth-child(1) {
-  animation-delay: 0.45s;
-}
-.brand-dots span:nth-child(2) {
-  animation-delay: 0.57s;
-}
-.brand-dots span:nth-child(3) {
-  animation-delay: 0.69s;
-}
-.brand-dots span:nth-child(4) {
-  animation-delay: 0.81s;
-}
-
-.brand-dots span + span {
-  margin-left: -7px;
-}
-
-.contact-row {
-  animation: rise 0.6s 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.auth-form-zone {
-  animation: rise 0.6s 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-/* 表单侧输入与主按钮微调（仅认证页生效；按钮加深保证白字过 WCAG AA） */
-.auth-form-zone :deep(.input) {
+/* ============ 表单微调 ============ */
+.auth-card :deep(.input) {
   min-height: 46px;
-  border-radius: 14px;
 }
 
-.auth-form-zone :deep(.btn-primary) {
+.auth-card :deep(.btn-primary) {
   min-height: 46px;
   border-radius: 999px;
   background-image: linear-gradient(90deg, #0f766e, #0e7490);
 }
 
-.auth-form-zone :deep(.btn-primary:hover) {
+.auth-card :deep(.btn-primary:hover) {
   filter: brightness(1.1);
 }
 
 /* ============ 降低动态 ============ */
 @media (prefers-reduced-motion: reduce) {
-  .auth-brand,
+  .auth-panel,
   .brand-row,
-  .brand-desc,
-  .brand-code,
-  .code-wipe,
+  .auth-term,
   .bub-user,
   .bub-ai,
   .ai-wipe,
-  .stream-caret,
   .cap-row .cap,
-  .brand-dots span,
   .contact-row,
-  .auth-form-zone {
+  .auth-card,
+  .auth-card-foot,
+  .tline,
+  .term-caret,
+  .stream-caret {
     animation: none;
     opacity: 1;
     clip-path: none;
-  }
-
-  .auth-gridlayer,
-  .auth-glow {
-    transition: none;
   }
 }
 </style>
