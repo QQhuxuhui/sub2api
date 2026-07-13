@@ -918,7 +918,7 @@ export default {
         description: '配置每个平台的默认模型映射模板。新建账号会预填该模板；可在批量编辑中应用到已有账号。',
         platform: '平台',
         json: '映射 JSON（原模型 → 目标模型）',
-        jsonHint: '例如 {"gemini-3-pro-preview": "gemini-3-pro-high"}，键值均为字符串。',
+        jsonHint: `例如 {'{'}"gemini-3-pro-preview": "gemini-3-pro-high"{'}'}，键值均为字符串。`,
         writeTimeWarning: '写入式快照：保存仅作为新建/应用时的默认来源，不会自动同步到已建账号的运行时映射。',
         invalidJson: 'JSON 格式无效，需为「字符串→字符串」的对象',
         loadFailed: '加载模型映射模板失败',

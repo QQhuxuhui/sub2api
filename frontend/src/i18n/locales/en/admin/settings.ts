@@ -923,7 +923,7 @@ export default {
         description: 'Configure the default model-mapping template per platform. New accounts are pre-filled from it; apply it to existing accounts via bulk edit.',
         platform: 'Platform',
         json: 'Mapping JSON (source → target)',
-        jsonHint: 'For example, {"gemini-3-pro-preview": "gemini-3-pro-high"}; keys and values must be strings.',
+        jsonHint: `For example, {'{'}"gemini-3-pro-preview": "gemini-3-pro-high"{'}'}; keys and values must be strings.`,
         writeTimeWarning: 'Write-time snapshot: saving only sets the default for create/apply; it does not auto-sync runtime mappings of existing accounts.',
         invalidJson: 'Invalid JSON: must be an object of string → string',
         loadFailed: 'Failed to load model mapping template',
