@@ -155,6 +155,8 @@ type SystemSettings struct {
 	APIBaseURL                  string
 	ContactInfo                 string
 	DocURL                      string
+	TelegramURL                 string
+	QQGroupURL                  string
 	HomeContent                 string
 	CompactHomeEnabled          bool
 	HideCcsImportButton         bool
@@ -353,6 +355,8 @@ type PublicSettings struct {
 	APIBaseURL                          string
 	ContactInfo                         string
 	DocURL                              string
+	TelegramURL                         string
+	QQGroupURL                          string
 	HomeContent                         string
 	CompactHomeEnabled                  bool
 	HideCcsImportButton                 bool
