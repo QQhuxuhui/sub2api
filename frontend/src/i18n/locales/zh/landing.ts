@@ -5,7 +5,6 @@ export default {
   },
   // Home Page
   home: {
-    viewOnGithub: '在 GitHub 上查看',
     viewDocs: '查看文档',
     docs: '文档',
     switchToLight: '切换到浅色模式',
@@ -14,14 +13,27 @@ export default {
     login: '登录',
     getStarted: '立即开始',
     goToDashboard: '进入控制台',
+    badge: '开源 · 订阅转 API 网关',
+    nav: {
+      keyUsage: '用量查询'
+    },
+    steps: {
+      register: {
+        title: '注册账号',
+        desc: '创建账号并登录控制台'
+      },
+      createKey: {
+        title: '创建 API Key',
+        desc: '在控制台一键生成专属密钥'
+      },
+      replaceUrl: {
+        title: '替换 Base URL',
+        desc: '把请求地址指向本平台，其余代码零改动'
+      }
+    },
     // 新增：面向用户的价值主张
     heroSubtitle: '一个密钥，畅用多个 AI 模型',
     heroDescription: '无需管理多个订阅账号，一站式接入 Claude、GPT、Gemini 等主流 AI 服务',
-    tags: {
-      subscriptionToApi: '订阅转 API',
-      stickySession: '会话保持',
-      realtimeBilling: '按量计费'
-    },
     // 用户痛点区块
     painPoints: {
       title: '你是否也遇到这些问题？',
@@ -95,12 +107,11 @@ export default {
     },
     providers: {
       title: '已支持的 AI 模型',
-      description: '一个 API，多种选择',
-      supported: '已支持',
       soon: '即将推出',
       claude: 'Claude',
+      gpt: 'GPT',
       gemini: 'Gemini',
-      antigravity: 'Antigravity',
+      grok: 'Grok',
       more: '更多'
     },
     // CTA 区块

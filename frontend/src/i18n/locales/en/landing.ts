@@ -5,7 +5,6 @@ export default {
   },
   // Home Page
   home: {
-    viewOnGithub: 'View on GitHub',
     viewDocs: 'View Documentation',
     docs: 'Docs',
     switchToLight: 'Switch to Light Mode',
@@ -14,14 +13,27 @@ export default {
     login: 'Login',
     getStarted: 'Get Started',
     goToDashboard: 'Go to Dashboard',
+    badge: 'Open Source · Subscription-to-API Gateway',
+    nav: {
+      keyUsage: 'Key Usage'
+    },
+    steps: {
+      register: {
+        title: 'Create an Account',
+        desc: 'Sign up and open the dashboard'
+      },
+      createKey: {
+        title: 'Create an API Key',
+        desc: 'Generate your key in one click'
+      },
+      replaceUrl: {
+        title: 'Switch Your Base URL',
+        desc: 'Swap one line, keep the rest of your code'
+      }
+    },
     // User-focused value proposition
     heroSubtitle: 'One Key, All AI Models',
     heroDescription: 'No need to manage multiple subscriptions. Access Claude, GPT, Gemini and more with a single API key',
-    tags: {
-      subscriptionToApi: 'Subscription to API',
-      stickySession: 'Session Persistence',
-      realtimeBilling: 'Pay As You Go'
-    },
     // Pain points section
     painPoints: {
       title: 'Sound Familiar?',
@@ -95,12 +107,11 @@ export default {
     },
     providers: {
       title: 'Supported AI Models',
-      description: 'One API, Multiple Choices',
-      supported: 'Supported',
       soon: 'Soon',
       claude: 'Claude',
+      gpt: 'GPT',
       gemini: 'Gemini',
-      antigravity: 'Antigravity',
+      grok: 'Grok',
       more: 'More'
     },
     // CTA section
