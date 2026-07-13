@@ -17,6 +17,17 @@ export default {
     nav: {
       keyUsage: '用量查询'
     },
+    authPanel: {
+      chatQuestion: '帮我分析这张架构图',
+      chatAnswer: '好的，这是一套三层网关架构',
+      capabilities: {
+        chat: '文本对话',
+        vision: '图像理解',
+        image: '图像生成',
+        stream: '流式输出'
+      },
+      contact: '联系我们'
+    },
     steps: {
       register: {
         title: '注册账号',

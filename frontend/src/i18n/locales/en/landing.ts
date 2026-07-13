@@ -17,6 +17,17 @@ export default {
     nav: {
       keyUsage: 'Key Usage'
     },
+    authPanel: {
+      chatQuestion: 'Analyze this architecture diagram',
+      chatAnswer: 'Sure, this is a three-tier gateway design',
+      capabilities: {
+        chat: 'Chat',
+        vision: 'Vision',
+        image: 'Image Gen',
+        stream: 'Streaming'
+      },
+      contact: 'Contact us'
+    },
     steps: {
       register: {
         title: 'Create an Account',

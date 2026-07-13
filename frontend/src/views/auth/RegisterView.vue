@@ -2,7 +2,7 @@
   <AuthLayout>
     <div class="space-y-6">
       <!-- Title -->
-      <div class="text-center">
+      <div class="text-left">
         <h2 class="text-2xl font-bold text-gray-900 dark:text-white">
           {{ t('auth.createAccount') }}
         </h2>
