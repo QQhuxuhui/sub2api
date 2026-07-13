@@ -19,7 +19,10 @@
     </div>
 
     <main class="relative z-10 flex flex-1 items-center justify-center px-4 py-10 sm:px-6">
-      <div class="grid w-full max-w-5xl items-center gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-20">
+      <div
+        class="w-full max-w-6xl rounded-[2rem] border border-white/80 bg-white/55 p-6 shadow-2xl shadow-primary-500/10 backdrop-blur-2xl dark:border-dark-700/50 dark:bg-dark-900/50 sm:p-10 lg:p-14"
+      >
+        <div class="grid items-center gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-16">
         <!-- Left: Brand Narrative (desktop only) -->
         <div class="hidden lg:block">
           <router-link
@@ -98,7 +101,7 @@
 
           <!-- Card -->
           <div
-            class="rounded-3xl border border-white/70 bg-white/80 p-8 shadow-xl shadow-primary-500/5 backdrop-blur-xl dark:border-dark-700/60 dark:bg-dark-900/70 dark:shadow-black/20"
+            class="rounded-3xl border border-gray-100 bg-white p-8 shadow-lg shadow-gray-900/5 dark:border-dark-700/60 dark:bg-dark-800/80 dark:shadow-black/20"
           >
             <slot />
           </div>
@@ -112,6 +115,7 @@
           <p class="mt-8 text-center text-xs text-gray-400 dark:text-dark-500">
             &copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}
           </p>
+        </div>
         </div>
       </div>
     </main>
