@@ -330,6 +330,8 @@ const baseSettingsResponse = {
   api_base_url: "",
   contact_info: "",
   doc_url: "",
+  telegram_url: "",
+  qq_group_url: "",
   home_content: "",
   hide_ccs_import_button: false,
   table_default_page_size: 20,

@@ -284,6 +284,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.DocURL != after.DocURL {
 		changed = append(changed, "doc_url")
 	}
+	if before.TelegramURL != after.TelegramURL {
+		changed = append(changed, "telegram_url")
+	}
+	if before.QQGroupURL != after.QQGroupURL {
+		changed = append(changed, "qq_group_url")
+	}
 	if before.HomeContent != after.HomeContent {
 		changed = append(changed, "home_content")
 	}
