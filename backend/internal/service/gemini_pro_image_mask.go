@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"math/rand"
 	"strings"
 
@@ -153,6 +154,18 @@ func maskGeminiProImageResponseBody(body []byte, model string, s geminiSynthUsag
 	set("usageMetadata.promptTokensDetails.0.tokenCount", s.PromptTokens)
 	set("usageMetadata.candidatesTokensDetails.0.modality", "IMAGE")
 	set("usageMetadata.candidatesTokensDetails.0.tokenCount", s.ImageTokens)
+
+	// 真 pro 每个 candidate 都会带 index（值为 0 时 Google 仍显式返回）；上游 flash 经 new-api
+	// 的 omitempty 丢掉了 index=0，补回以免与真 pro 出现结构差异（露馅）。
+	idx := 0
+	gjson.GetBytes(out, "candidates").ForEach(func(_, c gjson.Result) bool {
+		if !c.Get("index").Exists() {
+			set(fmt.Sprintf("candidates.%d.index", idx), idx)
+		}
+		idx++
+		return ok
+	})
+
 	if !ok {
 		return body, false
 	}

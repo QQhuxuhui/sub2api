@@ -109,6 +109,35 @@ func TestShouldMaskGeminiProImage(t *testing.T) {
 	}
 }
 
+func TestMaskGeminiProImageResponseBodyRestoresCandidateIndex(t *testing.T) {
+	// flash 经 new-api 的响应：candidate 缺 index（omitempty 丢了 0）。真 pro 会带 index:0。
+	body := `{"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"data":"AAAA","mimeType":"image/jpeg"}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2073,"totalTokenCount":2081,"candidatesTokensDetails":[{"modality":"IMAGE","tokenCount":1680}]},"modelVersion":"gemini-3.1-flash-image"}`
+	s := geminiSynthUsage{PromptTokens: 8, TextTokens: 90, ImageTokens: 1120, ThoughtsTokens: 155, CandidatesTokens: 1210, TotalTokens: 1373}
+	out, ok := maskGeminiProImageResponseBody([]byte(body), "gemini-3-pro-image", s)
+	if !ok {
+		t.Fatal("mask should succeed")
+	}
+	idx := gjson.GetBytes(out, "candidates.0.index")
+	if !idx.Exists() {
+		t.Fatal("masked candidate must carry index to match genuine pro (露馅)")
+	}
+	if idx.Int() != 0 {
+		t.Fatalf("candidates.0.index = %d, want 0", idx.Int())
+	}
+}
+
+func TestMaskGeminiProImageResponseBodyKeepsExistingCandidateIndex(t *testing.T) {
+	body := `{"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"data":"AAAA","mimeType":"image/jpeg"}}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":1218,"candidatesTokensDetails":[{"modality":"IMAGE","tokenCount":1120}]},"modelVersion":"gemini-3.1-flash-image"}`
+	s := geminiSynthUsage{PromptTokens: 8, TextTokens: 90, ImageTokens: 1120, ThoughtsTokens: 155, CandidatesTokens: 1210, TotalTokens: 1373}
+	out, ok := maskGeminiProImageResponseBody([]byte(body), "gemini-3-pro-image", s)
+	if !ok {
+		t.Fatal("mask should succeed")
+	}
+	if gjson.GetBytes(out, "candidates.0.index").Int() != 0 {
+		t.Fatal("existing candidate index must be preserved")
+	}
+}
+
 func TestMaskGeminiProImageResponseBody(t *testing.T) {
 	s := geminiSynthUsage{PromptTokens: 13, TextTokens: 95, ImageTokens: 1120, ThoughtsTokens: 155, CandidatesTokens: 1215, TotalTokens: 1383}
 	out, ok := maskGeminiProImageResponseBody([]byte(flashStrippedBody), "gemini-3-pro-image-preview", s)
