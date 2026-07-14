@@ -109,17 +109,31 @@ func shouldMaskGeminiProImage(respBody []byte, model string) bool {
 
 // maskGeminiProImageResponseBody 用合成 usage 改写响应体的 modelVersion 与 usageMetadata。
 // 其余字段（含 candidates 图像数据）保持不变。
-func maskGeminiProImageResponseBody(body []byte, model string, s geminiSynthUsage) []byte {
+// 全有或全无：任一 sjson 操作失败时返回原始 body 与 ok=false，避免半改写的自相矛盾响应。
+func maskGeminiProImageResponseBody(body []byte, model string, s geminiSynthUsage) ([]byte, bool) {
 	out := body
+	ok := true
 	set := func(path string, val any) {
-		if nb, err := sjson.SetBytes(out, path, val); err == nil {
-			out = nb
+		if !ok {
+			return
 		}
+		nb, err := sjson.SetBytes(out, path, val)
+		if err != nil {
+			ok = false
+			return
+		}
+		out = nb
 	}
 	del := func(path string) {
-		if nb, err := sjson.DeleteBytes(out, path); err == nil {
-			out = nb
+		if !ok {
+			return
 		}
+		nb, err := sjson.DeleteBytes(out, path)
+		if err != nil {
+			ok = false
+			return
+		}
+		out = nb
 	}
 
 	set("modelVersion", model)
@@ -133,7 +147,10 @@ func maskGeminiProImageResponseBody(body []byte, model string, s geminiSynthUsag
 	set("usageMetadata.promptTokensDetails.0.tokenCount", s.PromptTokens)
 	set("usageMetadata.candidatesTokensDetails.0.modality", "IMAGE")
 	set("usageMetadata.candidatesTokensDetails.0.tokenCount", s.ImageTokens)
-	return out
+	if !ok {
+		return body, false
+	}
+	return out, true
 }
 
 // applyGeminiProImageMask 是响应处理器的统一入口：
@@ -148,6 +165,45 @@ func applyGeminiProImageMask(respBody []byte, model, tier string) (newBody []byt
 	}
 	promptTokens := int(gjson.GetBytes(respBody, "usageMetadata.promptTokenCount").Int())
 	synth := synthesizeGeminiProImageUsage(tier, promptTokens)
-	nb := maskGeminiProImageResponseBody(respBody, model, synth)
+	nb, ok := maskGeminiProImageResponseBody(respBody, model, synth)
+	if !ok {
+		return respBody, nil, false
+	}
 	return nb, synthToClaudeUsage(synth), true
+}
+
+// geminiProImageMaskParams 由 ForwardNative 计算后传入响应处理器。
+type geminiProImageMaskParams struct {
+	Enabled bool
+	Model   string
+	Tier    string
+}
+
+// maskGeminiProImageStreamChunk 处理单个 SSE data 分块：
+// 若启用且为 pro 生图请求，则改写该块的 modelVersion（若存在）；
+// 若该块含 usageMetadata，则一并合成改写并产出计费 usage。
+func maskGeminiProImageStreamChunk(payload []byte, mask geminiProImageMaskParams) (newPayload []byte, usage *ClaudeUsage, masked bool) {
+	if !mask.Enabled || !isGeminiProImageModel(mask.Model) {
+		return payload, nil, false
+	}
+	hasUsage := gjson.GetBytes(payload, "usageMetadata").Exists()
+	hasModelVersion := gjson.GetBytes(payload, "modelVersion").Exists()
+	if !hasUsage && !hasModelVersion {
+		return payload, nil, false
+	}
+	if hasUsage {
+		if nb, u, ok := applyGeminiProImageMask(payload, mask.Model, mask.Tier); ok {
+			return nb, u, true
+		}
+	}
+	// 无 usageMetadata：仅在 modelVersion 非真 pro 时改写它。
+	if hasModelVersion {
+		mv := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "modelVersion").String()))
+		if !strings.HasPrefix(mv, strings.ToLower(strings.TrimSpace(mask.Model))) {
+			if nb, err := sjson.SetBytes(payload, "modelVersion", mask.Model); err == nil {
+				return nb, nil, true
+			}
+		}
+	}
+	return payload, nil, false
 }

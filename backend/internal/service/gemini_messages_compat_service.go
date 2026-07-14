@@ -1576,8 +1576,15 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 
+	imageTier := normalizeOpenAIImageSizeTier(s.extractImageInputSize(body))
+	maskParams := geminiProImageMaskParams{
+		Enabled: isGeminiProImageModel(originalModel),
+		Model:   originalModel,
+		Tier:    imageTier,
+	}
+
 	if stream {
-		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth)
+		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth, maskParams)
 		if err != nil {
 			return nil, err
 		}
@@ -1590,10 +1597,16 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to read upstream stream")
 			}
 			b, _ := json.Marshal(collected)
+			if maskParams.Enabled {
+				if nb, u, ok := applyGeminiProImageMask(b, maskParams.Model, maskParams.Tier); ok {
+					b = nb
+					usageObj = u
+				}
+			}
 			c.Data(http.StatusOK, "application/json", b)
 			usage = usageObj
 		} else {
-			usageResp, err := s.handleNativeNonStreamingResponse(c, resp, isOAuth)
+			usageResp, err := s.handleNativeNonStreamingResponse(c, resp, isOAuth, maskParams)
 			if err != nil {
 				return nil, err
 			}
@@ -2500,7 +2513,7 @@ type UpstreamHTTPResult struct {
 	Body       []byte
 }
 
-func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Context, resp *http.Response, isOAuth bool) (*ClaudeUsage, error) {
+func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Context, resp *http.Response, isOAuth bool, mask geminiProImageMaskParams) (*ClaudeUsage, error) {
 	if s.cfg != nil && s.cfg.Gateway.GeminiDebugResponseHeaders {
 		logger.LegacyPrintf("service.gemini_messages_compat", "[GeminiAPI] ========== Response Headers ==========")
 		for key, values := range resp.Header {
@@ -2523,6 +2536,14 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 		}
 	}
 
+	var maskedUsage *ClaudeUsage
+	if mask.Enabled {
+		if nb, u, ok := applyGeminiProImageMask(respBody, mask.Model, mask.Tier); ok {
+			respBody = nb
+			maskedUsage = u
+		}
+	}
+
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
 	contentType := resp.Header.Get("Content-Type")
@@ -2531,13 +2552,16 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	}
 	c.Data(resp.StatusCode, contentType, respBody)
 
+	if maskedUsage != nil {
+		return maskedUsage, nil
+	}
 	if u := extractGeminiUsage(respBody); u != nil {
 		return u, nil
 	}
 	return &ClaudeUsage{}, nil
 }
 
-func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, isOAuth bool) (*geminiNativeStreamResult, error) {
+func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, isOAuth bool, mask geminiProImageMaskParams) (*geminiNativeStreamResult, error) {
 	if s.cfg != nil && s.cfg.Gateway.GeminiDebugResponseHeaders {
 		logger.LegacyPrintf("service.gemini_messages_compat", "[GeminiAPI] ========== Streaming Response Headers ==========")
 		for key, values := range resp.Header {
@@ -2597,7 +2621,13 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 						rawBytes = []byte(payload)
 					}
 
-					if u := extractGeminiUsage(rawBytes); u != nil {
+					if nb, u, ok := maskGeminiProImageStreamChunk(rawBytes, mask); ok {
+						rawBytes = nb
+						rawToWrite = string(nb)
+						if u != nil {
+							usage = u
+						}
+					} else if u := extractGeminiUsage(rawBytes); u != nil {
 						usage = u
 					}
 
@@ -2608,6 +2638,9 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 
 					if isOAuth {
 						// SSE format requires double newline (\n\n) to separate events
+						_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", rawToWrite)
+					} else if rawToWrite != payload {
+						// 已伪装：写改写后的 data 行（保持 SSE 事件分隔）。
 						_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", rawToWrite)
 					} else {
 						// Pass-through for AI Studio responses.

@@ -111,7 +111,10 @@ func TestShouldMaskGeminiProImage(t *testing.T) {
 
 func TestMaskGeminiProImageResponseBody(t *testing.T) {
 	s := geminiSynthUsage{PromptTokens: 13, TextTokens: 95, ImageTokens: 1120, ThoughtsTokens: 155, CandidatesTokens: 1215, TotalTokens: 1383}
-	out := maskGeminiProImageResponseBody([]byte(flashStrippedBody), "gemini-3-pro-image-preview", s)
+	out, ok := maskGeminiProImageResponseBody([]byte(flashStrippedBody), "gemini-3-pro-image-preview", s)
+	if !ok {
+		t.Fatal("mask should succeed")
+	}
 
 	if mv := gjson.GetBytes(out, "modelVersion").String(); mv != "gemini-3-pro-image-preview" {
 		t.Errorf("modelVersion = %q, want pro name", mv)
@@ -141,6 +144,45 @@ func TestMaskGeminiProImageResponseBody(t *testing.T) {
 	}
 }
 
+func TestMaskGeminiProImageStreamChunk(t *testing.T) {
+	orig := geminiProImageIntn
+	geminiProImageIntn = func(n int) int { return 0 }
+	defer func() { geminiProImageIntn = orig }()
+
+	mask := geminiProImageMaskParams{Enabled: true, Model: "gemini-3-pro-image-preview", Tier: "2K"}
+
+	// 含 usageMetadata 的末块 → 改写 usage + modelVersion
+	nb, u, masked := maskGeminiProImageStreamChunk([]byte(flashStrippedBody), mask)
+	if !masked || u == nil {
+		t.Fatal("chunk with usageMetadata should be masked")
+	}
+	if gjson.GetBytes(nb, "modelVersion").String() != "gemini-3-pro-image-preview" {
+		t.Error("stream chunk modelVersion not rewritten")
+	}
+	if u.ImageOutputTokens != 1120 {
+		t.Errorf("stream billing ImageOutputTokens = %d, want 1120", u.ImageOutputTokens)
+	}
+
+	// 仅含 modelVersion、无 usageMetadata 的中间块 → 只改 modelVersion，usage 为 nil
+	mid := `{"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"modelVersion":"gemini-3.1-flash-image"}`
+	nb2, u2, masked2 := maskGeminiProImageStreamChunk([]byte(mid), mask)
+	if !masked2 {
+		t.Error("mid chunk with flash modelVersion should be rewritten")
+	}
+	if u2 != nil {
+		t.Error("mid chunk without usageMetadata should not yield billing usage")
+	}
+	if gjson.GetBytes(nb2, "modelVersion").String() != "gemini-3-pro-image-preview" {
+		t.Error("mid chunk modelVersion not rewritten")
+	}
+
+	// 未启用 → 原样返回
+	_, _, masked3 := maskGeminiProImageStreamChunk([]byte(flashStrippedBody), geminiProImageMaskParams{})
+	if masked3 {
+		t.Error("disabled mask should not rewrite")
+	}
+}
+
 func TestApplyGeminiProImageMask(t *testing.T) {
 	orig := geminiProImageIntn
 	geminiProImageIntn = func(n int) int { return 0 }
@@ -158,6 +200,9 @@ func TestApplyGeminiProImageMask(t *testing.T) {
 	parsed := extractGeminiUsage(nb)
 	if parsed.ImageOutputTokens != u.ImageOutputTokens || parsed.OutputTokens != u.OutputTokens {
 		t.Errorf("rewritten body usage %+v != billed usage %+v", parsed, u)
+	}
+	if parsed.InputTokens != u.InputTokens {
+		t.Errorf("InputTokens %d != %d", parsed.InputTokens, u.InputTokens)
 	}
 	if gjson.GetBytes(nb, "modelVersion").String() != "gemini-3-pro-image-preview" {
 		t.Error("modelVersion not rewritten")
