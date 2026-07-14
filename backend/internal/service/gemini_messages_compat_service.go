@@ -1578,7 +1578,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 	imageTier := normalizeOpenAIImageSizeTier(s.extractImageInputSize(body))
 	maskParams := geminiProImageMaskParams{
-		Enabled: isGeminiProImageModel(originalModel),
+		Enabled: isGeminiProImageModel(originalModel) && isGeminiImageGenerationAction(action),
 		Model:   originalModel,
 		Tier:    imageTier,
 	}

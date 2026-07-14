@@ -13,6 +13,12 @@ func isGeminiProImageModel(model string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gemini-3-pro-image")
 }
 
+// isGeminiImageGenerationAction 仅对真正会出图的 Gemini action 返回 true。
+// countTokens 等非生成 action 不应触发 pro 生图伪装/计费。
+func isGeminiImageGenerationAction(action string) bool {
+	return action == "generateContent" || action == "streamGenerateContent"
+}
+
 // proImageProfile 描述某档位下 pro 生图 usageMetadata 的特征。
 // ImageTokens 为确定值；其余为每请求随机取值的闭区间。
 type proImageProfile struct {
@@ -180,24 +186,22 @@ type geminiProImageMaskParams struct {
 }
 
 // maskGeminiProImageStreamChunk 处理单个 SSE data 分块：
-// 若启用且为 pro 生图请求，则改写该块的 modelVersion（若存在）；
-// 若该块含 usageMetadata，则一并合成改写并产出计费 usage。
+// 仅在终结分块（带 finishReason 的完整 usage）上做全量合成改写；
+// 中间分块的 usageMetadata 是累计中间量，用完整体启发式判断会误伤真 pro，
+// 故中间分块只纠正 modelVersion，绝不合成 usage。
 func maskGeminiProImageStreamChunk(payload []byte, mask geminiProImageMaskParams) (newPayload []byte, usage *ClaudeUsage, masked bool) {
 	if !mask.Enabled || !isGeminiProImageModel(mask.Model) {
 		return payload, nil, false
 	}
+	isFinal := gjson.GetBytes(payload, "candidates.0.finishReason").Exists()
 	hasUsage := gjson.GetBytes(payload, "usageMetadata").Exists()
-	hasModelVersion := gjson.GetBytes(payload, "modelVersion").Exists()
-	if !hasUsage && !hasModelVersion {
-		return payload, nil, false
-	}
-	if hasUsage {
+	if isFinal && hasUsage {
 		if nb, u, ok := applyGeminiProImageMask(payload, mask.Model, mask.Tier); ok {
 			return nb, u, true
 		}
+		return payload, nil, false
 	}
-	// 无 usageMetadata：仅在 modelVersion 非真 pro 时改写它。
-	if hasModelVersion {
+	if gjson.GetBytes(payload, "modelVersion").Exists() {
 		mv := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "modelVersion").String()))
 		if !strings.HasPrefix(mv, strings.ToLower(strings.TrimSpace(mask.Model))) {
 			if nb, err := sjson.SetBytes(payload, "modelVersion", mask.Model); err == nil {

@@ -151,35 +151,62 @@ func TestMaskGeminiProImageStreamChunk(t *testing.T) {
 
 	mask := geminiProImageMaskParams{Enabled: true, Model: "gemini-3-pro-image-preview", Tier: "2K"}
 
-	// 含 usageMetadata 的末块 → 改写 usage + modelVersion
-	nb, u, masked := maskGeminiProImageStreamChunk([]byte(flashStrippedBody), mask)
+	// 终结分块（有 finishReason + usageMetadata，flash）→ 全量合成 + 改 modelVersion
+	flashFinal := `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":13,"candidatesTokenCount":2129,"totalTokenCount":2142},"modelVersion":"gemini-3.1-flash-image"}`
+	nb, u, masked := maskGeminiProImageStreamChunk([]byte(flashFinal), mask)
 	if !masked || u == nil {
-		t.Fatal("chunk with usageMetadata should be masked")
+		t.Fatal("final flash chunk should be masked with usage")
 	}
 	if gjson.GetBytes(nb, "modelVersion").String() != "gemini-3-pro-image-preview" {
-		t.Error("stream chunk modelVersion not rewritten")
+		t.Error("final chunk modelVersion not rewritten")
 	}
 	if u.ImageOutputTokens != 1120 {
-		t.Errorf("stream billing ImageOutputTokens = %d, want 1120", u.ImageOutputTokens)
+		t.Errorf("final chunk ImageOutputTokens = %d, want 1120", u.ImageOutputTokens)
 	}
 
-	// 仅含 modelVersion、无 usageMetadata 的中间块 → 只改 modelVersion，usage 为 nil
-	mid := `{"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"modelVersion":"gemini-3.1-flash-image"}`
-	nb2, u2, masked2 := maskGeminiProImageStreamChunk([]byte(mid), mask)
+	// 中间分块（有 usageMetadata 但无 finishReason，flash）→ 只改 modelVersion，绝不合成 usage
+	midWithUsage := `{"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":10,"totalTokenCount":15},"modelVersion":"gemini-3.1-flash-image"}`
+	nb2, u2, masked2 := maskGeminiProImageStreamChunk([]byte(midWithUsage), mask)
 	if !masked2 {
-		t.Error("mid chunk with flash modelVersion should be rewritten")
+		t.Error("mid chunk with flash modelVersion should have modelVersion rewritten")
 	}
 	if u2 != nil {
-		t.Error("mid chunk without usageMetadata should not yield billing usage")
+		t.Error("mid chunk must NOT synthesize billing usage")
 	}
 	if gjson.GetBytes(nb2, "modelVersion").String() != "gemini-3-pro-image-preview" {
 		t.Error("mid chunk modelVersion not rewritten")
 	}
+	// usageMetadata 必须保持原样（未被合成覆盖）
+	if got := gjson.GetBytes(nb2, "usageMetadata.candidatesTokenCount").Int(); got != 10 {
+		t.Errorf("mid chunk usageMetadata was altered: candidatesTokenCount = %d, want 10", got)
+	}
+
+	// 真 pro 终结分块（finishReason + IMAGE 明细 + pro modelVersion）→ 透传，不改写
+	proFinal := `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":1218,"totalTokenCount":1388,"candidatesTokensDetails":[{"modality":"IMAGE","tokenCount":1120}],"thoughtsTokenCount":162},"modelVersion":"gemini-3-pro-image-preview"}`
+	_, _, masked3 := maskGeminiProImageStreamChunk([]byte(proFinal), mask)
+	if masked3 {
+		t.Error("genuine pro final chunk must not be masked")
+	}
 
 	// 未启用 → 原样返回
-	_, _, masked3 := maskGeminiProImageStreamChunk([]byte(flashStrippedBody), geminiProImageMaskParams{})
-	if masked3 {
+	_, _, masked4 := maskGeminiProImageStreamChunk([]byte(flashFinal), geminiProImageMaskParams{})
+	if masked4 {
 		t.Error("disabled mask should not rewrite")
+	}
+}
+
+func TestIsGeminiImageGenerationAction(t *testing.T) {
+	cases := map[string]bool{
+		"generateContent":       true,
+		"streamGenerateContent": true,
+		"countTokens":           false,
+		"":                      false,
+		"embedContent":          false,
+	}
+	for action, want := range cases {
+		if got := isGeminiImageGenerationAction(action); got != want {
+			t.Errorf("isGeminiImageGenerationAction(%q) = %v, want %v", action, got, want)
+		}
 	}
 }
 
