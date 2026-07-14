@@ -2938,6 +2938,20 @@
           </div>
           <p class="input-hint">{{ t('admin.accounts.openai.endpointCapabilitiesDesc') }}</p>
         </div>
+        <div>
+          <label
+            class="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-600"
+          >
+            <input
+              v-model="openAIImagesHighResEnabled"
+              type="checkbox"
+              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+              data-testid="openai-images-highres-toggle"
+            />
+            <span class="text-gray-700 dark:text-gray-200">{{ t('admin.accounts.openai.imagesHighRes') }}</span>
+          </label>
+          <p class="input-hint">{{ t('admin.accounts.openai.imagesHighResDesc') }}</p>
+        </div>
       </div>
 
       <div>
@@ -3651,6 +3665,7 @@ const openaiPassthroughEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
+const openAIImagesHighResEnabled = ref(false)
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
@@ -3769,6 +3784,14 @@ const applyOpenAIEndpointCapabilities = (credentials: Record<string, unknown>) =
     return
   }
   credentials.openai_capabilities = capabilities
+}
+
+const applyOpenAIImagesHighRes = (credentials: Record<string, unknown>) => {
+  if (openAIImagesHighResEnabled.value) {
+    credentials.openai_images_highres = true
+  } else {
+    delete credentials.openai_images_highres
+  }
 }
 
 function buildAntigravityExtra(): Record<string, unknown> | undefined {
@@ -4094,6 +4117,7 @@ watch(
     if (newPlatform !== 'openai') {
       openaiPassthroughEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
+      openAIImagesHighResEnabled.value = false
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       codexCLIOnlyEnabled.value = false
@@ -4505,6 +4529,7 @@ const resetForm = () => {
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
+  openAIImagesHighResEnabled.value = false
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
@@ -4907,6 +4932,7 @@ const handleSubmit = async () => {
   }
   if (form.platform === 'openai') {
     applyOpenAIEndpointCapabilities(credentials)
+    applyOpenAIImagesHighRes(credentials)
     const compactModelMapping = buildOpenAICompactModelMapping()
     if (compactModelMapping) {
       credentials.compact_model_mapping = compactModelMapping
@@ -5048,6 +5074,7 @@ const createAccountAndFinish = async (
   if (platform === 'openai') {
     if (type === 'apikey') {
       applyOpenAIEndpointCapabilities(credentials)
+      applyOpenAIImagesHighRes(credentials)
     }
     const compactModelMapping = buildOpenAICompactModelMapping()
     if (compactModelMapping) {

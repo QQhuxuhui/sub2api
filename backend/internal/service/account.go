@@ -89,6 +89,9 @@ const (
 
 const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
 
+// openAIImagesHighResCredentialKey 标记账号可产出 2K/4K 高清图片（官方渠道不支持，需显式开启）。
+const openAIImagesHighResCredentialKey = "openai_images_highres"
+
 const (
 	OpenAIAuthModePersonalAccessToken = "personalAccessToken"
 	openAIAuthModeCredentialKey       = "auth_mode"
@@ -1438,6 +1441,34 @@ func (a *Account) SupportsOpenAIImageCapability(capability OpenAIImagesCapabilit
 		return a.Type == AccountTypeOAuth || a.Type == AccountTypeAPIKey
 	default:
 		return true
+	}
+}
+
+// SupportsOpenAIImagesHighRes 判断账号是否被标记为支持 2K/4K 高清出图。
+// 该能力为白名单语义：仅当凭据中显式开启时返回 true。
+func (a *Account) SupportsOpenAIImagesHighRes() bool {
+	if a == nil || a.Credentials == nil {
+		return false
+	}
+	raw, found := a.Credentials[openAIImagesHighResCredentialKey]
+	if !found || raw == nil {
+		return false
+	}
+	switch value := raw.(type) {
+	case bool:
+		return value
+	case string:
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "true", "1", "yes", "on", "enabled":
+			return true
+		}
+		return false
+	case float64:
+		return value != 0
+	case int:
+		return value != 0
+	default:
+		return false
 	}
 }
 

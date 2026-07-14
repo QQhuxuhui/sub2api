@@ -543,6 +543,23 @@ func normalizeOpenAIImageSizeTier(size string) string {
 	return NormalizeImageBillingTierOrDefault(size)
 }
 
+// openAIImageSizeRequiresHighRes 判断显式尺寸是否落在 2K/4K 档。
+// 与计费默认值不同：auto/空尺寸不要求高清账号，官方账号可照常处理。
+func openAIImageSizeRequiresHighRes(size string) bool {
+	tier, ok := ClassifyImageBillingTier(size)
+	if !ok {
+		return false
+	}
+	return tier == ImageBillingSize2K || tier == ImageBillingSize4K
+}
+
+func (r *OpenAIImagesRequest) RequiresHighResImage() bool {
+	if r == nil {
+		return false
+	}
+	return openAIImageSizeRequiresHighRes(r.Size)
+}
+
 func (s *OpenAIGatewayService) ForwardImages(
 	ctx context.Context,
 	c *gin.Context,

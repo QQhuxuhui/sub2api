@@ -544,6 +544,9 @@ export default {
         endpointCapabilities: '端点能力',
         endpointCapabilitiesDesc:
           '用于调度筛选。文本端点会跟随上方 Responses API 支持显示为 Responses、Chat Completions 或自动模式；Embeddings 独立控制 /v1/embeddings。',
+        imagesHighRes: '支持 2K/4K 高清出图',
+        imagesHighResDesc:
+          '生图请求显式指定 2K/4K 尺寸时，仅调度到勾选了该标记的账号；auto 或 1K 尺寸的请求不受影响。',
         capabilityResponses: 'Responses',
         capabilityTextAuto: 'Responses / Chat Completions（自动）',
         capabilityResponsesAuto: 'Responses（自动探测）',
