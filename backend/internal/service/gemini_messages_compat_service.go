@@ -1576,15 +1576,11 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 
-	imageTier := normalizeOpenAIImageSizeTier(s.extractImageInputSize(body))
-	maskParams := geminiProImageMaskParams{
-		Enabled: isGeminiProImageModel(originalModel) && isGeminiImageGenerationAction(action),
-		Model:   originalModel,
-		Tier:    imageTier,
-	}
+	imageInputSize := s.extractImageInputSize(body)
+	imageUsageParams := newGeminiImageUsageParams(originalModel, action, imageInputSize, body)
 
 	if stream {
-		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth, maskParams)
+		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth, imageUsageParams)
 		if err != nil {
 			return nil, err
 		}
@@ -1597,16 +1593,14 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to read upstream stream")
 			}
 			b, _ := json.Marshal(collected)
-			if maskParams.Enabled {
-				if nb, u, ok := applyGeminiProImageMask(b, maskParams.Model, maskParams.Tier); ok {
-					b = nb
-					usageObj = u
-				}
+			if nb, u, ok := applyGeminiImageUsageAdjustment(b, imageUsageParams); ok {
+				b = nb
+				usageObj = u
 			}
 			c.Data(http.StatusOK, "application/json", b)
 			usage = usageObj
 		} else {
-			usageResp, err := s.handleNativeNonStreamingResponse(c, resp, isOAuth, maskParams)
+			usageResp, err := s.handleNativeNonStreamingResponse(c, resp, isOAuth, imageUsageParams)
 			if err != nil {
 				return nil, err
 			}
@@ -1620,7 +1614,6 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 	// 图片生成计费
 	imageCount := 0
-	imageInputSize := s.extractImageInputSize(body)
 	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
 	if isImageGenerationModel(originalModel) {
 		imageCount = 1
@@ -2298,8 +2291,14 @@ func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsag
 
 	var last map[string]any
 	var lastWithParts map[string]any
+	var lastWithUsage map[string]any
 	var collectedTextParts []string // Collect all text parts for aggregation
 	usage := &ClaudeUsage{}
+	finish := func() (map[string]any, *ClaudeUsage, error) {
+		result := pickGeminiCollectResult(last, lastWithParts)
+		mergeGeminiTerminalMetadata(result, lastWithUsage)
+		return mergeCollectedTextParts(result, collectedTextParts), usage, nil
+	}
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -2310,7 +2309,7 @@ func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsag
 				switch payload {
 				case "", "[DONE]":
 					if payload == "[DONE]" {
-						return mergeCollectedTextParts(pickGeminiCollectResult(last, lastWithParts), collectedTextParts), usage, nil
+						return finish()
 					}
 				default:
 					var parsed map[string]any
@@ -2329,6 +2328,7 @@ func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsag
 						last = parsed
 						if u := extractGeminiUsage(rawBytes); u != nil {
 							usage = u
+							lastWithUsage = parsed
 						}
 						if parts := extractGeminiParts(parsed); len(parts) > 0 {
 							lastWithParts = parsed
@@ -2352,7 +2352,18 @@ func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsag
 		}
 	}
 
-	return mergeCollectedTextParts(pickGeminiCollectResult(last, lastWithParts), collectedTextParts), usage, nil
+	return finish()
+}
+
+func mergeGeminiTerminalMetadata(target map[string]any, source map[string]any) {
+	if target == nil || source == nil {
+		return
+	}
+	for _, key := range []string{"usageMetadata", "modelVersion", "responseId"} {
+		if value, ok := source[key]; ok {
+			target[key] = value
+		}
+	}
 }
 
 func pickGeminiCollectResult(last map[string]any, lastWithParts map[string]any) map[string]any {
@@ -2513,7 +2524,7 @@ type UpstreamHTTPResult struct {
 	Body       []byte
 }
 
-func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Context, resp *http.Response, isOAuth bool, mask geminiProImageMaskParams) (*ClaudeUsage, error) {
+func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Context, resp *http.Response, isOAuth bool, imageUsage geminiImageUsageParams) (*ClaudeUsage, error) {
 	if s.cfg != nil && s.cfg.Gateway.GeminiDebugResponseHeaders {
 		logger.LegacyPrintf("service.gemini_messages_compat", "[GeminiAPI] ========== Response Headers ==========")
 		for key, values := range resp.Header {
@@ -2536,12 +2547,10 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 		}
 	}
 
-	var maskedUsage *ClaudeUsage
-	if mask.Enabled {
-		if nb, u, ok := applyGeminiProImageMask(respBody, mask.Model, mask.Tier); ok {
-			respBody = nb
-			maskedUsage = u
-		}
+	var adjustedUsage *ClaudeUsage
+	if nb, u, ok := applyGeminiImageUsageAdjustment(respBody, imageUsage); ok {
+		respBody = nb
+		adjustedUsage = u
 	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -2552,8 +2561,8 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	}
 	c.Data(resp.StatusCode, contentType, respBody)
 
-	if maskedUsage != nil {
-		return maskedUsage, nil
+	if adjustedUsage != nil {
+		return adjustedUsage, nil
 	}
 	if u := extractGeminiUsage(respBody); u != nil {
 		return u, nil
@@ -2561,7 +2570,7 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	return &ClaudeUsage{}, nil
 }
 
-func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, isOAuth bool, mask geminiProImageMaskParams) (*geminiNativeStreamResult, error) {
+func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, isOAuth bool, imageUsage geminiImageUsageParams) (*geminiNativeStreamResult, error) {
 	if s.cfg != nil && s.cfg.Gateway.GeminiDebugResponseHeaders {
 		logger.LegacyPrintf("service.gemini_messages_compat", "[GeminiAPI] ========== Streaming Response Headers ==========")
 		for key, values := range resp.Header {
@@ -2595,6 +2604,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 	reader := bufio.NewReader(resp.Body)
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
+	flashState := &geminiFlashImageStreamState{}
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -2621,7 +2631,16 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 						rawBytes = []byte(payload)
 					}
 
-					if nb, u, ok := maskGeminiProImageStreamChunk(rawBytes, mask); ok {
+					if nb, u, ok := maskGeminiProImageStreamChunk(rawBytes, imageUsage.proMaskParams()); ok {
+						rawBytes = nb
+						rawToWrite = string(nb)
+						if u != nil {
+							usage = u
+						}
+					} else if nb, u, ok := flashState.process(rawBytes, imageUsage.Model, imageUsage.FlashImageSize, imageUsage.FlashRepairEnabled, geminiFlashUsageRepairOptions{
+						PromptTextOnly:       imageUsage.FlashPromptTextOnly,
+						RequestedServiceTier: imageUsage.RequestedServiceTier,
+					}); ok {
 						rawBytes = nb
 						rawToWrite = string(nb)
 						if u != nil {

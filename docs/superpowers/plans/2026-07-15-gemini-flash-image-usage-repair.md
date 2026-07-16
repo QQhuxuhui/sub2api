@@ -12,7 +12,8 @@
 
 - 只处理 `gemini-3.1-flash-image` direct 请求和真正的生成 action。
 - 空尺寸按 1K；0.5K/1K/2K/4K 分别为 747/1120/1680/2520 IMAGE token。
-- 不修改 candidates/total/thoughts/model/tier/index，只增加缺失的 IMAGE 子明细。
+- 不修改 candidates/total/thoughts/model/index，只增加缺失的 IMAGE 子明细；仅在可
+  推导时补纯文本 prompt 明细和 serviceTier。
 - `OutputTokens` 包含 IMAGE，计费时通过减去 `ImageOutputTokens` 得到文本 token。
 - 未实际出图、未知尺寸、已有明细和不自洽计数必须原样透传。
 
@@ -29,7 +30,7 @@
 - Produces: `gemini31FlashImageTokens(string) (int, bool)`
 - Produces: `repairGemini31FlashImageUsage([]byte, string, string) ([]byte, *ClaudeUsage, bool)`
 
-- [ ] **Step 1: Write failing table tests** covering model variants, all sizes, empty=1K, unknown refusal, actual-image requirement, existing IMAGE preservation, multiple images, other modality preservation, thoughts preservation, and `candidatesTokenCount < imageTokens` refusal.
+- [ ] **Step 1: Write failing table tests** covering model variants, all sizes, empty=1K, unknown refusal, actual-image requirement, existing IMAGE preservation, multiple images, other modality preservation, thoughts preservation, text-only prompt detection, service tier precedence, and `candidatesTokenCount < imageTokens` refusal.
 - [ ] **Step 2: Run RED** with `go test ./internal/service -run 'TestGemini31Flash|TestRepairGemini31Flash' -count=1`; expect undefined function/build failures.
 - [ ] **Step 3: Implement minimal helpers** using gjson for detection and all-or-nothing sjson writes. Return usage only by calling `extractGeminiUsage` on the final body.
 - [ ] **Step 4: Run GREEN** with the same command; expect PASS.
@@ -68,4 +69,3 @@
 - [ ] **Step 4: Wire all three paths** so each writes the repaired body and returns usage parsed from that same body.
 - [ ] **Step 5: Run focused GREEN** for repair, handler and billing tests.
 - [ ] **Step 6: Run regression** with `go test ./internal/service ./internal/handler -count=1` and `go vet ./internal/service ./internal/handler`.
-

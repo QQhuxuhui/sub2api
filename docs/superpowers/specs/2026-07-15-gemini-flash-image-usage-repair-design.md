@@ -43,16 +43,23 @@ token 计价。
 {"modality":"IMAGE","tokenCount":1680}
 ```
 
-已有其它 modality 明细必须保留。以下字段一律不改：
+已有其它 modality 明细必须保留。以下计数和身份字段一律不改：
 
 - `promptTokenCount`
 - `candidatesTokenCount`
 - `totalTokenCount`
 - `thoughtsTokenCount`
-- `promptTokensDetails`
-- `trafficType` / `serviceTier`
 - `modelVersion`
 - `candidates[].index`
+
+根据 Google 官方 `UsageMetadata` 语义补全两个可推导字段：
+
+- 仅当请求中所有输入 part 均为 TEXT、没有缓存上下文，且响应缺少
+  `promptTokensDetails` 时，补 `[{"modality":"TEXT","tokenCount":promptTokenCount}]`。
+  含图片、文件、函数结果或未知模态的输入不猜测拆分。
+- 已有 `serviceTier` 原样保留；已有 Vertex 风格 `trafficType` 时不额外增加 tier；
+  两者都缺时使用请求显式的 `standard`/`flex`/`priority`，请求未指定或为
+  `unspecified` 时补官方默认语义 `serviceTier: "standard"`。
 
 当 `candidatesTokenCount < 回填的 IMAGE token` 时拒绝回填，防止产生负文本 token
 或不自洽账单。
@@ -87,7 +94,8 @@ JSON 非法、尺寸未知、无实际图片、已有 IMAGE 明细、计数不�
 - 0.5K、空值、1K、2K、4K 和未知尺寸。
 - 单图、多图、无图、安全拦截、已有 IMAGE、保留其它 modality。
 - `thoughtsTokenCount` 保留且参与 Output，但不与 IMAGE 重叠。
+- 纯文本输入补 prompt TEXT 明细；图片/文件/缓存输入不补。
+- serviceTier 请求值、默认 standard、已有 trafficType 和已有 tier 的优先级。
 - SSE 的图片块与 usage 块分离。
 - 聚合路径的图片块与 usage 块分离。
 - pro、2.5 flash、countTokens 不触发。
-
