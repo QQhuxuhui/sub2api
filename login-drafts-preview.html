@@ -1,0 +1,1539 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sub2API 登录页设计草稿</title>
+<style>
+  :root {
+    --bg: linear-gradient(180deg, #f0fdfa 0%, #ffffff 46%, #f0f9ff 100%);
+    --grid-line: rgba(20, 184, 166, 0.05);
+    --orb-a: rgba(94, 234, 212, 0.25);
+    --orb-b: rgba(165, 243, 252, 0.3);
+    --text-strong: #111827;
+    --text-body: #4b5563;
+    --text-muted: #6b7280;
+    --panel-bg: rgba(255, 255, 255, 0.55);
+    --panel-border: rgba(255, 255, 255, 0.8);
+    --card-bg: #ffffff;
+    --card-border: #f3f4f6;
+    --input-bg: #ffffff;
+    --input-border: #e5e7eb;
+    --input-fg: #111827;
+    --input-ph: #9ca3af;
+    --grad-a: #0d9488;
+    --grad-b: #06b6d4;
+    --grad-c: #0ea5e9;
+    --chip-border: rgba(229, 231, 235, 0.9);
+    --chip-bg: rgba(255, 255, 255, 0.75);
+    --chip-fg: #374151;
+    --bar-bg: rgba(255, 255, 255, 0.8);
+    --bar-border: rgba(229, 231, 235, 0.7);
+    --tab-active-bg: #111827;
+    --tab-active-fg: #ffffff;
+    --link: #0d9488;
+    --avatar-border: #e5e7eb;
+    --avatar-bg: #ffffff;
+    --avatar-fg: #374151;
+    --c-surface: #f8fafc;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: linear-gradient(180deg, #0a1e1c 0%, #020617 46%, #071522 100%);
+      --grid-line: rgba(45, 212, 191, 0.06);
+      --orb-a: rgba(20, 184, 166, 0.1);
+      --orb-b: rgba(6, 182, 212, 0.1);
+      --text-strong: #f8fafc;
+      --text-body: #cbd5e1;
+      --text-muted: #94a3b8;
+      --panel-bg: rgba(15, 23, 42, 0.5);
+      --panel-border: rgba(51, 65, 85, 0.5);
+      --card-bg: #1e293b;
+      --card-border: rgba(51, 65, 85, 0.6);
+      --input-bg: #0f172a;
+      --input-border: #334155;
+      --input-fg: #f1f5f9;
+      --input-ph: #64748b;
+      --grad-a: #2dd4bf;
+      --grad-b: #22d3ee;
+      --grad-c: #38bdf8;
+      --chip-border: rgba(51, 65, 85, 0.8);
+      --chip-bg: rgba(30, 41, 59, 0.75);
+      --chip-fg: #e2e8f0;
+      --bar-bg: rgba(15, 23, 42, 0.85);
+      --bar-border: rgba(51, 65, 85, 0.6);
+      --tab-active-bg: #f8fafc;
+      --tab-active-fg: #111827;
+      --link: #2dd4bf;
+      --avatar-border: #475569;
+      --avatar-bg: #1e293b;
+      --avatar-fg: #e2e8f0;
+      --c-surface: #020617;
+    }
+  }
+
+  :root[data-theme='light'] {
+    --bg: linear-gradient(180deg, #f0fdfa 0%, #ffffff 46%, #f0f9ff 100%);
+    --grid-line: rgba(20, 184, 166, 0.05);
+    --orb-a: rgba(94, 234, 212, 0.25);
+    --orb-b: rgba(165, 243, 252, 0.3);
+    --text-strong: #111827;
+    --text-body: #4b5563;
+    --text-muted: #6b7280;
+    --panel-bg: rgba(255, 255, 255, 0.55);
+    --panel-border: rgba(255, 255, 255, 0.8);
+    --card-bg: #ffffff;
+    --card-border: #f3f4f6;
+    --input-bg: #ffffff;
+    --input-border: #e5e7eb;
+    --input-fg: #111827;
+    --input-ph: #9ca3af;
+    --grad-a: #0d9488;
+    --grad-b: #06b6d4;
+    --grad-c: #0ea5e9;
+    --chip-border: rgba(229, 231, 235, 0.9);
+    --chip-bg: rgba(255, 255, 255, 0.75);
+    --chip-fg: #374151;
+    --bar-bg: rgba(255, 255, 255, 0.8);
+    --bar-border: rgba(229, 231, 235, 0.7);
+    --tab-active-bg: #111827;
+    --tab-active-fg: #ffffff;
+    --link: #0d9488;
+    --avatar-border: #e5e7eb;
+    --avatar-bg: #ffffff;
+    --avatar-fg: #374151;
+    --c-surface: #f8fafc;
+  }
+
+  :root[data-theme='dark'] {
+    --bg: linear-gradient(180deg, #0a1e1c 0%, #020617 46%, #071522 100%);
+    --grid-line: rgba(45, 212, 191, 0.06);
+    --orb-a: rgba(20, 184, 166, 0.1);
+    --orb-b: rgba(6, 182, 212, 0.1);
+    --text-strong: #f8fafc;
+    --text-body: #cbd5e1;
+    --text-muted: #94a3b8;
+    --panel-bg: rgba(15, 23, 42, 0.5);
+    --panel-border: rgba(51, 65, 85, 0.5);
+    --card-bg: #1e293b;
+    --card-border: rgba(51, 65, 85, 0.6);
+    --input-bg: #0f172a;
+    --input-border: #334155;
+    --input-fg: #f1f5f9;
+    --input-ph: #64748b;
+    --grad-a: #2dd4bf;
+    --grad-b: #22d3ee;
+    --grad-c: #38bdf8;
+    --chip-border: rgba(51, 65, 85, 0.8);
+    --chip-bg: rgba(30, 41, 59, 0.75);
+    --chip-fg: #e2e8f0;
+    --bar-bg: rgba(15, 23, 42, 0.85);
+    --bar-border: rgba(51, 65, 85, 0.6);
+    --tab-active-bg: #f8fafc;
+    --tab-active-fg: #111827;
+    --link: #2dd4bf;
+    --avatar-border: #475569;
+    --avatar-bg: #1e293b;
+    --avatar-fg: #e2e8f0;
+    --c-surface: #020617;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family:
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      Roboto,
+      'Helvetica Neue',
+      Arial,
+      'PingFang SC',
+      'Hiragino Sans GB',
+      'Microsoft YaHei',
+      sans-serif;
+    color: var(--text-strong);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: clip;
+    min-height: 100vh;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  h1,
+  h2,
+  h3,
+  p {
+    margin: 0;
+  }
+
+  button {
+    font-family: inherit;
+  }
+
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible {
+    outline: 2px solid #14b8a6;
+    outline-offset: 2px;
+  }
+
+  /* ============ 背景 ============ */
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(64px);
+  }
+
+  .orb-a {
+    left: -8rem;
+    top: -8rem;
+    width: 28rem;
+    height: 28rem;
+    background: var(--orb-a);
+  }
+
+  .orb-b {
+    right: -10rem;
+    top: 30%;
+    width: 26rem;
+    height: 26rem;
+    background: var(--orb-b);
+  }
+
+  .grid-lines {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 56px 56px;
+    -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 0%, #000, transparent);
+    mask-image: radial-gradient(ellipse 75% 65% at 50% 0%, #000, transparent);
+  }
+
+  /* ============ 顶部切换条 ============ */
+  .switcher {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--bar-bg);
+    border-bottom: 1px solid var(--bar-border);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .switcher-label {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .tab {
+    border: 1px solid var(--bar-border);
+    background: transparent;
+    color: var(--text-body);
+    font-size: 13px;
+    padding: 7px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .tab:hover {
+    color: var(--text-strong);
+  }
+
+  .tab.active {
+    background: var(--tab-active-bg);
+    color: var(--tab-active-fg);
+    border-color: transparent;
+    font-weight: 600;
+  }
+
+  .theme-btn {
+    border: 1px solid var(--bar-border);
+    background: transparent;
+    color: var(--text-muted);
+    padding: 7px;
+    border-radius: 999px;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+  }
+
+  .theme-btn:hover {
+    color: var(--text-strong);
+  }
+
+  .icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* ============ 草稿舞台 ============ */
+  .stage {
+    position: relative;
+    z-index: 10;
+  }
+
+  .draft {
+    display: none;
+    min-height: calc(100vh - 53px);
+    animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .draft.active {
+    display: flex;
+  }
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .draft {
+      animation: none;
+    }
+  }
+
+  /* ============ 通用组件 ============ */
+  .logo-tile {
+    border-radius: 14px;
+    background: linear-gradient(135deg, #14b8a6, #0891b2);
+    display: grid;
+    place-items: center;
+    color: #fff;
+    font-weight: 800;
+    box-shadow: 0 4px 14px rgba(20, 184, 166, 0.35);
+  }
+
+  .grad-text {
+    background: linear-gradient(100deg, var(--grad-a) 0%, var(--grad-b) 55%, var(--grad-c) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .field label {
+    font-size: 13.5px;
+    font-weight: 550;
+    color: var(--text-body);
+  }
+
+  .field .box {
+    position: relative;
+  }
+
+  .field .box svg {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    color: var(--input-ph);
+    pointer-events: none;
+  }
+
+  .field input {
+    width: 100%;
+    height: 44px;
+    border-radius: 12px;
+    border: 1px solid var(--input-border);
+    background: var(--input-bg);
+    color: var(--input-fg);
+    font-size: 14px;
+    padding: 0 14px 0 42px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .field input::placeholder {
+    color: var(--input-ph);
+  }
+
+  .field input:focus {
+    outline: none;
+    border-color: #14b8a6;
+    box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.2);
+  }
+
+  .forgot {
+    text-align: right;
+    font-size: 13px;
+  }
+
+  .forgot a {
+    color: var(--link);
+    font-weight: 500;
+  }
+
+  .submit {
+    width: 100%;
+    height: 46px;
+    border: 0;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #0f766e, #0e7490);
+    color: #fff;
+    font-size: 14.5px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 10px 24px rgba(20, 184, 166, 0.3);
+    transition: filter 0.2s, transform 0.1s;
+  }
+
+  .submit:hover {
+    filter: brightness(1.1);
+  }
+
+  .submit:active {
+    transform: scale(0.985);
+  }
+
+            .signup-line {
+    text-align: center;
+    font-size: 13.5px;
+    color: var(--text-muted);
+  }
+
+  .signup-line a {
+    color: var(--link);
+    font-weight: 550;
+  }
+
+  .contact-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 18px;
+    border-radius: 999px;
+    border: 1px solid var(--chip-border);
+    background: var(--chip-bg);
+    color: var(--chip-fg);
+    font-size: 13.5px;
+    font-weight: 500;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+  }
+
+  .contact-pill:hover {
+    transform: translateY(-2px);
+    border-color: rgba(20, 184, 166, 0.5);
+    box-shadow: 0 6px 16px rgba(20, 184, 166, 0.12);
+  }
+
+  .contact-pill svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .ic-tg {
+    color: #26a5e4;
+  }
+
+  .ic-qq {
+    color: #1ebafc;
+  }
+
+  .brand-dots {
+    display: flex;
+  }
+
+  .brand-dots span {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 1px solid var(--avatar-border);
+    background: var(--avatar-bg);
+    color: var(--avatar-fg);
+    display: grid;
+    place-items: center;
+  }
+
+  .brand-dots span + span {
+    margin-left: -8px;
+  }
+
+  .brand-dots svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* ============ 草稿 A：玻璃双栏 · 终端 ============ */
+  .a-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 16px;
+  }
+
+  .a-panel {
+    width: 100%;
+    max-width: 1080px;
+    border-radius: 32px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    box-shadow: 0 25px 60px rgba(20, 184, 166, 0.1);
+    padding: 48px;
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 56px;
+    align-items: center;
+  }
+
+  .a-left .a-brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .a-left .logo-tile {
+    width: 52px;
+    height: 52px;
+    font-size: 24px;
+  }
+
+  .a-left h1 {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .a-left .a-sub {
+    margin-top: 2px;
+    font-size: 13.5px;
+    color: var(--text-muted);
+  }
+
+  .a-term {
+    margin-top: 28px;
+    background: linear-gradient(150deg, #10222b 0%, #0a1420 100%);
+    border: 1px solid rgba(45, 212, 191, 0.16);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 20px 45px -12px rgba(2, 44, 34, 0.3);
+  }
+
+  .a-term-bar {
+    display: flex;
+    gap: 7px;
+    padding: 11px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .a-term-bar span {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .a-term-body {
+    padding: 16px 18px;
+    font-family: ui-monospace, 'Fira Code', Menlo, monospace;
+    font-size: 12.5px;
+    line-height: 2;
+    color: #cbd5e1;
+  }
+
+  .tk-p {
+    color: #34d399;
+    font-weight: 700;
+  }
+
+  .tk-c {
+    color: #38bdf8;
+  }
+
+  .tk-d {
+    color: #64748b;
+  }
+
+  .tk-ok {
+    color: #34d399;
+    background: rgba(52, 211, 153, 0.12);
+    padding: 1px 8px;
+    border-radius: 6px;
+    font-weight: 600;
+  }
+
+  .a-contact {
+    margin-top: 28px;
+  }
+
+  .a-contact p {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  .a-contact .row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .a-card {
+    border-radius: 24px;
+    border: 1px solid var(--card-border);
+    background: var(--card-bg);
+    box-shadow: 0 10px 30px rgba(17, 24, 39, 0.06);
+    padding: 36px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .a-card h2 {
+    font-size: 22px;
+    font-weight: 700;
+    text-align: center;
+  }
+
+  .a-card .hint {
+    text-align: center;
+    font-size: 13.5px;
+    color: var(--text-muted);
+    margin-top: -12px;
+  }
+
+  /* ============ 草稿 B：居中舞台 ============ */
+  .b-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 16px;
+    position: relative;
+  }
+
+  .b-halo {
+    position: absolute;
+    top: -140px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 640px;
+    height: 320px;
+    background: radial-gradient(ellipse at center, rgba(45, 212, 191, 0.28), rgba(34, 211, 238, 0.12), transparent 70%);
+    filter: blur(30px);
+    pointer-events: none;
+  }
+
+  .b-brand {
+    position: relative;
+    text-align: center;
+  }
+
+  .b-brand .logo-tile {
+    width: 56px;
+    height: 56px;
+    font-size: 26px;
+    margin: 0 auto;
+  }
+
+  .b-brand h1 {
+    margin-top: 16px;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .b-brand p {
+    margin-top: 6px;
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .b-card {
+    position: relative;
+    width: 100%;
+    max-width: 400px;
+    margin-top: 28px;
+    border-radius: 24px;
+    border: 1px solid var(--card-border);
+    background: var(--card-bg);
+    box-shadow: 0 20px 50px rgba(17, 24, 39, 0.08);
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .b-below {
+    margin-top: 22px;
+  }
+
+  .b-float {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 30;
+    display: flex;
+    gap: 10px;
+  }
+
+  /* ============ 草稿 C：品牌分屏 ============ */
+  .c-wrap {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 0.9fr 1.1fr;
+  }
+
+  .c-brand {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(160deg, #0f766e 0%, #115e59 45%, #164e63 100%);
+    background-size: 170% 170%;
+    animation: pan-grad 18s ease-in-out infinite alternate;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 56px;
+  }
+
+  .c-gridlayer {
+    position: absolute;
+    inset: -24px;
+    background:
+      linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 48px 48px;
+    -webkit-mask-image: radial-gradient(ellipse 90% 70% at 30% 20%, #000, transparent);
+    mask-image: radial-gradient(ellipse 90% 70% at 30% 20%, #000, transparent);
+    pointer-events: none;
+  }
+
+  .c-glow {
+    position: absolute;
+    right: -100px;
+    bottom: -120px;
+    width: 340px;
+    height: 340px;
+    border-radius: 50%;
+    background: rgba(103, 232, 249, 0.18);
+    filter: blur(70px);
+    pointer-events: none;
+  }
+
+  .c-top {
+    position: relative;
+  }
+
+  .c-top .c-brandrow {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .c-top .logo-tile {
+    width: 48px;
+    height: 48px;
+    font-size: 22px;
+    background: rgba(255, 255, 255, 0.14);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+
+  .c-top h1 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .c-top .c-sub {
+    margin-top: 2px;
+    font-size: 13.5px;
+    color: rgba(240, 253, 250, 0.85);
+  }
+
+  .c-top .c-desc {
+    margin-top: 28px;
+    max-width: 24rem;
+    font-size: 14.5px;
+    line-height: 1.75;
+    color: rgba(240, 253, 250, 0.92);
+  }
+
+  .c-code {
+    position: relative;
+    margin-top: 24px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: ui-monospace, 'Fira Code', Menlo, monospace;
+    font-size: 12.5px;
+    color: #99f6e4;
+    background: rgba(2, 44, 34, 0.45);
+    border: 1px solid rgba(153, 246, 228, 0.25);
+    padding: 10px 16px;
+    border-radius: 999px;
+  }
+
+  .c-bottom {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .c-bottom .brand-dots span {
+    border-color: rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.1);
+    color: #f0fdfa;
+  }
+
+  .c-contact {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .c-contact .label {
+    font-size: 13px;
+    color: rgba(240, 253, 250, 0.75);
+  }
+
+  .c-contact .contact-pill {
+    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.12);
+    color: #f0fdfa;
+  }
+
+  .c-contact .contact-pill:hover {
+    border-color: rgba(255, 255, 255, 0.55);
+    box-shadow: 0 6px 16px rgba(2, 44, 34, 0.3);
+  }
+
+  .c-contact .ic-tg,
+  .c-contact .ic-qq {
+    color: #f0fdfa;
+  }
+
+  .c-form-side {
+    background: var(--c-surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+  }
+
+  .c-form {
+    width: 100%;
+    max-width: 380px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .c-form h2 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .c-form .hint {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin-top: -12px;
+  }
+
+  .c-form .field input {
+    height: 48px;
+    border-radius: 14px;
+  }
+
+  .c-form .submit {
+    height: 48px;
+  }
+
+
+  /* ============ 动效层 ============ */
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes panel-in {
+    from { opacity: 0; transform: translateY(26px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes card-in {
+    from { opacity: 0; transform: translateX(26px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes spring-in {
+    from { opacity: 0; transform: translateY(24px) scale(0.9); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes pop {
+    0% { opacity: 0; transform: scale(0.6); }
+    70% { transform: scale(1.08); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+
+  /* 草稿 A：叙事入场 + 终端心跳 */
+  #draft-a .a-panel { animation: panel-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  #draft-a .a-brand { animation: rise 0.6s 0.15s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  #draft-a .a-term { animation: rise 0.6s 0.25s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  #draft-a .a-contact { animation: rise 0.6s 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  #draft-a .a-card { animation: card-in 0.7s 0.25s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+  .tl { opacity: 0; }
+  .tl-1 { animation: tl1 9s infinite; }
+  .tl-2 { animation: tl2 9s infinite; }
+  .tl-3 { animation: tl3 9s infinite; }
+
+  @keyframes tl1 {
+    0%, 4% { opacity: 0; transform: translateY(4px); }
+    9%, 91% { opacity: 1; transform: none; }
+    96%, 100% { opacity: 0; transform: none; }
+  }
+
+  @keyframes tl2 {
+    0%, 20% { opacity: 0; transform: translateY(4px); }
+    26%, 91% { opacity: 1; transform: none; }
+    96%, 100% { opacity: 0; transform: none; }
+  }
+
+  @keyframes tl3 {
+    0%, 33% { opacity: 0; transform: translateY(4px); }
+    39%, 91% { opacity: 1; transform: none; }
+    96%, 100% { opacity: 0; transform: none; }
+  }
+
+  .tcaret {
+    display: inline-block;
+    width: 7px;
+    height: 13px;
+    margin-left: 6px;
+    background: #34d399;
+    transform: translateY(2px);
+    animation: blink 1s step-end infinite;
+  }
+
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+  }
+
+  /* 草稿 B：氛围呼吸 + 弹性细节 */
+  .b-halo { animation: halo-drift 16s ease-in-out infinite alternate; }
+
+  @keyframes halo-drift {
+    from { transform: translateX(-54%) scale(1); }
+    to { transform: translateX(-46%) translateY(16px) scale(1.14); }
+  }
+
+  #draft-b .b-brand { animation: rise 0.6s 0.05s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  #draft-b .b-card { animation: rise 0.65s 0.18s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  #draft-b .b-below { animation: rise 0.6s 0.34s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+  .b-brand .logo-tile { animation: floaty 6s ease-in-out infinite alternate; }
+
+  @keyframes floaty {
+    from { transform: translateY(0); }
+    to { transform: translateY(-7px); }
+  }
+
+  #draft-b.active ~ * .b-float .contact-pill,
+  .b-float .contact-pill {
+    animation: spring-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+
+  .b-float .contact-pill:nth-child(1) { animation-delay: 0.65s; }
+  .b-float .contact-pill:nth-child(2) { animation-delay: 0.78s; }
+
+  /* 草稿 C：活的品牌面板 */
+  @keyframes pan-grad {
+    from { background-position: 0% 0%; }
+    to { background-position: 100% 100%; }
+  }
+
+  .c-gridlayer,
+  .c-glow {
+    will-change: transform;
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  #draft-c .c-brandrow { animation: rise 0.6s 0.05s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  #draft-c .c-desc { animation: rise 0.6s 0.15s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  #draft-c .c-code { animation: rise 0.6s 0.25s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+  .c-code .code-text {
+    display: inline-block;
+    white-space: nowrap;
+    clip-path: inset(0 100% 0 0);
+    animation: typing 2s steps(38) 0.7s forwards;
+  }
+
+  @keyframes typing {
+    to { clip-path: inset(0 0 0 0); }
+  }
+
+  #draft-c .brand-dots span { opacity: 0; animation: pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  #draft-c .brand-dots span:nth-child(1) { animation-delay: 0.5s; }
+  #draft-c .brand-dots span:nth-child(2) { animation-delay: 0.62s; }
+  #draft-c .brand-dots span:nth-child(3) { animation-delay: 0.74s; }
+  #draft-c .brand-dots span:nth-child(4) { animation-delay: 0.86s; }
+  #draft-c .c-contact { animation: rise 0.6s 1s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+  #draft-c .c-form > * { animation: rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  #draft-c .c-form > *:nth-child(1) { animation-delay: 0.08s; }
+  #draft-c .c-form > *:nth-child(2) { animation-delay: 0.14s; }
+  #draft-c .c-form > *:nth-child(3) { animation-delay: 0.2s; }
+  #draft-c .c-form > *:nth-child(4) { animation-delay: 0.27s; }
+  #draft-c .c-form > *:nth-child(5) { animation-delay: 0.33s; }
+  #draft-c .c-form > *:nth-child(6) { animation-delay: 0.4s; }
+  #draft-c .c-form > *:nth-child(7) { animation-delay: 0.47s; }
+
+
+  /* 草稿 C：AI 对话 / 多模态小剧场 */
+  .c-chat {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 26rem;
+    margin: 24px 0;
+  }
+
+  .bub {
+    border-radius: 16px;
+    padding: 12px 16px;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+
+  .bub p {
+    margin: 0;
+  }
+
+  .bub-user {
+    align-self: flex-end;
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-bottom-right-radius: 6px;
+    color: #f0fdfa;
+  }
+
+  .attach {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: ui-monospace, 'Fira Code', Menlo, monospace;
+    font-size: 11.5px;
+    color: #99f6e4;
+    background: rgba(2, 44, 34, 0.4);
+    border: 1px solid rgba(153, 246, 228, 0.25);
+    border-radius: 8px;
+    padding: 4px 10px;
+    margin-bottom: 8px;
+  }
+
+  .attach svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .bub-ai {
+    align-self: flex-start;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: rgba(2, 44, 34, 0.45);
+    border: 1px solid rgba(153, 246, 228, 0.2);
+    border-bottom-left-radius: 6px;
+    color: #ccfbf1;
+  }
+
+  .ai-avatar {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    display: grid;
+    place-items: center;
+  }
+
+  .ai-avatar svg {
+    width: 14px;
+    height: 14px;
+    color: #f0fdfa;
+  }
+
+  .ai-body {
+    display: flex;
+    align-items: center;
+    min-height: 26px;
+  }
+
+  .ai-line {
+    display: inline-block;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .scaret {
+    display: inline-block;
+    width: 7px;
+    height: 13px;
+    margin-left: 6px;
+    background: #5eead4;
+    animation: blink 1s step-end infinite;
+  }
+
+  .cap-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .cap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: rgba(240, 253, 250, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    padding: 5px 12px;
+  }
+
+  .cap svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  #draft-c .bub-user { animation: rise 0.6s 1.05s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  #draft-c .bub-ai { animation: rise 0.6s 1.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+  #draft-c .ai-line {
+    clip-path: inset(0 100% 0 0);
+    animation: typing 1.6s steps(13) 2.1s forwards;
+  }
+
+  #draft-c .cap-row .cap { opacity: 0; animation: pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  #draft-c .cap-row .cap:nth-child(1) { animation-delay: 2.9s; }
+  #draft-c .cap-row .cap:nth-child(2) { animation-delay: 3.02s; }
+  #draft-c .cap-row .cap:nth-child(3) { animation-delay: 3.14s; }
+  #draft-c .cap-row .cap:nth-child(4) { animation-delay: 3.26s; }
+
+  /* 共享微交互 */
+  .submit {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .submit::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -45%;
+    width: 40%;
+    height: 100%;
+    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    transform: skewX(-18deg);
+    transition: transform 0.65s ease;
+    pointer-events: none;
+  }
+
+  .submit:hover::after {
+    transform: translateX(360%) skewX(-18deg);
+  }
+
+  .contact-pill svg {
+    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .contact-pill:hover svg {
+    transform: rotate(-10deg) scale(1.15);
+  }
+
+  .field:focus-within label {
+    color: var(--link);
+  }
+
+  /* 降低动态：全部静默 */
+  @media (prefers-reduced-motion: reduce) {
+    #draft-a .a-panel, #draft-a .a-brand, #draft-a .a-term, #draft-a .a-contact, #draft-a .a-card,
+    .tl, .tcaret, .b-halo, #draft-b .b-brand, #draft-b .b-card, #draft-b .b-below,
+    .b-brand .logo-tile, .b-float .contact-pill, .c-brand, .c-code .code-text,
+    #draft-c .c-brandrow, #draft-c .c-desc, #draft-c .c-code, #draft-c .brand-dots span,
+    #draft-c .c-contact, #draft-c .c-form > *,
+    #draft-c .bub-user, #draft-c .bub-ai, #draft-c .ai-line, #draft-c .cap-row .cap, .scaret {
+      animation: none;
+      opacity: 1;
+      clip-path: none;
+    }
+
+    .c-gridlayer, .c-glow { transition: none; }
+    .submit::after { display: none; }
+  }
+
+  /* ============ 响应式 ============ */
+  @media (max-width: 960px) {
+    .a-panel {
+      grid-template-columns: 1fr;
+      padding: 28px;
+      gap: 32px;
+    }
+
+    .a-term {
+      display: none;
+    }
+
+    .c-wrap {
+      grid-template-columns: 1fr;
+    }
+
+    .c-brand {
+      padding: 32px 24px;
+      gap: 24px;
+    }
+
+    .c-top .c-desc,
+    .c-code,
+    .c-chat {
+      display: none;
+    }
+
+    .c-bottom .brand-dots {
+      display: none;
+    }
+  }
+</style>
+</head>
+<body>
+
+
+<div class="backdrop">
+  <div class="orb orb-a"></div>
+  <div class="orb orb-b"></div>
+  <div class="grid-lines"></div>
+</div>
+
+<!-- 切换条 -->
+<div class="switcher">
+  <span class="switcher-label">登录页设计草稿</span>
+  <div class="tabs">
+    <button class="tab active" data-draft="a">A · 玻璃双栏</button>
+    <button class="tab" data-draft="b">B · 居中舞台</button>
+    <button class="tab" data-draft="c">C · 品牌分屏</button>
+  </div>
+  <button class="theme-btn" id="themeToggle" title="切换主题" aria-label="切换主题">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path id="themeIcon" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+    </svg>
+  </button>
+</div>
+
+<div class="stage">
+  <!-- ============ 草稿 A ============ -->
+  <section class="draft active" id="draft-a">
+    <div class="a-wrap">
+      <div class="a-panel">
+        <div class="a-left">
+          <div class="a-brand">
+            <div class="logo-tile">S</div>
+            <div>
+              <h1 class="grad-text">Sub2API</h1>
+              <p class="a-sub">一个密钥，畅用多个 AI 模型</p>
+            </div>
+          </div>
+
+          <div class="a-term">
+            <div class="a-term-bar">
+              <span style="background:#f87171"></span>
+              <span style="background:#fbbf24"></span>
+              <span style="background:#34d399"></span>
+            </div>
+            <div class="a-term-body">
+              <div class="tl tl-1"><span class="tk-p">$</span> <span class="tk-c">sub2api</span> login<span class="tcaret"></span></div>
+              <div class="tl tl-2"><span class="tk-ok">200 OK</span> <span class="tk-d">authenticated, key ready</span></div>
+              <div class="tl tl-3"><span class="tk-d">claude-sonnet-4-6 · gpt · gemini · grok</span></div>
+            </div>
+          </div>
+
+          <div class="a-contact">
+            <p>遇到问题？联系我们</p>
+            <div class="row">
+              <a class="contact-pill" href="#">
+                <svg class="ic-tg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" /></svg>
+                Telegram
+              </a>
+              <a class="contact-pill" href="#">
+                <svg class="ic-qq" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.395 15.035a40 40 0 0 0-.803-2.264l-1.079-2.695c.001-.032.014-.562.014-.836C19.526 4.632 17.351 0 12 0S4.474 4.632 4.474 9.241c0 .274.013.804.014.836l-1.08 2.695a39 39 0 0 0-.802 2.264c-1.021 3.283-.69 4.643-.438 4.673.54.065 2.103-2.472 2.103-2.472 0 1.469.756 3.387 2.394 4.771-.612.188-1.363.479-1.845.835-.434.32-.379.646-.301.778.343.578 5.883.369 7.482.189 1.6.18 7.14.389 7.483-.189.078-.132.132-.458-.301-.778-.483-.356-1.233-.646-1.846-.836 1.637-1.384 2.393-3.302 2.393-4.771 0 0 1.563 2.537 2.103 2.472.251-.03.581-1.39-.438-4.673" /></svg>
+                QQ 群
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div class="a-card">
+          <h2>欢迎回来</h2>
+          <p class="hint">登录您的账户以继续</p>
+          <div class="field">
+            <label for="a-email">邮箱</label>
+            <div class="box">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
+              <input id="a-email" type="email" placeholder="请输入邮箱" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="a-pass">密码</label>
+            <div class="box">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+              <input id="a-pass" type="password" placeholder="请输入密码" />
+            </div>
+          </div>
+          <p class="forgot"><a href="#">忘记密码？</a></p>
+          <button class="submit" type="button">登 录</button>
+          <p class="signup-line">还没有账户？ <a href="#">注册</a></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 草稿 B ============ -->
+  <section class="draft" id="draft-b">
+    <div class="b-wrap">
+      <div class="b-halo"></div>
+      <div class="b-brand">
+        <div class="logo-tile">S</div>
+        <h1 class="grad-text">Sub2API</h1>
+        <p>一个密钥，畅用多个 AI 模型</p>
+      </div>
+      <div class="b-card">
+        <div class="field">
+          <label for="b-email">邮箱</label>
+          <div class="box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
+            <input id="b-email" type="email" placeholder="请输入邮箱" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="b-pass">密码</label>
+          <div class="box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+            <input id="b-pass" type="password" placeholder="请输入密码" />
+          </div>
+        </div>
+        <p class="forgot"><a href="#">忘记密码？</a></p>
+        <button class="submit" type="button">登 录</button>
+      </div>
+      <p class="signup-line b-below">还没有账户？ <a href="#">注册</a></p>
+    </div>
+    <div class="b-float">
+      <a class="contact-pill" href="#">
+        <svg class="ic-tg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" /></svg>
+        Telegram
+      </a>
+      <a class="contact-pill" href="#">
+        <svg class="ic-qq" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.395 15.035a40 40 0 0 0-.803-2.264l-1.079-2.695c.001-.032.014-.562.014-.836C19.526 4.632 17.351 0 12 0S4.474 4.632 4.474 9.241c0 .274.013.804.014.836l-1.08 2.695a39 39 0 0 0-.802 2.264c-1.021 3.283-.69 4.643-.438 4.673.54.065 2.103-2.472 2.103-2.472 0 1.469.756 3.387 2.394 4.771-.612.188-1.363.479-1.845.835-.434.32-.379.646-.301.778.343.578 5.883.369 7.482.189 1.6.18 7.14.389 7.483-.189.078-.132.132-.458-.301-.778-.483-.356-1.233-.646-1.846-.836 1.637-1.384 2.393-3.302 2.393-4.771 0 0 1.563 2.537 2.103 2.472.251-.03.581-1.39-.438-4.673" /></svg>
+        QQ 群
+      </a>
+    </div>
+  </section>
+
+  <!-- ============ 草稿 C ============ -->
+  <section class="draft" id="draft-c">
+    <div class="c-wrap">
+      <div class="c-brand">
+        <div class="c-gridlayer" data-plx="14"></div>
+        <div class="c-glow" data-plx="30"></div>
+        <div class="c-top">
+          <div class="c-brandrow">
+            <div class="logo-tile">S</div>
+            <div>
+              <h1>Sub2API</h1>
+              <p class="c-sub">一个密钥，畅用多个 AI 模型</p>
+            </div>
+          </div>
+          <p class="c-desc">无需管理多个订阅账号，一站式接入 Claude、GPT、Gemini 等主流 AI 服务。</p>
+          <div class="c-code"><span class="code-text">base_url = "https://your-domain.com/v1"</span></div>
+        </div>
+        <div class="c-chat">
+          <div class="bub bub-user">
+            <span class="attach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" /></svg>diagram.png</span>
+            <p>帮我分析这张架构图</p>
+          </div>
+          <div class="bub bub-ai">
+            <span class="ai-avatar"><svg viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" /></svg></span>
+            <div class="ai-body"><span class="ai-line">好的，这是一套三层网关架构</span><span class="scaret"></span></div>
+          </div>
+          <div class="cap-row">
+            <span class="cap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" /></svg>文本对话</span>
+            <span class="cap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" /></svg>图像理解</span>
+            <span class="cap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" /></svg>图像生成</span>
+            <span class="cap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>流式输出</span>
+          </div>
+        </div>
+        <div class="c-bottom">
+          <div class="brand-dots">
+            <span><svg viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" /></svg></span>
+            <span><svg viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="M21.55 10.004a5.416 5.416 0 00-.478-4.501c-1.217-2.09-3.662-3.166-6.05-2.66A5.59 5.59 0 0010.831 1C8.39.995 6.224 2.546 5.473 4.838A5.553 5.553 0 001.76 7.496a5.487 5.487 0 00.691 6.5 5.416 5.416 0 00.477 4.502c1.217 2.09 3.662 3.165 6.05 2.66A5.586 5.586 0 0013.168 23c2.443.006 4.61-1.546 5.361-3.84a5.553 5.553 0 003.715-2.66 5.488 5.488 0 00-.693-6.497v.001zm-8.381 11.558a4.199 4.199 0 01-2.675-.954c.034-.018.093-.05.132-.074l4.44-2.53a.71.71 0 00.364-.623v-6.176l1.877 1.069c.02.01.033.029.036.05v5.115c-.003 2.274-1.87 4.118-4.174 4.123zM4.192 17.78a4.059 4.059 0 01-.498-2.763c.032.02.09.055.131.078l4.44 2.53c.225.13.504.13.73 0l5.42-3.088v2.138a.068.068 0 01-.027.057L9.9 19.288c-1.999 1.136-4.552.46-5.707-1.51h-.001zM3.023 8.216A4.15 4.15 0 015.198 6.41l-.002.151v5.06a.711.711 0 00.364.624l5.42 3.087-1.876 1.07a.067.067 0 01-.063.005l-4.489-2.559c-1.995-1.14-2.679-3.658-1.53-5.63h.001zm15.417 3.54l-5.42-3.088L14.896 7.6a.067.067 0 01.063-.006l4.489 2.557c1.998 1.14 2.683 3.662 1.529 5.633a4.163 4.163 0 01-2.174 1.807V12.38a.71.71 0 00-.363-.623zm1.867-2.773a6.04 6.04 0 00-.132-.078l-4.44-2.53a.731.731 0 00-.729 0l-5.42 3.088V7.325a.068.068 0 01.027-.057L14.1 4.713c2-1.137 4.555-.46 5.707 1.513.487.833.664 1.809.499 2.757h.001zm-11.741 3.81l-1.877-1.068a.065.065 0 01-.036-.051V6.559c.001-2.277 1.873-4.122 4.181-4.12.976 0 1.92.338 2.671.954-.034.018-.092.05-.131.073l-4.44 2.53a.71.71 0 00-.365.623l-.003 6.173v.002zm1.02-2.168L12 9.25l2.414 1.375v2.75L12 14.75l-2.415-1.375v-2.75z" /></svg></span>
+            <span><svg viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z" /></svg></span>
+            <span><svg viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815" /></svg></span>
+          </div>
+          <div class="c-contact">
+            <span class="label">联系我们</span>
+            <a class="contact-pill" href="#">
+              <svg class="ic-tg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" /></svg>
+              Telegram
+            </a>
+            <a class="contact-pill" href="#">
+              <svg class="ic-qq" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.395 15.035a40 40 0 0 0-.803-2.264l-1.079-2.695c.001-.032.014-.562.014-.836C19.526 4.632 17.351 0 12 0S4.474 4.632 4.474 9.241c0 .274.013.804.014.836l-1.08 2.695a39 39 0 0 0-.802 2.264c-1.021 3.283-.69 4.643-.438 4.673.54.065 2.103-2.472 2.103-2.472 0 1.469.756 3.387 2.394 4.771-.612.188-1.363.479-1.845.835-.434.32-.379.646-.301.778.343.578 5.883.369 7.482.189 1.6.18 7.14.389 7.483-.189.078-.132.132-.458-.301-.778-.483-.356-1.233-.646-1.846-.836 1.637-1.384 2.393-3.302 2.393-4.771 0 0 1.563 2.537 2.103 2.472.251-.03.581-1.39-.438-4.673" /></svg>
+              QQ 群
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="c-form-side">
+        <div class="c-form">
+          <h2>欢迎回来</h2>
+          <p class="hint">登录您的账户以继续</p>
+          <div class="field">
+            <label for="c-email">邮箱</label>
+            <div class="box">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
+              <input id="c-email" type="email" placeholder="请输入邮箱" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="c-pass">密码</label>
+            <div class="box">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+              <input id="c-pass" type="password" placeholder="请输入密码" />
+            </div>
+          </div>
+          <p class="forgot"><a href="#">忘记密码？</a></p>
+          <button class="submit" type="button">登 录</button>
+          <p class="signup-line">还没有账户？ <a href="#">注册</a></p>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var MOON = 'M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z';
+    var SUN = 'M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z';
+
+    function isDark() {
+      if (root.dataset.theme) return root.dataset.theme === 'dark';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+
+    function syncIcon() {
+      var icon = document.getElementById('themeIcon');
+      if (icon) icon.setAttribute('d', isDark() ? SUN : MOON);
+    }
+
+    var toggle = document.getElementById('themeToggle');
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        root.dataset.theme = isDark() ? 'light' : 'dark';
+        syncIcon();
+      });
+    }
+
+    new MutationObserver(syncIcon).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+    syncIcon();
+
+    // 指针视差（仅草稿 C 的网格与光斑层）
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduce && window.matchMedia('(pointer: fine)').matches) {
+      var plx = Array.prototype.slice.call(document.querySelectorAll('[data-plx]'));
+      window.addEventListener('pointermove', function (e) {
+        var nx = e.clientX / window.innerWidth - 0.5;
+        var ny = e.clientY / window.innerHeight - 0.5;
+        plx.forEach(function (el) {
+          var s = parseFloat(el.dataset.plx) || 10;
+          el.style.transform = 'translate(' + (nx * s).toFixed(1) + 'px,' + (ny * s).toFixed(1) + 'px)';
+        });
+      }, { passive: true });
+    }
+
+    // 草稿切换
+    var tabs = document.querySelectorAll('.tab');
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        tabs.forEach(function (t) { t.classList.remove('active'); });
+        tab.classList.add('active');
+        document.querySelectorAll('.draft').forEach(function (d) { d.classList.remove('active'); });
+        var target = document.getElementById('draft-' + tab.dataset.draft);
+        if (target) {
+          target.classList.remove('active');
+          void target.offsetWidth;
+          target.classList.add('active');
+        }
+      });
+    });
+  })();
+</script>
+
+</body>
+</html>
