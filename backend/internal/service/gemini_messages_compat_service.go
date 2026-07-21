@@ -14,6 +14,7 @@ import (
 	"math"
 	mathrand "math/rand"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -2286,6 +2287,161 @@ func unwrapIfNeeded(isOAuth bool, raw []byte) []byte {
 	return inner
 }
 
+type geminiSSEImageCandidateState struct {
+	template     map[string]any
+	images       []any
+	lastSnapshot []any
+}
+
+type geminiSSEImageAccumulator struct {
+	candidates map[int]*geminiSSEImageCandidateState
+	order      []int
+}
+
+func (a *geminiSSEImageAccumulator) observe(response map[string]any) {
+	if a == nil || response == nil {
+		return
+	}
+	candidates, ok := response["candidates"].([]any)
+	if !ok {
+		return
+	}
+	if a.candidates == nil {
+		a.candidates = make(map[int]*geminiSSEImageCandidateState)
+	}
+	for position, rawCandidate := range candidates {
+		candidate, ok := rawCandidate.(map[string]any)
+		if !ok {
+			continue
+		}
+		images := geminiCandidateImageParts(candidate)
+		if len(images) == 0 {
+			continue
+		}
+		identity := geminiCandidateIdentity(candidate, position)
+		state := a.candidates[identity]
+		if state == nil {
+			state = &geminiSSEImageCandidateState{}
+			a.candidates[identity] = state
+			a.order = append(a.order, identity)
+		}
+		state.template = candidate
+		switch {
+		case geminiPartsPrefix(state.lastSnapshot, images):
+			state.images = append(state.images, images[len(state.lastSnapshot):]...)
+		case geminiPartsPrefix(images, state.lastSnapshot):
+			// Duplicate or rewind: retain the complete sequence already observed.
+		default:
+			state.images = append(state.images, images...)
+		}
+		state.lastSnapshot = images
+	}
+}
+
+func (a *geminiSSEImageAccumulator) mergeInto(response map[string]any) map[string]any {
+	if a == nil || len(a.candidates) == 0 || response == nil {
+		return response
+	}
+	candidates, _ := response["candidates"].([]any)
+	seen := make(map[int]struct{}, len(candidates))
+	for position, rawCandidate := range candidates {
+		candidate, ok := rawCandidate.(map[string]any)
+		if !ok {
+			continue
+		}
+		identity := geminiCandidateIdentity(candidate, position)
+		state := a.candidates[identity]
+		if state == nil {
+			continue
+		}
+		candidates[position] = geminiCandidateWithImages(candidate, state.images)
+		seen[identity] = struct{}{}
+	}
+	for _, identity := range a.order {
+		if _, ok := seen[identity]; ok {
+			continue
+		}
+		state := a.candidates[identity]
+		candidates = append(candidates, geminiCandidateWithImages(state.template, state.images))
+	}
+	response["candidates"] = candidates
+	return response
+}
+
+func geminiCandidateIdentity(candidate map[string]any, fallback int) int {
+	if index, ok := asInt(candidate["index"]); ok {
+		return index
+	}
+	return fallback
+}
+
+func geminiCandidateImageParts(candidate map[string]any) []any {
+	content, _ := candidate["content"].(map[string]any)
+	parts, _ := content["parts"].([]any)
+	images := make([]any, 0, len(parts))
+	for _, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if ok && isGeminiOutputImagePart(part) {
+			images = append(images, rawPart)
+		}
+	}
+	return images
+}
+
+func isGeminiOutputImagePart(part map[string]any) bool {
+	inlineData, ok := part["inlineData"].(map[string]any)
+	if !ok {
+		return false
+	}
+	mimeType, _ := inlineData["mimeType"].(string)
+	data, _ := inlineData["data"].(string)
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(mimeType)), "image/") && data != ""
+}
+
+func geminiPartsPrefix(prefix, sequence []any) bool {
+	if len(prefix) > len(sequence) {
+		return false
+	}
+	for index := range prefix {
+		if !reflect.DeepEqual(prefix[index], sequence[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func geminiCandidateWithImages(candidate map[string]any, images []any) map[string]any {
+	out := make(map[string]any, len(candidate))
+	for key, value := range candidate {
+		out[key] = value
+	}
+	content, _ := candidate["content"].(map[string]any)
+	contentCopy := make(map[string]any, len(content)+1)
+	for key, value := range content {
+		contentCopy[key] = value
+	}
+	parts, _ := content["parts"].([]any)
+	merged := make([]any, 0, len(parts)+len(images))
+	inserted := false
+	for _, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if ok && isGeminiOutputImagePart(part) {
+			if !inserted {
+				merged = append(merged, images...)
+				inserted = true
+			}
+			continue
+		}
+		merged = append(merged, rawPart)
+	}
+	if !inserted {
+		merged = append(merged, images...)
+	}
+	contentCopy["parts"] = merged
+	out["content"] = contentCopy
+	return out
+}
+
 func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsage, error) {
 	reader := bufio.NewReader(body)
 
@@ -2294,9 +2450,11 @@ func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsag
 	var lastWithUsage map[string]any
 	var collectedTextParts []string // Collect all text parts for aggregation
 	usage := &ClaudeUsage{}
+	imageAccumulator := &geminiSSEImageAccumulator{}
 	finish := func() (map[string]any, *ClaudeUsage, error) {
 		result := pickGeminiCollectResult(last, lastWithParts)
 		mergeGeminiTerminalMetadata(result, lastWithUsage)
+		result = imageAccumulator.mergeInto(result)
 		return mergeCollectedTextParts(result, collectedTextParts), usage, nil
 	}
 
@@ -2325,6 +2483,7 @@ func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsag
 						_ = json.Unmarshal(rawBytes, &parsed)
 					}
 					if parsed != nil {
+						imageAccumulator.observe(parsed)
 						last = parsed
 						if u := extractGeminiUsage(rawBytes); u != nil {
 							usage = u

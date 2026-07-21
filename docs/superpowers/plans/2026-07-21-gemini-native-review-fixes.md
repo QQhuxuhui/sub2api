@@ -72,7 +72,7 @@ func TestCollectGeminiSSEPreservesImagesAcrossSeparateChunks(t *testing.T) {
 func TestCollectGeminiSSEDoesNotDuplicateCumulativeImages(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"candidates":[{"index":0,"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}}]}}]}`,
-		`data: {"candidates":[{"index":0,"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}}},{"inlineData":{"mimeType":"image/jpeg","data":"BBBB"}}]}}]}`,
+		`data: {"candidates":[{"index":0,"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}},{"inlineData":{"mimeType":"image/jpeg","data":"BBBB"}}]}}]}`,
 		`data: {"candidates":[{"index":0,"content":{"parts":[{"inlineData":{"mimeType":"image/webp","data":"CCCC"}}]}}]}`,
 		`data: {"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":4000,"totalTokenCount":4008}}`,
 		`data: [DONE]`,

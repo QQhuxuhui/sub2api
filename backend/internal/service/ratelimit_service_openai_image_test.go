@@ -86,14 +86,22 @@ func TestOpenAIGatewayServiceForwardImages_ImageRateLimitReturnsFailoverAndCools
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = req
+	newRateLimitResponse := func() *http.Response {
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     http.Header{"X-Request-Id": []string{"req_img_rate_limited"}},
+			Body:       io.NopCloser(strings.NewReader(errorBody)),
+		}
+	}
 
 	svc := &OpenAIGatewayService{
 		rateLimitService: &RateLimitService{accountRepo: repo},
 		httpUpstream: &httpUpstreamRecorder{
-			resp: &http.Response{
-				StatusCode: http.StatusTooManyRequests,
-				Header:     http.Header{"X-Request-Id": []string{"req_img_rate_limited"}},
-				Body:       io.NopCloser(strings.NewReader(errorBody)),
+			responses: []*http.Response{
+				newRateLimitResponse(),
+				newRateLimitResponse(),
+				newRateLimitResponse(),
+				newRateLimitResponse(),
 			},
 		},
 	}

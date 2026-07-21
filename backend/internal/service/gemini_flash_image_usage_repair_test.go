@@ -303,6 +303,65 @@ func TestCollectGeminiSSEPreservesUsageFromMetadataOnlyFinalChunk(t *testing.T) 
 	require.Equal(t, 1680, repairedUsage.ImageOutputTokens)
 }
 
+func TestCollectGeminiSSEPreservesImagesAcrossSeparateChunks(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}}]}}]}`,
+		`data: {"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/jpeg","data":"BBBB"}}]}}]}`,
+		`data: {"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":4000,"totalTokenCount":4008},"modelVersion":"gemini-3.1-flash-image"}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	collected, _, err := collectGeminiSSE(strings.NewReader(stream), false)
+	require.NoError(t, err)
+	body, err := json.Marshal(collected)
+	require.NoError(t, err)
+
+	var images []string
+	gjson.GetBytes(body, "candidates.0.content.parts").ForEach(func(_, part gjson.Result) bool {
+		if data := part.Get("inlineData.data").String(); data != "" {
+			images = append(images, data)
+		}
+		return true
+	})
+	require.Equal(t, []string{"AAAA", "BBBB"}, images)
+
+	repairedBody, usage, repaired := repairGemini31FlashImageUsage(
+		body,
+		"gemini-3.1-flash-image",
+		"2K",
+		geminiFlashUsageRepairOptions{},
+	)
+	require.True(t, repaired)
+	require.Equal(t, int64(3360), gjson.GetBytes(repairedBody, "usageMetadata.candidatesTokensDetails.0.tokenCount").Int())
+	require.Equal(t, 3360, usage.ImageOutputTokens)
+}
+
+func TestCollectGeminiSSEDoesNotDuplicateCumulativeImages(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"index":0,"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}}]}}]}`,
+		`data: {"candidates":[{"index":0,"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}},{"inlineData":{"mimeType":"image/jpeg","data":"BBBB"}}]}}]}`,
+		`data: {"candidates":[{"index":0,"content":{"parts":[{"inlineData":{"mimeType":"image/webp","data":"CCCC"}}]}}]}`,
+		`data: {"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":4000,"totalTokenCount":4008}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	collected, _, err := collectGeminiSSE(strings.NewReader(stream), false)
+	require.NoError(t, err)
+	body, err := json.Marshal(collected)
+	require.NoError(t, err)
+
+	var images []string
+	gjson.GetBytes(body, "candidates.0.content.parts").ForEach(func(_, part gjson.Result) bool {
+		if data := part.Get("inlineData.data").String(); data != "" {
+			images = append(images, data)
+		}
+		return true
+	})
+	require.Equal(t, []string{"AAAA", "BBBB", "CCCC"}, images)
+}
+
 func TestNewGeminiImageUsageParamsUsesRawFlashSizeAndGatesActions(t *testing.T) {
 	textRequest := []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`)
 	params := newGeminiImageUsageParams("gemini-3.1-flash-image", "generateContent", "", textRequest)
