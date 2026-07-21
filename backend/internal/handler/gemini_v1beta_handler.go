@@ -46,6 +46,21 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		return
 	}
 
+	// 分组启用自定义模型列表时，直接返回过滤后的列表（与 /v1/models 行为对齐），
+	// 不再透传上游完整列表，避免下游看到超出自定义范围的模型。
+	if apiKey.Group != nil && apiKey.Group.CustomModelsListEnabled() {
+		platform := apiKey.Group.Platform
+		if hasForcePlatform && strings.TrimSpace(forcePlatform) != "" {
+			platform = forcePlatform
+		}
+		groupID := apiKey.Group.ID
+		availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), &groupID, platform)
+		if resp, ok := geminiCustomModelsListResponse(platform, availableModels, apiKey.Group); ok {
+			c.JSON(http.StatusOK, resp)
+			return
+		}
+	}
+
 	// 强制 antigravity 模式：返回 antigravity 支持的模型列表
 	if forcePlatform == service.PlatformAntigravity {
 		c.JSON(http.StatusOK, antigravity.FallbackGeminiModelsList())
@@ -76,6 +91,37 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		return
 	}
 	writeUpstreamResponse(c, res)
+}
+
+// geminiCustomModelsListResponse 按分组自定义模型列表构建 Gemini v1beta 格式的模型列表。
+// 过滤语义与 /v1/models（filterModelsByCustomList）一致：自定义列表中的模型需能匹配
+// 账号可用模型（无可用模型时退回平台默认列表）才会保留。未启用自定义列表时返回 ok=false。
+func geminiCustomModelsListResponse(platform string, availableModels []string, group *service.Group) (gemini.ModelsListResponse, bool) {
+	if group == nil || !group.CustomModelsListEnabled() {
+		return gemini.ModelsListResponse{}, false
+	}
+	fallbackModels := geminiV1BetaFallbackModelIDs(platform)
+	filtered := filterModelsByCustomList(customModelsListSource(platform, availableModels, fallbackModels), fallbackModels, group.ModelsListConfig.Models)
+	models := make([]gemini.Model, 0, len(filtered))
+	for _, id := range filtered {
+		models = append(models, gemini.FallbackModel(id))
+	}
+	return gemini.ModelsListResponse{Models: models}, true
+}
+
+func geminiV1BetaFallbackModelIDs(platform string) []string {
+	if platform != service.PlatformGemini {
+		return defaultModelIDsForPlatform(platform)
+	}
+	models := gemini.DefaultModels()
+	ids := make([]string, 0, len(models))
+	for _, model := range models {
+		id := strings.TrimPrefix(strings.TrimSpace(model.Name), "models/")
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // GeminiV1BetaGetModel proxies:

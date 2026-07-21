@@ -143,6 +143,86 @@ func TestGeminiV1BetaHandler_GetModelAntigravityFallback(t *testing.T) {
 	}
 }
 
+// TestGeminiCustomModelsListResponse 验证分组自定义模型列表在 Gemini 原生 /v1beta/models 上生效:
+// 启用自定义列表时只返回配置的模型(v1beta 格式,带 models/ 前缀),未启用时不拦截。
+func TestGeminiCustomModelsListResponse(t *testing.T) {
+	t.Parallel()
+
+	t.Run("启用自定义列表-只返回配置的模型", func(t *testing.T) {
+		group := &service.Group{
+			Platform: service.PlatformAntigravity,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"gemini-3.1-pro-high", "gemini-2.5-flash"},
+			},
+		}
+		resp, ok := geminiCustomModelsListResponse(service.PlatformAntigravity, nil, group)
+		require.True(t, ok)
+		names := make([]string, 0, len(resp.Models))
+		for _, m := range resp.Models {
+			names = append(names, m.Name)
+		}
+		require.Equal(t, []string{"models/gemini-3.1-pro-high", "models/gemini-2.5-flash"}, names)
+	})
+
+	t.Run("配置外的模型被过滤", func(t *testing.T) {
+		group := &service.Group{
+			Platform: service.PlatformAntigravity,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"gemini-2.5-flash", "not-a-real-model"},
+			},
+		}
+		resp, ok := geminiCustomModelsListResponse(service.PlatformAntigravity, nil, group)
+		require.True(t, ok)
+		require.Len(t, resp.Models, 1)
+		require.Equal(t, "models/gemini-2.5-flash", resp.Models[0].Name)
+	})
+
+	t.Run("账号可用模型作为过滤基准", func(t *testing.T) {
+		group := &service.Group{
+			Platform: service.PlatformGemini,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"gemini-2.5-pro", "gemini-custom-model"},
+			},
+		}
+		available := []string{"gemini-2.5-pro", "gemini-custom-model", "gemini-extra"}
+		resp, ok := geminiCustomModelsListResponse(service.PlatformGemini, available, group)
+		require.True(t, ok)
+		names := make([]string, 0, len(resp.Models))
+		for _, m := range resp.Models {
+			names = append(names, m.Name)
+		}
+		require.Equal(t, []string{"models/gemini-2.5-pro", "models/gemini-custom-model"}, names)
+	})
+
+	t.Run("Gemini原生回退保留native-only模型", func(t *testing.T) {
+		group := &service.Group{
+			Platform: service.PlatformGemini,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"gemini-3.1-pro-preview-customtools"},
+			},
+		}
+		resp, ok := geminiCustomModelsListResponse(service.PlatformGemini, nil, group)
+		require.True(t, ok)
+		require.Len(t, resp.Models, 1)
+		require.Equal(t, "models/gemini-3.1-pro-preview-customtools", resp.Models[0].Name)
+	})
+
+	t.Run("未启用自定义列表-不拦截", func(t *testing.T) {
+		group := &service.Group{Platform: service.PlatformGemini}
+		_, ok := geminiCustomModelsListResponse(service.PlatformGemini, nil, group)
+		require.False(t, ok)
+	})
+
+	t.Run("Group为nil-不拦截", func(t *testing.T) {
+		_, ok := geminiCustomModelsListResponse(service.PlatformGemini, nil, nil)
+		require.False(t, ok)
+	})
+}
+
 func TestShouldFallbackGeminiModel_KnownFallbackOn404(t *testing.T) {
 	t.Parallel()
 
