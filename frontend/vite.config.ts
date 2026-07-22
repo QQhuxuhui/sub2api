@@ -96,6 +96,11 @@ export default defineConfig(({ mode }) => {
               return 'vendor-i18n'
             }
 
+            // 首页 3D/动效库（仅由落地页动态 import，按需加载）
+            if (id.includes('/three/') || id.includes('/gsap/') || id.includes('/lenis/')) {
+              return 'vendor-fx'
+            }
+
             // 其他小型第三方库合并
             return 'vendor-misc'
           }

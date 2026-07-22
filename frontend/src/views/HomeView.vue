@@ -33,6 +33,13 @@
       ></div>
     </div>
 
+    <!-- Hero particle field (Three.js, additive; hidden under reduced motion / no WebGL) -->
+    <canvas
+      ref="heroCanvasRef"
+      class="pointer-events-none absolute inset-x-0 top-0 h-[52rem] w-full [mask-image:radial-gradient(ellipse_80%_70%_at_50%_10%,#000,transparent)]"
+      aria-hidden="true"
+    ></canvas>
+
     <!-- Header -->
     <header class="sticky top-0 z-30 px-4 pt-4 sm:px-6">
       <nav
@@ -158,11 +165,11 @@
           </div>
 
           <!-- Right: Terminal -->
-          <div class="relative mx-auto w-full max-w-md lg:max-w-none">
+          <div ref="terminalWrapRef" class="terminal-tilt-wrap relative mx-auto w-full max-w-md lg:max-w-none">
             <div
               class="pointer-events-none absolute -inset-8 rounded-[2.5rem] bg-gradient-to-br from-primary-400/20 via-cyan-400/10 to-sky-400/20 blur-2xl dark:from-primary-500/15 dark:via-cyan-500/10 dark:to-sky-500/15"
             ></div>
-            <div class="terminal-window relative">
+            <div ref="terminalRef" class="terminal-window relative">
               <div class="terminal-header">
                 <div class="terminal-buttons">
                   <span class="dot-close"></span>
@@ -194,6 +201,7 @@
                   <span class="caret"></span>
                 </div>
               </div>
+              <div class="terminal-glare" aria-hidden="true"></div>
             </div>
           </div>
         </section>
@@ -203,11 +211,11 @@
           <p class="text-center text-sm font-medium text-gray-500 dark:text-dark-400">
             {{ t('home.providers.title') }}
           </p>
-          <div class="mt-6 flex flex-wrap items-center justify-center gap-3">
+          <div ref="chipsRef" class="mt-6 flex flex-wrap items-center justify-center gap-3">
             <div
               v-for="p in providerChips"
               :key="p.name"
-              class="flex items-center gap-2.5 rounded-full border border-gray-200/80 bg-white/70 px-5 py-2.5 text-gray-800 backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-primary-300/70 hover:shadow-md hover:shadow-primary-500/10 dark:border-dark-700/70 dark:bg-dark-800/70 dark:text-gray-100 dark:hover:border-primary-500/40"
+              class="chip-magnetic flex items-center gap-2.5 rounded-full border border-gray-200/80 bg-white/70 px-5 py-2.5 text-gray-800 backdrop-blur-sm transition-[border-color,box-shadow] hover:border-primary-300/70 hover:shadow-md hover:shadow-primary-500/10 dark:border-dark-700/70 dark:bg-dark-800/70 dark:text-gray-100 dark:hover:border-primary-500/40"
             >
               <svg
                 class="h-5 w-5"
@@ -242,7 +250,7 @@
                 class="mx-auto mt-5 h-1 w-14 rounded-full bg-gradient-to-r from-primary-500 to-cyan-500 lg:mx-0"
               ></div>
             </div>
-            <div class="grid gap-4 sm:grid-cols-2">
+            <div ref="painGridRef" class="grid gap-4 sm:grid-cols-2">
               <div
                 v-for="item in painItems"
                 :key="item.key"
@@ -288,32 +296,40 @@
                 {{ t('home.features.unifiedGatewayDesc') }}
               </p>
 
-              <!-- Routing visual -->
-              <div class="mt-8 flex flex-wrap items-center gap-3">
-                <div class="flex -space-x-2">
-                  <div
-                    v-for="p in providerChips"
-                    :key="p.name"
-                    class="flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700 shadow-sm dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200"
-                  >
-                    <svg
-                      class="h-5 w-5"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      fill-rule="evenodd"
-                      aria-hidden="true"
+              <!-- Routing visual (particles flow from provider marks to the gateway pill) -->
+              <div class="relative mt-8">
+                <canvas
+                  ref="routeCanvasRef"
+                  class="pointer-events-none absolute inset-0 h-full w-full"
+                  aria-hidden="true"
+                ></canvas>
+                <div class="relative flex flex-wrap items-center gap-3">
+                  <div ref="routeSrcRef" class="flex -space-x-2">
+                    <div
+                      v-for="p in providerChips"
+                      :key="p.name"
+                      class="flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700 shadow-sm dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200"
                     >
-                      <path v-for="(d, i) in p.paths" :key="i" :d="d" />
-                    </svg>
+                      <svg
+                        class="h-5 w-5"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        fill-rule="evenodd"
+                        aria-hidden="true"
+                      >
+                        <path v-for="(d, i) in p.paths" :key="i" :d="d" />
+                      </svg>
+                    </div>
                   </div>
-                </div>
-                <div
-                  class="h-px min-w-8 flex-1 bg-gradient-to-r from-gray-300 to-primary-400 dark:from-dark-600 dark:to-primary-500"
-                ></div>
-                <div
-                  class="flex items-center gap-2 whitespace-nowrap rounded-full bg-gray-900 px-4 py-2 font-mono text-xs text-primary-300 shadow-lg dark:bg-black/60"
-                >
-                  POST /v1/messages
+                  <div
+                    class="h-px min-w-8 flex-1 bg-gradient-to-r from-gray-300 to-primary-400 opacity-40 dark:from-dark-600 dark:to-primary-500"
+                  ></div>
+                  <div
+                    ref="routeDstRef"
+                    class="flex items-center gap-2 whitespace-nowrap rounded-full bg-gray-900 px-4 py-2 font-mono text-xs text-primary-300 shadow-lg dark:bg-black/60"
+                  >
+                    POST /v1/messages
+                  </div>
                 </div>
               </div>
             </div>
@@ -413,16 +429,42 @@
         </section>
 
         <!-- Steps -->
-        <section data-reveal class="pt-24 lg:pt-32">
+        <section ref="stepsSectionRef" data-reveal class="pt-24 lg:pt-32">
           <h2
             class="text-center text-3xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-4xl"
           >
             {{ t('home.solutions.subtitle') }}
           </h2>
           <div class="relative mx-auto mt-14 max-w-4xl">
-            <div
-              class="absolute left-[16%] right-[16%] top-6 hidden h-px bg-gradient-to-r from-primary-300 via-cyan-300 to-sky-300 dark:from-primary-500/40 dark:via-cyan-500/40 dark:to-sky-500/40 sm:block"
-            ></div>
+            <svg
+              class="absolute left-[16%] top-6 hidden h-[2px] w-[68%] sm:block dark:opacity-50"
+              viewBox="0 0 100 2"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <defs>
+                <linearGradient
+                  id="home-step-grad"
+                  gradientUnits="userSpaceOnUse"
+                  x1="0"
+                  y1="1"
+                  x2="100"
+                  y2="1"
+                >
+                  <stop offset="0" stop-color="#5eead4" />
+                  <stop offset="0.5" stop-color="#67e8f9" />
+                  <stop offset="1" stop-color="#7dd3fc" />
+                </linearGradient>
+              </defs>
+              <path
+                ref="stepLineRef"
+                d="M0 1 L100 1"
+                stroke="url(#home-step-grad)"
+                stroke-width="2"
+                fill="none"
+                pathLength="1"
+              />
+            </svg>
             <div class="grid gap-10 sm:grid-cols-3 sm:gap-6">
               <div
                 v-for="(step, idx) in stepItems"
@@ -430,7 +472,7 @@
                 class="relative flex flex-col items-center text-center"
               >
                 <div
-                  class="z-10 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-600 to-cyan-700 text-lg font-bold text-white shadow-lg shadow-primary-500/30"
+                  class="step-dot z-10 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-600 to-cyan-700 text-lg font-bold text-white shadow-lg shadow-primary-500/30"
                 >
                   {{ idx + 1 }}
                 </div>
@@ -448,7 +490,8 @@
         <!-- CTA -->
         <section data-reveal class="pb-6 pt-24 lg:pt-28">
           <div
-            class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary-700 via-teal-700 to-cyan-800 px-6 py-14 text-center shadow-xl shadow-primary-500/20 sm:px-12"
+            ref="ctaCardRef"
+            class="cta-spot relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary-700 via-teal-700 to-cyan-800 px-6 py-14 text-center shadow-xl shadow-primary-500/20 sm:px-12"
           >
             <div
               class="pointer-events-none absolute -left-20 -top-24 h-64 w-64 rounded-full bg-white/10 blur-3xl"
@@ -520,6 +563,7 @@ import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
 import { BRAND_PATHS } from '@/constants/brandIcons'
+import { useHomeEffects } from '@/composables/useHomeEffects'
 
 const { t } = useI18n()
 
@@ -532,6 +576,7 @@ const siteLogo = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.site_
 const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || t('home.heroSubtitle'))
 const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
+const homeEffectsEnabled = computed(() => !homeContent.value)
 
 // Check if homeContent is a URL (for iframe display)
 const isHomeContentUrl = computed(() => {
@@ -541,6 +586,37 @@ const isHomeContentUrl = computed(() => {
 
 // Theme
 const isDark = ref(document.documentElement.classList.contains('dark'))
+
+// 3D / interaction effect targets (see useHomeEffects)
+const heroCanvasRef = ref<HTMLCanvasElement | null>(null)
+const routeCanvasRef = ref<HTMLCanvasElement | null>(null)
+const routeSrcRef = ref<HTMLElement | null>(null)
+const routeDstRef = ref<HTMLElement | null>(null)
+const terminalWrapRef = ref<HTMLElement | null>(null)
+const terminalRef = ref<HTMLElement | null>(null)
+const chipsRef = ref<HTMLElement | null>(null)
+const painGridRef = ref<HTMLElement | null>(null)
+const stepsSectionRef = ref<HTMLElement | null>(null)
+const stepLineRef = ref<SVGPathElement | null>(null)
+const ctaCardRef = ref<HTMLElement | null>(null)
+
+useHomeEffects(
+  {
+    heroCanvas: heroCanvasRef,
+    routeCanvas: routeCanvasRef,
+    routeSrc: routeSrcRef,
+    routeDst: routeDstRef,
+    terminalWrap: terminalWrapRef,
+    terminal: terminalRef,
+    chips: chipsRef,
+    painGrid: painGridRef,
+    stepsSection: stepsSectionRef,
+    stepLine: stepLineRef,
+    ctaCard: ctaCardRef
+  },
+  isDark,
+  homeEffectsEnabled
+)
 
 // GitHub URL
 const githubUrl = 'https://github.com/Wei-Shaw/sub2api'
@@ -717,6 +793,49 @@ onUnmounted(() => {
   transform: none;
 }
 
+/* ============ Terminal 3D tilt ============ */
+.terminal-tilt-wrap {
+  perspective: 1100px;
+}
+
+.terminal-glare {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: 20px;
+  opacity: 0;
+  background: radial-gradient(
+    420px circle at var(--gx, 50%) var(--gy, 50%),
+    rgba(94, 234, 212, 0.14),
+    transparent 55%
+  );
+  transition: opacity 0.3s;
+}
+
+.terminal-tilt-wrap:hover .terminal-glare {
+  opacity: 1;
+}
+
+/* ============ CTA pointer spotlight ============ */
+.cta-spot::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  background: radial-gradient(
+    360px circle at var(--sx, 50%) var(--sy, 50%),
+    rgba(255, 255, 255, 0.16),
+    transparent 60%
+  );
+  transition: opacity 0.35s;
+}
+
+.cta-spot:hover::after {
+  opacity: 1;
+}
+
 /* ============ Terminal ============ */
 .terminal-window {
   background: linear-gradient(150deg, #10222b 0%, #0a1420 100%);
@@ -726,6 +845,8 @@ onUnmounted(() => {
     0 30px 60px -15px rgba(2, 44, 34, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
   overflow: hidden;
+  transform-style: preserve-3d;
+  will-change: transform;
 }
 
 .terminal-header {
@@ -891,6 +1012,11 @@ onUnmounted(() => {
 
   .caret {
     animation: none;
+  }
+
+  .terminal-glare,
+  .cta-spot::after {
+    display: none;
   }
 
   [data-reveal] {
