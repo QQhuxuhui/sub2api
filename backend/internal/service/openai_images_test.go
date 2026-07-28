@@ -1192,6 +1192,44 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyStreamMultilineSSEDataBillsImag
 	require.Equal(t, 8, result.Usage.ImageOutputTokens)
 }
 
+func TestOpenAIGatewayServiceForwardImages_APIKeyStreamingEditMergesImageInputTokens(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"make it night","images":[{"image_url":"https://example.com/input.png"}],"stream":true}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{},
+		httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"text/event-stream"},
+				"X-Request-Id": []string{"req_img_stream_edit_usage"},
+			},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"type\":\"image_generation.completed\",\"usage\":{\"input_tokens\":1518,\"input_tokens_details\":{\"image_tokens\":1508,\"text_tokens\":10},\"output_tokens\":196,\"output_tokens_details\":{\"image_tokens\":196}},\"b64_json\":\"ZmluYWw=\",\"output_format\":\"png\"}\n\n" +
+					"data: [DONE]\n\n",
+			)),
+		}},
+	}
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+	account := &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"api_key":  "test-api-key",
+		"base_url": "https://image-upstream.example/v1",
+	}}
+
+	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1508, result.Usage.ImageInputTokens)
+	require.Equal(t, 196, result.Usage.ImageOutputTokens)
+	require.Equal(t, 1, result.ImageCount)
+}
+
 func TestExtractOpenAIImagesBillableCountFromJSONBytes_CompletedEvent(t *testing.T) {
 	body := []byte(`{"type":"image_generation.completed","b64_json":"ZmluYWw=","usage":{"input_tokens":10,"output_tokens":18}}`)
 
@@ -1767,6 +1805,292 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingHandlesMultilineSSE(t *
 	require.Equal(t, "TXVsdGlsaW5l", gjson.Get(completed.Data, "b64_json").String())
 	require.JSONEq(t, `{"images":1}`, gjson.Get(completed.Data, "usage").Raw)
 	require.NotContains(t, rec.Body.String(), "event: error")
+}
+
+func TestForwardOpenAIImagesSimulation_APIKeyGenerationIntegration(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	encoded := testPNGBase64(t, 1024, 1024)
+	upstreamBody := `{"created":1710000020,"model":"gpt-image-2","data":[{"b64_json":"` + encoded + `","revised_prompt":"expanded"}],"usage":{"input_tokens":30,"output_tokens":400,"total_tokens":430}}`
+
+	run := func(t *testing.T, marked bool, channelMappedModel, requestModel, upstream string) (*OpenAIForwardResult, *httptest.ResponseRecorder) {
+		t.Helper()
+		body := []byte(`{"model":"` + requestModel + `","prompt":"draw a cat","size":"1024x1024","n":1}`)
+		req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = req
+
+		svc := &OpenAIGatewayService{
+			cfg: &config.Config{},
+			httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(upstream)),
+			}},
+		}
+		parsed, err := svc.ParseOpenAIImagesRequest(ctx, body)
+		require.NoError(t, err)
+		credentials := map[string]any{
+			"api_key":  "test-api-key",
+			"base_url": "https://image-upstream.example/v1",
+		}
+		if marked {
+			credentials[openAIImagesUsageSimulationCredentialKey] = true
+		}
+		account := &Account{ID: 20, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: credentials}
+		result, err := svc.ForwardImages(context.Background(), ctx, account, body, parsed, channelMappedModel)
+		require.NoError(t, err)
+		return result, recorder
+	}
+
+	t.Run("marked account", func(t *testing.T) {
+		result, recorder := run(t, true, "", "gpt-image-2", upstreamBody)
+		require.True(t, result.ImageUsageSimulated)
+		require.Equal(t, 196, result.Usage.ImageOutputTokens)
+		require.Equal(t, 30, result.Usage.InputTokens)
+		require.Equal(t, int64(196), gjson.Get(recorder.Body.String(), "usage.output_tokens_details.image_tokens").Int())
+		require.Equal(t, "opaque", gjson.Get(recorder.Body.String(), "background").String())
+		require.Equal(t, "png", gjson.Get(recorder.Body.String(), "output_format").String())
+		require.Equal(t, "low", gjson.Get(recorder.Body.String(), "quality").String())
+		require.Equal(t, "1024x1024", gjson.Get(recorder.Body.String(), "size").String())
+		require.Equal(t, encoded, gjson.Get(recorder.Body.String(), "data.0.b64_json").String())
+		require.False(t, gjson.Get(recorder.Body.String(), "data.0.revised_prompt").Exists())
+	})
+
+	t.Run("unmarked account", func(t *testing.T) {
+		result, recorder := run(t, false, "", "gpt-image-2", upstreamBody)
+		require.False(t, result.ImageUsageSimulated)
+		require.Equal(t, 400, result.Usage.OutputTokens)
+		require.Equal(t, upstreamBody, recorder.Body.String())
+	})
+
+	t.Run("effective upstream model is not covered", func(t *testing.T) {
+		result, recorder := run(t, true, "gpt-image-1", "gpt-image-2", upstreamBody)
+		require.False(t, result.ImageUsageSimulated)
+		require.Equal(t, 400, result.Usage.OutputTokens)
+		require.Equal(t, upstreamBody, recorder.Body.String())
+	})
+
+	// spec 集成清单 15：未知出图尺寸必须整体放弃模拟、逐字节透传。
+	t.Run("unknown output size", func(t *testing.T) {
+		unknownBody := `{"created":1710000021,"model":"gpt-image-2","data":[{"b64_json":"` + testPNGBase64(t, 1254, 1254) + `"}],"usage":{"input_tokens":30,"output_tokens":400,"total_tokens":430}}`
+		result, recorder := run(t, true, "", "gpt-image-2", unknownBody)
+		require.False(t, result.ImageUsageSimulated)
+		require.Equal(t, 400, result.Usage.OutputTokens)
+		require.Equal(t, unknownBody, recorder.Body.String())
+	})
+
+	// spec 集成清单 16：请求模型不在白名单（非仅 channel 映射后的上游模型）不模拟。
+	t.Run("request model is not covered", func(t *testing.T) {
+		for _, model := range []string{"gpt-image-1", "grok-imagine"} {
+			t.Run(model, func(t *testing.T) {
+				result, recorder := run(t, true, "", model, upstreamBody)
+				require.False(t, result.ImageUsageSimulated)
+				require.Equal(t, 400, result.Usage.OutputTokens)
+				require.Equal(t, upstreamBody, recorder.Body.String())
+			})
+		}
+	})
+}
+
+func TestForwardOpenAIImagesSimulation_RemoteEditUsesUpstreamAggregate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"make it night","images":[{"image_url":"https://example.com/input.png"}],"n":1}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = req
+	encoded := testPNGBase64(t, 1024, 1024)
+	upstreamBody := `{"data":[{"b64_json":"` + encoded + `"}],"usage":{"input_tokens":1518,"input_tokens_details":{"image_tokens":1508,"text_tokens":10},"output_tokens":400}}`
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{},
+		httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+		}},
+	}
+	parsed, err := svc.ParseOpenAIImagesRequest(ctx, body)
+	require.NoError(t, err)
+	account := &Account{ID: 21, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"api_key":                                "test-api-key",
+		"base_url":                               "https://image-upstream.example/v1",
+		openAIImagesUsageSimulationCredentialKey: true,
+	}}
+
+	result, err := svc.ForwardImages(context.Background(), ctx, account, body, parsed, "")
+	require.NoError(t, err)
+	require.True(t, result.ImageUsageSimulated)
+	require.Equal(t, 1508, result.Usage.ImageInputTokens)
+	require.Equal(t, 1518, result.Usage.InputTokens)
+	require.Equal(t, 196, result.Usage.ImageOutputTokens)
+	require.Equal(t, int64(1508), gjson.Get(recorder.Body.String(), "usage.input_tokens_details.image_tokens").Int())
+	require.Equal(t, int64(196), gjson.Get(recorder.Body.String(), "usage.output_tokens_details.image_tokens").Int())
+}
+
+func TestForwardOpenAIImagesSimulation_RecordUsageBillsSynthesizedTokens(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"make it night","images":[{"image_url":"https://example.com/input.png"}],"n":1}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = req
+
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.cfg.Default.RateMultiplier = 1
+	svc.billingService.pricingService = &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"gpt-image-2": {
+			InputCostPerToken:       5e-6,
+			InputCostPerImageToken:  8e-6,
+			OutputCostPerToken:      1e-5,
+			OutputCostPerImageToken: 3e-5,
+		},
+	}}
+	groupID := int64(26)
+	svc.resolver = newOpenAIImageChannelPricingResolverForTest(t, groupID, "gpt-image-2", 0.25)
+	encoded := testPNGBase64(t, 1024, 1024)
+	svc.httpUpstream = &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"req_image_usage_simulated"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"data":[{"b64_json":"` + encoded + `"}],"usage":{"input_tokens":1518,"input_tokens_details":{"image_tokens":1508,"text_tokens":10},"output_tokens":400}}`)),
+	}}
+	parsed, err := svc.ParseOpenAIImagesRequest(ctx, body)
+	require.NoError(t, err)
+	account := &Account{ID: 23, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"api_key":                                "test-api-key",
+		"base_url":                               "https://image-upstream.example/v1",
+		openAIImagesUsageSimulationCredentialKey: true,
+	}}
+	user := &User{ID: 24}
+	apiKey := &APIKey{ID: 25, User: user, GroupID: &groupID, Group: &Group{ID: groupID, RateMultiplier: 1}}
+
+	result, err := svc.ForwardImages(context.Background(), ctx, account, body, parsed, "")
+	require.NoError(t, err)
+	require.True(t, result.ImageUsageSimulated)
+	require.Equal(t, 1508, result.Usage.ImageInputTokens)
+	require.Equal(t, 196, result.Usage.ImageOutputTokens)
+
+	err = svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result:  result,
+		APIKey:  apiKey,
+		User:    user,
+		Account: account,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.BillingMode)
+	require.Equal(t, string(BillingModeToken), *usageRepo.lastLog.BillingMode)
+	require.InDelta(t, 0.012114, usageRepo.lastLog.InputCost, 1e-12)
+	require.InDelta(t, 0.00588, usageRepo.lastLog.ImageOutputCost, 1e-12)
+	require.InDelta(t, 0.017994, usageRepo.lastLog.TotalCost, 1e-12)
+	require.Equal(t, 1, userRepo.deductCalls)
+	require.InDelta(t, 0.017994, userRepo.lastAmount, 1e-12)
+}
+
+func TestForwardOpenAIImagesSimulation_ChannelTokenPricingBillsImageInputAtChannelInputPrice(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"make it night","images":[{"image_url":"https://example.com/input.png"}],"n":1}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = req
+
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.cfg.Default.RateMultiplier = 1
+	pricingSvc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"gpt-image-2": {
+			InputCostPerToken:       5e-6,
+			InputCostPerImageToken:  8e-6,
+			OutputCostPerToken:      1e-5,
+			OutputCostPerImageToken: 3e-5,
+		},
+	}}
+	svc.billingService.pricingService = pricingSvc
+	groupID := int64(27)
+	// 渠道配置 flat token 定价（input 3e-6）：图片输入 token 必须按渠道 input 价计费，
+	// 不得让 LiteLLM 的 input_cost_per_image_token（8e-6）穿透渠道定价。
+	svc.resolver = newOpenAITokenChannelPricingResolverWithLiteLLMForTest(t, groupID, "gpt-image-2", pricingSvc)
+	encoded := testPNGBase64(t, 1024, 1024)
+	svc.httpUpstream = &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"req_image_usage_simulated_channel_token"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"data":[{"b64_json":"` + encoded + `"}],"usage":{"input_tokens":1518,"input_tokens_details":{"image_tokens":1508,"text_tokens":10},"output_tokens":400}}`)),
+	}}
+	parsed, err := svc.ParseOpenAIImagesRequest(ctx, body)
+	require.NoError(t, err)
+	account := &Account{ID: 28, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"api_key":                                "test-api-key",
+		"base_url":                               "https://image-upstream.example/v1",
+		openAIImagesUsageSimulationCredentialKey: true,
+	}}
+	user := &User{ID: 29}
+	apiKey := &APIKey{ID: 30, User: user, GroupID: &groupID, Group: &Group{ID: groupID, RateMultiplier: 1}}
+
+	result, err := svc.ForwardImages(context.Background(), ctx, account, body, parsed, "")
+	require.NoError(t, err)
+	require.True(t, result.ImageUsageSimulated)
+	require.Equal(t, 1508, result.Usage.ImageInputTokens)
+	require.Equal(t, 196, result.Usage.ImageOutputTokens)
+
+	err = svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result:  result,
+		APIKey:  apiKey,
+		User:    user,
+		Account: account,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.BillingMode)
+	require.Equal(t, string(BillingModeToken), *usageRepo.lastLog.BillingMode)
+	// 输入侧 1518 token 全按渠道 input 价 3e-6（text 10 + image 1508 回退），图片输出按渠道 15e-6。
+	require.InDelta(t, 0.004554, usageRepo.lastLog.InputCost, 1e-12)
+	require.InDelta(t, 0.00294, usageRepo.lastLog.ImageOutputCost, 1e-12)
+	require.InDelta(t, 0.007494, usageRepo.lastLog.TotalCost, 1e-12)
+}
+
+func TestForwardOpenAIImagesSimulation_ResponseFormatURLPassesThrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","response_format":"url","n":1}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = req
+	upstreamBody := `{"data":[{"url":"https://cdn.example.com/image.png"}],"usage":{"input_tokens":3,"output_tokens":4}}`
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{},
+		httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+		}},
+	}
+	parsed, err := svc.ParseOpenAIImagesRequest(ctx, body)
+	require.NoError(t, err)
+	account := &Account{ID: 22, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"api_key":                                "test-api-key",
+		"base_url":                               "https://image-upstream.example/v1",
+		openAIImagesUsageSimulationCredentialKey: true,
+	}}
+
+	result, err := svc.ForwardImages(context.Background(), ctx, account, body, parsed, "")
+	require.NoError(t, err)
+	require.Equal(t, 4, result.Usage.OutputTokens)
+	require.Equal(t, upstreamBody, recorder.Body.String())
 }
 
 func TestOpenAIGatewayServiceForwardImages_OAuthStreamingDrainsAfterClientDisconnect(t *testing.T) {

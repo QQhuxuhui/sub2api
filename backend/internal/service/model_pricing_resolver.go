@@ -161,6 +161,9 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 			resolved.BasePricing.ImageOutputPricePerToken = 0
 		}
 		resolved.BasePricing.ImageOutputPriceExplicit = true
+		// 渠道无图片输入价字段：归零后 computeTokenBreakdown 会回退到生效的 input 价，
+		// 避免 LiteLLM 的 input_cost_per_image_token 穿透渠道定价（与区间路径一致）。
+		resolved.BasePricing.ImageInputPricePerToken = 0
 		return
 	}
 
@@ -199,6 +202,9 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 		resolved.BasePricing.ImageOutputPricePerToken = 0
 	}
 	resolved.BasePricing.ImageOutputPriceExplicit = true
+	// 渠道无图片输入价字段：归零后 computeTokenBreakdown 会回退到渠道 input 价，
+	// 避免 LiteLLM 的 input_cost_per_image_token 穿透渠道定价。
+	resolved.BasePricing.ImageInputPricePerToken = 0
 }
 
 // applyRequestTierOverrides 应用按次/图片模式的渠道覆盖

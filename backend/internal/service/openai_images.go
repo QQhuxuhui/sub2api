@@ -25,6 +25,7 @@ import (
 	"github.com/imroc/req/v3"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"go.uber.org/zap"
 )
 
 const (
@@ -725,7 +726,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			ImageOutputSizes: imageOutputSizes,
 		}, nil
 	} else {
-		nonStreamUsage, nonStreamCount, nonStreamSizes, err := s.handleOpenAIImagesNonStreamingResponse(resp, c)
+		nonStreamUsage, nonStreamCount, nonStreamSizes, usageSimulated, err := s.handleOpenAIImagesNonStreamingResponse(resp, c, account, parsed, upstreamModel)
 		if err != nil {
 			return nil, err
 		}
@@ -734,18 +735,19 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			imageCount = nonStreamCount
 		}
 		return &OpenAIForwardResult{
-			RequestID:        resp.Header.Get("x-request-id"),
-			Usage:            usage,
-			Model:            requestModel,
-			UpstreamModel:    upstreamModel,
-			Stream:           parsed.Stream,
-			ResponseHeaders:  resp.Header.Clone(),
-			Duration:         time.Since(startTime),
-			FirstTokenMs:     firstTokenMs,
-			ImageCount:       imageCount,
-			ImageSize:        parsed.SizeTier,
-			ImageInputSize:   parsed.Size,
-			ImageOutputSizes: nonStreamSizes,
+			RequestID:           resp.Header.Get("x-request-id"),
+			Usage:               usage,
+			Model:               requestModel,
+			UpstreamModel:       upstreamModel,
+			Stream:              parsed.Stream,
+			ResponseHeaders:     resp.Header.Clone(),
+			Duration:            time.Since(startTime),
+			FirstTokenMs:        firstTokenMs,
+			ImageUsageSimulated: usageSimulated,
+			ImageCount:          imageCount,
+			ImageSize:           parsed.SizeTier,
+			ImageInputSize:      parsed.Size,
+			ImageOutputSizes:    nonStreamSizes,
 		}, nil
 	}
 }
@@ -888,10 +890,31 @@ func cloneMultipartHeader(src textproto.MIMEHeader) textproto.MIMEHeader {
 	return dst
 }
 
-func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(resp *http.Response, c *gin.Context) (OpenAIUsage, int, []string, error) {
+func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	parsed *OpenAIImagesRequest,
+	effectiveUpstreamModel string,
+) (OpenAIUsage, int, []string, bool, error) {
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
-		return OpenAIUsage{}, 0, nil, err
+		return OpenAIUsage{}, 0, nil, false, err
+	}
+	usage, _ := extractOpenAIUsageFromJSONBytes(body)
+	usageSimulated := false
+	if rewritten, simulatedUsage, applied := maybeSimulateOpenAIImagesUsage(body, account, parsed, effectiveUpstreamModel); applied {
+		body = rewritten
+		usage = simulatedUsage
+		usageSimulated = true
+		logger.L().Info("openai_images.usage_simulated",
+			zap.Int64("account_id", account.ID),
+			zap.String("requested_model", parsed.Model),
+			zap.String("upstream_model", effectiveUpstreamModel),
+			zap.Int("input_tokens", usage.InputTokens),
+			zap.Int("image_input_tokens", usage.ImageInputTokens),
+			zap.Int("image_output_tokens", usage.ImageOutputTokens),
+		)
 	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	contentType := "application/json"
@@ -902,8 +925,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(resp *http
 	}
 	c.Data(resp.StatusCode, contentType, body)
 
-	usage, _ := extractOpenAIUsageFromJSONBytes(body)
-	return usage, extractOpenAIImageCountFromJSONBytes(body), collectOpenAIResponseImageOutputSizesFromJSONBytes(body), nil
+	return usage, extractOpenAIImageCountFromJSONBytes(body), collectOpenAIResponseImageOutputSizesFromJSONBytes(body), usageSimulated, nil
 }
 
 func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
@@ -1161,6 +1183,9 @@ func mergeOpenAIUsage(dst *OpenAIUsage, body []byte) {
 		}
 		if parsed.CacheReadInputTokens > 0 {
 			dst.CacheReadInputTokens = parsed.CacheReadInputTokens
+		}
+		if parsed.ImageInputTokens > 0 {
+			dst.ImageInputTokens = parsed.ImageInputTokens
 		}
 		if parsed.ImageOutputTokens > 0 {
 			dst.ImageOutputTokens = parsed.ImageOutputTokens

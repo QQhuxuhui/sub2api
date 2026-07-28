@@ -108,6 +108,7 @@ var (
 // 只保留我们需要的字段，使用指针来处理可能缺失的值
 type LiteLLMModelPricing struct {
 	InputCostPerToken                   float64 `json:"input_cost_per_token"`
+	InputCostPerImageToken              float64 `json:"input_cost_per_image_token"`
 	InputCostPerTokenPriority           float64 `json:"input_cost_per_token_priority"`
 	OutputCostPerToken                  float64 `json:"output_cost_per_token"`
 	OutputCostPerTokenPriority          float64 `json:"output_cost_per_token_priority"`
@@ -141,6 +142,7 @@ type PricingRemoteClient interface {
 // LiteLLMRawEntry 用于解析原始JSON数据
 type LiteLLMRawEntry struct {
 	InputCostPerToken                   *float64 `json:"input_cost_per_token"`
+	InputCostPerImageToken              *float64 `json:"input_cost_per_image_token"`
 	InputCostPerTokenPriority           *float64 `json:"input_cost_per_token_priority"`
 	OutputCostPerToken                  *float64 `json:"output_cost_per_token"`
 	OutputCostPerTokenPriority          *float64 `json:"output_cost_per_token_priority"`
@@ -449,6 +451,9 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 
 		if entry.InputCostPerToken != nil {
 			pricing.InputCostPerToken = *entry.InputCostPerToken
+		}
+		if entry.InputCostPerImageToken != nil {
+			pricing.InputCostPerImageToken = *entry.InputCostPerImageToken
 		}
 		if entry.InputCostPerTokenPriority != nil {
 			pricing.InputCostPerTokenPriority = *entry.InputCostPerTokenPriority

@@ -1,6 +1,6 @@
 # gpt-image-2 usage 模拟与响应对齐设计
 
-日期：2026-07-28（v2.1，补入对 adobe2api 实际实现的核对结果）
+日期：2026-07-28（v2.2，实现前复审收紧响应与数据边界）
 状态：设计已确认，实现计划见 `docs/superpowers/plans/2026-07-28-gpt-image-2-usage-simulation.md`
 
 参考实现：`docs/superpowers/specs/2026-07-14-gemini-pro-image-masking-design.md`
@@ -57,7 +57,8 @@ tokens = TABLE[ratio][sizeTier][quality]
 
 ## 实测基准
 
-**base（low 档）token 表**，18 格全部实测；竖版与横版同值（已验证 720×1280 = 1280×720）：
+**base（low 档）token 表**，横版/方图 18 格全部实测。竖版暂沿用横版值，
+仅直接验证过 720×1280 low = 1280×720 low：
 
 | 比例 | 1K | 2K | 4K |
 |---|---|---|---|
@@ -68,7 +69,7 @@ tokens = TABLE[ratio][sizeTier][quality]
 | 16:9 | 1280×720 **106** | 2560×1440 **205** | 3840×2160 **371** |
 | 21:9 | 1456×624 **82** | 3024×1296 **166** | 3696×1584 **220** |
 
-**medium / high 档同样 18 格全部实测**（2026-07-28 补齐，共 54 格无推导值）：
+**medium / high 的横版/方图同样 18 格全部实测**（2026-07-28 补齐，共 54 个实测值）：
 
 | 比例 | 1K low/med/high | 2K low/med/high | 4K low/med/high |
 |---|---|---|---|
@@ -83,7 +84,8 @@ tokens = TABLE[ratio][sizeTier][quality]
 > med/low 组内差 <0.7%，high/med 组内差 <0.05%；但跨比例差异显著
 > （med/low 从 3:2 的 8.71 到 21:9 的 9.00，high/med 从 21:9 的 3.905 到 5:4 的 4.052）。
 > 这正说明**不可跨比例外推** —— 早期用全局倍率推导时，21:9 的 1K high
-> 推得 2944 而实测 2863（−2.8%）。现全表实测，该风险已消除。
+> 推得 2944 而实测 2863（−2.8%）。横版/方图全表实测后，该风险已消除；
+> 竖版仍需补测确认转置对称性。
 
 **输入图像 token 公式**（官方直连与 codex 两条管线共 11 个实测点全部精确吻合）：
 
@@ -111,7 +113,10 @@ patches = ceil(w/32) * ceil(h/32)
 **所有 `gpt-image-*` 前缀 + 全部 Grok 生图模型**。若账号同时承载 `gpt-image-1`
 或 `grok-imagine`，会被错误套用 gpt-image-2 的表。
 
-故显式白名单：仅 `gpt-image-2` 及确认过的版本别名（`gpt-image-2-<date>` 形态）。
+故显式白名单：仅 `gpt-image-2` 及逐个确认过的版本别名（当前为
+`gpt-image-2-2026-04-21`）。不按 `gpt-image-2-<date>` 模式泛化放行，避免未来版本
+在计费规则变化后静默套用旧表。门控同时检查下游请求模型和模型映射后的有效上游模型；
+任一不在白名单都不模拟。
 其余一律不模拟。
 
 ### 闸门 3：请求能力门控
@@ -122,7 +127,7 @@ patches = ceil(w/32) * ceil(h/32)
 |---|---|
 | `parsed.Stream == true` | 流式与 partial images 的 token 规则未实测 |
 | `parsed.PartialImages != nil` | 官方称每张 partial 额外 +100 token，未实测 |
-| `parsed.N > 1` 或 `data` 长度 ≠ 1 | 多图 token 是否线性未实测 |
+| `parsed.N != 1` 或 `data` 长度 ≠ 1 | 只验证过单图；异常值与多图均降级 |
 | `parsed.HasMask == true` | mask 作为额外输入图的计法未实测 |
 | `parsed.Background` 非空且 ≠ `"opaque"` | transparent 未实测；且不得把用户要的 transparent 改写成 opaque |
 | `parsed.OutputFormat` 非空且 ≠ `"png"` | JPEG/WebP 未实测 |
@@ -152,11 +157,13 @@ patches = ceil(w/32) * ceil(h/32)
 改为：把实际出图尺寸按 `"WxH"` 在**已知 30 组精确尺寸**（10 比例 × 3 档，含横竖版）
 中查表；命中才继续，未命中直接 `applied=false`。
 
-出图尺寸的取值优先级（**只有两级，不回落请求尺寸**）：
+首张 `b64_json` 的实际图像头是尺寸和格式的**唯一真源**，使用流式 base64 decoder
+配合 `image.DecodeConfig` 读取，避免为 4K 图片分配完整 raw buffer。响应体顶层 `size`
+若存在，只做一致性校验；与实际图片不一致时直接降级。请求尺寸永不作为兜底。
 
-1. 响应体 `size` 字段；
-2. 解码首张 `b64_json` 的图像头（**单次 base64 解码同时取宽高与格式**，
-   不重复解码，避免 4K 并发下的内存放大）。
+响应 JSON 的校验、usage 读取和改写必须共享一次结构化解析结果，不能对大段 `b64_json`
+反复执行整包 `gjson.ParseBytes` / `sjson.SetBytes`。保留 4 MiB 响应的 `-benchmem`
+基准作为回归观察项；当前根对象单次改写约分配 16.8 MiB，旧的逐字段改写约 37.8 MiB。
 
 v2 曾把「请求侧 `parsed.Size`」作为第三级兜底，现**删除**：
 
@@ -209,7 +216,9 @@ sub2api 侧无法在运行时分辨上游值真假（响应体上没有任何可
 | C（不采纳） | sub2api 自己下载远程图 | 违反「网关不下载」的既定边界，引入 SSRF 与带宽成本 |
 
 A 的落地项写在实现计划「上线前置事项 0」，并在灰度阶段用可观测判据验收：
-`usage_logs.image_input_tokens` 必须**随输入图尺寸变化**，若恒等于 `张数 × 300` 即说明前置未完成。
+结构化日志事件 `openai_images.usage_simulated` 的 `image_input_tokens` 必须**随输入图尺寸变化**；
+若恒等于 `张数 × 300` 即说明前置未完成。`usage_logs` 当前没有独立的
+`image_input_tokens` 列，不能把它写成数据库验收字段。
 
 ## 组件设计
 
@@ -221,7 +230,8 @@ A 的落地项写在实现计划「上线前置事项 0」，并在灰度阶段�
 | `isSimulatableOpenAIImagesModel(model string) bool` | 闸门 2 |
 | `openAIImagesRequestSimulatable(parsed *OpenAIImagesRequest) bool` | 闸门 3 |
 | `lookupOpenAIImageSize(w, h int) (openAIImageGeometry, bool)` | 闸门 4，30 组精确表 |
-| `decodeImageMeta(encoded string) (w, h int, format string, ok bool)` | 单次解码取宽高+格式 |
+| `decodeImageMeta(encoded string) (w, h int, format string, ok bool)` | 流式读取图像头，取宽高+格式 |
+| `openAIImagesResponseSimulatable(body []byte, actualFormat, expectedQuality string) bool` | 响应侧 opaque/png/quality 门控 |
 | `normalizeOpenAIImageQuality(raw string) (string, bool)` | `auto`/空 → `low`；未知值 → false |
 | `openAIImageOutputTokens(ratio, tier, quality string) (int, bool)` | 三维查表 |
 | `openAIImageInputTokens(w, h int) int` | patch 公式 |
@@ -241,6 +251,12 @@ A 的落地项写在实现计划「上线前置事项 0」，并在灰度阶段�
   - `quality`：写**归一后的请求 quality**（与计费同源），而非由尺寸档位反推。
   - `size`：写真实出图尺寸。
 - 抹除上游指纹：删除 `data[].revised_prompt`。
+
+改写前另做响应侧门控：上游显式返回的 `background` 必须为空或 `opaque`，
+`output_format` 必须为空或 `png`，显式 `quality` 必须等于请求归一值，且实际
+`b64_json` 编码必须是 PNG；显式 `model` 也必须在同一白名单内。请求侧参数
+不能替代这个检查，因为上游响应可能与请求不一致。响应 usage 若出现正数缓存读取或
+缓存创建 token 也降级：缓存图像输入的 $2/1M 计价口径尚未验证，不能按普通图像输入收费。
 
 > **已知差异 1（model 字段）**：官方响应**不含** `model`，本方案保留并设为请求模型名
 > 而非删除 —— 删除可能破坏依赖该字段的下游客户端。故目标表述为
@@ -287,7 +303,8 @@ low $0.011 / medium $0.100 / high $0.400）。它只影响未打标记账号的�
 
 - 仅覆盖**非流式**路径（闸门 3 已排除 stream）。
 - 不覆盖 `/v1/responses` 的 image_generation 工具路径。
-- 不实现 partial images、transparent、JPEG/WebP、`n>1`、缓存图像输入 —— 全部由闸门 3 挡掉。
+- 不实现 partial images、transparent、JPEG/WebP、`n!=1`、缓存图像输入 ——
+  由请求门控或响应门控降级透传。
 
 ## 测试计划（TDD）
 
@@ -305,16 +322,20 @@ low $0.011 / medium $0.100 / high $0.400）。它只影响未打标记账号的�
    `1254x1254`、`1672x941`、`1000x100`、`0x0` 均未命中。
 6. `normalizeOpenAIImageQuality`：空/`auto`→low；low/medium/high 原样；
    未知值（如 `hd`、`4k`）→ false。
-7. `openAIImageOutputTokens`：抽取的实测格逐一精确断言；未知比例/档位/quality 返回 false。
+7. `openAIImageOutputTokens`：横版/方图 54 格全部逐一精确断言并校验用例数；
+   未知比例/档位/quality 返回 false。
 8. `resolveOpenAIImagesInputTokens`：全部本地可解码 → 逐张求和；
    含远程 URL → 用上游聚合值；含远程 URL 且上游无值 → false；无输入图 → 0,true。
 9. `rewriteOpenAIImagesResponseBody`：官方字段齐备、`quality` 等于请求归一值、
    `background` 沿用上游、`revised_prompt` 被删、`b64_json` 逐字节保留。
 10. **一致性不变量**：`extractOpenAIUsageFromJSONBytes(改写后 body)` == 计费 usage。
 11. 降级路径：四道闸门各自触发时 body 逐字节不变。
-12. `resolveOpenAIImageGeometry`：响应体 `size` → 命中；仅有 `b64_json` → 解码命中；
-    **只有 `data[].url` 无 `b64_json` → 即使请求侧 `size` 在表内也返回 false**
-    （不再回落请求尺寸）。
+12. `resolveOpenAIImageGeometry`：实际 `b64_json` → 解码命中；顶层 `size` 与实际尺寸
+    不一致或图片不可解码 → false；**只有 `data[].url` 无 `b64_json` → 即使请求侧
+    `size` 在表内也返回 false**（不再回落请求尺寸）。
+13. 响应侧门控：transparent、JPEG/WebP 字段或实际非 PNG 编码均逐字节透传。
+14. 模型映射：请求模型或有效上游模型任一不在白名单时逐字节透传。
+15. 缓存 usage：缓存读取/创建 token 为正时逐字节透传。
 
 集成测试（复用 `openai_images_test.go` 既有夹具）：
 
@@ -332,8 +353,12 @@ low $0.011 / medium $0.100 / high $0.400）。它只影响未打标记账号的�
   `revised_prompt` 与 `gpt-image-2-codex` 不再出现。
 - `quality` 回显等于请求归一值；只传 `size` 不传 quality 时按 **low** 计费（与官方一致）。
 - `usage_logs.image_output_tokens` 等于三维表对应格；
+  `usage_logs.billing_mode = token`；
   `total_cost = image_output × 30/1M + text_input × 5/1M + image_input × 8/1M`。
-- 远程 URL 改图的 `ImageInputTokens` 非 0，**且随输入图尺寸变化**
+- 远程 URL 改图在 `openai_images.usage_simulated` 日志中的 `image_input_tokens` 非 0，
+  **且随输入图尺寸变化**
   （恒等于 `张数 × 300` 说明 adobe2api 的前置改造未完成，见跨仓库依赖 #1）。
 - 四道闸门任一不满足时，响应体与 usage 与改动前逐字节一致。
-- 全部新单测通过；既有测试无新增失败（dev 分支已知 2 个预先存在的失败）。
+- 请求参数虽受支持但上游实际返回 transparent、非 PNG 或声明尺寸与图片不一致时，
+  同样逐字节透传。
+- 全部新单测通过；`go test ./...`、`go build ./...` 与 `go vet ./...` 全部通过。

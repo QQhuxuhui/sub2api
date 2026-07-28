@@ -46,6 +46,50 @@ func TestParsePricingData_ParsesPriorityAndServiceTierFields(t *testing.T) {
 	require.True(t, pricing.SupportsServiceTier)
 }
 
+func TestBillingService_GPTImage2UsesDistinctImageInputTokenPrice(t *testing.T) {
+	pricingSvc := &PricingService{}
+	data, err := pricingSvc.parsePricingData([]byte(`{
+		"gpt-image-2": {
+			"input_cost_per_token": 0.000005,
+			"input_cost_per_image_token": 0.000008,
+			"output_cost_per_token": 0.00001,
+			"output_cost_per_image_token": 0.00003,
+			"litellm_provider": "openai",
+			"mode": "image_generation"
+		}
+	}`))
+	require.NoError(t, err)
+	pricingSvc.pricingData = data
+	billingSvc := NewBillingService(&config.Config{}, pricingSvc)
+
+	cost, err := billingSvc.CalculateCost("gpt-image-2", UsageTokens{
+		InputTokens:       1518,
+		ImageInputTokens:  1508,
+		OutputTokens:      196,
+		ImageOutputTokens: 196,
+	}, 1)
+	require.NoError(t, err)
+	require.InDelta(t, 0.012114, cost.InputCost, 1e-12)
+	require.InDelta(t, 0.00588, cost.ImageOutputCost, 1e-12)
+	require.InDelta(t, 0.017994, cost.TotalCost, 1e-12)
+}
+
+func TestDefaultPricingIncludesGPTImage2DifferentialTokenPrices(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
+	require.NoError(t, err)
+	pricingSvc := &PricingService{}
+	pricingData, err := pricingSvc.parsePricingData(body)
+	require.NoError(t, err)
+	pricingSvc.pricingData = pricingData
+
+	pricing, err := NewBillingService(&config.Config{}, pricingSvc).GetModelPricing("gpt-image-2")
+	require.NoError(t, err)
+	require.InDelta(t, 5e-6, pricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 8e-6, pricing.ImageInputPricePerToken, 1e-12)
+	require.InDelta(t, 1e-5, pricing.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 3e-5, pricing.ImageOutputPricePerToken, 1e-12)
+}
+
 func TestBillingService_GPT56CacheWritePricingUsesOfficialMultiplier(t *testing.T) {
 	tests := []struct {
 		model             string

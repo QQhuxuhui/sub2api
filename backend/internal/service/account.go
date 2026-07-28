@@ -92,6 +92,9 @@ const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
 // openAIImagesHighResCredentialKey 标记账号可产出 2K/4K 高清图片（官方渠道不支持，需显式开启）。
 const openAIImagesHighResCredentialKey = "openai_images_highres"
 
+// openAIImagesUsageSimulationCredentialKey 标记账号启用 gpt-image-2 usage 模拟。
+const openAIImagesUsageSimulationCredentialKey = "openai_images_usage_simulation"
+
 const (
 	OpenAIAuthModePersonalAccessToken = "personalAccessToken"
 	openAIAuthModeCredentialKey       = "auth_mode"
@@ -1447,10 +1450,19 @@ func (a *Account) SupportsOpenAIImageCapability(capability OpenAIImagesCapabilit
 // SupportsOpenAIImagesHighRes 判断账号是否被标记为支持 2K/4K 高清出图。
 // 该能力为白名单语义：仅当凭据中显式开启时返回 true。
 func (a *Account) SupportsOpenAIImagesHighRes() bool {
-	if a == nil || a.Credentials == nil {
+	return a != nil && accountCredentialFlagEnabled(a.Credentials, openAIImagesHighResCredentialKey)
+}
+
+// SupportsOpenAIImagesUsageSimulation 判断账号是否显式启用 gpt-image-2 usage 模拟。
+func (a *Account) SupportsOpenAIImagesUsageSimulation() bool {
+	return a != nil && accountCredentialFlagEnabled(a.Credentials, openAIImagesUsageSimulationCredentialKey)
+}
+
+func accountCredentialFlagEnabled(credentials map[string]any, key string) bool {
+	if credentials == nil {
 		return false
 	}
-	raw, found := a.Credentials[openAIImagesHighResCredentialKey]
+	raw, found := credentials[key]
 	if !found || raw == nil {
 		return false
 	}
@@ -1467,6 +1479,11 @@ func (a *Account) SupportsOpenAIImagesHighRes() bool {
 		return value != 0
 	case int:
 		return value != 0
+	case int64:
+		return value != 0
+	case json.Number:
+		parsed, err := strconv.ParseFloat(value.String(), 64)
+		return err == nil && parsed != 0
 	default:
 		return false
 	}

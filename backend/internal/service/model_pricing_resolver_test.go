@@ -235,6 +235,29 @@ func newResolverWithChannel(t *testing.T, pricing []ChannelModelPricing) *ModelP
 	return NewModelPricingResolver(cs, bs)
 }
 
+// newResolverWithChannelAndBilling 同 newResolverWithChannel，但允许注入定制的 billing service
+// （用于让底价携带特定字段，验证渠道覆盖语义）。
+func newResolverWithChannelAndBilling(t *testing.T, pricing []ChannelModelPricing, bs *BillingService) *ModelPricingResolver {
+	t.Helper()
+	const groupID = 100
+	repo := &mockChannelRepository{
+		listAllFn: func(_ context.Context) ([]Channel, error) {
+			return []Channel{{
+				ID:           1,
+				Name:         "test-channel",
+				Status:       StatusActive,
+				GroupIDs:     []int64{groupID},
+				ModelPricing: pricing,
+			}}, nil
+		},
+		getGroupPlatformsFn: func(_ context.Context, _ []int64) (map[int64]string, error) {
+			return map[int64]string{groupID: "anthropic"}, nil
+		},
+	}
+	cs := NewChannelService(repo, nil, nil, nil)
+	return NewModelPricingResolver(cs, bs)
+}
+
 // groupIDPtr returns a pointer to groupID 100 (the test constant).
 func groupIDPtr() *int64 { v := int64(100); return &v }
 
@@ -288,6 +311,56 @@ func TestResolve_WithChannelOverride_TokenPartialOverride(t *testing.T) {
 	require.InDelta(t, 20e-6, resolved.BasePricing.InputPricePerToken, 1e-12)
 	// OutputPrice kept from base (fallback: 15e-6)
 	require.InDelta(t, 15e-6, resolved.BasePricing.OutputPricePerToken, 1e-12)
+}
+
+func TestResolve_WithChannelOverride_TokenImageInputPriceDoesNotLeak(t *testing.T) {
+	// 底价（LiteLLM 语义）带独立图片输入价 8e-6；渠道 token 定价没有图片输入价字段，
+	// 覆盖后必须归零（计费时回退到生效的 input 价），不得让 LiteLLM 价穿透。
+	newBS := func() *BillingService {
+		bs := newTestBillingServiceForResolver()
+		bs.fallbackPrices["gpt-image-2"] = &ModelPricing{
+			InputPricePerToken:       5e-6,
+			OutputPricePerToken:      1e-5,
+			ImageInputPricePerToken:  8e-6,
+			ImageOutputPricePerToken: 3e-5,
+		}
+		return bs
+	}
+
+	t.Run("flat override", func(t *testing.T) {
+		r := newResolverWithChannelAndBilling(t, []ChannelModelPricing{{
+			Platform:    "anthropic",
+			Models:      []string{"gpt-image-2"},
+			BillingMode: BillingModeToken,
+			InputPrice:  testPtrFloat64(3e-6),
+			OutputPrice: testPtrFloat64(15e-6),
+		}}, newBS())
+
+		resolved := r.Resolve(context.Background(), PricingInput{Model: "gpt-image-2", GroupID: groupIDPtr()})
+		require.NotNil(t, resolved)
+		require.Equal(t, "channel", resolved.Source)
+		require.NotNil(t, resolved.BasePricing)
+		require.InDelta(t, 3e-6, resolved.BasePricing.InputPricePerToken, 1e-18)
+		require.Zero(t, resolved.BasePricing.ImageInputPricePerToken)
+	})
+
+	t.Run("interval no-match fallback", func(t *testing.T) {
+		r := newResolverWithChannelAndBilling(t, []ChannelModelPricing{{
+			Platform:    "anthropic",
+			Models:      []string{"gpt-image-2"},
+			BillingMode: BillingModeToken,
+			Intervals: []PricingInterval{
+				{MinTokens: 1_000_000, MaxTokens: nil, InputPrice: testPtrFloat64(2e-6), OutputPrice: testPtrFloat64(8e-6)},
+			},
+		}}, newBS())
+
+		resolved := r.Resolve(context.Background(), PricingInput{Model: "gpt-image-2", GroupID: groupIDPtr()})
+		require.NotNil(t, resolved)
+		// 低于区间下限 → 回退 BasePricing 克隆，同样不得携带 LiteLLM 图片输入价
+		pricing := r.GetIntervalPricing(resolved, 100)
+		require.NotNil(t, pricing)
+		require.Zero(t, pricing.ImageInputPricePerToken)
+	})
 }
 
 func TestResolve_WithChannelOverride_TokenWithIntervals(t *testing.T) {

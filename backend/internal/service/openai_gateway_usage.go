@@ -372,7 +372,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 			return s.calculateOpenAIVideoCost(ctx, billingModel, apiKey, result, videoMultiplier), nil
 		}
 	}
-	if result != nil && result.ImageCount > 0 {
+	if result != nil && result.ImageCount > 0 && !result.ImageUsageSimulated {
 		// 渠道定价为 token 计费时走 token 路径，否则走图片计费
 		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
 			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
@@ -387,7 +387,9 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		if candidate == "" {
 			continue
 		}
-		cost, err := s.calculateOpenAIRecordUsageTokenCost(ctx, apiKey, candidate, multiplier, tokens, serviceTier)
+		cost, err := s.calculateOpenAIRecordUsageTokenCost(
+			ctx, apiKey, candidate, multiplier, tokens, serviceTier, result != nil && result.ImageUsageSimulated,
+		)
 		if err == nil {
 			return cost, nil
 		}
@@ -435,10 +437,11 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 	multiplier float64,
 	tokens UsageTokens,
 	serviceTier string,
+	forceTokenMode bool,
 ) (*CostBreakdown, error) {
 	if s.resolver != nil && apiKey.Group != nil {
 		gid := apiKey.Group.ID
-		return s.billingService.CalculateCostUnified(CostInput{
+		input := CostInput{
 			Ctx:            ctx,
 			Model:          billingModel,
 			GroupID:        &gid,
@@ -447,9 +450,29 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 			RateMultiplier: multiplier,
 			ServiceTier:    serviceTier,
 			Resolver:       s.resolver,
-		})
+		}
+		if forceTokenMode {
+			input.Resolved = s.resolver.Resolve(ctx, PricingInput{Model: billingModel, GroupID: &gid})
+			if input.Resolved != nil && input.Resolved.Mode == BillingModeToken {
+				cost, err := s.billingService.CalculateCostUnified(input)
+				if err == nil && cost != nil && cost.BillingMode == "" {
+					cost.BillingMode = string(BillingModeToken)
+				}
+				return cost, err
+			}
+		} else {
+			cost, err := s.billingService.CalculateCostUnified(input)
+			if err == nil && cost != nil && cost.BillingMode == "" {
+				cost.BillingMode = string(BillingModeToken)
+			}
+			return cost, err
+		}
 	}
-	return s.billingService.CalculateCostWithServiceTier(billingModel, tokens, multiplier, serviceTier)
+	cost, err := s.billingService.CalculateCostWithServiceTier(billingModel, tokens, multiplier, serviceTier)
+	if err == nil && cost != nil && cost.BillingMode == "" {
+		cost.BillingMode = string(BillingModeToken)
+	}
+	return cost, err
 }
 
 func (s *OpenAIGatewayService) calculateOpenAIImageCost(

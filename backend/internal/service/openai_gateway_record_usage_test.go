@@ -2268,6 +2268,29 @@ func newOpenAIImageChannelPricingResolverForTest(t *testing.T, groupID int64, mo
 	return NewModelPricingResolver(cs, NewBillingService(&config.Config{}, nil))
 }
 
+// newOpenAITokenChannelPricingResolverWithLiteLLMForTest 构造 flat token 渠道定价的 resolver，
+// 且其内部 billing service 带有 LiteLLM 定价数据——用于验证 LiteLLM 的
+// input_cost_per_image_token 不会穿透渠道定价。
+func newOpenAITokenChannelPricingResolverWithLiteLLMForTest(t *testing.T, groupID int64, model string, pricingSvc *PricingService) *ModelPricingResolver {
+	t.Helper()
+	inputPrice := 3e-6
+	outputPrice := 15e-6
+	imageOutputPrice := 15e-6
+	cache := newEmptyChannelCache()
+	cache.pricingByGroupModel[channelModelKey{groupID: groupID, model: model}] = &ChannelModelPricing{
+		BillingMode:      BillingModeToken,
+		InputPrice:       &inputPrice,
+		OutputPrice:      &outputPrice,
+		ImageOutputPrice: &imageOutputPrice,
+	}
+	cache.channelByGroupID[groupID] = &Channel{ID: groupID, Status: StatusActive}
+	cache.groupPlatform[groupID] = ""
+	cache.loadedAt = time.Now()
+	cs := &ChannelService{}
+	cs.cache.Store(cache)
+	return NewModelPricingResolver(cs, NewBillingService(&config.Config{}, pricingSvc))
+}
+
 func newOpenAITokenImageChannelPricingResolverForTest(t *testing.T, groupID int64, model string) *ModelPricingResolver {
 	t.Helper()
 	inputPrice := 3e-6

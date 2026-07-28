@@ -1358,6 +1358,31 @@ func TestGetModelPricingWithChannel_OverrideOutputPriceOnly(t *testing.T) {
 	require.InDelta(t, 3e-6, pricing.InputPricePerToken, 1e-12)
 }
 
+func TestGetModelPricingWithChannel_ImageInputPriceDoesNotLeak(t *testing.T) {
+	// LiteLLM 底价带独立图片输入价 8e-6；渠道定价没有图片输入价字段，
+	// 覆盖后必须归零（计费时回退到生效的 input 价），不得让 LiteLLM 价穿透。
+	pricingSvc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"gpt-image-2": {
+			InputCostPerToken:       5e-6,
+			InputCostPerImageToken:  8e-6,
+			OutputCostPerToken:      1e-5,
+			OutputCostPerImageToken: 3e-5,
+		},
+	}}
+	svc := NewBillingService(&config.Config{}, pricingSvc)
+
+	base, err := svc.GetModelPricing("gpt-image-2")
+	require.NoError(t, err)
+	require.InDelta(t, 8e-6, base.ImageInputPricePerToken, 1e-18, "无渠道定价时 LiteLLM 图片输入价应生效")
+
+	pricing, err := svc.GetModelPricingWithChannel("gpt-image-2", &ChannelModelPricing{
+		InputPrice: testPtrFloat64(3e-6),
+	})
+	require.NoError(t, err)
+	require.InDelta(t, 3e-6, pricing.InputPricePerToken, 1e-18)
+	require.Zero(t, pricing.ImageInputPricePerToken)
+}
+
 func TestGetModelPricingWithChannel_OverrideAllFields(t *testing.T) {
 	svc := newTestBillingService()
 

@@ -2842,6 +2842,38 @@ func TestExtractOpenAIUsageFromJSONBytes_AcceptsResponseAndChatUsageShapes(t *te
 	require.Zero(t, usage.CacheReadInputTokens, "官方嵌套缓存读取字段显式为零时仍应优先于兼容顶层别名")
 }
 
+func TestExtractOpenAIUsageFromJSONBytes_ReadsImageInputTokens(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{
+			name: "responses usage",
+			body: `{"usage":{"input_tokens":1518,"input_tokens_details":{"image_tokens":1508,"text_tokens":10},"output_tokens":196,"output_tokens_details":{"image_tokens":196}}}`,
+			want: 1508,
+		},
+		{
+			name: "chat compatibility alias",
+			body: `{"usage":{"prompt_tokens":714,"prompt_tokens_details":{"image_tokens":704,"text_tokens":10},"completion_tokens":196,"completion_tokens_details":{"image_tokens":196}}}`,
+			want: 704,
+		},
+		{
+			name: "absent",
+			body: `{"usage":{"input_tokens":54,"output_tokens":229}}`,
+			want: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usage, ok := extractOpenAIUsageFromJSONBytes([]byte(tt.body))
+			require.True(t, ok)
+			require.Equal(t, tt.want, usage.ImageInputTokens)
+		})
+	}
+}
+
 func TestExtractCodexFinalResponse_SampleReplay(t *testing.T) {
 	body := strings.Join([]string{
 		`event: message`,
