@@ -651,6 +651,12 @@ func TestOpenAIImageOutputTokensMeasuredCells(t *testing.T) {
 		{"21:9", ImageBillingSize1K, "low", 82},
 		{"21:9", ImageBillingSize1K, "medium", 733},
 		{"21:9", ImageBillingSize1K, "high", 2863},
+		// 以下为 2026-07-28 补测格，刻意选取与早期推导值不同者，防止回填抄错
+		{"1:1", ImageBillingSize4K, "medium", 5930},  // 早期推导 5845
+		{"1:1", ImageBillingSize4K, "high", 23719},   // 早期推导 23380
+		{"5:4", ImageBillingSize1K, "high", 5551},    // 早期推导 5480
+		{"3:2", ImageBillingSize2K, "medium", 2363},  // 早期推导 2404
+		{"21:9", ImageBillingSize4K, "high", 7729},   // 早期推导 7804
 	}
 	for _, tc := range cases {
 		got, ok := openAIImageOutputTokens(tc.ratio, tc.tier, tc.quality)
@@ -687,11 +693,10 @@ import 增补 `"fmt"`，追加：
 ```go
 // openAIImageTokenCell 是三维 token 表的一格：给定比例与尺寸档下的三个 quality 值。
 //
-// 数据来源 docs/GPT_IMAGE_2_TOKEN_REFERENCE.md。low 列 18 格全部实测；
-// medium/high 共 11 格实测，其余 25 格由 medium = round(low × 8.87)、
-// high = round(medium × 4.0) 推导（4.0 有两处实测确认：7024/1756、13342/3336）。
-// 实测倍率在 8.709~8.992 间浮动，故推导格带 ±2~3% 误差，
-// 上线前应按计划末尾的「上线前置事项」补测替换。
+// 数据来源 docs/GPT_IMAGE_2_TOKEN_REFERENCE.md §4：**54 格全部实测**，无推导值。
+// 倍率不可用于外推：med/low 跨比例从 3:2 的 8.71 到 21:9 的 9.00，
+// high/med 从 21:9 的 3.905 到 5:4 的 4.052；早期按全局倍率推导时
+// 21:9 的 1K high 推得 2944 而实测 2863（−2.8%）。
 type openAIImageTokenCell struct {
 	Size   string
 	Low    int
@@ -704,32 +709,32 @@ var openAIImageTokenTable = map[string]map[string]openAIImageTokenCell{
 	"1:1": {
 		ImageBillingSize1K: {"1024x1024", 196, 1756, 7024},
 		ImageBillingSize2K: {"2048x2048", 397, 3568, 14272},
-		ImageBillingSize4K: {"2880x2880", 659, 5845, 23380},
+		ImageBillingSize4K: {"2880x2880", 659, 5930, 23719},
 	},
 	"5:4": {
-		ImageBillingSize1K: {"1120x896", 157, 1370, 5480},
-		ImageBillingSize2K: {"2240x1792", 313, 2776, 11104},
-		ImageBillingSize4K: {"3200x2560", 530, 4701, 18804},
+		ImageBillingSize1K: {"1120x896", 157, 1370, 5551},
+		ImageBillingSize2K: {"2240x1792", 313, 2743, 11115},
+		ImageBillingSize4K: {"3200x2560", 530, 4648, 18835},
 	},
 	"4:3": {
 		ImageBillingSize1K: {"1152x864", 144, 1294, 5176},
-		ImageBillingSize2K: {"2304x1728", 288, 2555, 10220},
-		ImageBillingSize4K: {"3264x2448", 480, 4258, 17032},
+		ImageBillingSize2K: {"2304x1728", 288, 2584, 10336},
+		ImageBillingSize4K: {"3264x2448", 480, 4316, 17264},
 	},
 	"3:2": {
-		ImageBillingSize1K: {"1248x832", 134, 1167, 4668},
-		ImageBillingSize2K: {"2496x1664", 271, 2404, 9616},
-		ImageBillingSize4K: {"3504x2336", 449, 3983, 15932},
+		ImageBillingSize1K: {"1248x832", 134, 1167, 4667},
+		ImageBillingSize2K: {"2496x1664", 271, 2363, 9452},
+		ImageBillingSize4K: {"3504x2336", 449, 3912, 15645},
 	},
 	"16:9": {
-		ImageBillingSize1K: {"1280x720", 106, 947, 3788},
-		ImageBillingSize2K: {"2560x1440", 205, 1818, 7272},
+		ImageBillingSize1K: {"1280x720", 106, 947, 3787},
+		ImageBillingSize2K: {"2560x1440", 205, 1843, 7370},
 		ImageBillingSize4K: {"3840x2160", 371, 3336, 13342},
 	},
 	"21:9": {
 		ImageBillingSize1K: {"1456x624", 82, 733, 2863},
-		ImageBillingSize2K: {"3024x1296", 166, 1472, 5888},
-		ImageBillingSize4K: {"3696x1584", 220, 1951, 7804},
+		ImageBillingSize2K: {"3024x1296", 166, 1492, 5825},
+		ImageBillingSize4K: {"3696x1584", 220, 1980, 7729},
 	},
 }
 
@@ -1893,41 +1898,10 @@ git commit -m "feat(images): 转发链路接入 usage 模拟（四道闸门门�
 
 ## 上线前置事项
 
-### 1. 补测 25 个推导格（可选但强烈建议）
+### 1. token 表已全量实测，无需补测
 
-当前 54 格中 **29 格实测、25 格推导**。推导用 `med = round(low × 8.87)`、
-`high = round(med × 4.0)`，而实测倍率在 **8.709 ~ 8.992** 间浮动，
-已知反例：21:9 的 1K high 推导 2944、实测 **2863**（−2.8%）。
-
-若要求精确计费，用下列脚本补齐（估算成本 **约 $5.8**、约 25 次调用）：
-
-```bash
-KEY=<官方直连 key>
-BASE=<官方直连网关>
-P="a plain blue circle centered on a white background"
-for spec in \
-  "2048x2048 high" "2880x2880 medium" "2880x2880 high" \
-  "1120x896 high" "2240x1792 medium" "2240x1792 high" \
-  "3200x2560 medium" "3200x2560 high" \
-  "1152x864 high" "2304x1728 medium" "2304x1728 high" \
-  "3264x2448 medium" "3264x2448 high" \
-  "1248x832 high" "2496x1664 medium" "2496x1664 high" \
-  "3504x2336 medium" "3504x2336 high" \
-  "1280x720 high" "2560x1440 medium" "2560x1440 high" \
-  "3024x1296 medium" "3024x1296 high" \
-  "3696x1584 medium" "3696x1584 high"
-do
-  set -- $spec
-  echo -n "$1 $2 -> "
-  curl -sS "$BASE/v1/images/generations" -H "Authorization: Bearer $KEY" \
-    -H "Content-Type: application/json" \
-    -d "{\"model\":\"gpt-image-2\",\"prompt\":\"$P\",\"size\":\"$1\",\"quality\":\"$2\"}" \
-    --max-time 600 \
-  | python3 -c "import sys,json;print(json.load(sys.stdin)['usage']['output_tokens_details']['image_tokens'])"
-done
-```
-
-拿到实测值后替换 `openAIImageTokenTable` 中对应字段，并把注释里的「推导」改为「实测」。
+54 格（6 比例 × 3 尺寸档 × 3 quality）已于 2026-07-28 全部实测完毕，表中不含任何推导值。
+若日后官方调整计价，用 `docs/GPT_IMAGE_2_TOKEN_REFERENCE.md` §11 的复现命令重测即可。
 
 ### 2. 决定 codex 账号（1118）是否打标记
 
