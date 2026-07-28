@@ -15,6 +15,14 @@
 > ①token 表由「尺寸档兼作 quality」改为真实三维；②新增模型白名单与请求能力门控；
 > ③几何由「最近比例吸附」改为「30 组精确尺寸匹配，未命中即降级」；
 > ④远程输入图改用上游聚合值兜底；⑤base64 单次解码。
+>
+> **v2.1 说明**：核对 adobe2api 实际实现后的三项调整（详见设计文档同名小节）：
+> ⑥闸门 3 增加 `response_format` —— adobe2api 支持 `response_format=url`，
+> 此时无 `b64_json` 可解码，而官方响应根本没有 `url` 字段（Task 3）；
+> ⑦`resolveOpenAIImageGeometry` **删除**「回落请求侧 size」这一级 ——
+> adobe2api 有 `fallback_aspect_ratio`，请求尺寸 ≠ 出图尺寸，按它查表会计到别的格（Task 6）；
+> ⑧上游聚合值兜底新增跨仓库前置条件 —— adobe2api 写死 `INPUT_IMAGE_TOKENS = 300`，
+> 不先改就会在主用例上采信假值（Task 7 + 上线前置事项 0）。
 
 ## Global Constraints
 
@@ -311,6 +319,9 @@ func TestOpenAIImagesRequestSimulatable(t *testing.T) {
 		{"jpeg", func(r *OpenAIImagesRequest) { r.OutputFormat = "jpeg" }},
 		{"compression", func(r *OpenAIImagesRequest) { r.OutputCompression = &two }},
 		{"input fidelity", func(r *OpenAIImagesRequest) { r.InputFidelity = "high" }},
+		// adobe2api 支持 response_format=url（generation.py:394,941），此时响应里没有
+		// b64_json 可解码；而官方 gpt-image-2 的响应根本没有 url 字段，改写它自相矛盾。
+		{"response_format url", func(r *OpenAIImagesRequest) { r.ResponseFormat = "url" }},
 	}
 	for _, tc := range blocked {
 		t.Run(tc.name, func(t *testing.T) {
@@ -326,8 +337,9 @@ func TestOpenAIImagesRequestSimulatable(t *testing.T) {
 	allowed := clean()
 	allowed.Background = "opaque"
 	allowed.OutputFormat = "png"
+	allowed.ResponseFormat = "b64_json"
 	if !openAIImagesRequestSimulatable(allowed) {
-		t.Errorf("explicit opaque/png should still be simulatable")
+		t.Errorf("explicit opaque/png/b64_json should still be simulatable")
 	}
 }
 ```
@@ -399,6 +411,13 @@ func openAIImagesRequestSimulatable(parsed *OpenAIImagesRequest) bool {
 		return false // JPEG/WebP 未实测
 	}
 	if parsed.OutputCompression != nil || strings.TrimSpace(parsed.InputFidelity) != "" {
+		return false
+	}
+	// response_format 必须显式挡在这里，不能指望 openAIImagesCapability
+	// （openai_images.go:509）—— 那是路由能力判定，标记账号若也具备 native 能力仍会命中。
+	// 挡它的理由：官方响应只有 b64_json、根本没有 url 字段；且 adobe2api 走 url 分支时
+	// 响应里没有 b64_json，闸门 4 的尺寸来源与 output_format 都无从取得。
+	if format := strings.ToLower(strings.TrimSpace(parsed.ResponseFormat)); format != "" && format != "b64_json" {
 		return false
 	}
 	return true
@@ -867,7 +886,7 @@ v1 对同一份 base64 解码两次（一次取宽高、一次取格式），4K 
 **Interfaces:**
 - Produces:
   - `func decodeImageMeta(encoded string) (w, h int, format string, ok bool)`
-  - `func resolveOpenAIImageGeometry(body []byte, requestSize string) (openAIImageGeometry, string, bool)`（第二个返回值为图像格式，空串表示未知）
+  - `func resolveOpenAIImageGeometry(body []byte) (openAIImageGeometry, string, bool)`（第二个返回值为图像格式，空串表示未知；**不接受请求侧 size**，见下）
 
 - [ ] **Step 1: 写失败测试**
 
@@ -903,7 +922,7 @@ func TestDecodeImageMeta(t *testing.T) {
 
 func TestResolveOpenAIImageGeometryFromSizeField(t *testing.T) {
 	body := []byte(`{"size":"2048x2048","data":[{"b64_json":"aGk="}]}`)
-	geom, _, ok := resolveOpenAIImageGeometry(body, "")
+	geom, _, ok := resolveOpenAIImageGeometry(body)
 	if !ok || geom.Ratio != "1:1" || geom.Tier != ImageBillingSize2K {
 		t.Fatalf("geom = %+v ok=%v", geom, ok)
 	}
@@ -911,7 +930,7 @@ func TestResolveOpenAIImageGeometryFromSizeField(t *testing.T) {
 
 func TestResolveOpenAIImageGeometryFromB64(t *testing.T) {
 	body := []byte(`{"data":[{"b64_json":"` + pngBase64(t, 1280, 720) + `"}]}`)
-	geom, format, ok := resolveOpenAIImageGeometry(body, "")
+	geom, format, ok := resolveOpenAIImageGeometry(body)
 	if !ok || geom.Ratio != "16:9" || geom.Tier != ImageBillingSize1K {
 		t.Fatalf("geom = %+v ok=%v", geom, ok)
 	}
@@ -920,24 +939,27 @@ func TestResolveOpenAIImageGeometryFromB64(t *testing.T) {
 	}
 }
 
-func TestResolveOpenAIImageGeometryFromRequestSize(t *testing.T) {
+// 只有 url 没有 b64_json 时必须降级，不得拿请求尺寸顶上：
+// adobe2api 的 resolve_image_geometry 有 output_size 映射与 fallback_aspect_ratio，
+// 请求尺寸 ≠ 出图尺寸，按它查表会计到另一格上去。
+// （函数签名本身已不接受请求尺寸，这个用例守住的是「不要再把它加回来」。）
+func TestResolveOpenAIImageGeometryURLOnlyBody(t *testing.T) {
 	body := []byte(`{"data":[{"url":"https://example.com/a.png"}]}`)
-	geom, _, ok := resolveOpenAIImageGeometry(body, "3024x1296")
-	if !ok || geom.Ratio != "21:9" || geom.Tier != ImageBillingSize2K {
-		t.Fatalf("geom = %+v ok=%v", geom, ok)
+	if _, _, ok := resolveOpenAIImageGeometry(body); ok {
+		t.Errorf("url-only body must not resolve geometry")
 	}
 }
 
 // 出图尺寸不在已知 30 组内时必须降级。
 func TestResolveOpenAIImageGeometryUnknownSize(t *testing.T) {
 	body := []byte(`{"size":"1672x941","data":[{"b64_json":"aGk="}]}`)
-	if _, _, ok := resolveOpenAIImageGeometry(body, ""); ok {
+	if _, _, ok := resolveOpenAIImageGeometry(body); ok {
 		t.Errorf("codex size 1672x941 should not resolve")
 	}
-	if _, _, ok := resolveOpenAIImageGeometry([]byte(`{"data":[]}`), ""); ok {
+	if _, _, ok := resolveOpenAIImageGeometry([]byte(`{"data":[]}`)); ok {
 		t.Errorf("empty data should not resolve")
 	}
-	if _, _, ok := resolveOpenAIImageGeometry([]byte("not json"), ""); ok {
+	if _, _, ok := resolveOpenAIImageGeometry([]byte("not json")); ok {
 		t.Errorf("invalid json should not resolve")
 	}
 }
@@ -977,9 +999,14 @@ func decodeImageMeta(encoded string) (int, int, string, bool) {
 }
 
 // resolveOpenAIImageGeometry 按优先级取出图几何，并顺带返回图像格式（可能为空）。
-// 三级来源：响应体 size 字段 → 首张 b64_json 图像头 → 请求侧 size。
+// 只有两级来源：响应体 size 字段 → 首张 b64_json 图像头。
 // 得到的尺寸必须命中已知 30 组，否则返回 ok=false。
-func resolveOpenAIImageGeometry(body []byte, requestSize string) (openAIImageGeometry, string, bool) {
+//
+// 刻意不接受请求侧 size：adobe2api 的 resolve_image_geometry 带 output_size 映射与
+// fallback_aspect_ratio，请求的比例 Firefly 不支持时会落到别的比例，出图尺寸随之改变，
+// 按请求尺寸查表会计到另一格上去。闸门 3 已挡掉 response_format=url，
+// 所以 b64_json 必然存在；解码不出来就说明这个响应不是我们理解的形态，应当降级而不是猜。
+func resolveOpenAIImageGeometry(body []byte) (openAIImageGeometry, string, bool) {
 	if w, h, ok := parseWidthHeight(gjson.GetBytes(body, "size").String()); ok {
 		if geom, found := lookupOpenAIImageSize(w, h); found {
 			return geom, "", true
@@ -991,12 +1018,6 @@ func resolveOpenAIImageGeometry(body []byte, requestSize string) (openAIImageGeo
 			if geom, found := lookupOpenAIImageSize(w, h); found {
 				return geom, format, true
 			}
-			return openAIImageGeometry{}, "", false
-		}
-	}
-	if w, h, ok := parseWidthHeight(requestSize); ok {
-		if geom, found := lookupOpenAIImageSize(w, h); found {
-			return geom, "", true
 		}
 	}
 	return openAIImageGeometry{}, "", false
@@ -1026,6 +1047,14 @@ git commit -m "feat(images): 出图几何解析改为精确尺寸匹配并单次
 
 `openai_images.go:283` 明确支持远程 `images[].image_url`，网关不下载这些图。
 v1 直接跳过 http URL 再求和 → 远程改图的输入图 token 归 0。
+
+> **⚠️ 本任务有跨仓库前置条件，先看「上线前置事项 0」再动手。**
+> 兜底采信的是上游 `usage.input_tokens_details.image_tokens`。链路 A（官方直连）给的是真值；
+> **链路 C（adobe2api）写死 `INPUT_IMAGE_TOKENS = 300`**（`core/models/resolver.py:33`），
+> 与图像尺寸无关。而「标记账号 = adobe + 远程 image_url 改图」正是主用例，
+> 必然走到这条兜底 —— 不先改 adobe2api，这里就是在用假值计费（1024×1024 少收 71%）。
+> sub2api 侧无法在运行时分辨真假（响应体上没有可判别标记），故按前置条件处理，
+> 本任务的代码逻辑不变。
 
 **Files:**
 - Modify: `backend/internal/service/openai_images_usage_simulation.go`
@@ -1144,6 +1173,9 @@ func resolveOpenAIImagesInputTokens(body []byte, parsed *OpenAIImagesRequest) (i
 	if !unknown {
 		return total, true
 	}
+	// 前置条件：上游给的聚合值必须是真的。链路 A 成立；链路 C（adobe2api）在
+	// INPUT_IMAGE_TOKENS = 300 未改成 patch 公式之前不成立 —— 见「上线前置事项 0」。
+	// 这里只能挡掉「缺失 / 为 0」这种明显不可信的，分辨不了「是个假的正数」。
 	upstream := int(gjson.GetBytes(body, "usage.input_tokens_details.image_tokens").Int())
 	if upstream <= 0 {
 		return 0, false
@@ -1657,7 +1689,7 @@ func applyOpenAIImagesUsageSimulation(
 	if !ok {
 		return body, OpenAIUsage{}, false
 	}
-	geom, format, ok := resolveOpenAIImageGeometry(body, parsed.Size)
+	geom, format, ok := resolveOpenAIImageGeometry(body)
 	if !ok {
 		return body, OpenAIUsage{}, false
 	}
@@ -1815,6 +1847,26 @@ func TestForwardOpenAIImagesSimulationRemoteEdits(t *testing.T) {
 		t.Errorf("ImageInputTokens = %d, want 1508 (upstream aggregate)", usage.ImageInputTokens)
 	}
 }
+
+// response_format=url：adobe2api 只回 data[].url，没有 b64_json；
+// 官方响应也没有 url 字段。整条必须原样透传。
+func TestForwardOpenAIImagesSimulationResponseFormatURL(t *testing.T) {
+	raw := `{"model":"gpt-image-2","data":[{"url":"http://adobe2api:6001/generated/x.png"}],` +
+		`"usage":{"input_tokens":10,"output_tokens":1056,"total_tokens":1066}}`
+	account := &Account{Credentials: map[string]any{"openai_images_usage_simulation": true}}
+	parsed := &OpenAIImagesRequest{
+		Model: "gpt-image-2", Prompt: "night", Size: "1024x1024", N: 1,
+		ResponseFormat: "url",
+		Endpoint:       openAIImagesGenerationsEndpoint,
+	}
+	out, _, applied := maybeSimulateOpenAIImagesUsage([]byte(raw), account, parsed)
+	if applied {
+		t.Fatalf("response_format=url must not be simulated")
+	}
+	if string(out) != raw {
+		t.Errorf("body must pass through byte-for-byte")
+	}
+}
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -1898,6 +1950,23 @@ git commit -m "feat(images): 转发链路接入 usage 模拟（四道闸门门�
 
 ## 上线前置事项
 
+### 0. 【阻塞】改掉 adobe2api 写死的 `INPUT_IMAGE_TOKENS = 300`
+
+**不做这项就不要给 adobe 账号打标记**，否则主用例上的输入图 token 是假的。
+
+- 位置：`adobe2api/core/models/resolver.py:33`，`build_image_usage` 里 `img_in = 张数 × 300`。
+- 改法：换成本方案 Task 4 的 patch 公式（adobe2api 手里有图片字节，能精确算）：
+  `max(w,h) < 1024` 时按 `min(2.0, 1024/max(w,h))` 放大 → `ceil(w/32) * ceil(h/32)`
+  → 超过 1536 patch 则等比缩小。
+- 配套：`tests/test_images_edits.py:157,183,539` 三处断言 `== 300 / 600` 需同步改成按尺寸算的期望值。
+- 验收：同一张 1024×1024 输入图，`input_tokens_details.image_tokens` 应为 **1024**（不再是 300）；
+  换成 3840×2160 应为 **1508**。
+
+顺带（不阻塞本方案）：`_GPT_IMAGE_OUTPUT_TOKENS` 仍是 gpt-image-1 的 3×3 表、
+`_RES_TO_QUALITY` 仍把 1K/2K/4K 当 low/medium/high。打了标记的账号会被 sub2api 整体覆盖，
+但**未打标记的账号照旧按错口径计费**。是否一并换成 18 格表 × 质量倍率，
+以及倍率选哪一档（4K 16:9 单图 low $0.011 / medium $0.100 / high $0.400），是待拍板的定价决策。
+
 ### 1. token 表已全量实测，无需补测
 
 54 格（6 比例 × 3 尺寸档 × 3 quality）已于 2026-07-28 全部实测完毕，表中不含任何推导值。
@@ -1913,6 +1982,10 @@ git commit -m "feat(images): 转发链路接入 usage 模拟（四道闸门门�
 在目标账号 credentials 加 `"openai_images_usage_simulation": true`，
 先观察 `usage_logs.image_output_tokens` 与 `total_cost` 是否符合三维表，再全量。
 
+灰度期必查一项：拿两张尺寸差别大的远程图各打一次改图，
+`usage_logs.image_input_tokens` 必须**跟着尺寸变**。若两次都等于 `张数 × 300`，
+说明前置事项 0 没生效，此时的输入图计费是假的，应立刻摘掉标记。
+
 ## 验收标准
 
 - 打标记账号的响应 `usage` 结构与官方一致；`background`/`output_format`/`quality`/`size` 齐备；
@@ -1921,6 +1994,8 @@ git commit -m "feat(images): 转发链路接入 usage 模拟（四道闸门门�
   与官方一致。
 - `usage_logs.image_output_tokens` 等于三维表对应格；
   `total_cost = image_output × 30/1M + text_input × 5/1M + image_input × 8/1M`。
-- 远程 URL 改图的 `ImageInputTokens` 非 0（走上游聚合值）。
+- 远程 URL 改图的 `ImageInputTokens` 非 0（走上游聚合值），**且随输入图尺寸变化**
+  —— 恒为 `张数 × 300` 说明上线前置事项 0 未完成。
+- `response_format=url` 的请求不被模拟，`data[].url` 原样透传。
 - 四道闸门任一不满足时响应体与 usage 逐字节不变。
 - `go build ./...`、`go vet ./internal/service/` 通过；测试无新增失败。
