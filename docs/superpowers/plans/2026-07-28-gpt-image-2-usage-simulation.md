@@ -2,44 +2,53 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让被标记账号返回的 `/v1/images/*` 响应在 usage 与响应体字段上与官方 gpt-image-2 完全一致，并按实测 token 表计费。
+**Goal:** 让被标记账号的 `/v1/images/*` 响应在 usage 结构与官方 gpt-image-2 一致，并按实测三维 token 表（比例 × 尺寸档 × quality）计费。
 
-**Architecture:** 新增一个纯函数模块，把「几何归一 → 查 token 表 → 合成 usage → 改写响应体」串成一条链。合成出的同一份数据既写入响应体又作为计费 usage 返回，两者口径由单测守住不变量。唯一接入点是 `handleOpenAIImagesNonStreamingResponse`，在 `c.Data` 写出前拦截。
+**Architecture:** 一个纯函数模块，先过四道闸门（账号标记 / 模型白名单 / 请求能力 / 几何精确匹配），任一不过即原样透传；通过后合成 usage，同一份数据既写入响应体又作为计费 usage 返回，一致性由单测守住。唯一接入点是 `handleOpenAIImagesNonStreamingResponse`，在 `c.Data` 写出前拦截。
 
-**Tech Stack:** Go；`github.com/tidwall/gjson`（读）+ `github.com/tidwall/sjson`（写）；`image.DecodeConfig`（只读图像头取宽高）；标准库 `testing`（表驱动，与 `gemini_pro_image_mask_test.go` 同风格，不引入 testify）。
+**Tech Stack:** Go；`tidwall/gjson`（读）+ `tidwall/sjson`（写）；`image.DecodeConfig`（单次解码取宽高与格式）；标准库 `testing`（表驱动，与 `gemini_pro_image_mask_test.go` 同风格，不引入 testify）。
 
 设计文档：`docs/superpowers/specs/2026-07-28-gpt-image-2-usage-simulation-design.md`
 数据来源：`docs/GPT_IMAGE_2_TOKEN_REFERENCE.md`
 
+> **v2 说明**：本计划为采纳代码评审 5 项 P1 后的重写版。相对 v1 的实质改动：
+> ①token 表由「尺寸档兼作 quality」改为真实三维；②新增模型白名单与请求能力门控；
+> ③几何由「最近比例吸附」改为「30 组精确尺寸匹配，未命中即降级」；
+> ④远程输入图改用上游聚合值兜底；⑤base64 单次解码。
+
 ## Global Constraints
 
 - 包名 `service`，全部新代码放在 `backend/internal/service/`。
-- 未打标记的账号必须**零行为变化**（响应体逐字节一致、usage 一致）。
-- 任何失败路径一律降级为「原样透传 + 原 usage」，**不得让请求失败**。
+- 四道闸门任一不过 → `applied=false`，响应体与 usage **逐字节不变**。
+- 任何失败路径一律降级为透传，**不得让请求失败**。
 - 不得触碰 `data[].b64_json` / `data[].url` 的内容。
-- 计费档位映射为**自定义**：1K→low、2K→medium、4K→high（官方 quality 与 size 本是正交维度），实现中必须写明该偏离。
-- 档位判定按**总像素**，不得按最长边（21:9 的 2K 是 3024×1296，长边会误判）。
-- dev 分支存在 2 个预先存在的失败用例，验收以「与基线对比无新增失败」为准，而非绝对全绿。
-- `docs/*` 在 `.gitignore` 中，文档类改动需 `git add -f`。
+- **不得覆盖用户显式指定的字段**（尤其 `background`）。
+- 档位由**精确尺寸查表**得出，不做最近比例吸附。
+- `quality` 取请求值，`auto`/缺省 → `low`（已实测：官方自身即回显 low）。
+- 目标表述为「**结构与官方一致**」，不是「逐字节不可分辨」（`model` 字段保留，见设计文档已知差异 1）。
+- 仓库**没有** `backend/internal/service/account_test.go`；账号相关单测统一放新建的
+  `openai_images_usage_simulation_test.go`（highres 的同类测试在 `openai_images_highres_test.go`）。
+- dev 分支存在 2 个预先存在的失败用例，验收以「无新增失败」为准。
+- `docs/*` 在 `.gitignore` 中，文档改动需 `git add -f`。
 
 ## File Structure
 
 | 文件 | 职责 |
 |---|---|
-| `backend/internal/service/openai_images_usage_simulation.go`（新建） | 几何归一、token 表、输入图 token 公式、合成器、响应体改写、编排入口 |
-| `backend/internal/service/openai_images_usage_simulation_test.go`（新建） | 上述全部单元测试 + 一致性不变量测试 |
-| `backend/internal/service/account.go`（修改） | 新增 credentials 标记常量与 `SupportsOpenAIImagesUsageSimulation()` |
-| `backend/internal/service/account_test.go`（修改） | 标记解析的单测 |
+| `backend/internal/service/openai_images_usage_simulation.go`（新建） | 四道闸门、三维 token 表、输入图 token、合成器、响应体改写、编排 |
+| `backend/internal/service/openai_images_usage_simulation_test.go`（新建） | 全部单测 + 一致性不变量 + 账号标记测试 |
+| `backend/internal/service/account.go`（修改） | 凭据标记常量 + `SupportsOpenAIImagesUsageSimulation()` |
 | `backend/internal/service/openai_gateway_response_handling.go:747`（修改） | `openAIUsageFromGJSON` 补读 `input_tokens_details.image_tokens` |
-| `backend/internal/service/openai_gateway_response_handling_test.go`（修改） | 上述补丁的单测 |
-| `backend/internal/service/openai_images.go:891,728`（修改） | 接入点：改签名 + 在 `c.Data` 前调用编排入口 |
+| `backend/internal/service/openai_gateway_response_handling_test.go`（修改） | 上述补丁单测 |
+| `backend/internal/service/openai_images.go:891,728`（修改） | 接入点：改签名 + `c.Data` 前拦截 |
+| `backend/internal/service/openai_images_test.go`（修改） | 集成测试 |
 
 ---
 
 ### Task 1: 修复 ImageInputTokens 从未被填充
 
-独立于模拟功能的既有缺陷：`openAIUsageFromGJSON` 读了 output 侧的 image_tokens，
-漏读 input 侧，导致所有改图请求的输入图像 token（$8/1M 档）从不计费。先行修复。
+独立缺陷，先行修复：`openAIUsageFromGJSON` 读了 output 侧的 image_tokens，漏读 input 侧，
+导致所有改图请求的输入图像 token（$8/1M 档）从不计费，官方直连链路同样受影响。
 
 **Files:**
 - Modify: `backend/internal/service/openai_gateway_response_handling.go:747-772`
@@ -50,8 +59,6 @@
 - Produces: `openAIUsageFromGJSON` 填充 `OpenAIUsage.ImageInputTokens`
 
 - [ ] **Step 1: 写失败测试**
-
-追加到 `backend/internal/service/openai_gateway_response_handling_test.go`：
 
 ```go
 func TestOpenAIUsageFromGJSONReadsImageInputTokens(t *testing.T) {
@@ -72,8 +79,7 @@ func TestOpenAIUsageFromGJSONReadsImageInputTokens(t *testing.T) {
 }
 
 func TestOpenAIUsageFromGJSONImageInputTokensAbsent(t *testing.T) {
-	body := `{"usage":{"input_tokens":54,"output_tokens":229}}`
-	usage, ok := extractOpenAIUsageFromJSONBytes([]byte(body))
+	usage, ok := extractOpenAIUsageFromJSONBytes([]byte(`{"usage":{"input_tokens":54,"output_tokens":229}}`))
 	if !ok {
 		t.Fatalf("expected usage to be parsed")
 	}
@@ -83,18 +89,17 @@ func TestOpenAIUsageFromGJSONImageInputTokensAbsent(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: 运行确认失败**
 
 ```bash
-cd backend && go test ./internal/service/ -run 'TestOpenAIUsageFromGJSONReadsImageInputTokens' -v
+cd backend && go test ./internal/service/ -run TestOpenAIUsageFromGJSONReadsImageInputTokens -v
 ```
 
 预期：FAIL，`ImageInputTokens = 0, want 1508`。
 
 - [ ] **Step 3: 实现**
 
-在 `backend/internal/service/openai_gateway_response_handling.go` 的 `openAIUsageFromGJSON`
-中，紧跟 `imageOutputTokens` 那段之后、`return` 之前插入：
+在 `openAIUsageFromGJSON` 中 `imageOutputTokens` 那段之后插入：
 
 ```go
 	imageInputTokens := value.Get("input_tokens_details.image_tokens").Int()
@@ -103,68 +108,47 @@ cd backend && go test ./internal/service/ -run 'TestOpenAIUsageFromGJSONReadsIma
 	}
 ```
 
-并在返回的结构体里加一行：
+返回结构体增加一行 `ImageInputTokens: int(imageInputTokens),`。
 
-```go
-	return OpenAIUsage{
-		InputTokens:              int(inputTokens),
-		ImageInputTokens:         int(imageInputTokens),
-		OutputTokens:             int(outputTokens),
-		CacheCreationInputTokens: cacheCreationTokens,
-		CacheReadInputTokens:     cacheReadTokens,
-		ImageOutputTokens:        int(imageOutputTokens),
-	}, true
-```
-
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: 运行确认通过**
 
 ```bash
-cd backend && go test ./internal/service/ -run 'TestOpenAIUsageFromGJSON' -v
+cd backend && go test ./internal/service/ -run TestOpenAIUsageFromGJSON -v
 ```
 
-预期：全部 PASS。
-
-- [ ] **Step 5: 跑一遍 service 包确认无回归**
-
-```bash
-cd backend && go test ./internal/service/ 2>&1 | tail -20
-```
-
-预期：新增失败为 0（与改动前的基线失败清单一致）。
-
-- [ ] **Step 6: 提交**
+- [ ] **Step 5: 提交**
 
 ```bash
 git add backend/internal/service/openai_gateway_response_handling.go \
         backend/internal/service/openai_gateway_response_handling_test.go
-git commit -m "fix(images): usage 解析补读 input_tokens_details.image_tokens
-
-输入图像 token 此前恒为 0，改图请求的图像输入部分（\$8/1M 档）从未计费。
-billing_service 已支持 ImageInputTokens>0 的分单价路径，仅解析侧缺失。"
+git commit -m "fix(images): usage 解析补读 input_tokens_details.image_tokens"
 ```
 
 ---
 
-### Task 2: 账号级模拟开关
+### Task 2: 闸门 1 — 账号标记
 
 **Files:**
 - Modify: `backend/internal/service/account.go`（常量区 ~:93、方法区 ~:1449）
-- Test: `backend/internal/service/account_test.go`
+- Create: `backend/internal/service/openai_images_usage_simulation_test.go`
 
 **Interfaces:**
-- Consumes: 无
 - Produces: `func (a *Account) SupportsOpenAIImagesUsageSimulation() bool`
 
 - [ ] **Step 1: 写失败测试**
 
-追加到 `backend/internal/service/account_test.go`：
+新建 `openai_images_usage_simulation_test.go`：
 
 ```go
+package service
+
+import "testing"
+
 func TestSupportsOpenAIImagesUsageSimulation(t *testing.T) {
 	cases := []struct {
-		name string
+		name  string
 		creds map[string]any
-		want bool
+		want  bool
 	}{
 		{"bool true", map[string]any{"openai_images_usage_simulation": true}, true},
 		{"bool false", map[string]any{"openai_images_usage_simulation": false}, false},
@@ -191,7 +175,7 @@ func TestSupportsOpenAIImagesUsageSimulation(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: 运行确认失败**
 
 ```bash
 cd backend && go test ./internal/service/ -run TestSupportsOpenAIImagesUsageSimulation -v
@@ -201,25 +185,15 @@ cd backend && go test ./internal/service/ -run TestSupportsOpenAIImagesUsageSimu
 
 - [ ] **Step 3: 实现**
 
-在 `backend/internal/service/account.go` 的常量区，紧邻
-`openAIImagesHighResCredentialKey` 之后加：
+`account.go` 常量区，紧邻 `openAIImagesHighResCredentialKey` 之后：
 
 ```go
-// openAIImagesUsageSimulationCredentialKey 标记账号的 images 响应需要被改写成
-// 官方 gpt-image-2 口径（usage + 官方字段）。白名单语义：仅显式开启时生效。
+// openAIImagesUsageSimulationCredentialKey 标记账号的 images 响应需被改写成
+// 官方 gpt-image-2 口径。白名单语义：仅显式开启时生效。
 const openAIImagesUsageSimulationCredentialKey = "openai_images_usage_simulation"
 ```
 
-在 `SupportsOpenAIImagesHighRes` 之后加（与其解析逻辑一致，复用同一套取值语义）：
-
-```go
-// SupportsOpenAIImagesUsageSimulation 判断账号是否启用 images usage 模拟改写。
-func (a *Account) SupportsOpenAIImagesUsageSimulation() bool {
-	return a.credentialFlag(openAIImagesUsageSimulationCredentialKey)
-}
-```
-
-并把 `SupportsOpenAIImagesHighRes` 里的解析体提取为共用私有方法（DRY）：
+把 `SupportsOpenAIImagesHighRes` 的解析体提取为共用私有方法（DRY）：
 
 ```go
 func (a *Account) credentialFlag(key string) bool {
@@ -247,58 +221,221 @@ func (a *Account) credentialFlag(key string) bool {
 		return false
 	}
 }
-```
 
-`SupportsOpenAIImagesHighRes` 改为：
-
-```go
 func (a *Account) SupportsOpenAIImagesHighRes() bool {
 	return a.credentialFlag(openAIImagesHighResCredentialKey)
 }
+
+// SupportsOpenAIImagesUsageSimulation 判断账号是否启用 images usage 模拟改写。
+func (a *Account) SupportsOpenAIImagesUsageSimulation() bool {
+	return a.credentialFlag(openAIImagesUsageSimulationCredentialKey)
+}
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: 运行确认通过（含既有 highres 测试不回归）**
 
 ```bash
 cd backend && go test ./internal/service/ -run 'TestSupportsOpenAIImages' -v
 ```
 
-预期：新测试 PASS，既有的 highres 测试仍 PASS。
-
 - [ ] **Step 5: 提交**
 
 ```bash
-git add backend/internal/service/account.go backend/internal/service/account_test.go
+git add backend/internal/service/account.go \
+        backend/internal/service/openai_images_usage_simulation_test.go
 git commit -m "feat(images): 新增账号级 usage 模拟开关凭据标记"
 ```
 
 ---
 
-### Task 3: 输入图像 token 公式
+### Task 3: 闸门 2、3 — 模型白名单与请求能力门控
+
+`isOpenAIImageGenerationModel`（`openai_images.go:457`）放行所有 `gpt-image-*` 前缀
+**以及全部 Grok 生图模型**。账号一旦同时承载 `gpt-image-1` 或 `grok-imagine`，
+会被错误套用 gpt-image-2 的表。请求侧同理：参考数据未覆盖的形态必须先降级。
 
 **Files:**
 - Create: `backend/internal/service/openai_images_usage_simulation.go`
 - Test: `backend/internal/service/openai_images_usage_simulation_test.go`
 
 **Interfaces:**
-- Consumes: 无
-- Produces: `func openAIImageInputTokens(w, h int) int`
+- Produces:
+  - `func isSimulatableOpenAIImagesModel(model string) bool`
+  - `func openAIImagesRequestSimulatable(parsed *OpenAIImagesRequest) bool`
 
 - [ ] **Step 1: 写失败测试**
 
-新建 `backend/internal/service/openai_images_usage_simulation_test.go`：
+```go
+func TestIsSimulatableOpenAIImagesModel(t *testing.T) {
+	cases := map[string]bool{
+		"gpt-image-2":            true,
+		"GPT-IMAGE-2":            true,
+		"  gpt-image-2  ":        true,
+		"gpt-image-2-2026-04-21": true,
+		"gpt-image-1":            false,
+		"gpt-image-1.5":          false,
+		"gpt-image-3":            false,
+		"gpt-image-2-codex":      false,
+		"grok-imagine":           false,
+		"grok-imagine-edit":      false,
+		"":                       false,
+	}
+	for model, want := range cases {
+		if got := isSimulatableOpenAIImagesModel(model); got != want {
+			t.Errorf("isSimulatableOpenAIImagesModel(%q) = %v, want %v", model, got, want)
+		}
+	}
+}
+
+func TestOpenAIImagesRequestSimulatable(t *testing.T) {
+	clean := func() *OpenAIImagesRequest {
+		return &OpenAIImagesRequest{N: 1}
+	}
+	if !openAIImagesRequestSimulatable(clean()) {
+		t.Errorf("clean request should be simulatable")
+	}
+	if openAIImagesRequestSimulatable(nil) {
+		t.Errorf("nil request should not be simulatable")
+	}
+
+	two := 2
+	blocked := []struct {
+		name  string
+		mutate func(*OpenAIImagesRequest)
+	}{
+		{"stream", func(r *OpenAIImagesRequest) { r.Stream = true }},
+		{"partial images", func(r *OpenAIImagesRequest) { r.PartialImages = &two }},
+		{"n>1", func(r *OpenAIImagesRequest) { r.N = 2 }},
+		{"mask", func(r *OpenAIImagesRequest) { r.HasMask = true }},
+		{"transparent", func(r *OpenAIImagesRequest) { r.Background = "transparent" }},
+		{"jpeg", func(r *OpenAIImagesRequest) { r.OutputFormat = "jpeg" }},
+		{"compression", func(r *OpenAIImagesRequest) { r.OutputCompression = &two }},
+		{"input fidelity", func(r *OpenAIImagesRequest) { r.InputFidelity = "high" }},
+	}
+	for _, tc := range blocked {
+		t.Run(tc.name, func(t *testing.T) {
+			r := clean()
+			tc.mutate(r)
+			if openAIImagesRequestSimulatable(r) {
+				t.Errorf("%s should block simulation", tc.name)
+			}
+		})
+	}
+
+	// 显式写了官方默认值不应被挡
+	allowed := clean()
+	allowed.Background = "opaque"
+	allowed.OutputFormat = "png"
+	if !openAIImagesRequestSimulatable(allowed) {
+		t.Errorf("explicit opaque/png should still be simulatable")
+	}
+}
+```
+
+- [ ] **Step 2: 运行确认失败**
+
+```bash
+cd backend && go test ./internal/service/ -run 'TestIsSimulatableOpenAIImagesModel|TestOpenAIImagesRequestSimulatable' -v
+```
+
+预期：编译失败，两个函数 undefined。
+
+- [ ] **Step 3: 实现**
+
+新建 `openai_images_usage_simulation.go`：
 
 ```go
 package service
 
-import "testing"
+import "strings"
 
+// isSimulatableOpenAIImagesModel 是闸门 2：显式白名单。
+//
+// 不能复用 isOpenAIImageGenerationModel —— 它放行所有 gpt-image-* 前缀以及
+// 全部 Grok 生图模型，而本模块的 token 表只对 gpt-image-2 成立。
+// 允许 "gpt-image-2" 本身与 "gpt-image-2-<版本后缀>" 形态；
+// 明确排除 gpt-image-2-codex（账号代理管线，口径不同）。
+func isSimulatableOpenAIImagesModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "gpt-image-2" {
+		return true
+	}
+	const prefix = "gpt-image-2-"
+	if !strings.HasPrefix(normalized, prefix) {
+		return false
+	}
+	suffix := strings.TrimPrefix(normalized, prefix)
+	if suffix == "" {
+		return false
+	}
+	// 仅接受纯数字与连字符构成的版本后缀（如 2026-04-21），排除 codex 等变体。
+	for _, r := range suffix {
+		if (r < '0' || r > '9') && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// openAIImagesRequestSimulatable 是闸门 3：参考数据未覆盖的请求形态一律不模拟。
+// 依据 docs/GPT_IMAGE_2_TOKEN_REFERENCE.md §12「未覆盖」清单。
+func openAIImagesRequestSimulatable(parsed *OpenAIImagesRequest) bool {
+	if parsed == nil {
+		return false
+	}
+	if parsed.Stream || parsed.PartialImages != nil {
+		return false // 流式与 partial images 的 token 规则未实测
+	}
+	if parsed.N > 1 {
+		return false // 多图 token 是否线性未实测
+	}
+	if parsed.HasMask {
+		return false // mask 作为额外输入图的计法未实测
+	}
+	if background := strings.ToLower(strings.TrimSpace(parsed.Background)); background != "" && background != "opaque" {
+		return false // transparent 未实测；更不能把用户要的透明背景改写成不透明
+	}
+	if format := strings.ToLower(strings.TrimSpace(parsed.OutputFormat)); format != "" && format != "png" {
+		return false // JPEG/WebP 未实测
+	}
+	if parsed.OutputCompression != nil || strings.TrimSpace(parsed.InputFidelity) != "" {
+		return false
+	}
+	return true
+}
+```
+
+- [ ] **Step 4: 运行确认通过**
+
+```bash
+cd backend && go test ./internal/service/ -run 'TestIsSimulatableOpenAIImagesModel|TestOpenAIImagesRequestSimulatable' -v
+```
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add backend/internal/service/openai_images_usage_simulation.go \
+        backend/internal/service/openai_images_usage_simulation_test.go
+git commit -m "feat(images): 新增模拟的模型白名单与请求能力门控"
+```
+
+---
+
+### Task 4: 输入图像 token 公式
+
+**Files:**
+- Modify: `backend/internal/service/openai_images_usage_simulation.go`
+- Test: `backend/internal/service/openai_images_usage_simulation_test.go`
+
+**Interfaces:**
+- Produces: `func openAIImageInputTokens(w, h int) int`
+
+- [ ] **Step 1: 写失败测试**
+
+```go
 // 数据来源：docs/GPT_IMAGE_2_TOKEN_REFERENCE.md §6，官方直连与 codex 两条管线实测。
 func TestOpenAIImageInputTokens(t *testing.T) {
-	cases := []struct {
-		w, h int
-		want int
-	}{
+	cases := []struct{ w, h, want int }{
 		{256, 256, 256},
 		{512, 512, 1024},
 		{512, 1024, 512},
@@ -316,9 +453,6 @@ func TestOpenAIImageInputTokens(t *testing.T) {
 			t.Errorf("openAIImageInputTokens(%d,%d) = %d, want %d", tc.w, tc.h, got, tc.want)
 		}
 	}
-}
-
-func TestOpenAIImageInputTokensInvalid(t *testing.T) {
 	for _, tc := range [][2]int{{0, 100}, {100, 0}, {-1, -1}} {
 		if got := openAIImageInputTokens(tc[0], tc[1]); got != 0 {
 			t.Errorf("openAIImageInputTokens(%d,%d) = %d, want 0", tc[0], tc[1], got)
@@ -327,28 +461,21 @@ func TestOpenAIImageInputTokensInvalid(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: 运行确认失败**
 
 ```bash
 cd backend && go test ./internal/service/ -run TestOpenAIImageInputTokens -v
 ```
 
-预期：编译失败 `undefined: openAIImageInputTokens`。
-
 - [ ] **Step 3: 实现**
 
-新建 `backend/internal/service/openai_images_usage_simulation.go`：
+import 增补 `"math"`，追加：
 
 ```go
-package service
-
-import "math"
-
-// openAIImageInputPatchLimit 是官方对单张输入图的 patch 数上限。
-const openAIImageInputPatchLimit = 1536
-
-// openAIImageInputUpscaleTarget 是最长边不足时的放大目标（放大倍数另有 2 倍上限）。
-const openAIImageInputUpscaleTarget = 1024
+const (
+	openAIImageInputPatchLimit     = 1536
+	openAIImageInputUpscaleTarget  = 1024
+)
 
 // openAIImageInputTokens 按官方口径计算单张输入图的图像 token。
 //
@@ -356,8 +483,7 @@ const openAIImageInputUpscaleTarget = 1024
 //	patches = ceil(w/32) * ceil(h/32)
 //	若 patches > 1536：等比缩小直到 patches <= 1536
 //
-// 该公式在官方直连与 codex 两条管线共 11 个实测点上精确吻合，
-// 依据见 docs/GPT_IMAGE_2_TOKEN_REFERENCE.md §6。
+// 公式在官方直连与 codex 两条管线共 11 个实测点上精确吻合。
 func openAIImageInputTokens(w, h int) int {
 	if w <= 0 || h <= 0 {
 		return 0
@@ -387,13 +513,11 @@ func imagePatchCount(w, h float64) int {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: 运行确认通过**
 
 ```bash
 cd backend && go test ./internal/service/ -run TestOpenAIImageInputTokens -v
 ```
-
-预期：全部 PASS（11 个点逐一命中）。
 
 - [ ] **Step 5: 提交**
 
@@ -405,361 +529,288 @@ git commit -m "feat(images): 按官方口径实现输入图像 token 公式"
 
 ---
 
-### Task 4: 输出 token 表与比例/档位归一
+### Task 5: 三维 token 表、精确尺寸索引与 quality 归一
+
+这是闸门 4 的数据基础。**不做最近比例吸附** —— 未知尺寸必须落到降级路径。
 
 **Files:**
 - Modify: `backend/internal/service/openai_images_usage_simulation.go`
 - Test: `backend/internal/service/openai_images_usage_simulation_test.go`
 
 **Interfaces:**
-- Consumes: 无
-- Produces:
-  - `func normalizeOpenAIImageRatio(w, h int) string`（返回归一后的横版比例键）
-  - `func openAIImageTierByPixels(w, h int) string`（返回 `"1K"`/`"2K"`/`"4K"`）
-  - `func openAIImageOutputTokens(ratio, tier string) (int, bool)`
-
-- [ ] **Step 1: 写失败测试**
-
-追加到 `openai_images_usage_simulation_test.go`：
-
-```go
-func TestNormalizeOpenAIImageRatio(t *testing.T) {
-	cases := []struct {
-		w, h int
-		want string
-	}{
-		{1024, 1024, "1:1"},
-		{2880, 2880, "1:1"},
-		{1120, 896, "5:4"},
-		{896, 1120, "5:4"},   // 竖版归一到横版键
-		{1152, 864, "4:3"},
-		{864, 1152, "4:3"},
-		{1248, 832, "3:2"},
-		{832, 1248, "3:2"},
-		{1280, 720, "16:9"},
-		{720, 1280, "16:9"},
-		{3840, 2160, "16:9"},
-		{1456, 624, "21:9"},
-		{3024, 1296, "21:9"},
-	}
-	for _, tc := range cases {
-		if got := normalizeOpenAIImageRatio(tc.w, tc.h); got != tc.want {
-			t.Errorf("normalizeOpenAIImageRatio(%d,%d) = %q, want %q", tc.w, tc.h, got, tc.want)
-		}
-	}
-}
-
-// 档位必须按总像素判定：21:9 的 2K 是 3024x1296，最长边 3024 会被长边阈值误判成 4K。
-func TestOpenAIImageTierByPixels(t *testing.T) {
-	cases := []struct {
-		w, h int
-		want string
-	}{
-		{1456, 624, "1K"},   // 1K 最小像素 908,544
-		{1024, 1024, "1K"},  // 1K 最大像素 1,048,576
-		{2560, 1440, "2K"},  // 2K 最小像素 3,686,400
-		{3024, 1296, "2K"},  // 长边 3024，但属 2K
-		{2048, 2048, "2K"},  // 2K 最大像素 4,194,304
-		{3696, 1584, "4K"},  // 4K 最小像素 5,854,464
-		{3840, 2160, "4K"},
-		{2880, 2880, "4K"},  // 4K 最大像素 8,294,400
-	}
-	for _, tc := range cases {
-		if got := openAIImageTierByPixels(tc.w, tc.h); got != tc.want {
-			t.Errorf("openAIImageTierByPixels(%d,%d) = %q, want %q", tc.w, tc.h, got, tc.want)
-		}
-	}
-}
-
-func TestOpenAIImageOutputTokens(t *testing.T) {
-	cases := []struct {
-		ratio, tier string
-		want        int
-	}{
-		{"1:1", "1K", 196}, {"1:1", "2K", 3568}, {"1:1", "4K", 23658},
-		{"5:4", "1K", 157}, {"5:4", "2K", 2811}, {"5:4", "4K", 19027},
-		{"4:3", "1K", 144}, {"4:3", "2K", 2586}, {"4:3", "4K", 17232},
-		{"3:2", "1K", 134}, {"3:2", "2K", 2434}, {"3:2", "4K", 16119},
-		{"16:9", "1K", 106}, {"16:9", "2K", 1841}, {"16:9", "4K", 13342},
-		{"21:9", "1K", 82}, {"21:9", "2K", 1491}, {"21:9", "4K", 7898},
-	}
-	for _, tc := range cases {
-		got, ok := openAIImageOutputTokens(tc.ratio, tc.tier)
-		if !ok || got != tc.want {
-			t.Errorf("openAIImageOutputTokens(%q,%q) = %d,%v want %d,true", tc.ratio, tc.tier, got, ok, tc.want)
-		}
-	}
-	if _, ok := openAIImageOutputTokens("7:3", "1K"); ok {
-		t.Errorf("unknown ratio should return ok=false")
-	}
-	if _, ok := openAIImageOutputTokens("1:1", "8K"); ok {
-		t.Errorf("unknown tier should return ok=false")
-	}
-}
-```
-
-- [ ] **Step 2: 运行测试确认失败**
-
-```bash
-cd backend && go test ./internal/service/ -run 'TestNormalizeOpenAIImageRatio|TestOpenAIImageTierByPixels|TestOpenAIImageOutputTokens' -v
-```
-
-预期：编译失败，三个函数 undefined。
-
-- [ ] **Step 3: 实现**
-
-追加到 `openai_images_usage_simulation.go`（同时把 `import "math"` 保持不变）：
-
-```go
-// openAIImageRatioKeys 是官方 gpt-image-2 支持的 10 个比例归一后的 6 个横版键。
-// 竖版（4:5 / 3:4 / 2:3 / 9:16）token 与对应横版相同，故统一归一到横版键。
-var openAIImageRatioKeys = []struct {
-	key   string
-	value float64
-}{
-	{"1:1", 1.0},
-	{"5:4", 5.0 / 4.0},
-	{"4:3", 4.0 / 3.0},
-	{"3:2", 3.0 / 2.0},
-	{"16:9", 16.0 / 9.0},
-	{"21:9", 21.0 / 9.0},
-}
-
-// normalizeOpenAIImageRatio 取与实际宽高比最接近的受支持比例键。
-// 竖版先转成横版再比对。
-func normalizeOpenAIImageRatio(w, h int) string {
-	if w <= 0 || h <= 0 {
-		return ""
-	}
-	long, short := float64(w), float64(h)
-	if long < short {
-		long, short = short, long
-	}
-	target := long / short
-	best := openAIImageRatioKeys[0].key
-	bestDiff := math.Abs(target - openAIImageRatioKeys[0].value)
-	for _, candidate := range openAIImageRatioKeys[1:] {
-		if diff := math.Abs(target - candidate.value); diff < bestDiff {
-			best, bestDiff = candidate.key, diff
-		}
-	}
-	return best
-}
-
-// 档位阈值按总像素。三档实测像素区间互不重叠且间隔充裕：
-//	1K [908,544, 1,048,576]  2K [3,686,400, 4,194,304]  4K [5,854,464, 8,294,400]
-// 不可改为按最长边判定：21:9 的 2K 是 3024x1296，长边 3024 会被误判成 4K。
-const (
-	openAIImageTier1KMaxPixels = 1_600_000
-	openAIImageTier2KMaxPixels = 4_500_000
-)
-
-func openAIImageTierByPixels(w, h int) string {
-	pixels := w * h
-	switch {
-	case pixels <= 0:
-		return ""
-	case pixels <= openAIImageTier1KMaxPixels:
-		return ImageBillingSize1K
-	case pixels <= openAIImageTier2KMaxPixels:
-		return ImageBillingSize2K
-	default:
-		return ImageBillingSize4K
-	}
-}
-
-// openAIImageOutputTokensTable 为输出图像 token 表，键为 [比例][档位]。
-//
-// 档位到官方 quality 的映射为**自定义**（官方 quality 与 size 是两个正交维度）：
-// 1K 取 low、2K 取 medium、4K 取 high，以获得更陡的价格梯度。
-// 表中 196 / 3568 / 13342 为实测值，其余由 low × 8.98（medium）
-// 与 low × 35.9（high）推导。依据见 docs/GPT_IMAGE_2_TOKEN_REFERENCE.md §4、§5。
-var openAIImageOutputTokensTable = map[string]map[string]int{
-	"1:1":  {ImageBillingSize1K: 196, ImageBillingSize2K: 3568, ImageBillingSize4K: 23658},
-	"5:4":  {ImageBillingSize1K: 157, ImageBillingSize2K: 2811, ImageBillingSize4K: 19027},
-	"4:3":  {ImageBillingSize1K: 144, ImageBillingSize2K: 2586, ImageBillingSize4K: 17232},
-	"3:2":  {ImageBillingSize1K: 134, ImageBillingSize2K: 2434, ImageBillingSize4K: 16119},
-	"16:9": {ImageBillingSize1K: 106, ImageBillingSize2K: 1841, ImageBillingSize4K: 13342},
-	"21:9": {ImageBillingSize1K: 82, ImageBillingSize2K: 1491, ImageBillingSize4K: 7898},
-}
-
-func openAIImageOutputTokens(ratio, tier string) (int, bool) {
-	tiers, ok := openAIImageOutputTokensTable[ratio]
-	if !ok {
-		return 0, false
-	}
-	tokens, ok := tiers[tier]
-	return tokens, ok
-}
-```
-
-- [ ] **Step 4: 运行测试确认通过**
-
-```bash
-cd backend && go test ./internal/service/ -run 'TestNormalizeOpenAIImageRatio|TestOpenAIImageTierByPixels|TestOpenAIImageOutputTokens' -v
-```
-
-预期：全部 PASS。
-
-- [ ] **Step 5: 提交**
-
-```bash
-git add backend/internal/service/openai_images_usage_simulation.go \
-        backend/internal/service/openai_images_usage_simulation_test.go
-git commit -m "feat(images): 新增 gpt-image-2 输出 token 实测表与比例/档位归一"
-```
-
----
-
-### Task 5: 几何归一
-
-**Files:**
-- Modify: `backend/internal/service/openai_images_usage_simulation.go`
-- Test: `backend/internal/service/openai_images_usage_simulation_test.go`
-
-**Interfaces:**
-- Consumes: `normalizeOpenAIImageRatio`、`openAIImageTierByPixels`（Task 4）
 - Produces:
   - `type openAIImageGeometry struct { Width, Height int; Ratio, Tier string }`
-  - `func resolveOpenAIImageGeometry(body []byte, requestSize string) (openAIImageGeometry, bool)`
+  - `func lookupOpenAIImageSize(w, h int) (openAIImageGeometry, bool)`
+  - `func normalizeOpenAIImageQuality(raw string) (string, bool)`
+  - `func openAIImageOutputTokens(ratio, tier, quality string) (int, bool)`
 
 - [ ] **Step 1: 写失败测试**
 
-追加到 `openai_images_usage_simulation_test.go`（文件顶部 import 增补
-`"bytes"`、`"encoding/base64"`、`"image"`、`"image/color"`、`"image/png"`）：
-
 ```go
-func pngDataURLBase64(t *testing.T, w, h int) string {
-	t.Helper()
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	img.Set(0, 0, color.RGBA{R: 1, G: 2, B: 3, A: 255})
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		t.Fatalf("encode png: %v", err)
+func TestLookupOpenAIImageSizeKnown(t *testing.T) {
+	cases := []struct {
+		w, h        int
+		ratio, tier string
+	}{
+		{1024, 1024, "1:1", ImageBillingSize1K},
+		{2048, 2048, "1:1", ImageBillingSize2K},
+		{2880, 2880, "1:1", ImageBillingSize4K},
+		{1120, 896, "5:4", ImageBillingSize1K},
+		{896, 1120, "5:4", ImageBillingSize1K}, // 竖版归一到横版键
+		{1152, 864, "4:3", ImageBillingSize1K},
+		{864, 1152, "4:3", ImageBillingSize1K},
+		{1248, 832, "3:2", ImageBillingSize1K},
+		{832, 1248, "3:2", ImageBillingSize1K},
+		{1280, 720, "16:9", ImageBillingSize1K},
+		{720, 1280, "16:9", ImageBillingSize1K},
+		{2560, 1440, "16:9", ImageBillingSize2K},
+		{3840, 2160, "16:9", ImageBillingSize4K},
+		{1456, 624, "21:9", ImageBillingSize1K},
+		{3024, 1296, "21:9", ImageBillingSize2K}, // 长边 3024 却属 2K
+		{3696, 1584, "21:9", ImageBillingSize4K},
 	}
-	return base64.StdEncoding.EncodeToString(buf.Bytes())
-}
-
-func TestResolveOpenAIImageGeometryFromSizeField(t *testing.T) {
-	body := []byte(`{"size":"2048x2048","data":[{"b64_json":"aGk="}]}`)
-	geom, ok := resolveOpenAIImageGeometry(body, "")
-	if !ok {
-		t.Fatalf("expected ok")
-	}
-	if geom.Width != 2048 || geom.Height != 2048 {
-		t.Errorf("dims = %dx%d, want 2048x2048", geom.Width, geom.Height)
-	}
-	if geom.Ratio != "1:1" || geom.Tier != ImageBillingSize2K {
-		t.Errorf("ratio/tier = %q/%q, want 1:1/2K", geom.Ratio, geom.Tier)
-	}
-}
-
-func TestResolveOpenAIImageGeometryFromB64(t *testing.T) {
-	body := []byte(`{"data":[{"b64_json":"` + pngDataURLBase64(t, 1280, 720) + `"}]}`)
-	geom, ok := resolveOpenAIImageGeometry(body, "")
-	if !ok {
-		t.Fatalf("expected ok")
-	}
-	if geom.Width != 1280 || geom.Height != 720 {
-		t.Errorf("dims = %dx%d, want 1280x720", geom.Width, geom.Height)
-	}
-	if geom.Ratio != "16:9" || geom.Tier != ImageBillingSize1K {
-		t.Errorf("ratio/tier = %q/%q, want 16:9/1K", geom.Ratio, geom.Tier)
-	}
-}
-
-func TestResolveOpenAIImageGeometryFromRequestSize(t *testing.T) {
-	body := []byte(`{"data":[{"url":"https://example.com/a.png"}]}`)
-	geom, ok := resolveOpenAIImageGeometry(body, "3024x1296")
-	if !ok {
-		t.Fatalf("expected ok")
-	}
-	if geom.Ratio != "21:9" || geom.Tier != ImageBillingSize2K {
-		t.Errorf("ratio/tier = %q/%q, want 21:9/2K", geom.Ratio, geom.Tier)
-	}
-}
-
-func TestResolveOpenAIImageGeometryFails(t *testing.T) {
-	cases := [][]byte{
-		[]byte(`{"data":[]}`),
-		[]byte(`{"data":[{"url":"https://example.com/a.png"}]}`),
-		[]byte(`not json`),
-		nil,
-	}
-	for i, body := range cases {
-		if _, ok := resolveOpenAIImageGeometry(body, ""); ok {
-			t.Errorf("case %d: expected ok=false", i)
+	for _, tc := range cases {
+		geom, ok := lookupOpenAIImageSize(tc.w, tc.h)
+		if !ok {
+			t.Fatalf("lookupOpenAIImageSize(%d,%d) not found", tc.w, tc.h)
+		}
+		if geom.Ratio != tc.ratio || geom.Tier != tc.tier {
+			t.Errorf("(%d,%d) = %q/%q, want %q/%q", tc.w, tc.h, geom.Ratio, geom.Tier, tc.ratio, tc.tier)
+		}
+		if geom.Width != tc.w || geom.Height != tc.h {
+			t.Errorf("(%d,%d) dims not preserved: %dx%d", tc.w, tc.h, geom.Width, geom.Height)
 		}
 	}
 }
+
+// 未知尺寸必须降级，不得吸附到最近比例。
+func TestLookupOpenAIImageSizeUnknown(t *testing.T) {
+	for _, tc := range [][2]int{
+		{1254, 1254}, // codex 出图，非 16 整除
+		{1672, 941},  // codex 出图
+		{1000, 100},  // 10:1 极端比例
+		{1023, 1023}, // 接近 1024 但不等
+		{624, 1456},  // 21:9 的竖版，官方比例列表中不存在
+		{0, 0},
+		{-1, 10},
+	} {
+		if _, ok := lookupOpenAIImageSize(tc[0], tc[1]); ok {
+			t.Errorf("lookupOpenAIImageSize(%d,%d) should not be found", tc[0], tc[1])
+		}
+	}
+}
+
+func TestLookupOpenAIImageSizeCoversThirtyEntries(t *testing.T) {
+	if got := len(openAIImageSizeIndex); got != 30 {
+		t.Errorf("size index has %d entries, want 30", got)
+	}
+}
+
+func TestNormalizeOpenAIImageQuality(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want string
+		ok   bool
+	}{
+		{"", "low", true},       // 官方默认
+		{"auto", "low", true},   // 实测：官方回显 low
+		{"AUTO", "low", true},
+		{"low", "low", true},
+		{"medium", "medium", true},
+		{"high", "high", true},
+		{" High ", "high", true},
+		{"hd", "", false},   // adobe2api 别名，非官方值
+		{"4k", "", false},
+		{"ultra", "", false},
+	}
+	for _, tc := range cases {
+		got, ok := normalizeOpenAIImageQuality(tc.raw)
+		if ok != tc.ok || (ok && got != tc.want) {
+			t.Errorf("normalizeOpenAIImageQuality(%q) = %q,%v want %q,%v", tc.raw, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestOpenAIImageOutputTokensMeasuredCells(t *testing.T) {
+	cases := []struct {
+		ratio, tier, quality string
+		want                 int
+	}{
+		{"1:1", ImageBillingSize1K, "low", 196},
+		{"1:1", ImageBillingSize1K, "medium", 1756},
+		{"1:1", ImageBillingSize1K, "high", 7024},
+		{"1:1", ImageBillingSize2K, "low", 397},
+		{"1:1", ImageBillingSize2K, "medium", 3568},
+		{"5:4", ImageBillingSize1K, "medium", 1370},
+		{"4:3", ImageBillingSize1K, "medium", 1294},
+		{"3:2", ImageBillingSize1K, "medium", 1167},
+		{"16:9", ImageBillingSize1K, "medium", 947},
+		{"16:9", ImageBillingSize4K, "low", 371},
+		{"16:9", ImageBillingSize4K, "medium", 3336},
+		{"16:9", ImageBillingSize4K, "high", 13342},
+		{"21:9", ImageBillingSize1K, "low", 82},
+		{"21:9", ImageBillingSize1K, "medium", 733},
+		{"21:9", ImageBillingSize1K, "high", 2863},
+	}
+	for _, tc := range cases {
+		got, ok := openAIImageOutputTokens(tc.ratio, tc.tier, tc.quality)
+		if !ok || got != tc.want {
+			t.Errorf("openAIImageOutputTokens(%q,%q,%q) = %d,%v want %d,true",
+				tc.ratio, tc.tier, tc.quality, got, ok, tc.want)
+		}
+	}
+}
+
+func TestOpenAIImageOutputTokensUnknown(t *testing.T) {
+	if _, ok := openAIImageOutputTokens("7:3", ImageBillingSize1K, "low"); ok {
+		t.Errorf("unknown ratio should return false")
+	}
+	if _, ok := openAIImageOutputTokens("1:1", "8K", "low"); ok {
+		t.Errorf("unknown tier should return false")
+	}
+	if _, ok := openAIImageOutputTokens("1:1", ImageBillingSize1K, "ultra"); ok {
+		t.Errorf("unknown quality should return false")
+	}
+}
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: 运行确认失败**
 
 ```bash
-cd backend && go test ./internal/service/ -run TestResolveOpenAIImageGeometry -v
+cd backend && go test ./internal/service/ -run 'TestLookupOpenAIImageSize|TestNormalizeOpenAIImageQuality|TestOpenAIImageOutputTokens' -v
 ```
-
-预期：编译失败 `undefined: resolveOpenAIImageGeometry`。
 
 - [ ] **Step 3: 实现**
 
-追加到 `openai_images_usage_simulation.go`，并把文件顶部 import 改为：
+import 增补 `"fmt"`，追加：
 
 ```go
-import (
-	"bytes"
-	"encoding/base64"
-	"image"
-	_ "image/jpeg"
-	_ "image/png"
-	"math"
-	"strconv"
-	"strings"
+// openAIImageTokenCell 是三维 token 表的一格：给定比例与尺寸档下的三个 quality 值。
+//
+// 数据来源 docs/GPT_IMAGE_2_TOKEN_REFERENCE.md。low 列 18 格全部实测；
+// medium/high 共 11 格实测，其余 25 格由 medium = round(low × 8.87)、
+// high = round(medium × 4.0) 推导（4.0 有两处实测确认：7024/1756、13342/3336）。
+// 实测倍率在 8.709~8.992 间浮动，故推导格带 ±2~3% 误差，
+// 上线前应按计划末尾的「上线前置事项」补测替换。
+type openAIImageTokenCell struct {
+	Size   string
+	Low    int
+	Medium int
+	High   int
+}
 
-	"github.com/tidwall/gjson"
-	_ "golang.org/x/image/webp"
-)
-```
+// openAIImageTokenTable 键为 [归一后的横版比例][尺寸档]。
+var openAIImageTokenTable = map[string]map[string]openAIImageTokenCell{
+	"1:1": {
+		ImageBillingSize1K: {"1024x1024", 196, 1756, 7024},
+		ImageBillingSize2K: {"2048x2048", 397, 3568, 14272},
+		ImageBillingSize4K: {"2880x2880", 659, 5845, 23380},
+	},
+	"5:4": {
+		ImageBillingSize1K: {"1120x896", 157, 1370, 5480},
+		ImageBillingSize2K: {"2240x1792", 313, 2776, 11104},
+		ImageBillingSize4K: {"3200x2560", 530, 4701, 18804},
+	},
+	"4:3": {
+		ImageBillingSize1K: {"1152x864", 144, 1294, 5176},
+		ImageBillingSize2K: {"2304x1728", 288, 2555, 10220},
+		ImageBillingSize4K: {"3264x2448", 480, 4258, 17032},
+	},
+	"3:2": {
+		ImageBillingSize1K: {"1248x832", 134, 1167, 4668},
+		ImageBillingSize2K: {"2496x1664", 271, 2404, 9616},
+		ImageBillingSize4K: {"3504x2336", 449, 3983, 15932},
+	},
+	"16:9": {
+		ImageBillingSize1K: {"1280x720", 106, 947, 3788},
+		ImageBillingSize2K: {"2560x1440", 205, 1818, 7272},
+		ImageBillingSize4K: {"3840x2160", 371, 3336, 13342},
+	},
+	"21:9": {
+		ImageBillingSize1K: {"1456x624", 82, 733, 2863},
+		ImageBillingSize2K: {"3024x1296", 166, 1472, 5888},
+		ImageBillingSize4K: {"3696x1584", 220, 1951, 7804},
+	},
+}
 
-```go
 // openAIImageGeometry 描述一次出图的几何信息。
 type openAIImageGeometry struct {
 	Width  int
 	Height int
-	Ratio  string // 归一后的横版比例键，如 "16:9"
+	Ratio  string // 归一后的横版比例键
 	Tier   string // ImageBillingSize1K / 2K / 4K
 }
 
-// resolveOpenAIImageGeometry 按优先级确定出图几何：
-//  1. 响应体 size 字段（官方直连与 codex 管线有，adobe2api 无）
-//  2. 解码首张 b64_json 的图像头取真实宽高
-//  3. 请求侧 size
-//
-// 三者皆不可用时返回 ok=false，调用方应放弃改写。
-func resolveOpenAIImageGeometry(body []byte, requestSize string) (openAIImageGeometry, bool) {
-	if w, h, ok := parseWidthHeight(gjson.GetBytes(body, "size").String()); ok {
-		return buildOpenAIImageGeometry(w, h)
-	}
-	if gjson.ValidBytes(body) {
-		encoded := gjson.GetBytes(body, "data.0.b64_json").String()
-		if w, h, ok := decodeImageDimensionsBase64(encoded); ok {
-			return buildOpenAIImageGeometry(w, h)
+// openAIImageSizeIndex 是 "WxH" -> 几何 的精确索引，共 30 项
+// （6 个横版/方形比例 × 3 档 = 18，加 4 个有官方竖版对应的比例 × 3 档 = 12）。
+// 21:9 在官方比例列表中没有竖版对应（无 9:21），故不加其转置。
+var openAIImageSizeIndex = buildOpenAIImageSizeIndex()
+
+func buildOpenAIImageSizeIndex() map[string]openAIImageGeometry {
+	// 有官方竖版对应的比例；21:9 不在其列。
+	transposable := map[string]bool{"5:4": true, "4:3": true, "3:2": true, "16:9": true}
+	index := make(map[string]openAIImageGeometry, 30)
+	for ratio, tiers := range openAIImageTokenTable {
+		for tier, cell := range tiers {
+			w, h, ok := parseWidthHeight(cell.Size)
+			if !ok {
+				continue
+			}
+			index[fmt.Sprintf("%dx%d", w, h)] = openAIImageGeometry{Width: w, Height: h, Ratio: ratio, Tier: tier}
+			if w != h && transposable[ratio] {
+				index[fmt.Sprintf("%dx%d", h, w)] = openAIImageGeometry{Width: h, Height: w, Ratio: ratio, Tier: tier}
+			}
 		}
 	}
-	if w, h, ok := parseWidthHeight(requestSize); ok {
-		return buildOpenAIImageGeometry(w, h)
-	}
-	return openAIImageGeometry{}, false
+	return index
 }
 
-func buildOpenAIImageGeometry(w, h int) (openAIImageGeometry, bool) {
-	ratio := normalizeOpenAIImageRatio(w, h)
-	tier := openAIImageTierByPixels(w, h)
-	if ratio == "" || tier == "" {
+// lookupOpenAIImageSize 是闸门 4：只认已知的 30 组精确尺寸。
+// 刻意不做最近比例吸附 —— token 不随像素线性变化，吸附会产生错误计费。
+func lookupOpenAIImageSize(w, h int) (openAIImageGeometry, bool) {
+	if w <= 0 || h <= 0 {
 		return openAIImageGeometry{}, false
 	}
-	return openAIImageGeometry{Width: w, Height: h, Ratio: ratio, Tier: tier}, true
+	geom, ok := openAIImageSizeIndex[fmt.Sprintf("%dx%d", w, h)]
+	return geom, ok
+}
+
+// normalizeOpenAIImageQuality 把请求的 quality 归一为官方三档。
+// 空值与 "auto" 均为 low —— 已实测：1024x1024 + quality:"auto" 返回 196 token
+// 且响应回显 quality:"low"。非官方值（如 adobe2api 的 hd/4k/ultra 别名）返回 false，
+// 由调用方降级，避免猜测计费。
+func normalizeOpenAIImageQuality(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "auto", "low":
+		return "low", true
+	case "medium":
+		return "medium", true
+	case "high":
+		return "high", true
+	default:
+		return "", false
+	}
+}
+
+func openAIImageOutputTokens(ratio, tier, quality string) (int, bool) {
+	tiers, ok := openAIImageTokenTable[ratio]
+	if !ok {
+		return 0, false
+	}
+	cell, ok := tiers[tier]
+	if !ok {
+		return 0, false
+	}
+	switch quality {
+	case "low":
+		return cell.Low, true
+	case "medium":
+		return cell.Medium, true
+	case "high":
+		return cell.High, true
+	default:
+		return 0, false
+	}
 }
 
 // parseWidthHeight 解析 "1024x1024" 形态；"auto" 等非尺寸值返回 ok=false。
@@ -778,130 +829,418 @@ func parseWidthHeight(value string) (int, int, bool) {
 	}
 	return w, h, true
 }
-
-// decodeImageDimensionsBase64 只解图像头，不解整幅图像。
-func decodeImageDimensionsBase64(encoded string) (int, int, bool) {
-	encoded = strings.TrimSpace(encoded)
-	if encoded == "" {
-		return 0, 0, false
-	}
-	if idx := strings.Index(encoded, ","); strings.HasPrefix(encoded, "data:") && idx > 0 {
-		encoded = encoded[idx+1:]
-	}
-	raw, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil || len(raw) == 0 {
-		return 0, 0, false
-	}
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
-	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
-		return 0, 0, false
-	}
-	return cfg.Width, cfg.Height, true
-}
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+import 再增补 `"strconv"`。
+
+- [ ] **Step 4: 运行确认通过**
 
 ```bash
-cd backend && go test ./internal/service/ -run TestResolveOpenAIImageGeometry -v
+cd backend && go test ./internal/service/ -run 'TestLookupOpenAIImageSize|TestNormalizeOpenAIImageQuality|TestOpenAIImageOutputTokens' -v
 ```
 
-预期：全部 PASS。
+预期：全部 PASS，含 `TestLookupOpenAIImageSizeCoversThirtyEntries` 断言索引恰为 30 项。
 
 - [ ] **Step 5: 提交**
 
 ```bash
 git add backend/internal/service/openai_images_usage_simulation.go \
         backend/internal/service/openai_images_usage_simulation_test.go
-git commit -m "feat(images): 新增出图几何归一（size 字段/b64 图像头/请求尺寸三级回退）"
+git commit -m "feat(images): 新增三维 token 表、30 组精确尺寸索引与 quality 归一"
 ```
 
 ---
 
-### Task 6: usage 合成器
+### Task 6: 单次解码的图像元信息读取与几何解析
+
+v1 对同一份 base64 解码两次（一次取宽高、一次取格式），4K 并发下内存翻倍。改为单次。
 
 **Files:**
 - Modify: `backend/internal/service/openai_images_usage_simulation.go`
 - Test: `backend/internal/service/openai_images_usage_simulation_test.go`
 
 **Interfaces:**
-- Consumes: `openAIImageInputTokens`（Task 3）、`openAIImageOutputTokens`（Task 4）
 - Produces:
-  - `type openAIImagesSynthUsage struct { TextInputTokens, ImageInputTokens, ImageOutputTokens, InputTokens, OutputTokens, TotalTokens int }`
-  - `func synthesizeOpenAIImagesUsage(geom openAIImageGeometry, textInputTokens int, inputImageDims [][2]int, imageCount int) (openAIImagesSynthUsage, bool)`
+  - `func decodeImageMeta(encoded string) (w, h int, format string, ok bool)`
+  - `func resolveOpenAIImageGeometry(body []byte, requestSize string) (openAIImageGeometry, string, bool)`（第二个返回值为图像格式，空串表示未知）
+
+- [ ] **Step 1: 写失败测试**
+
+测试文件顶部 import 增补 `"bytes"`、`"encoding/base64"`、`"image"`、`"image/color"`、`"image/png"`、`"github.com/tidwall/gjson"`。
+
+```go
+func pngBase64(t *testing.T, w, h int) string {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	img.Set(0, 0, color.RGBA{R: 1, G: 2, B: 3, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+func TestDecodeImageMeta(t *testing.T) {
+	w, h, format, ok := decodeImageMeta(pngBase64(t, 1280, 720))
+	if !ok || w != 1280 || h != 720 || format != "png" {
+		t.Errorf("decodeImageMeta = %d,%d,%q,%v want 1280,720,png,true", w, h, format, ok)
+	}
+	if _, _, _, ok := decodeImageMeta("not-base64!!!"); ok {
+		t.Errorf("invalid base64 should return false")
+	}
+	if _, _, _, ok := decodeImageMeta(""); ok {
+		t.Errorf("empty should return false")
+	}
+	if _, _, _, ok := decodeImageMeta(base64.StdEncoding.EncodeToString([]byte("hello"))); ok {
+		t.Errorf("non-image bytes should return false")
+	}
+}
+
+func TestResolveOpenAIImageGeometryFromSizeField(t *testing.T) {
+	body := []byte(`{"size":"2048x2048","data":[{"b64_json":"aGk="}]}`)
+	geom, _, ok := resolveOpenAIImageGeometry(body, "")
+	if !ok || geom.Ratio != "1:1" || geom.Tier != ImageBillingSize2K {
+		t.Fatalf("geom = %+v ok=%v", geom, ok)
+	}
+}
+
+func TestResolveOpenAIImageGeometryFromB64(t *testing.T) {
+	body := []byte(`{"data":[{"b64_json":"` + pngBase64(t, 1280, 720) + `"}]}`)
+	geom, format, ok := resolveOpenAIImageGeometry(body, "")
+	if !ok || geom.Ratio != "16:9" || geom.Tier != ImageBillingSize1K {
+		t.Fatalf("geom = %+v ok=%v", geom, ok)
+	}
+	if format != "png" {
+		t.Errorf("format = %q, want png", format)
+	}
+}
+
+func TestResolveOpenAIImageGeometryFromRequestSize(t *testing.T) {
+	body := []byte(`{"data":[{"url":"https://example.com/a.png"}]}`)
+	geom, _, ok := resolveOpenAIImageGeometry(body, "3024x1296")
+	if !ok || geom.Ratio != "21:9" || geom.Tier != ImageBillingSize2K {
+		t.Fatalf("geom = %+v ok=%v", geom, ok)
+	}
+}
+
+// 出图尺寸不在已知 30 组内时必须降级。
+func TestResolveOpenAIImageGeometryUnknownSize(t *testing.T) {
+	body := []byte(`{"size":"1672x941","data":[{"b64_json":"aGk="}]}`)
+	if _, _, ok := resolveOpenAIImageGeometry(body, ""); ok {
+		t.Errorf("codex size 1672x941 should not resolve")
+	}
+	if _, _, ok := resolveOpenAIImageGeometry([]byte(`{"data":[]}`), ""); ok {
+		t.Errorf("empty data should not resolve")
+	}
+	if _, _, ok := resolveOpenAIImageGeometry([]byte("not json"), ""); ok {
+		t.Errorf("invalid json should not resolve")
+	}
+}
+```
+
+- [ ] **Step 2: 运行确认失败**
+
+```bash
+cd backend && go test ./internal/service/ -run 'TestDecodeImageMeta|TestResolveOpenAIImageGeometry' -v
+```
+
+- [ ] **Step 3: 实现**
+
+import 增补 `"bytes"`、`"encoding/base64"`、`"image"`、`_ "image/jpeg"`、`_ "image/png"`、
+`"github.com/tidwall/gjson"`、`_ "golang.org/x/image/webp"`。
+
+```go
+// decodeImageMeta 单次 base64 解码，一并取出宽高与格式，避免重复解码放大内存。
+// image.DecodeConfig 只读图像头，不解全图。
+func decodeImageMeta(encoded string) (int, int, string, bool) {
+	encoded = strings.TrimSpace(encoded)
+	if encoded == "" {
+		return 0, 0, "", false
+	}
+	if idx := strings.Index(encoded, ","); strings.HasPrefix(encoded, "data:") && idx > 0 {
+		encoded = encoded[idx+1:]
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(raw) == 0 {
+		return 0, 0, "", false
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return 0, 0, "", false
+	}
+	return cfg.Width, cfg.Height, format, true
+}
+
+// resolveOpenAIImageGeometry 按优先级取出图几何，并顺带返回图像格式（可能为空）。
+// 三级来源：响应体 size 字段 → 首张 b64_json 图像头 → 请求侧 size。
+// 得到的尺寸必须命中已知 30 组，否则返回 ok=false。
+func resolveOpenAIImageGeometry(body []byte, requestSize string) (openAIImageGeometry, string, bool) {
+	if w, h, ok := parseWidthHeight(gjson.GetBytes(body, "size").String()); ok {
+		if geom, found := lookupOpenAIImageSize(w, h); found {
+			return geom, "", true
+		}
+		return openAIImageGeometry{}, "", false
+	}
+	if gjson.ValidBytes(body) {
+		if w, h, format, ok := decodeImageMeta(gjson.GetBytes(body, "data.0.b64_json").String()); ok {
+			if geom, found := lookupOpenAIImageSize(w, h); found {
+				return geom, format, true
+			}
+			return openAIImageGeometry{}, "", false
+		}
+	}
+	if w, h, ok := parseWidthHeight(requestSize); ok {
+		if geom, found := lookupOpenAIImageSize(w, h); found {
+			return geom, "", true
+		}
+	}
+	return openAIImageGeometry{}, "", false
+}
+```
+
+> 注意：响应体 `size` 存在但不在已知 30 组时**直接返回 false**，不再回落到 b64 解码
+> —— 上游已明确告知了尺寸，它不在表内就是不该模拟的形态。
+
+- [ ] **Step 4: 运行确认通过**
+
+```bash
+cd backend && go test ./internal/service/ -run 'TestDecodeImageMeta|TestResolveOpenAIImageGeometry' -v
+```
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add backend/internal/service/openai_images_usage_simulation.go \
+        backend/internal/service/openai_images_usage_simulation_test.go
+git commit -m "feat(images): 出图几何解析改为精确尺寸匹配并单次解码"
+```
+
+---
+
+### Task 7: 输入图 token 取数与远程 URL 兜底
+
+`openai_images.go:283` 明确支持远程 `images[].image_url`，网关不下载这些图。
+v1 直接跳过 http URL 再求和 → 远程改图的输入图 token 归 0。
+
+**Files:**
+- Modify: `backend/internal/service/openai_images_usage_simulation.go`
+- Test: `backend/internal/service/openai_images_usage_simulation_test.go`
+
+**Interfaces:**
+- Produces: `func resolveOpenAIImagesInputTokens(body []byte, parsed *OpenAIImagesRequest) (int, bool)`
 
 - [ ] **Step 1: 写失败测试**
 
 ```go
-func TestSynthesizeOpenAIImagesUsageTextOnly(t *testing.T) {
+func TestResolveOpenAIImagesInputTokensNoInputImages(t *testing.T) {
+	parsed := &OpenAIImagesRequest{N: 1}
+	got, ok := resolveOpenAIImagesInputTokens([]byte(`{"usage":{}}`), parsed)
+	if !ok || got != 0 {
+		t.Errorf("got %d,%v want 0,true", got, ok)
+	}
+}
+
+func TestResolveOpenAIImagesInputTokensAllLocal(t *testing.T) {
+	parsed := &OpenAIImagesRequest{
+		N: 1,
+		InputImageURLs: []string{
+			"data:image/png;base64," + pngBase64(t, 1024, 1024),
+			"data:image/png;base64," + pngBase64(t, 1280, 720),
+		},
+	}
+	got, ok := resolveOpenAIImagesInputTokens([]byte(`{"usage":{}}`), parsed)
+	if !ok || got != 1024+920 {
+		t.Errorf("got %d,%v want %d,true", got, ok, 1024+920)
+	}
+}
+
+// 含远程 URL 时改用上游聚合值，不能只把能解码的那几张求和。
+func TestResolveOpenAIImagesInputTokensRemoteUsesUpstream(t *testing.T) {
+	parsed := &OpenAIImagesRequest{
+		N:              1,
+		InputImageURLs: []string{"https://example.com/a.png", "data:image/png;base64," + pngBase64(t, 1024, 1024)},
+	}
+	body := []byte(`{"usage":{"input_tokens_details":{"image_tokens":2212}}}`)
+	got, ok := resolveOpenAIImagesInputTokens(body, parsed)
+	if !ok || got != 2212 {
+		t.Errorf("got %d,%v want 2212,true", got, ok)
+	}
+}
+
+// 含远程 URL 且上游没有可信值 → 整次放弃模拟。
+func TestResolveOpenAIImagesInputTokensRemoteWithoutUpstream(t *testing.T) {
+	parsed := &OpenAIImagesRequest{N: 1, InputImageURLs: []string{"https://example.com/a.png"}}
+	if _, ok := resolveOpenAIImagesInputTokens([]byte(`{"usage":{}}`), parsed); ok {
+		t.Errorf("should return false when upstream aggregate is missing")
+	}
+	if _, ok := resolveOpenAIImagesInputTokens([]byte(`{"usage":{"input_tokens_details":{"image_tokens":0}}}`), parsed); ok {
+		t.Errorf("zero upstream aggregate is not trustworthy")
+	}
+}
+
+func TestResolveOpenAIImagesInputTokensUploads(t *testing.T) {
+	raw, err := base64.StdEncoding.DecodeString(pngBase64(t, 2048, 2048))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	parsed := &OpenAIImagesRequest{N: 1, Uploads: []OpenAIImagesUpload{{Data: raw}}}
+	got, ok := resolveOpenAIImagesInputTokens([]byte(`{"usage":{}}`), parsed)
+	if !ok || got != 1521 {
+		t.Errorf("got %d,%v want 1521,true", got, ok)
+	}
+}
+```
+
+- [ ] **Step 2: 运行确认失败**
+
+```bash
+cd backend && go test ./internal/service/ -run TestResolveOpenAIImagesInputTokens -v
+```
+
+- [ ] **Step 3: 实现**
+
+```go
+// resolveOpenAIImagesInputTokens 计算输入图像 token 总数。
+//
+// 网关不下载远程图（openai_images.go:283 允许 images[].image_url 为 http(s)），
+// 因此只要有任意一张尺寸取不到，就改用上游返回的聚合值；
+// 上游也没有可信值时返回 false，由调用方整次放弃模拟 —— 宁可不模拟，
+// 也不能把远程输入图当成 0 token 少收费。
+func resolveOpenAIImagesInputTokens(body []byte, parsed *OpenAIImagesRequest) (int, bool) {
+	if parsed == nil {
+		return 0, false
+	}
+	total := 0
+	unknown := false
+
+	for _, imageURL := range parsed.InputImageURLs {
+		w, h, _, ok := decodeImageMeta(imageURL)
+		if !ok {
+			unknown = true
+			continue
+		}
+		total += openAIImageInputTokens(w, h)
+	}
+	for _, upload := range parsed.Uploads {
+		// Uploads 的 Width/Height 来自 multipart 头部（parseOpenAIImageDimensions），
+		// 客户端通常不带，故多为 0；非 0 时可省一次解码。
+		if upload.Width > 0 && upload.Height > 0 {
+			total += openAIImageInputTokens(upload.Width, upload.Height)
+			continue
+		}
+		cfg, _, err := image.DecodeConfig(bytes.NewReader(upload.Data))
+		if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+			unknown = true
+			continue
+		}
+		total += openAIImageInputTokens(cfg.Width, cfg.Height)
+	}
+
+	if !unknown {
+		return total, true
+	}
+	upstream := int(gjson.GetBytes(body, "usage.input_tokens_details.image_tokens").Int())
+	if upstream <= 0 {
+		return 0, false
+	}
+	return upstream, true
+}
+```
+
+- [ ] **Step 4: 运行确认通过**
+
+```bash
+cd backend && go test ./internal/service/ -run TestResolveOpenAIImagesInputTokens -v
+```
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add backend/internal/service/openai_images_usage_simulation.go \
+        backend/internal/service/openai_images_usage_simulation_test.go
+git commit -m "feat(images): 输入图 token 支持远程 URL 的上游聚合值兜底"
+```
+
+---
+
+### Task 8: usage 合成器
+
+**Files:**
+- Modify: `backend/internal/service/openai_images_usage_simulation.go`
+- Test: `backend/internal/service/openai_images_usage_simulation_test.go`
+
+**Interfaces:**
+- Produces:
+  - `type openAIImagesSynthUsage struct { TextInputTokens, ImageInputTokens, ImageOutputTokens, InputTokens, OutputTokens, TotalTokens int }`
+  - `func synthesizeOpenAIImagesUsage(geom openAIImageGeometry, quality string, textInputTokens, imageInputTokens int) (openAIImagesSynthUsage, bool)`
+  - `func (s openAIImagesSynthUsage) toOpenAIUsage() OpenAIUsage`
+  - `func estimateOpenAIImagePromptTokens(prompt string) int`
+
+- [ ] **Step 1: 写失败测试**
+
+```go
+func TestSynthesizeOpenAIImagesUsage(t *testing.T) {
 	geom := openAIImageGeometry{Width: 1024, Height: 1024, Ratio: "1:1", Tier: ImageBillingSize1K}
-	s, ok := synthesizeOpenAIImagesUsage(geom, 15, nil, 1)
+
+	s, ok := synthesizeOpenAIImagesUsage(geom, "low", 15, 0)
 	if !ok {
 		t.Fatalf("expected ok")
 	}
 	if s.ImageOutputTokens != 196 || s.OutputTokens != 196 {
-		t.Errorf("output = %d/%d, want 196/196", s.ImageOutputTokens, s.OutputTokens)
+		t.Errorf("output = %d/%d want 196/196", s.ImageOutputTokens, s.OutputTokens)
 	}
-	if s.ImageInputTokens != 0 || s.InputTokens != 15 {
-		t.Errorf("input = %d/%d, want 0/15", s.ImageInputTokens, s.InputTokens)
+	if s.InputTokens != 15 || s.TotalTokens != 211 {
+		t.Errorf("input/total = %d/%d want 15/211", s.InputTokens, s.TotalTokens)
 	}
-	if s.TotalTokens != 211 {
-		t.Errorf("total = %d, want 211", s.TotalTokens)
-	}
-}
 
-func TestSynthesizeOpenAIImagesUsageWithInputImages(t *testing.T) {
-	geom := openAIImageGeometry{Width: 1024, Height: 1024, Ratio: "1:1", Tier: ImageBillingSize1K}
-	// 550x368 -> 704, 2048x1152 -> 1508, 可加
-	s, ok := synthesizeOpenAIImagesUsage(geom, 10, [][2]int{{550, 368}, {2048, 1152}}, 1)
-	if !ok {
-		t.Fatalf("expected ok")
+	// quality 维度生效：同尺寸不同 quality 取不同格
+	if m, _ := synthesizeOpenAIImagesUsage(geom, "medium", 15, 0); m.ImageOutputTokens != 1756 {
+		t.Errorf("medium = %d, want 1756", m.ImageOutputTokens)
 	}
-	if s.ImageInputTokens != 2212 {
-		t.Errorf("ImageInputTokens = %d, want 2212", s.ImageInputTokens)
+	if h, _ := synthesizeOpenAIImagesUsage(geom, "high", 15, 0); h.ImageOutputTokens != 7024 {
+		t.Errorf("high = %d, want 7024", h.ImageOutputTokens)
 	}
-	if s.InputTokens != 2222 {
-		t.Errorf("InputTokens = %d, want 2222", s.InputTokens)
+
+	// 输入图 token 计入
+	withInput, _ := synthesizeOpenAIImagesUsage(geom, "low", 10, 2212)
+	if withInput.ImageInputTokens != 2212 || withInput.InputTokens != 2222 {
+		t.Errorf("input = %d/%d want 2212/2222", withInput.ImageInputTokens, withInput.InputTokens)
 	}
-	if s.TotalTokens != s.InputTokens+s.OutputTokens {
+	if withInput.TotalTokens != withInput.InputTokens+withInput.OutputTokens {
 		t.Errorf("total invariant broken")
 	}
-}
 
-func TestSynthesizeOpenAIImagesUsageMultipleOutputs(t *testing.T) {
-	geom := openAIImageGeometry{Width: 3840, Height: 2160, Ratio: "16:9", Tier: ImageBillingSize4K}
-	s, ok := synthesizeOpenAIImagesUsage(geom, 20, nil, 2)
-	if !ok {
-		t.Fatalf("expected ok")
+	// 未知几何 → false
+	bad := openAIImageGeometry{Width: 10, Height: 10, Ratio: "7:3", Tier: ImageBillingSize1K}
+	if _, ok := synthesizeOpenAIImagesUsage(bad, "low", 10, 0); ok {
+		t.Errorf("unknown ratio should return false")
 	}
-	if s.ImageOutputTokens != 13342*2 {
-		t.Errorf("ImageOutputTokens = %d, want %d", s.ImageOutputTokens, 13342*2)
-	}
-}
 
-func TestSynthesizeOpenAIImagesUsageUnknownGeometry(t *testing.T) {
-	geom := openAIImageGeometry{Width: 100, Height: 100, Ratio: "7:3", Tier: ImageBillingSize1K}
-	if _, ok := synthesizeOpenAIImagesUsage(geom, 10, nil, 1); ok {
-		t.Errorf("unknown ratio should return ok=false")
+	// 文本 token 下限
+	floor, _ := synthesizeOpenAIImagesUsage(geom, "low", 0, 0)
+	if floor.TextInputTokens != 1 {
+		t.Errorf("TextInputTokens = %d, want floor 1", floor.TextInputTokens)
 	}
 }
 
-func TestSynthesizeOpenAIImagesUsageTextTokenFloor(t *testing.T) {
-	geom := openAIImageGeometry{Width: 1024, Height: 1024, Ratio: "1:1", Tier: ImageBillingSize1K}
-	s, _ := synthesizeOpenAIImagesUsage(geom, 0, nil, 1)
-	if s.TextInputTokens != 1 {
-		t.Errorf("TextInputTokens = %d, want floor 1", s.TextInputTokens)
+func TestEstimateOpenAIImagePromptTokens(t *testing.T) {
+	if got := estimateOpenAIImagePromptTokens("变成黑夜"); got != 4 {
+		t.Errorf("CJK = %d, want 4", got)
+	}
+	if got := estimateOpenAIImagePromptTokens("make it night"); got != 3 {
+		t.Errorf("ascii = %d, want 3", got)
+	}
+	if got := estimateOpenAIImagePromptTokens(""); got != 1 {
+		t.Errorf("empty = %d, want floor 1", got)
 	}
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: 运行确认失败**
 
 ```bash
-cd backend && go test ./internal/service/ -run TestSynthesizeOpenAIImagesUsage -v
+cd backend && go test ./internal/service/ -run 'TestSynthesizeOpenAIImagesUsage|TestEstimateOpenAIImagePromptTokens' -v
 ```
-
-预期：编译失败 `undefined: synthesizeOpenAIImagesUsage`。
 
 - [ ] **Step 3: 实现**
 
@@ -917,32 +1256,26 @@ type openAIImagesSynthUsage struct {
 	TotalTokens       int
 }
 
-// synthesizeOpenAIImagesUsage 按几何与输入图尺寸合成官方口径 usage。
-// imageCount 为实际产出图片数（对应请求的 n）。
 func synthesizeOpenAIImagesUsage(
 	geom openAIImageGeometry,
+	quality string,
 	textInputTokens int,
-	inputImageDims [][2]int,
-	imageCount int,
+	imageInputTokens int,
 ) (openAIImagesSynthUsage, bool) {
-	perImage, ok := openAIImageOutputTokens(geom.Ratio, geom.Tier)
+	outputTokens, ok := openAIImageOutputTokens(geom.Ratio, geom.Tier, quality)
 	if !ok {
 		return openAIImagesSynthUsage{}, false
-	}
-	if imageCount < 1 {
-		imageCount = 1
 	}
 	if textInputTokens < 1 {
 		textInputTokens = 1
 	}
-	imageInput := 0
-	for _, dim := range inputImageDims {
-		imageInput += openAIImageInputTokens(dim[0], dim[1])
+	if imageInputTokens < 0 {
+		imageInputTokens = 0
 	}
 	s := openAIImagesSynthUsage{
 		TextInputTokens:   textInputTokens,
-		ImageInputTokens:  imageInput,
-		ImageOutputTokens: perImage * imageCount,
+		ImageInputTokens:  imageInputTokens,
+		ImageOutputTokens: outputTokens,
 	}
 	s.InputTokens = s.TextInputTokens + s.ImageInputTokens
 	s.OutputTokens = s.ImageOutputTokens
@@ -950,7 +1283,6 @@ func synthesizeOpenAIImagesUsage(
 	return s, true
 }
 
-// toOpenAIUsage 产出与响应体同源的计费 usage。
 func (s openAIImagesSynthUsage) toOpenAIUsage() OpenAIUsage {
 	return OpenAIUsage{
 		InputTokens:       s.InputTokens,
@@ -959,85 +1291,108 @@ func (s openAIImagesSynthUsage) toOpenAIUsage() OpenAIUsage {
 		ImageOutputTokens: s.ImageOutputTokens,
 	}
 }
+
+// estimateOpenAIImagePromptTokens 在上游未回传文本 token 时粗估：
+// CJK 按 1 token/字，其余按 4 字符/token，下限 1。
+func estimateOpenAIImagePromptTokens(prompt string) int {
+	cjk, other := 0, 0
+	for _, r := range prompt {
+		if (r >= 0x4E00 && r <= 0x9FFF) || (r >= 0x3040 && r <= 0x30FF) || (r >= 0xAC00 && r <= 0xD7AF) {
+			cjk++
+			continue
+		}
+		other++
+	}
+	if tokens := cjk + other/4; tokens >= 1 {
+		return tokens
+	}
+	return 1
+}
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: 运行确认通过**
 
 ```bash
-cd backend && go test ./internal/service/ -run TestSynthesizeOpenAIImagesUsage -v
+cd backend && go test ./internal/service/ -run 'TestSynthesizeOpenAIImagesUsage|TestEstimateOpenAIImagePromptTokens' -v
 ```
-
-预期：全部 PASS。
 
 - [ ] **Step 5: 提交**
 
 ```bash
 git add backend/internal/service/openai_images_usage_simulation.go \
         backend/internal/service/openai_images_usage_simulation_test.go
-git commit -m "feat(images): 新增 images usage 合成器"
+git commit -m "feat(images): 新增带 quality 维度的 usage 合成器"
 ```
 
 ---
 
-### Task 7: 响应体改写
+### Task 9: 响应体改写
 
 **Files:**
 - Modify: `backend/internal/service/openai_images_usage_simulation.go`
 - Test: `backend/internal/service/openai_images_usage_simulation_test.go`
 
 **Interfaces:**
-- Consumes: `openAIImagesSynthUsage`、`openAIImageGeometry`
-- Produces: `func rewriteOpenAIImagesResponseBody(body []byte, model string, s openAIImagesSynthUsage, geom openAIImageGeometry) ([]byte, bool)`
+- Produces: `func rewriteOpenAIImagesResponseBody(body []byte, model, quality, format string, s openAIImagesSynthUsage, geom openAIImageGeometry) ([]byte, bool)`
 
 - [ ] **Step 1: 写失败测试**
 
 ```go
 func TestRewriteOpenAIImagesResponseBodyAdobe(t *testing.T) {
-	b64 := pngDataURLBase64(t, 8, 8)
+	b64 := pngBase64(t, 8, 8)
 	body := []byte(`{"created":1,"model":"gpt-image-2","data":[{"b64_json":"` + b64 + `"}],` +
-		`"usage":{"input_tokens":304,"output_tokens":400,"total_tokens":704,` +
-		`"input_tokens_details":{"image_tokens":300,"text_tokens":4},` +
-		`"output_tokens_details":{"image_tokens":400,"text_tokens":0}}}`)
+		`"usage":{"input_tokens":304,"output_tokens":400,"total_tokens":704}}`)
 	geom := openAIImageGeometry{Width: 2048, Height: 2048, Ratio: "1:1", Tier: ImageBillingSize2K}
-	s, _ := synthesizeOpenAIImagesUsage(geom, 12, nil, 1)
+	s, _ := synthesizeOpenAIImagesUsage(geom, "low", 12, 0)
 
-	out, ok := rewriteOpenAIImagesResponseBody(body, "gpt-image-2", s, geom)
+	out, ok := rewriteOpenAIImagesResponseBody(body, "gpt-image-2", "low", "png", s, geom)
 	if !ok {
 		t.Fatalf("expected ok")
 	}
-	if got := gjson.GetBytes(out, "background").String(); got != "opaque" {
-		t.Errorf("background = %q, want opaque", got)
+	checks := map[string]string{
+		"background":    "opaque",
+		"output_format": "png",
+		"quality":       "low", // 回显请求归一值，不由尺寸档反推
+		"size":          "2048x2048",
+		"model":         "gpt-image-2",
 	}
-	if got := gjson.GetBytes(out, "output_format").String(); got != "png" {
-		t.Errorf("output_format = %q, want png", got)
+	for path, want := range checks {
+		if got := gjson.GetBytes(out, path).String(); got != want {
+			t.Errorf("%s = %q, want %q", path, got, want)
+		}
 	}
-	if got := gjson.GetBytes(out, "quality").String(); got != "medium" {
-		t.Errorf("quality = %q, want medium (2K)", got)
-	}
-	if got := gjson.GetBytes(out, "size").String(); got != "2048x2048" {
-		t.Errorf("size = %q, want 2048x2048", got)
-	}
-	if got := gjson.GetBytes(out, "usage.output_tokens_details.image_tokens").Int(); got != 3568 {
-		t.Errorf("image_tokens = %d, want 3568", got)
+	if got := gjson.GetBytes(out, "usage.output_tokens_details.image_tokens").Int(); got != 397 {
+		t.Errorf("image_tokens = %d, want 397", got)
 	}
 	if got := gjson.GetBytes(out, "usage.output_tokens_details.text_tokens").Int(); got != 0 {
 		t.Errorf("output text_tokens = %d, want 0", got)
 	}
-	// 图像数据必须逐字节保留
 	if gjson.GetBytes(out, "data.0.b64_json").String() != b64 {
 		t.Errorf("b64_json was modified")
 	}
 }
 
-func TestRewriteOpenAIImagesResponseBodyCodex(t *testing.T) {
-	b64 := pngDataURLBase64(t, 8, 8)
-	body := []byte(`{"created":1,"model":"gpt-image-2-codex","quality":"auto","size":"1672x941",` +
-		`"data":[{"b64_json":"` + b64 + `","revised_prompt":"expanded prompt text"}],` +
-		`"usage":{"input_tokens":2327,"output_tokens":1158,"total_tokens":3485}}`)
-	geom := openAIImageGeometry{Width: 1280, Height: 720, Ratio: "16:9", Tier: ImageBillingSize1K}
-	s, _ := synthesizeOpenAIImagesUsage(geom, 20, nil, 1)
+// 上游已给 background 时必须沿用，不得覆盖成 opaque。
+func TestRewriteOpenAIImagesResponseBodyKeepsUpstreamBackground(t *testing.T) {
+	body := []byte(`{"background":"transparent","data":[{"b64_json":"` + pngBase64(t, 8, 8) + `"}],"usage":{}}`)
+	geom := openAIImageGeometry{Width: 1024, Height: 1024, Ratio: "1:1", Tier: ImageBillingSize1K}
+	s, _ := synthesizeOpenAIImagesUsage(geom, "low", 5, 0)
+	out, ok := rewriteOpenAIImagesResponseBody(body, "gpt-image-2", "low", "png", s, geom)
+	if !ok {
+		t.Fatalf("expected ok")
+	}
+	if got := gjson.GetBytes(out, "background").String(); got != "transparent" {
+		t.Errorf("background = %q, want transparent (upstream value preserved)", got)
+	}
+}
 
-	out, ok := rewriteOpenAIImagesResponseBody(body, "gpt-image-2", s, geom)
+func TestRewriteOpenAIImagesResponseBodyStripsCodexFingerprint(t *testing.T) {
+	body := []byte(`{"model":"gpt-image-2-codex","quality":"auto",` +
+		`"data":[{"b64_json":"` + pngBase64(t, 8, 8) + `","revised_prompt":"expanded"}],"usage":{}}`)
+	geom := openAIImageGeometry{Width: 1280, Height: 720, Ratio: "16:9", Tier: ImageBillingSize1K}
+	s, _ := synthesizeOpenAIImagesUsage(geom, "medium", 20, 0)
+
+	out, ok := rewriteOpenAIImagesResponseBody(body, "gpt-image-2", "medium", "png", s, geom)
 	if !ok {
 		t.Fatalf("expected ok")
 	}
@@ -1047,49 +1402,44 @@ func TestRewriteOpenAIImagesResponseBodyCodex(t *testing.T) {
 	if gjson.GetBytes(out, "data.0.revised_prompt").Exists() {
 		t.Errorf("revised_prompt should be removed")
 	}
-	if got := gjson.GetBytes(out, "quality").String(); got != "low" {
-		t.Errorf("quality = %q, want low (1K)", got)
+	if got := gjson.GetBytes(out, "quality").String(); got != "medium" {
+		t.Errorf("quality = %q, want medium", got)
 	}
 	if got := gjson.GetBytes(out, "size").String(); got != "1280x720" {
 		t.Errorf("size = %q, want 1280x720", got)
 	}
 }
 
-func TestRewriteOpenAIImagesResponseBodyInvalid(t *testing.T) {
+func TestRewriteOpenAIImagesResponseBodyInvalidJSON(t *testing.T) {
 	geom := openAIImageGeometry{Width: 1024, Height: 1024, Ratio: "1:1", Tier: ImageBillingSize1K}
-	s, _ := synthesizeOpenAIImagesUsage(geom, 10, nil, 1)
-	if _, ok := rewriteOpenAIImagesResponseBody([]byte("not json"), "gpt-image-2", s, geom); ok {
+	s, _ := synthesizeOpenAIImagesUsage(geom, "low", 10, 0)
+	if _, ok := rewriteOpenAIImagesResponseBody([]byte("not json"), "gpt-image-2", "low", "png", s, geom); ok {
 		t.Errorf("invalid json should return ok=false")
 	}
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: 运行确认失败**
 
 ```bash
 cd backend && go test ./internal/service/ -run TestRewriteOpenAIImagesResponseBody -v
 ```
 
-预期：编译失败 `undefined: rewriteOpenAIImagesResponseBody`。
-
 - [ ] **Step 3: 实现**
 
-在 import 中增补 `"fmt"` 与 `"github.com/tidwall/sjson"`，然后追加：
+import 增补 `"github.com/tidwall/sjson"`。
 
 ```go
-// openAIImageTierQuality 把内部档位映射为响应体里回显的官方 quality 值。
-// 这是自定义映射（官方 quality 与 size 正交），与计费表口径保持一致。
-var openAIImageTierQuality = map[string]string{
-	ImageBillingSize1K: "low",
-	ImageBillingSize2K: "medium",
-	ImageBillingSize4K: "high",
-}
-
-// rewriteOpenAIImagesResponseBody 用合成 usage 替换响应体的 usage，
-// 并补齐官方独有字段、抹除上游指纹。不触碰 data[].b64_json / data[].url。
+// rewriteOpenAIImagesResponseBody 用合成 usage 替换响应体，补齐官方字段、抹除上游指纹。
+// 不触碰 data[].b64_json / data[].url 的内容。
+//
+// quality 写入的是**归一后的请求值**（与计费同源），不由尺寸档反推 ——
+// 官方 quality 与 size 是正交维度。
 func rewriteOpenAIImagesResponseBody(
 	body []byte,
 	model string,
+	quality string,
+	format string,
 	s openAIImagesSynthUsage,
 	geom openAIImageGeometry,
 ) ([]byte, bool) {
@@ -1123,31 +1473,33 @@ func rewriteOpenAIImagesResponseBody(
 		return body, false
 	}
 
+	// 上游已给 background 就沿用；绝不覆盖用户/上游的显式取值。
 	if !gjson.GetBytes(out, "background").Exists() {
 		if !set("background", "opaque") {
 			return body, false
 		}
 	}
 	if !gjson.GetBytes(out, "output_format").Exists() {
-		if !set("output_format", openAIImageOutputFormat(out)) {
+		resolved := strings.TrimSpace(format)
+		if resolved == "" {
+			resolved = "png"
+		}
+		if !set("output_format", resolved) {
 			return body, false
 		}
 	}
-	if quality, ok := openAIImageTierQuality[geom.Tier]; ok {
-		if !set("quality", quality) {
-			return body, false
-		}
+	if !set("quality", quality) {
+		return body, false
 	}
 	if !set("size", fmt.Sprintf("%dx%d", geom.Width, geom.Height)) {
 		return body, false
 	}
-	if strings.TrimSpace(model) != "" {
-		if !set("model", strings.TrimSpace(model)) {
+	if trimmed := strings.TrimSpace(model); trimmed != "" {
+		if !set("model", trimmed) {
 			return body, false
 		}
 	}
 
-	// 抹除 codex 管线特有的 revised_prompt
 	for i := range gjson.GetBytes(out, "data").Array() {
 		path := fmt.Sprintf("data.%d.revised_prompt", i)
 		if !gjson.GetBytes(out, path).Exists() {
@@ -1161,74 +1513,45 @@ func rewriteOpenAIImagesResponseBody(
 	}
 	return out, true
 }
-
-// openAIImageOutputFormat 由首张图像的实际编码推断，失败时回落 png。
-func openAIImageOutputFormat(body []byte) string {
-	encoded := strings.TrimSpace(gjson.GetBytes(body, "data.0.b64_json").String())
-	if encoded == "" {
-		return "png"
-	}
-	if idx := strings.Index(encoded, ","); strings.HasPrefix(encoded, "data:") && idx > 0 {
-		encoded = encoded[idx+1:]
-	}
-	raw, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return "png"
-	}
-	_, format, err := image.DecodeConfig(bytes.NewReader(raw))
-	if err != nil {
-		return "png"
-	}
-	switch format {
-	case "jpeg":
-		return "jpeg"
-	case "webp":
-		return "webp"
-	default:
-		return "png"
-	}
-}
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: 运行确认通过**
 
 ```bash
 cd backend && go test ./internal/service/ -run TestRewriteOpenAIImagesResponseBody -v
 ```
-
-预期：全部 PASS。
 
 - [ ] **Step 5: 提交**
 
 ```bash
 git add backend/internal/service/openai_images_usage_simulation.go \
         backend/internal/service/openai_images_usage_simulation_test.go
-git commit -m "feat(images): 响应体改写为官方 gpt-image-2 结构"
+git commit -m "feat(images): 响应体改写为官方结构并回显请求 quality"
 ```
 
 ---
 
-### Task 8: 编排入口与一致性不变量
+### Task 10: 编排、四道闸门与一致性不变量
 
 **Files:**
 - Modify: `backend/internal/service/openai_images_usage_simulation.go`
 - Test: `backend/internal/service/openai_images_usage_simulation_test.go`
 
 **Interfaces:**
-- Consumes: Task 5/6/7 全部产物
-- Produces: `func applyOpenAIImagesUsageSimulation(body []byte, model string, parsed *OpenAIImagesRequest) ([]byte, OpenAIUsage, bool)`
+- Produces:
+  - `func applyOpenAIImagesUsageSimulation(body []byte, parsed *OpenAIImagesRequest) ([]byte, OpenAIUsage, bool)`
+  - `func maybeSimulateOpenAIImagesUsage(body []byte, account *Account, parsed *OpenAIImagesRequest) ([]byte, OpenAIUsage, bool)`
 
 - [ ] **Step 1: 写失败测试**
 
 ```go
 // 不变量：改写后的 body 再解析出的 usage，必须与用于计费的 usage 完全一致。
 func TestApplyOpenAIImagesUsageSimulationConsistency(t *testing.T) {
-	b64 := pngDataURLBase64(t, 2048, 2048)
-	body := []byte(`{"created":1,"model":"gpt-image-2","data":[{"b64_json":"` + b64 + `"}],` +
+	body := []byte(`{"created":1,"model":"gpt-image-2","data":[{"b64_json":"` + pngBase64(t, 2048, 2048) + `"}],` +
 		`"usage":{"input_tokens":304,"output_tokens":400,"total_tokens":704}}`)
-	parsed := &OpenAIImagesRequest{Prompt: "a plain blue circle", Size: "2048x2048", N: 1}
+	parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "a plain blue circle", Size: "2048x2048", N: 1}
 
-	out, usage, ok := applyOpenAIImagesUsageSimulation(body, "gpt-image-2", parsed)
+	out, usage, ok := applyOpenAIImagesUsageSimulation(body, parsed)
 	if !ok {
 		t.Fatalf("expected applied")
 	}
@@ -1239,205 +1562,126 @@ func TestApplyOpenAIImagesUsageSimulationConsistency(t *testing.T) {
 	if parsedUsage != usage {
 		t.Errorf("usage mismatch:\n body   = %+v\n billed = %+v", parsedUsage, usage)
 	}
-	if usage.ImageOutputTokens != 3568 {
-		t.Errorf("ImageOutputTokens = %d, want 3568", usage.ImageOutputTokens)
+	// 不传 quality → low → 2K 1:1 = 397（与官方一致，而非早期草案的 3568）
+	if usage.ImageOutputTokens != 397 {
+		t.Errorf("ImageOutputTokens = %d, want 397", usage.ImageOutputTokens)
 	}
 }
 
-func TestApplyOpenAIImagesUsageSimulationDegrades(t *testing.T) {
-	// 几何不可确定：无 size、无可解码 b64、请求也无 size
-	body := []byte(`{"data":[{"url":"https://example.com/a.png"}],"usage":{"input_tokens":1,"output_tokens":2}}`)
-	parsed := &OpenAIImagesRequest{Prompt: "x", N: 1}
-
-	out, _, ok := applyOpenAIImagesUsageSimulation(body, "gpt-image-2", parsed)
-	if ok {
-		t.Errorf("expected applied=false")
+func TestApplyOpenAIImagesUsageSimulationQualityDimension(t *testing.T) {
+	body := []byte(`{"data":[{"b64_json":"` + pngBase64(t, 2048, 2048) + `"}],"usage":{}}`)
+	for _, tc := range []struct {
+		quality string
+		want    int
+	}{{"", 397}, {"auto", 397}, {"low", 397}, {"medium", 3568}} {
+		parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", Size: "2048x2048", N: 1, Quality: tc.quality}
+		_, usage, ok := applyOpenAIImagesUsageSimulation(body, parsed)
+		if !ok || usage.ImageOutputTokens != tc.want {
+			t.Errorf("quality=%q -> %d,%v want %d,true", tc.quality, usage.ImageOutputTokens, ok, tc.want)
+		}
 	}
-	if string(out) != string(body) {
-		t.Errorf("body must be returned untouched on degrade")
+	// 非官方 quality 值 → 降级
+	parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", Size: "2048x2048", N: 1, Quality: "hd"}
+	if _, _, ok := applyOpenAIImagesUsageSimulation(body, parsed); ok {
+		t.Errorf("non-official quality should degrade")
 	}
 }
-```
 
-- [ ] **Step 2: 运行测试确认失败**
-
-```bash
-cd backend && go test ./internal/service/ -run TestApplyOpenAIImagesUsageSimulation -v
-```
-
-预期：编译失败 `undefined: applyOpenAIImagesUsageSimulation`。
-
-- [ ] **Step 3: 实现**
-
-```go
-// applyOpenAIImagesUsageSimulation 串联几何归一、合成与响应体改写。
-// 任一环节失败均返回原 body 与 applied=false，调用方沿用原 usage。
-func applyOpenAIImagesUsageSimulation(
-	body []byte,
-	model string,
-	parsed *OpenAIImagesRequest,
-) ([]byte, OpenAIUsage, bool) {
-	if len(body) == 0 || parsed == nil {
-		return body, OpenAIUsage{}, false
-	}
-	geom, ok := resolveOpenAIImageGeometry(body, parsed.Size)
-	if !ok {
-		return body, OpenAIUsage{}, false
+func TestMaybeSimulateOpenAIImagesUsageGates(t *testing.T) {
+	body := []byte(`{"model":"gpt-image-2","data":[{"b64_json":"` + pngBase64(t, 1024, 1024) + `"}],"usage":{}}`)
+	marked := &Account{Credentials: map[string]any{"openai_images_usage_simulation": true}}
+	unmarked := &Account{Credentials: map[string]any{}}
+	clean := func() *OpenAIImagesRequest {
+		return &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", Size: "1024x1024", N: 1}
 	}
 
-	imageCount := len(gjson.GetBytes(body, "data").Array())
-	if imageCount < 1 {
-		return body, OpenAIUsage{}, false
+	if _, usage, ok := maybeSimulateOpenAIImagesUsage(body, marked, clean()); !ok || usage.ImageOutputTokens != 196 {
+		t.Errorf("marked account should simulate, got %d,%v", usage.ImageOutputTokens, ok)
 	}
 
-	textTokens := int(gjson.GetBytes(body, "usage.input_tokens_details.text_tokens").Int())
-	if textTokens <= 0 {
-		textTokens = estimateOpenAIImagePromptTokens(parsed.Prompt)
-	}
-
-	synth, ok := synthesizeOpenAIImagesUsage(geom, textTokens, openAIImagesInputDims(parsed), imageCount)
-	if !ok {
-		return body, OpenAIUsage{}, false
-	}
-	newBody, ok := rewriteOpenAIImagesResponseBody(body, model, synth, geom)
-	if !ok {
-		return body, OpenAIUsage{}, false
-	}
-	return newBody, synth.toOpenAIUsage(), true
-}
-
-// openAIImagesInputDims 取请求侧输入图的像素尺寸。
-// data URL 与 multipart 上传可直接解码；http(s) URL 不额外下载，跳过。
-func openAIImagesInputDims(parsed *OpenAIImagesRequest) [][2]int {
-	dims := make([][2]int, 0, len(parsed.InputImageURLs)+len(parsed.Uploads))
-	for _, imageURL := range parsed.InputImageURLs {
-		if !strings.HasPrefix(strings.TrimSpace(imageURL), "data:") {
-			continue
-		}
-		if w, h, ok := decodeImageDimensionsBase64(imageURL); ok {
-			dims = append(dims, [2]int{w, h})
-		}
-	}
-	for _, upload := range parsed.Uploads {
-		// Uploads 的 Width/Height 来自 multipart 头部（parseOpenAIImageDimensions），
-		// 客户端通常不带，故为 0；非 0 时可省一次解码。
-		if upload.Width > 0 && upload.Height > 0 {
-			dims = append(dims, [2]int{upload.Width, upload.Height})
-			continue
-		}
-		cfg, _, err := image.DecodeConfig(bytes.NewReader(upload.Data))
-		if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
-			continue
-		}
-		dims = append(dims, [2]int{cfg.Width, cfg.Height})
-	}
-	return dims
-}
-
-// estimateOpenAIImagePromptTokens 在上游未回传文本 token 时粗估：
-// CJK 按 1 token/字，其余按 4 字符/token，下限 1。
-func estimateOpenAIImagePromptTokens(prompt string) int {
-	cjk := 0
-	other := 0
-	for _, r := range prompt {
-		if (r >= 0x4E00 && r <= 0x9FFF) || (r >= 0x3040 && r <= 0x30FF) || (r >= 0xAC00 && r <= 0xD7AF) {
-			cjk++
-			continue
-		}
-		other++
-	}
-	tokens := cjk + other/4
-	if tokens < 1 {
-		return 1
-	}
-	return tokens
-}
-```
-
-- [ ] **Step 4: 运行测试确认通过**
-
-```bash
-cd backend && go test ./internal/service/ -run TestApplyOpenAIImagesUsageSimulation -v
-```
-
-预期：全部 PASS，尤其是一致性不变量那条。
-
-- [ ] **Step 5: 提交**
-
-```bash
-git add backend/internal/service/openai_images_usage_simulation.go \
-        backend/internal/service/openai_images_usage_simulation_test.go
-git commit -m "feat(images): 新增 usage 模拟编排入口与响应体/计费一致性保证"
-```
-
----
-
-### Task 9: 接入转发链路
-
-**Files:**
-- Modify: `backend/internal/service/openai_images.go:891`（`handleOpenAIImagesNonStreamingResponse`）
-- Modify: `backend/internal/service/openai_images.go:728`（唯一调用点）
-- Test: `backend/internal/service/openai_images_usage_simulation_test.go`
-
-**Interfaces:**
-- Consumes: `applyOpenAIImagesUsageSimulation`（Task 8）、`SupportsOpenAIImagesUsageSimulation`（Task 2）
-- Produces: 无（终点任务）
-
-- [ ] **Step 1: 写失败测试**
-
-```go
-func TestMaybeSimulateOpenAIImagesUsage(t *testing.T) {
-	b64 := pngDataURLBase64(t, 1024, 1024)
-	upstream := `{"created":1,"model":"gpt-image-2","data":[{"b64_json":"` + b64 + `"}],` +
-		`"usage":{"input_tokens":304,"output_tokens":400,"total_tokens":704}}`
-
-	cases := []struct {
-		name          string
-		account       *Account
-		wantSimulated bool
+	gates := []struct {
+		name    string
+		account *Account
+		parsed  *OpenAIImagesRequest
 	}{
-		{"标记账号触发改写", &Account{Credentials: map[string]any{"openai_images_usage_simulation": true}}, true},
-		{"未标记账号原样透传", &Account{Credentials: map[string]any{}}, false},
+		{"闸门1 未标记账号", unmarked, clean()},
+		{"闸门2 非白名单模型", marked, &OpenAIImagesRequest{Model: "gpt-image-1", Prompt: "x", Size: "1024x1024", N: 1}},
+		{"闸门2 grok", marked, &OpenAIImagesRequest{Model: "grok-imagine", Prompt: "x", Size: "1024x1024", N: 1}},
+		{"闸门3 n>1", marked, &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", Size: "1024x1024", N: 2}},
+		{"闸门3 transparent", marked, &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", Size: "1024x1024", N: 1, Background: "transparent"}},
+		{"闸门4 未知尺寸", marked, &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", Size: "1254x1254", N: 1}},
 	}
-	for _, tc := range cases {
+	for _, tc := range gates {
 		t.Run(tc.name, func(t *testing.T) {
-			body := []byte(upstream)
-			parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "circle", Size: "1024x1024", N: 1}
-			out, usage, applied := maybeSimulateOpenAIImagesUsage(body, tc.account, parsed)
-			if applied != tc.wantSimulated {
-				t.Fatalf("applied = %v, want %v", applied, tc.wantSimulated)
+			unknownBody := []byte(`{"size":"1254x1254","data":[{"url":"x"}],"usage":{}}`)
+			in := body
+			if strings.Contains(tc.name, "闸门4") {
+				in = unknownBody
 			}
-			if !tc.wantSimulated {
-				if string(out) != upstream {
-					t.Errorf("body must be untouched for unmarked account")
-				}
-				return
+			out, _, ok := maybeSimulateOpenAIImagesUsage(in, tc.account, tc.parsed)
+			if ok {
+				t.Errorf("%s should not simulate", tc.name)
 			}
-			if usage.ImageOutputTokens != 196 {
-				t.Errorf("ImageOutputTokens = %d, want 196", usage.ImageOutputTokens)
-			}
-			if got := gjson.GetBytes(out, "quality").String(); got != "low" {
-				t.Errorf("quality = %q, want low", got)
+			if string(out) != string(in) {
+				t.Errorf("%s: body must be untouched", tc.name)
 			}
 		})
 	}
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: 运行确认失败**
 
 ```bash
-cd backend && go test ./internal/service/ -run TestMaybeSimulateOpenAIImagesUsage -v
+cd backend && go test ./internal/service/ -run 'TestApplyOpenAIImagesUsageSimulation|TestMaybeSimulateOpenAIImagesUsage' -v
 ```
-
-预期：编译失败 `undefined: maybeSimulateOpenAIImagesUsage`。
 
 - [ ] **Step 3: 实现**
 
-在 `openai_images_usage_simulation.go` 增加账号门控的薄封装：
-
 ```go
-// maybeSimulateOpenAIImagesUsage 仅对显式打了标记的账号执行模拟改写。
+// applyOpenAIImagesUsageSimulation 串联闸门 3/4 与合成、改写。
+// 任一环节失败返回原 body 与 applied=false，调用方沿用原 usage。
+func applyOpenAIImagesUsageSimulation(
+	body []byte,
+	parsed *OpenAIImagesRequest,
+) ([]byte, OpenAIUsage, bool) {
+	if len(body) == 0 || !openAIImagesRequestSimulatable(parsed) {
+		return body, OpenAIUsage{}, false
+	}
+	quality, ok := normalizeOpenAIImageQuality(parsed.Quality)
+	if !ok {
+		return body, OpenAIUsage{}, false
+	}
+	geom, format, ok := resolveOpenAIImageGeometry(body, parsed.Size)
+	if !ok {
+		return body, OpenAIUsage{}, false
+	}
+	// 闸门 3 已排除 n>1；此处再确认响应确实只含一张图。
+	if len(gjson.GetBytes(body, "data").Array()) != 1 {
+		return body, OpenAIUsage{}, false
+	}
+
+	imageInput, ok := resolveOpenAIImagesInputTokens(body, parsed)
+	if !ok {
+		return body, OpenAIUsage{}, false
+	}
+	textTokens := int(gjson.GetBytes(body, "usage.input_tokens_details.text_tokens").Int())
+	if textTokens <= 0 {
+		textTokens = estimateOpenAIImagePromptTokens(parsed.Prompt)
+	}
+
+	synth, ok := synthesizeOpenAIImagesUsage(geom, quality, textTokens, imageInput)
+	if !ok {
+		return body, OpenAIUsage{}, false
+	}
+	newBody, ok := rewriteOpenAIImagesResponseBody(body, parsed.Model, quality, format, synth, geom)
+	if !ok {
+		return body, OpenAIUsage{}, false
+	}
+	return newBody, synth.toOpenAIUsage(), true
+}
+
+// maybeSimulateOpenAIImagesUsage 是对外入口，先过闸门 1（账号标记）与闸门 2（模型白名单）。
 func maybeSimulateOpenAIImagesUsage(
 	body []byte,
 	account *Account,
@@ -1446,15 +1690,140 @@ func maybeSimulateOpenAIImagesUsage(
 	if !account.SupportsOpenAIImagesUsageSimulation() {
 		return body, OpenAIUsage{}, false
 	}
-	model := ""
-	if parsed != nil {
-		model = parsed.Model
+	if parsed == nil || !isSimulatableOpenAIImagesModel(parsed.Model) {
+		return body, OpenAIUsage{}, false
 	}
-	return applyOpenAIImagesUsageSimulation(body, model, parsed)
+	return applyOpenAIImagesUsageSimulation(body, parsed)
 }
 ```
 
-在 `openai_images.go` 把 `handleOpenAIImagesNonStreamingResponse` 改为：
+- [ ] **Step 4: 运行确认通过**
+
+```bash
+cd backend && go test ./internal/service/ -run 'TestApplyOpenAIImagesUsageSimulation|TestMaybeSimulateOpenAIImagesUsage' -v
+```
+
+预期：全部 PASS，尤其是一致性不变量与六项闸门降级。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add backend/internal/service/openai_images_usage_simulation.go \
+        backend/internal/service/openai_images_usage_simulation_test.go
+git commit -m "feat(images): 新增四道闸门编排与响应体/计费一致性保证"
+```
+
+---
+
+### Task 11: 接入转发链路与集成测试
+
+**Files:**
+- Modify: `backend/internal/service/openai_images.go:891`（`handleOpenAIImagesNonStreamingResponse`）
+- Modify: `backend/internal/service/openai_images.go:728`（唯一调用点）
+- Test: `backend/internal/service/openai_images_test.go`
+
+**Interfaces:**
+- Consumes: `maybeSimulateOpenAIImagesUsage`（Task 10）
+
+- [ ] **Step 1: 写失败集成测试**
+
+追加到 `backend/internal/service/openai_images_test.go`（沿用该文件既有的
+上游 stub / gin 测试上下文构造方式；若既有夹具函数名不同，按同文件既有写法适配）：
+
+```go
+func TestForwardOpenAIImagesSimulationIntegration(t *testing.T) {
+	upstreamBody := func(t *testing.T) string {
+		t.Helper()
+		return `{"created":1,"model":"gpt-image-2","data":[{"b64_json":"` + pngBase64(t, 1024, 1024) + `"}],` +
+			`"usage":{"input_tokens":304,"output_tokens":400,"total_tokens":704}}`
+	}
+
+	cases := []struct {
+		name          string
+		account       *Account
+		parsed        *OpenAIImagesRequest
+		wantSimulated bool
+		wantImageOut  int
+	}{
+		{
+			name:          "标记账号 + gpt-image-2 → 模拟",
+			account:       &Account{Credentials: map[string]any{"openai_images_usage_simulation": true}},
+			parsed:        &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", Size: "1024x1024", N: 1},
+			wantSimulated: true,
+			wantImageOut:  196,
+		},
+		{
+			name:          "未标记账号 → 透传",
+			account:       &Account{Credentials: map[string]any{}},
+			parsed:        &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", Size: "1024x1024", N: 1},
+			wantSimulated: false,
+			wantImageOut:  0,
+		},
+		{
+			name:          "标记账号 + gpt-image-1 → 透传",
+			account:       &Account{Credentials: map[string]any{"openai_images_usage_simulation": true}},
+			parsed:        &OpenAIImagesRequest{Model: "gpt-image-1", Prompt: "x", Size: "1024x1024", N: 1},
+			wantSimulated: false,
+			wantImageOut:  0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := upstreamBody(t)
+			out, usage, applied := maybeSimulateOpenAIImagesUsage([]byte(raw), tc.account, tc.parsed)
+			if applied != tc.wantSimulated {
+				t.Fatalf("applied = %v, want %v", applied, tc.wantSimulated)
+			}
+			if !tc.wantSimulated {
+				if string(out) != raw {
+					t.Errorf("body must be byte-identical when not simulated")
+				}
+				return
+			}
+			if usage.ImageOutputTokens != tc.wantImageOut {
+				t.Errorf("ImageOutputTokens = %d, want %d", usage.ImageOutputTokens, tc.wantImageOut)
+			}
+			if got := gjson.GetBytes(out, "quality").String(); got != "low" {
+				t.Errorf("quality = %q, want low", got)
+			}
+		})
+	}
+}
+
+// 远程 images[].image_url 的 edits：输入图 token 必须走上游聚合值，不能为 0
+func TestForwardOpenAIImagesSimulationRemoteEdits(t *testing.T) {
+	raw := `{"model":"gpt-image-2","data":[{"b64_json":"` + pngBase64(t, 1024, 1024) + `"}],` +
+		`"usage":{"input_tokens":1518,"input_tokens_details":{"image_tokens":1508,"text_tokens":10},` +
+		`"output_tokens":196,"output_tokens_details":{"image_tokens":196,"text_tokens":0},"total_tokens":1714}}`
+	account := &Account{Credentials: map[string]any{"openai_images_usage_simulation": true}}
+	parsed := &OpenAIImagesRequest{
+		Model: "gpt-image-2", Prompt: "make it night", Size: "1024x1024", N: 1,
+		Endpoint:       openAIImagesEditsEndpoint,
+		InputImageURLs: []string{"https://example.com/a.png"},
+	}
+	_, usage, applied := maybeSimulateOpenAIImagesUsage([]byte(raw), account, parsed)
+	if !applied {
+		t.Fatalf("expected simulation to apply")
+	}
+	if usage.ImageInputTokens != 1508 {
+		t.Errorf("ImageInputTokens = %d, want 1508 (upstream aggregate)", usage.ImageInputTokens)
+	}
+}
+```
+
+- [ ] **Step 2: 运行确认失败**
+
+```bash
+cd backend && go test ./internal/service/ -run TestForwardOpenAIImagesSimulation -v
+```
+
+预期：编译通过但 `TestForwardOpenAIImagesSimulationIntegration` 因接入点未改而与预期不符，
+或（若 Task 10 已完成）此步已 PASS —— 此时改为验证接入点：把下一步的签名改动做完后再跑。
+
+- [ ] **Step 3: 实现接入点**
+
+`openai_images.go` 中把 `handleOpenAIImagesNonStreamingResponse` 改为：
 
 ```go
 func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(
@@ -1475,7 +1844,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(
 		}
 	}
 
-	// 模拟改写必须发生在写出之前，且响应体与计费 usage 同源。
+	// 模拟改写必须在写出之前，且响应体与计费 usage 同源。
 	simulatedBody, simulatedUsage, simulated := maybeSimulateOpenAIImagesUsage(body, account, parsed)
 	if simulated {
 		body = simulatedBody
@@ -1491,19 +1860,17 @@ func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(
 }
 ```
 
-在唯一调用点（`openai_images.go:728`）补两个实参：
+唯一调用点（`openai_images.go:728`）补两个实参：
 
 ```go
 		nonStreamUsage, nonStreamCount, nonStreamSizes, err := s.handleOpenAIImagesNonStreamingResponse(resp, c, account, parsed)
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: 运行确认通过**
 
 ```bash
-cd backend && go test ./internal/service/ -run TestMaybeSimulateOpenAIImagesUsage -v
+cd backend && go test ./internal/service/ -run TestForwardOpenAIImagesSimulation -v
 ```
-
-预期：两个子用例均 PASS。
 
 - [ ] **Step 5: 全量回归**
 
@@ -1512,39 +1879,74 @@ cd backend && go build ./... && go vet ./internal/service/
 cd backend && go test ./internal/service/ ./internal/handler/ 2>&1 | tail -30
 ```
 
-预期：编译与 vet 通过；失败用例与改动前基线一致（dev 分支已知 2 个预先存在的失败），无新增失败。
+预期：编译与 vet 通过；失败用例与改动前基线一致，无新增失败。
 
 - [ ] **Step 6: 提交**
 
 ```bash
 git add backend/internal/service/openai_images.go \
-        backend/internal/service/openai_images_usage_simulation.go \
-        backend/internal/service/openai_images_usage_simulation_test.go
-git commit -m "feat(images): 转发链路接入 usage 模拟（仅标记账号生效）"
+        backend/internal/service/openai_images_test.go
+git commit -m "feat(images): 转发链路接入 usage 模拟（四道闸门门控）"
 ```
 
 ---
 
 ## 上线前置事项
 
-以下三项不属于代码任务，需在开启标记前完成：
+### 1. 补测 25 个推导格（可选但强烈建议）
 
-- [ ] 用官方直连打一张 `{"size":"2880x2880","quality":"high"}`（约 $0.71），
-      核实 Task 4 表中 4K 1:1 的 23658。偏差 >5% 则以实测值替换后补一次提交。
-- [ ] 决定账号 1118（codex 管线）是否打标记。两点需一并权衡：
-      ①它返回的是真实 token，打标记等于用模拟值覆盖真实值；
-      ②**它的出图尺寸（`1672x941`、`1254x1254` 等）不被 16 整除**，
-      而 `size` 字段回显的是真实尺寸，打了标记也仍能被下游识别为非官方。
-      **默认建议：只给 adobe2api 账号（1115）打标记。**
-- [ ] 在目标账号的 credentials 中加入 `"openai_images_usage_simulation": true`，
-      灰度一个账号观察 `usage_logs.image_output_tokens` 与 `total_cost` 后再全量。
+当前 54 格中 **29 格实测、25 格推导**。推导用 `med = round(low × 8.87)`、
+`high = round(med × 4.0)`，而实测倍率在 **8.709 ~ 8.992** 间浮动，
+已知反例：21:9 的 1K high 推导 2944、实测 **2863**（−2.8%）。
+
+若要求精确计费，用下列脚本补齐（估算成本 **约 $5.8**、约 25 次调用）：
+
+```bash
+KEY=<官方直连 key>
+BASE=<官方直连网关>
+P="a plain blue circle centered on a white background"
+for spec in \
+  "2048x2048 high" "2880x2880 medium" "2880x2880 high" \
+  "1120x896 high" "2240x1792 medium" "2240x1792 high" \
+  "3200x2560 medium" "3200x2560 high" \
+  "1152x864 high" "2304x1728 medium" "2304x1728 high" \
+  "3264x2448 medium" "3264x2448 high" \
+  "1248x832 high" "2496x1664 medium" "2496x1664 high" \
+  "3504x2336 medium" "3504x2336 high" \
+  "1280x720 high" "2560x1440 medium" "2560x1440 high" \
+  "3024x1296 medium" "3024x1296 high" \
+  "3696x1584 medium" "3696x1584 high"
+do
+  set -- $spec
+  echo -n "$1 $2 -> "
+  curl -sS "$BASE/v1/images/generations" -H "Authorization: Bearer $KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"gpt-image-2\",\"prompt\":\"$P\",\"size\":\"$1\",\"quality\":\"$2\"}" \
+    --max-time 600 \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['usage']['output_tokens_details']['image_tokens'])"
+done
+```
+
+拿到实测值后替换 `openAIImageTokenTable` 中对应字段，并把注释里的「推导」改为「实测」。
+
+### 2. 决定 codex 账号（1118）是否打标记
+
+闸门 4 会因其出图尺寸（`1672x941`、`1254x1254` 等）不在已知 30 组内而直接降级，
+**即使打了标记也基本不会被模拟**。这是预期行为。默认建议：只给 adobe2api 账号（1115）打标记。
+
+### 3. 灰度
+
+在目标账号 credentials 加 `"openai_images_usage_simulation": true`，
+先观察 `usage_logs.image_output_tokens` 与 `total_cost` 是否符合三维表，再全量。
 
 ## 验收标准
 
-- 打标记账号的响应体含 `background` / `output_format` / `quality` / `size` 四个官方字段，
-  `usage` 为官方嵌套结构，`revised_prompt` 与 `gpt-image-2-codex` 不再出现。
-- `usage_logs.image_output_tokens` 等于 Task 4 表对应格；
+- 打标记账号的响应 `usage` 结构与官方一致；`background`/`output_format`/`quality`/`size` 齐备；
+  `revised_prompt` 与 `gpt-image-2-codex` 不再出现。
+- `quality` 回显等于请求归一值；**只传 `size=2048x2048` 不传 quality 时按 low 计费（397 token）**，
+  与官方一致。
+- `usage_logs.image_output_tokens` 等于三维表对应格；
   `total_cost = image_output × 30/1M + text_input × 5/1M + image_input × 8/1M`。
-- 改图请求的 `ImageInputTokens` 非 0 且等于 patch 公式结果。
-- 未打标记账号的响应体与 usage 与改动前逐字节一致。
+- 远程 URL 改图的 `ImageInputTokens` 非 0（走上游聚合值）。
+- 四道闸门任一不满足时响应体与 usage 逐字节不变。
 - `go build ./...`、`go vet ./internal/service/` 通过；测试无新增失败。
