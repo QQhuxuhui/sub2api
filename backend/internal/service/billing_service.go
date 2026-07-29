@@ -93,6 +93,7 @@ type ModelPricing struct {
 	InputPricePerToken                 float64 // 每token输入价格 (USD)
 	InputPricePerTokenPriority         float64 // priority service tier 下每token输入价格 (USD)
 	ImageInputPricePerToken            float64 // 图片输入 token 价格 (USD)，用于多模态 embedding 等图文不同价场景；为 0 时回退到 InputPricePerToken
+	ImageInputPriceExplicit            bool    // 是否由渠道定价显式设定（为 true 时即使 == 0 也不回退）
 	OutputPricePerToken                float64 // 每token输出价格 (USD)
 	OutputPricePerTokenPriority        float64 // priority service tier 下每token输出价格 (USD)
 	CacheCreationPricePerToken         float64 // 缓存创建每token价格 (USD)
@@ -850,9 +851,14 @@ func (s *BillingService) GetModelPricingWithChannel(model string, channelPricing
 		pricing.ImageOutputPricePerToken = 0
 	}
 	pricing.ImageOutputPriceExplicit = true
-	// 渠道无图片输入价字段：归零后 computeTokenBreakdown 会回退到生效的 input 价，
-	// 避免 LiteLLM 的 input_cost_per_image_token 穿透渠道定价。
-	pricing.ImageInputPricePerToken = 0
+	// 图片输入价：显式配置则用配置值（含显式 0 = 免费）；未配置则归零回退到
+	// 生效的 input 价，避免 LiteLLM 的 input_cost_per_image_token 穿透渠道定价。
+	if channelPricing.ImageInputPrice != nil {
+		pricing.ImageInputPricePerToken = *channelPricing.ImageInputPrice
+		pricing.ImageInputPriceExplicit = true
+	} else {
+		pricing.ImageInputPricePerToken = 0
+	}
 	return pricing, nil
 }
 
@@ -987,8 +993,9 @@ func (s *BillingService) computeTokenBreakdown(
 			imageInputTokens = tokens.InputTokens
 		}
 		imageInputPrice := pricing.ImageInputPricePerToken
-		if imageInputPrice == 0 {
-			// 未配置图片输入档时回退到文本 input 价（已含 priority / 长上下文调整）
+		if imageInputPrice == 0 && !pricing.ImageInputPriceExplicit {
+			// 未配置图片输入档时回退到文本 input 价（已含 priority / 长上下文调整）；
+			// 渠道显式配置 0 则不回退（图片输入免费）。
 			imageInputPrice = inputPrice
 		}
 		bd.InputCost = float64(textInputTokens)*inputPrice + float64(imageInputTokens)*imageInputPrice

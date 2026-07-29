@@ -2020,7 +2020,7 @@ func TestForwardOpenAIImagesSimulation_ChannelTokenPricingBillsImageInputAtChann
 	groupID := int64(27)
 	// 渠道配置 flat token 定价（input 3e-6）：图片输入 token 必须按渠道 input 价计费，
 	// 不得让 LiteLLM 的 input_cost_per_image_token（8e-6）穿透渠道定价。
-	svc.resolver = newOpenAITokenChannelPricingResolverWithLiteLLMForTest(t, groupID, "gpt-image-2", pricingSvc)
+	svc.resolver = newOpenAITokenChannelPricingResolverWithLiteLLMForTest(t, groupID, "gpt-image-2", pricingSvc, nil)
 	encoded := testPNGBase64(t, 1024, 1024)
 	svc.httpUpstream = &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -2060,6 +2060,69 @@ func TestForwardOpenAIImagesSimulation_ChannelTokenPricingBillsImageInputAtChann
 	require.InDelta(t, 0.004554, usageRepo.lastLog.InputCost, 1e-12)
 	require.InDelta(t, 0.00294, usageRepo.lastLog.ImageOutputCost, 1e-12)
 	require.InDelta(t, 0.007494, usageRepo.lastLog.TotalCost, 1e-12)
+}
+
+func TestForwardOpenAIImagesSimulation_ChannelExplicitImageInputPrice(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"make it night","images":[{"image_url":"https://example.com/input.png"}],"n":1}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = req
+
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.cfg.Default.RateMultiplier = 1
+	pricingSvc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"gpt-image-2": {
+			InputCostPerToken:       5e-6,
+			InputCostPerImageToken:  8e-6,
+			OutputCostPerToken:      1e-5,
+			OutputCostPerImageToken: 3e-5,
+		},
+	}}
+	svc.billingService.pricingService = pricingSvc
+	groupID := int64(31)
+	// 渠道显式配置图片输入价 8e-6：图片输入按 8e-6 计，文本仍按渠道 input 价 3e-6。
+	imageInputPrice := 8e-6
+	svc.resolver = newOpenAITokenChannelPricingResolverWithLiteLLMForTest(t, groupID, "gpt-image-2", pricingSvc, &imageInputPrice)
+	encoded := testPNGBase64(t, 1024, 1024)
+	svc.httpUpstream = &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"req_image_usage_simulated_channel_image_input"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"data":[{"b64_json":"` + encoded + `"}],"usage":{"input_tokens":1518,"input_tokens_details":{"image_tokens":1508,"text_tokens":10},"output_tokens":400}}`)),
+	}}
+	parsed, err := svc.ParseOpenAIImagesRequest(ctx, body)
+	require.NoError(t, err)
+	account := &Account{ID: 32, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"api_key":                                "test-api-key",
+		"base_url":                               "https://image-upstream.example/v1",
+		openAIImagesUsageSimulationCredentialKey: true,
+	}}
+	user := &User{ID: 33}
+	apiKey := &APIKey{ID: 34, User: user, GroupID: &groupID, Group: &Group{ID: groupID, RateMultiplier: 1}}
+
+	result, err := svc.ForwardImages(context.Background(), ctx, account, body, parsed, "")
+	require.NoError(t, err)
+	require.True(t, result.ImageUsageSimulated)
+
+	err = svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result:  result,
+		APIKey:  apiKey,
+		User:    user,
+		Account: account,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	// text 10×3e-6 + image 1508×8e-6 = 0.01209_4；图片输出 196×15e-6 = 0.00294。
+	require.InDelta(t, 0.012094, usageRepo.lastLog.InputCost, 1e-12)
+	require.InDelta(t, 0.00294, usageRepo.lastLog.ImageOutputCost, 1e-12)
+	require.InDelta(t, 0.015034, usageRepo.lastLog.TotalCost, 1e-12)
 }
 
 func TestForwardOpenAIImagesSimulation_ResponseFormatURLPassesThrough(t *testing.T) {

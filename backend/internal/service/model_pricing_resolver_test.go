@@ -344,6 +344,38 @@ func TestResolve_WithChannelOverride_TokenImageInputPriceDoesNotLeak(t *testing.
 		require.Zero(t, resolved.BasePricing.ImageInputPricePerToken)
 	})
 
+	t.Run("flat explicit image input price", func(t *testing.T) {
+		r := newResolverWithChannelAndBilling(t, []ChannelModelPricing{{
+			Platform:        "anthropic",
+			Models:          []string{"gpt-image-2"},
+			BillingMode:     BillingModeToken,
+			InputPrice:      testPtrFloat64(3e-6),
+			ImageInputPrice: testPtrFloat64(8e-6),
+			OutputPrice:     testPtrFloat64(15e-6),
+		}}, newBS())
+
+		resolved := r.Resolve(context.Background(), PricingInput{Model: "gpt-image-2", GroupID: groupIDPtr()})
+		require.NotNil(t, resolved)
+		require.InDelta(t, 8e-6, resolved.BasePricing.ImageInputPricePerToken, 1e-18)
+		require.True(t, resolved.BasePricing.ImageInputPriceExplicit)
+	})
+
+	t.Run("flat explicit zero image input price means free", func(t *testing.T) {
+		r := newResolverWithChannelAndBilling(t, []ChannelModelPricing{{
+			Platform:        "anthropic",
+			Models:          []string{"gpt-image-2"},
+			BillingMode:     BillingModeToken,
+			InputPrice:      testPtrFloat64(3e-6),
+			ImageInputPrice: testPtrFloat64(0),
+			OutputPrice:     testPtrFloat64(15e-6),
+		}}, newBS())
+
+		resolved := r.Resolve(context.Background(), PricingInput{Model: "gpt-image-2", GroupID: groupIDPtr()})
+		require.NotNil(t, resolved)
+		require.Zero(t, resolved.BasePricing.ImageInputPricePerToken)
+		require.True(t, resolved.BasePricing.ImageInputPriceExplicit, "显式 0 必须带 Explicit，计费时不回退 input 价")
+	})
+
 	t.Run("interval no-match fallback", func(t *testing.T) {
 		r := newResolverWithChannelAndBilling(t, []ChannelModelPricing{{
 			Platform:    "anthropic",

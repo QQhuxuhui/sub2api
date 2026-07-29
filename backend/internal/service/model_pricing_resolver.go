@@ -161,9 +161,9 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 			resolved.BasePricing.ImageOutputPricePerToken = 0
 		}
 		resolved.BasePricing.ImageOutputPriceExplicit = true
-		// 渠道无图片输入价字段：归零后 computeTokenBreakdown 会回退到生效的 input 价，
-		// 避免 LiteLLM 的 input_cost_per_image_token 穿透渠道定价（与区间路径一致）。
-		resolved.BasePricing.ImageInputPricePerToken = 0
+		// 图片输入价：显式配置则用配置值（含显式 0 = 免费）；未配置则归零回退到
+		// 生效的 input 价，避免 LiteLLM 的 input_cost_per_image_token 穿透渠道定价。
+		applyChannelImageInputPrice(chPricing, resolved.BasePricing)
 		return
 	}
 
@@ -202,9 +202,22 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 		resolved.BasePricing.ImageOutputPricePerToken = 0
 	}
 	resolved.BasePricing.ImageOutputPriceExplicit = true
-	// 渠道无图片输入价字段：归零后 computeTokenBreakdown 会回退到渠道 input 价，
-	// 避免 LiteLLM 的 input_cost_per_image_token 穿透渠道定价。
-	resolved.BasePricing.ImageInputPricePerToken = 0
+	// 图片输入价：显式配置则用配置值（含显式 0 = 免费）；未配置则归零回退到渠道
+	// input 价，避免 LiteLLM 的 input_cost_per_image_token 穿透渠道定价。
+	applyChannelImageInputPrice(chPricing, resolved.BasePricing)
+}
+
+// applyChannelImageInputPrice 应用渠道图片输入价到定价快照。
+// nil = 未配置 → 归零（computeTokenBreakdown 回退到 input 价）；
+// 非 nil = 显式配置 → 使用配置值并置 Explicit（显式 0 不回退，即图片输入免费）。
+func applyChannelImageInputPrice(chPricing *ChannelModelPricing, pricing *ModelPricing) {
+	if chPricing.ImageInputPrice != nil {
+		pricing.ImageInputPricePerToken = *chPricing.ImageInputPrice
+		pricing.ImageInputPriceExplicit = true
+	} else {
+		pricing.ImageInputPricePerToken = 0
+		pricing.ImageInputPriceExplicit = false
+	}
 }
 
 // applyRequestTierOverrides 应用按次/图片模式的渠道覆盖
@@ -268,11 +281,15 @@ func intervalToModelPricing(iv *PricingInterval, supportsCacheBreakdown bool, ch
 		pricing.CacheReadPricePerToken = *iv.CacheReadPrice
 		pricing.CacheReadPricePerTokenPriority = *iv.CacheReadPrice
 	}
-	// 渠道定价存在时，ImageOutputPrice 显式覆盖
+	// 渠道定价存在时，ImageOutputPrice / ImageInputPrice 显式覆盖
 	if chPricing != nil {
 		pricing.ImageOutputPriceExplicit = true
 		if chPricing.ImageOutputPrice != nil {
 			pricing.ImageOutputPricePerToken = *chPricing.ImageOutputPrice
+		}
+		if chPricing.ImageInputPrice != nil {
+			pricing.ImageInputPricePerToken = *chPricing.ImageInputPrice
+			pricing.ImageInputPriceExplicit = true
 		}
 	}
 	return pricing

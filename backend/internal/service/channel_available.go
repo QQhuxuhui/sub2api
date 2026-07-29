@@ -140,7 +140,7 @@ func pricingNeedsFallback(p *ChannelModelPricing) bool {
 	if p == nil {
 		return true
 	}
-	if p.InputPrice != nil || p.OutputPrice != nil ||
+	if p.InputPrice != nil || p.ImageInputPrice != nil || p.OutputPrice != nil ||
 		p.CacheWritePrice != nil || p.CacheReadPrice != nil ||
 		p.ImageOutputPrice != nil || p.PerRequestPrice != nil {
 		return false
