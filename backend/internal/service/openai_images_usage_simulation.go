@@ -433,7 +433,6 @@ func estimateOpenAIImagePromptTokens(prompt string) int {
 
 func rewriteOpenAIImagesResponseBody(
 	body []byte,
-	model string,
 	quality string,
 	format string,
 	usage openAIImagesSynthUsage,
@@ -443,13 +442,12 @@ func rewriteOpenAIImagesResponseBody(
 	if !ok {
 		return body, false
 	}
-	return rewriteDecodedOpenAIImagesResponseBody(body, root, model, quality, format, usage, geometry)
+	return rewriteDecodedOpenAIImagesResponseBody(body, root, quality, format, usage, geometry)
 }
 
 func rewriteDecodedOpenAIImagesResponseBody(
 	body []byte,
 	root map[string]any,
-	model string,
 	quality string,
 	format string,
 	usage openAIImagesSynthUsage,
@@ -484,9 +482,9 @@ func rewriteDecodedOpenAIImagesResponseBody(
 	}
 	root["quality"] = quality
 	root["size"] = openAIImageDimensionsKey(geometry.Width, geometry.Height)
-	if trimmedModel := strings.TrimSpace(model); trimmedModel != "" {
-		root["model"] = trimmedModel
-	}
+	// 官方 images 响应不返回 model 字段（已与官方直连逐字段比对确认），
+	// 上游若回显了它（adobe 的 gpt-image-2-codex 之类）一并删掉，保持结构同构。
+	delete(root, "model")
 	if data, ok := root["data"].([]any); ok {
 		for _, item := range data {
 			if imageData, ok := item.(map[string]any); ok {
@@ -599,7 +597,7 @@ func applyOpenAIImagesUsageSimulation(
 	if !ok {
 		return body, OpenAIUsage{}, "", false
 	}
-	rewritten, ok := rewriteDecodedOpenAIImagesResponseBody(body, root, parsed.Model, quality, format, synthesized, geometry)
+	rewritten, ok := rewriteDecodedOpenAIImagesResponseBody(body, root, quality, format, synthesized, geometry)
 	if !ok {
 		return body, OpenAIUsage{}, "", false
 	}

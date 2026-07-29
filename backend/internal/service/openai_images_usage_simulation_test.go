@@ -524,7 +524,7 @@ func TestRewriteOpenAIImagesResponseBody(t *testing.T) {
 		t.Fatal("synthesize fixture usage")
 	}
 
-	out, ok := rewriteOpenAIImagesResponseBody(body, "gpt-image-2", "low", "png", usage, geometry)
+	out, ok := rewriteOpenAIImagesResponseBody(body, "low", "png", usage, geometry)
 	if !ok {
 		t.Fatal("expected response rewrite to succeed")
 	}
@@ -533,12 +533,15 @@ func TestRewriteOpenAIImagesResponseBody(t *testing.T) {
 		"output_format": "png",
 		"quality":       "low",
 		"size":          "2048x2048",
-		"model":         "gpt-image-2",
 	}
 	for path, want := range fields {
 		if got := gjson.GetBytes(out, path).String(); got != want {
 			t.Errorf("%s = %q, want %q", path, got, want)
 		}
+	}
+	// 官方 images 响应不返回 model；上游回显的 gpt-image-2-codex 必须被删掉。
+	if gjson.GetBytes(out, "model").Exists() {
+		t.Errorf("model 字段应被删除，实际 = %q", gjson.GetBytes(out, "model").String())
 	}
 	numericFields := map[string]int64{
 		"usage.input_tokens":                       12,
@@ -566,7 +569,7 @@ func TestRewriteOpenAIImagesResponseBodyPreservesAllowedMetadata(t *testing.T) {
 	body := []byte(`{"background":"opaque","output_format":"png","data":[{"b64_json":"abc"}],"usage":{}}`)
 	geometry := openAIImageGeometry{Width: 1280, Height: 720, Ratio: "16:9", Tier: ImageBillingSize1K}
 	usage, _ := synthesizeOpenAIImagesUsage(geometry, "medium", 20, 0)
-	out, ok := rewriteOpenAIImagesResponseBody(body, "gpt-image-2", "medium", "png", usage, geometry)
+	out, ok := rewriteOpenAIImagesResponseBody(body, "medium", "png", usage, geometry)
 	if !ok {
 		t.Fatal("expected response rewrite to succeed")
 	}
@@ -588,7 +591,7 @@ func TestRewriteOpenAIImagesResponseBodyRejectsInvalidJSON(t *testing.T) {
 	geometry := openAIImageGeometry{Width: 1024, Height: 1024, Ratio: "1:1", Tier: ImageBillingSize1K}
 	usage, _ := synthesizeOpenAIImagesUsage(geometry, "low", 10, 0)
 	for _, body := range [][]byte{[]byte("not json"), []byte(`[]`)} {
-		out, ok := rewriteOpenAIImagesResponseBody(body, "gpt-image-2", "low", "png", usage, geometry)
+		out, ok := rewriteOpenAIImagesResponseBody(body, "low", "png", usage, geometry)
 		if ok || !bytes.Equal(out, body) {
 			t.Errorf("invalid body must be returned untouched: %q", body)
 		}
@@ -606,7 +609,7 @@ func BenchmarkRewriteOpenAIImagesResponseBody4MiB(b *testing.B) {
 	b.SetBytes(int64(len(body)))
 	b.ResetTimer()
 	for range b.N {
-		if _, ok := rewriteOpenAIImagesResponseBody(body, "gpt-image-2", "low", "png", usage, geometry); !ok {
+		if _, ok := rewriteOpenAIImagesResponseBody(body, "low", "png", usage, geometry); !ok {
 			b.Fatal("rewrite failed")
 		}
 	}
