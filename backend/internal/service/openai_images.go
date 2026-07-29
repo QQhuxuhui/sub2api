@@ -903,10 +903,12 @@ func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(
 	}
 	usage, _ := extractOpenAIUsageFromJSONBytes(body)
 	usageSimulated := false
-	if rewritten, simulatedUsage, applied := maybeSimulateOpenAIImagesUsage(body, account, parsed, effectiveUpstreamModel); applied {
+	simulatedOutputSize := ""
+	if rewritten, simulatedUsage, outputSize, applied := maybeSimulateOpenAIImagesUsage(body, account, parsed, effectiveUpstreamModel); applied {
 		body = rewritten
 		usage = simulatedUsage
 		usageSimulated = true
+		simulatedOutputSize = outputSize
 		logger.L().Info("openai_images.usage_simulated",
 			zap.Int64("account_id", account.ID),
 			zap.String("requested_model", parsed.Model),
@@ -925,7 +927,13 @@ func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(
 	}
 	c.Data(resp.StatusCode, contentType, body)
 
-	return usage, extractOpenAIImageCountFromJSONBytes(body), collectOpenAIResponseImageOutputSizesFromJSONBytes(body), usageSimulated, nil
+	outputSizes := collectOpenAIResponseImageOutputSizesFromJSONBytes(body)
+	if len(outputSizes) == 0 && simulatedOutputSize != "" {
+		// 官方 images 响应把 size 放在根级，data[] 元素内没有该字段，采集器取不到；
+		// 模拟路径已解码出真实像素，用它补齐，让计费档位按实际出图归类而非请求尺寸。
+		outputSizes = []string{simulatedOutputSize}
+	}
+	return usage, extractOpenAIImageCountFromJSONBytes(body), outputSizes, usageSimulated, nil
 }
 
 func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(

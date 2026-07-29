@@ -641,7 +641,7 @@ func TestApplyOpenAIImagesUsageSimulationConsistency(t *testing.T) {
 	body := []byte(`{"created":1,"data":[{"b64_json":"` + encoded + `"}],"usage":{"input_tokens":304,"output_tokens":400,"total_tokens":704}}`)
 	parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "fallback text", Size: "2048x2048", N: 1}
 
-	out, usage, applied := applyOpenAIImagesUsageSimulation(body, parsed)
+	out, usage, _, applied := applyOpenAIImagesUsageSimulation(body, parsed)
 	if !applied {
 		t.Fatal("expected simulation to apply")
 	}
@@ -663,7 +663,7 @@ func TestApplyOpenAIImagesUsageSimulationConsistency(t *testing.T) {
 func TestApplyOpenAIImagesUsageSimulationUsesTextDetailAndQuality(t *testing.T) {
 	body := []byte(`{"data":[{"b64_json":"` + testPNGBase64(t, 1024, 1024) + `"}],"usage":{"input_tokens":999,"input_tokens_details":{"text_tokens":12,"image_tokens":0}}}`)
 	parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "ignored fallback", Quality: "medium", N: 1}
-	out, usage, applied := applyOpenAIImagesUsageSimulation(body, parsed)
+	out, usage, _, applied := applyOpenAIImagesUsageSimulation(body, parsed)
 	if !applied || usage.InputTokens != 12 || usage.ImageOutputTokens != 1756 {
 		t.Fatalf("usage = %+v, applied = %v", usage, applied)
 	}
@@ -675,7 +675,7 @@ func TestApplyOpenAIImagesUsageSimulationUsesTextDetailAndQuality(t *testing.T) 
 func TestApplyOpenAIImagesUsageSimulationRejectsUnknownQuality(t *testing.T) {
 	body := []byte(`{"data":[{"b64_json":"` + testPNGBase64(t, 1024, 1024) + `"}],"usage":{}}`)
 	parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", Quality: "hd", N: 1}
-	out, _, applied := applyOpenAIImagesUsageSimulation(body, parsed)
+	out, _, _, applied := applyOpenAIImagesUsageSimulation(body, parsed)
 	if applied || !bytes.Equal(out, body) {
 		t.Fatal("unknown quality must pass through byte-for-byte")
 	}
@@ -691,7 +691,7 @@ func TestApplyOpenAIImagesUsageSimulationTextFallbackKeepsScalesConsistent(t *te
 		body := []byte(`{"data":[{"b64_json":"` + outputPNG + `"}],"usage":{"input_tokens":310}}`)
 		parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "make it night", N: 1,
 			InputImageURLs: []string{inputPNG}}
-		out, usage, applied := applyOpenAIImagesUsageSimulation(body, parsed)
+		out, usage, _, applied := applyOpenAIImagesUsageSimulation(body, parsed)
 		if !applied {
 			t.Fatal("expected simulation to apply")
 		}
@@ -709,7 +709,7 @@ func TestApplyOpenAIImagesUsageSimulationTextFallbackKeepsScalesConsistent(t *te
 		body := []byte(`{"data":[{"b64_json":"` + outputPNG + `"}],"usage":{"input_tokens":310,"input_tokens_details":{"image_tokens":300}}}`)
 		parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "make it night", N: 1,
 			InputImageURLs: []string{inputPNG}}
-		out, usage, applied := applyOpenAIImagesUsageSimulation(body, parsed)
+		out, usage, _, applied := applyOpenAIImagesUsageSimulation(body, parsed)
 		if !applied {
 			t.Fatal("expected simulation to apply")
 		}
@@ -739,7 +739,7 @@ func TestApplyOpenAIImagesUsageSimulationRejectsUnsupportedResponses(t *testing.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, _, applied := applyOpenAIImagesUsageSimulation(tt.body, parsed)
+			out, _, _, applied := applyOpenAIImagesUsageSimulation(tt.body, parsed)
 			if applied || !bytes.Equal(out, tt.body) {
 				t.Fatal("unsupported response must pass through byte-for-byte")
 			}
@@ -753,7 +753,7 @@ func TestMaybeSimulateOpenAIImagesUsageGates(t *testing.T) {
 	clean := func() *OpenAIImagesRequest {
 		return &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", N: 1}
 	}
-	if _, usage, applied := maybeSimulateOpenAIImagesUsage(body, marked, clean(), "gpt-image-2"); !applied || usage.ImageOutputTokens != 196 {
+	if _, usage, _, applied := maybeSimulateOpenAIImagesUsage(body, marked, clean(), "gpt-image-2"); !applied || usage.ImageOutputTokens != 196 {
 		t.Fatalf("marked supported request = %+v, %v", usage, applied)
 	}
 
@@ -770,7 +770,7 @@ func TestMaybeSimulateOpenAIImagesUsageGates(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, _, applied := maybeSimulateOpenAIImagesUsage(body, tt.account, tt.parsed, "gpt-image-2")
+			out, _, _, applied := maybeSimulateOpenAIImagesUsage(body, tt.account, tt.parsed, "gpt-image-2")
 			if applied || !bytes.Equal(out, body) {
 				t.Fatal("failed gate must pass through body byte-for-byte")
 			}

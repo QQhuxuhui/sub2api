@@ -541,32 +541,34 @@ func openAIImagesResponseSimulatable(body []byte, actualFormat, expectedQuality 
 	return ok && openAIImagesResponseSimulatableFromDecoded(root, actualFormat, expectedQuality)
 }
 
+// applyOpenAIImagesUsageSimulation 返回改写后的响应体、合成 usage、真实出图尺寸（"WxH"）与是否生效。
+// 出图尺寸取自解码得到的真实像素，供计费档位归类与用量日志使用（响应体本身保持官方字段结构）。
 func applyOpenAIImagesUsageSimulation(
 	body []byte,
 	parsed *OpenAIImagesRequest,
-) ([]byte, OpenAIUsage, bool) {
+) ([]byte, OpenAIUsage, string, bool) {
 	if len(body) == 0 || !openAIImagesRequestSimulatable(parsed) {
-		return body, OpenAIUsage{}, false
+		return body, OpenAIUsage{}, "", false
 	}
 	quality, ok := normalizeOpenAIImageQuality(parsed.Quality)
 	if !ok {
-		return body, OpenAIUsage{}, false
+		return body, OpenAIUsage{}, "", false
 	}
 	root, ok := parseOpenAIImagesSimulationResponse(body)
 	if !ok {
-		return body, OpenAIUsage{}, false
+		return body, OpenAIUsage{}, "", false
 	}
 	geometry, format, ok := resolveOpenAIImageGeometryFromDecoded(root)
 	if !ok || !openAIImagesResponseSimulatableFromDecoded(root, format, quality) {
-		return body, OpenAIUsage{}, false
+		return body, OpenAIUsage{}, "", false
 	}
 	data, ok := root["data"].([]any)
 	if !ok || len(data) != 1 {
-		return body, OpenAIUsage{}, false
+		return body, OpenAIUsage{}, "", false
 	}
 	imageInputTokens, ok := resolveOpenAIImagesInputTokensFromDecoded(root, parsed)
 	if !ok {
-		return body, OpenAIUsage{}, false
+		return body, OpenAIUsage{}, "", false
 	}
 
 	textInputTokens, exists := decodedJSONInt(root, "usage", "input_tokens_details", "text_tokens")
@@ -595,13 +597,13 @@ func applyOpenAIImagesUsageSimulation(
 
 	synthesized, ok := synthesizeOpenAIImagesUsage(geometry, quality, textInputTokens, imageInputTokens)
 	if !ok {
-		return body, OpenAIUsage{}, false
+		return body, OpenAIUsage{}, "", false
 	}
 	rewritten, ok := rewriteDecodedOpenAIImagesResponseBody(body, root, parsed.Model, quality, format, synthesized, geometry)
 	if !ok {
-		return body, OpenAIUsage{}, false
+		return body, OpenAIUsage{}, "", false
 	}
-	return rewritten, synthesized.toOpenAIUsage(), true
+	return rewritten, synthesized.toOpenAIUsage(), openAIImageDimensionsKey(geometry.Width, geometry.Height), true
 }
 
 func maybeSimulateOpenAIImagesUsage(
@@ -609,10 +611,10 @@ func maybeSimulateOpenAIImagesUsage(
 	account *Account,
 	parsed *OpenAIImagesRequest,
 	effectiveUpstreamModel string,
-) ([]byte, OpenAIUsage, bool) {
+) ([]byte, OpenAIUsage, string, bool) {
 	if !account.SupportsOpenAIImagesUsageSimulation() || parsed == nil ||
 		!isSimulatableOpenAIImagesModel(parsed.Model) || !isSimulatableOpenAIImagesModel(effectiveUpstreamModel) {
-		return body, OpenAIUsage{}, false
+		return body, OpenAIUsage{}, "", false
 	}
 	return applyOpenAIImagesUsageSimulation(body, parsed)
 }

@@ -1995,6 +1995,47 @@ func TestForwardOpenAIImagesSimulation_RecordUsageBillsSynthesizedTokens(t *test
 	require.InDelta(t, 0.017994, userRepo.lastAmount, 1e-12)
 }
 
+func TestForwardOpenAIImagesSimulation_OutputSizeDrivesBillingTier(t *testing.T) {
+	// adobe 会按 quality 升档出图：请求 1280x720（1K 档字符串）+ high 实际产 3840x2160。
+	// 计费档位必须跟真实出图走（4K/output），而不是回退到请求尺寸（2K/input）。
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"a lighthouse","size":"1280x720","quality":"high","n":1}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = req
+
+	encoded := testPNGBase64(t, 3840, 2160)
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{},
+		httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"data":[{"b64_json":"` + encoded + `"}],"usage":{"input_tokens":5,"output_tokens":400}}`)),
+		}},
+	}
+	parsed, err := svc.ParseOpenAIImagesRequest(ctx, body)
+	require.NoError(t, err)
+	require.Equal(t, ImageBillingSize2K, parsed.SizeTier, "请求尺寸本身归 2K 档")
+	account := &Account{ID: 40, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"api_key":                                "test-api-key",
+		"base_url":                               "https://image-upstream.example/v1",
+		openAIImagesUsageSimulationCredentialKey: true,
+	}}
+
+	result, err := svc.ForwardImages(context.Background(), ctx, account, body, parsed, "")
+	require.NoError(t, err)
+	require.True(t, result.ImageUsageSimulated)
+	require.Equal(t, []string{"3840x2160"}, result.ImageOutputSizes, "真实出图尺寸应被采集")
+
+	ApplyOpenAIImageBillingResolution(result)
+	require.Equal(t, "3840x2160", result.ImageOutputSize)
+	require.Equal(t, ImageBillingSize4K, result.ImageSize, "档位应按实际出图归类")
+	require.Equal(t, ImageSizeSourceOutput, result.ImageSizeSource)
+	require.Equal(t, 13342, result.Usage.ImageOutputTokens)
+}
+
 func TestForwardOpenAIImagesSimulation_ChannelTokenPricingBillsImageInputAtChannelInputPrice(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-image-2","prompt":"make it night","images":[{"image_url":"https://example.com/input.png"}],"n":1}`)
