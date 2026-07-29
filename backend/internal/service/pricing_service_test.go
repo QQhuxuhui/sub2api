@@ -74,6 +74,25 @@ func TestBillingService_GPTImage2UsesDistinctImageInputTokenPrice(t *testing.T) 
 	require.InDelta(t, 0.017994, cost.TotalCost, 1e-12)
 }
 
+func TestBillingService_ImageInputPricePresenceIsPreserved(t *testing.T) {
+	pricingSvc := &PricingService{}
+	data, err := pricingSvc.parsePricingData([]byte(`{
+		"image-priced": {"input_cost_per_token": 0.000005, "input_cost_per_image_token": 0.000008},
+		"image-unpriced": {"input_cost_per_token": 0.000005}
+	}`))
+	require.NoError(t, err)
+	pricingSvc.pricingData = data
+	billingSvc := NewBillingService(&config.Config{}, pricingSvc)
+
+	priced, err := billingSvc.GetModelPricing("image-priced")
+	require.NoError(t, err)
+	require.True(t, priced.ImageInputPriceExplicit)
+
+	unpriced, err := billingSvc.GetModelPricing("image-unpriced")
+	require.NoError(t, err)
+	require.False(t, unpriced.ImageInputPriceExplicit)
+}
+
 func TestDefaultPricingIncludesGPTImage2DifferentialTokenPrices(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
 	require.NoError(t, err)

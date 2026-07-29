@@ -27,6 +27,18 @@ export interface PricingFormEntry {
   intervals: IntervalFormEntry[]
 }
 
+export function hasAnyPricing(entry: PricingFormEntry): boolean {
+  return [
+    entry.input_price,
+    entry.image_input_price,
+    entry.output_price,
+    entry.cache_write_price,
+    entry.cache_read_price,
+    entry.image_output_price,
+    entry.per_request_price,
+  ].some(value => toNullableNumber(value) !== null)
+}
+
 // 价格转换：后端存 per-token，前端显示 per-MTok ($/1M tokens)
 const MTOK = 1_000_000
 

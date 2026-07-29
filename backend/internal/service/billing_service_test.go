@@ -1363,10 +1363,11 @@ func TestGetModelPricingWithChannel_ImageInputPriceDoesNotLeak(t *testing.T) {
 	// 覆盖后必须归零（计费时回退到生效的 input 价），不得让 LiteLLM 价穿透。
 	pricingSvc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
 		"gpt-image-2": {
-			InputCostPerToken:       5e-6,
-			InputCostPerImageToken:  8e-6,
-			OutputCostPerToken:      1e-5,
-			OutputCostPerImageToken: 3e-5,
+			InputCostPerToken:         5e-6,
+			InputCostPerImageToken:    8e-6,
+			InputCostPerImageTokenSet: true,
+			OutputCostPerToken:        1e-5,
+			OutputCostPerImageToken:   3e-5,
 		},
 	}}
 	svc := NewBillingService(&config.Config{}, pricingSvc)

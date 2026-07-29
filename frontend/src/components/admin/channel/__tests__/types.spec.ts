@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateIntervals, type IntervalFormEntry } from '../types'
+import { hasAnyPricing, validateIntervals, type IntervalFormEntry, type PricingFormEntry } from '../types'
 
 function makeInterval(over: Partial<IntervalFormEntry>): IntervalFormEntry {
   return {
@@ -79,5 +79,26 @@ describe('validateIntervals', () => {
       ]
       expect(validateIntervals(intervals, 'image', t)).toContain('maxGreaterThanMin')
     })
+  })
+})
+
+describe('hasAnyPricing', () => {
+  const base: PricingFormEntry = {
+    models: [],
+    billing_mode: 'token',
+    input_price: null,
+    image_input_price: null,
+    output_price: null,
+    cache_write_price: null,
+    cache_read_price: null,
+    image_output_price: null,
+    per_request_price: null,
+    intervals: [],
+  }
+
+  it('recognizes image-only pricing as an existing price', () => {
+    expect(hasAnyPricing({ ...base, image_input_price: 8 })).toBe(true)
+    expect(hasAnyPricing({ ...base, image_output_price: 30 })).toBe(true)
+    expect(hasAnyPricing({ ...base, image_input_price: 0 })).toBe(true)
   })
 })

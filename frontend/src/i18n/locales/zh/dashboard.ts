@@ -488,6 +488,7 @@ export default {
       billingModeImage: '按图片',
       billingModeVideo: '按视频',
       inputPrice: '输入',
+      imageInputTokenPrice: '图片输入',
       outputPrice: '输出',
       cacheWritePrice: '缓存写入',
       cacheReadPrice: '缓存读取',

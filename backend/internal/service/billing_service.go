@@ -93,7 +93,7 @@ type ModelPricing struct {
 	InputPricePerToken                 float64 // 每token输入价格 (USD)
 	InputPricePerTokenPriority         float64 // priority service tier 下每token输入价格 (USD)
 	ImageInputPricePerToken            float64 // 图片输入 token 价格 (USD)，用于多模态 embedding 等图文不同价场景；为 0 时回退到 InputPricePerToken
-	ImageInputPriceExplicit            bool    // 是否由渠道定价显式设定（为 true 时即使 == 0 也不回退）
+	ImageInputPriceExplicit            bool    // 是否由定价源或渠道显式设定（为 true 时即使 == 0 也不回退）
 	OutputPricePerToken                float64 // 每token输出价格 (USD)
 	OutputPricePerTokenPriority        float64 // priority service tier 下每token输出价格 (USD)
 	CacheCreationPricePerToken         float64 // 缓存创建每token价格 (USD)
@@ -794,6 +794,7 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 				LongContextInputMultiplier:         litellmPricing.LongContextInputCostMultiplier,
 				LongContextOutputMultiplier:        litellmPricing.LongContextOutputCostMultiplier,
 				ImageInputPricePerToken:            litellmPricing.InputCostPerImageToken,
+				ImageInputPriceExplicit:            litellmPricing.InputCostPerImageTokenSet,
 				ImageOutputPricePerToken:           litellmPricing.OutputCostPerImageToken,
 			}), nil
 		}
@@ -858,6 +859,7 @@ func (s *BillingService) GetModelPricingWithChannel(model string, channelPricing
 		pricing.ImageInputPriceExplicit = true
 	} else {
 		pricing.ImageInputPricePerToken = 0
+		pricing.ImageInputPriceExplicit = false
 	}
 	return pricing, nil
 }

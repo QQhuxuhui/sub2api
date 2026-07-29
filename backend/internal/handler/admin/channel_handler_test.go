@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -20,6 +21,24 @@ import (
 
 func float64Ptr(v float64) *float64 { return &v }
 func intPtr(v int) *int             { return &v }
+
+func TestGetModelDefaultPricing_MissingImageInputPriceIsNull(t *testing.T) {
+	billingSvc := service.NewBillingService(&config.Config{}, nil)
+	h := NewChannelHandler(nil, billingSvc, nil)
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/channels/model-pricing?model=claude-sonnet-4", nil)
+	h.GetModelDefaultPricing(c)
+
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
+	require.Equal(t, true, envelope.Data["found"])
+	require.Nil(t, envelope.Data["image_input_price"])
+}
 
 // ---------------------------------------------------------------------------
 // 1. channelToResponse

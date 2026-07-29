@@ -499,12 +499,20 @@ func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {
 	response.Success(c, gin.H{
 		"found":              true,
 		"input_price":        pricing.InputPricePerToken,
-		"image_input_price":  pricing.ImageInputPricePerToken,
+		"image_input_price":  optionalImageInputPrice(pricing),
 		"output_price":       pricing.OutputPricePerToken,
 		"cache_write_price":  pricing.CacheCreationPricePerToken,
 		"cache_read_price":   pricing.CacheReadPricePerToken,
 		"image_output_price": pricing.ImageOutputPricePerToken,
 	})
+}
+
+func optionalImageInputPrice(pricing *service.ModelPricing) *float64 {
+	if pricing == nil || (pricing.ImageInputPricePerToken == 0 && !pricing.ImageInputPriceExplicit) {
+		return nil
+	}
+	price := pricing.ImageInputPricePerToken
+	return &price
 }
 
 // platformToLiteLLMProvider maps a channel platform name to the corresponding

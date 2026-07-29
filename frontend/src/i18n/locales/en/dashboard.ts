@@ -483,6 +483,7 @@ export default {
       billingModeImage: 'Per Image',
       billingModeVideo: 'Per Video',
       inputPrice: 'Input',
+      imageInputTokenPrice: 'Image Input',
       outputPrice: 'Output',
       cacheWritePrice: 'Cache Write',
       cacheReadPrice: 'Cache Read',

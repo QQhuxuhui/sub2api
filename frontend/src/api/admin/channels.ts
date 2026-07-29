@@ -152,7 +152,7 @@ export async function remove(id: number): Promise<void> {
 export interface ModelDefaultPricing {
   found: boolean
   input_price?: number    // per-token price
-  image_input_price?: number
+  image_input_price?: number | null
   output_price?: number
   cache_write_price?: number
   cache_read_price?: number

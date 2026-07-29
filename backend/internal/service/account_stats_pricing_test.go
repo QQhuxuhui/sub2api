@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -243,6 +244,55 @@ func TestCalculateStatsCost_TokenBilling_WithImageOutput(t *testing.T) {
 	require.NotNil(t, result)
 	// 100*0.001 + 50*0.002 + 10*0.01 = 0.1 + 0.1 + 0.1 = 0.3
 	require.InDelta(t, 0.3, *result, 1e-12)
+}
+
+func TestCalculateStatsCost_TokenBilling_WithImageInput(t *testing.T) {
+	pricing := &ChannelModelPricing{
+		BillingMode:     BillingModeToken,
+		InputPrice:      testPtrFloat64(5e-6),
+		ImageInputPrice: testPtrFloat64(8e-6),
+		OutputPrice:     testPtrFloat64(1e-5),
+	}
+	tokens := UsageTokens{InputTokens: 1518, ImageInputTokens: 1508}
+
+	result := calculateStatsCost(pricing, tokens, 1)
+	require.NotNil(t, result)
+	require.InDelta(t, 10*5e-6+1508*8e-6, *result, 1e-12)
+}
+
+func TestTryModelFilePricing_WithImageInput(t *testing.T) {
+	pricingSvc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"gpt-image-2": {
+			InputCostPerToken:         5e-6,
+			InputCostPerImageToken:    8e-6,
+			InputCostPerImageTokenSet: true,
+		},
+	}}
+	billingService := NewBillingService(&config.Config{}, pricingSvc)
+	tokens := UsageTokens{InputTokens: 1518, ImageInputTokens: 1508}
+
+	result := tryModelFilePricing(billingService, "gpt-image-2", tokens)
+	require.NotNil(t, result)
+	require.InDelta(t, 10*5e-6+1508*8e-6, *result, 1e-12)
+}
+
+func TestCalculateStatsCost_TokenBilling_IntervalPreservesImageInputPrice(t *testing.T) {
+	maxTokens := 2000
+	pricing := &ChannelModelPricing{
+		BillingMode:     BillingModeToken,
+		InputPrice:      testPtrFloat64(5e-6),
+		ImageInputPrice: testPtrFloat64(8e-6),
+		Intervals: []PricingInterval{{
+			MinTokens:  0,
+			MaxTokens:  &maxTokens,
+			InputPrice: testPtrFloat64(6e-6),
+		}},
+	}
+	tokens := UsageTokens{InputTokens: 1518, ImageInputTokens: 1508}
+
+	result := calculateStatsCost(pricing, tokens, 1)
+	require.NotNil(t, result)
+	require.InDelta(t, 10*6e-6+1508*8e-6, *result, 1e-12)
 }
 
 func TestCalculateStatsCost_TokenBilling_PartialPricesNil(t *testing.T) {

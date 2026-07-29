@@ -109,6 +109,7 @@ var (
 type LiteLLMModelPricing struct {
 	InputCostPerToken                   float64 `json:"input_cost_per_token"`
 	InputCostPerImageToken              float64 `json:"input_cost_per_image_token"`
+	InputCostPerImageTokenSet           bool    `json:"-"`
 	InputCostPerTokenPriority           float64 `json:"input_cost_per_token_priority"`
 	OutputCostPerToken                  float64 `json:"output_cost_per_token"`
 	OutputCostPerTokenPriority          float64 `json:"output_cost_per_token_priority"`
@@ -442,11 +443,12 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		}
 
 		pricing := &LiteLLMModelPricing{
-			LiteLLMProvider:       entry.LiteLLMProvider,
-			Mode:                  entry.Mode,
-			SupportsPromptCaching: entry.SupportsPromptCaching,
-			SupportsServiceTier:   entry.SupportsServiceTier,
-			TokenPricingAbsent:    entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil,
+			LiteLLMProvider:           entry.LiteLLMProvider,
+			Mode:                      entry.Mode,
+			SupportsPromptCaching:     entry.SupportsPromptCaching,
+			SupportsServiceTier:       entry.SupportsServiceTier,
+			InputCostPerImageTokenSet: entry.InputCostPerImageToken != nil,
+			TokenPricingAbsent:        entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil,
 		}
 
 		if entry.InputCostPerToken != nil {

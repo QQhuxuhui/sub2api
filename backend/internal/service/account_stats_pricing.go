@@ -65,7 +65,13 @@ func tryModelFilePricing(billingService *BillingService, model string, tokens Us
 	if err != nil || pricing == nil {
 		return nil
 	}
-	cost := float64(tokens.InputTokens)*pricing.InputPricePerToken +
+	textInputTokens, imageInputTokens := splitInputTokenCounts(tokens)
+	imageInputPrice := pricing.ImageInputPricePerToken
+	if imageInputPrice == 0 && !pricing.ImageInputPriceExplicit {
+		imageInputPrice = pricing.InputPricePerToken
+	}
+	cost := float64(textInputTokens)*pricing.InputPricePerToken +
+		float64(imageInputTokens)*imageInputPrice +
 		float64(tokens.OutputTokens)*pricing.OutputPricePerToken +
 		float64(tokens.CacheCreationTokens)*pricing.CacheCreationPricePerToken +
 		float64(tokens.CacheReadTokens)*pricing.CacheReadPricePerToken +
@@ -189,11 +195,13 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *
 		totalTokens := tokens.InputTokens + tokens.OutputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens
 		if iv := FindMatchingInterval(pricing.Intervals, totalTokens); iv != nil {
 			p = &ChannelModelPricing{
-				InputPrice:      iv.InputPrice,
-				OutputPrice:     iv.OutputPrice,
-				CacheWritePrice: iv.CacheWritePrice,
-				CacheReadPrice:  iv.CacheReadPrice,
-				PerRequestPrice: iv.PerRequestPrice,
+				InputPrice:       iv.InputPrice,
+				ImageInputPrice:  pricing.ImageInputPrice,
+				OutputPrice:      iv.OutputPrice,
+				CacheWritePrice:  iv.CacheWritePrice,
+				CacheReadPrice:   iv.CacheReadPrice,
+				ImageOutputPrice: pricing.ImageOutputPrice,
+				PerRequestPrice:  iv.PerRequestPrice,
 			}
 		}
 	}
@@ -203,7 +211,14 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *
 		}
 		return *ptr
 	}
-	cost := float64(tokens.InputTokens)*deref(p.InputPrice) +
+	textInputTokens, imageInputTokens := splitInputTokenCounts(tokens)
+	inputPrice := deref(p.InputPrice)
+	imageInputPrice := deref(p.ImageInputPrice)
+	if p.ImageInputPrice == nil {
+		imageInputPrice = inputPrice
+	}
+	cost := float64(textInputTokens)*inputPrice +
+		float64(imageInputTokens)*imageInputPrice +
 		float64(tokens.OutputTokens)*deref(p.OutputPrice) +
 		float64(tokens.CacheCreationTokens)*deref(p.CacheWritePrice) +
 		float64(tokens.CacheReadTokens)*deref(p.CacheReadPrice) +
@@ -212,6 +227,19 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *
 		return nil
 	}
 	return &cost
+}
+
+func splitInputTokenCounts(tokens UsageTokens) (textInputTokens, imageInputTokens int) {
+	if tokens.ImageInputTokens <= 0 {
+		return tokens.InputTokens, 0
+	}
+	imageInputTokens = tokens.ImageInputTokens
+	textInputTokens = tokens.InputTokens - imageInputTokens
+	if textInputTokens < 0 {
+		textInputTokens = 0
+		imageInputTokens = tokens.InputTokens
+	}
+	return textInputTokens, imageInputTokens
 }
 
 // applyAccountStatsCost resolves the account stats cost for a usage log entry.
