@@ -547,6 +547,9 @@ export default {
         imagesHighRes: '支持 2K/4K 高清出图',
         imagesHighResDesc:
           '生图请求显式指定 2K/4K 尺寸时，仅调度到勾选了该标记的账号；auto 或 1K 尺寸的请求不受影响。',
+        imagesUsageSimulation: '模拟 gpt-image-2 官方 usage（token 计费）',
+        imagesUsageSimulationDesc:
+          '开启后，该账号的 gpt-image-2 非流式生图/改图响应会按实测 token 表合成官方口径的 usage，并强制按 token 计费。仅给上游 usage 不可信的渠道（如 adobe2api）开启。',
         capabilityResponses: 'Responses',
         capabilityTextAuto: 'Responses / Chat Completions（自动）',
         capabilityResponsesAuto: 'Responses（自动探测）',

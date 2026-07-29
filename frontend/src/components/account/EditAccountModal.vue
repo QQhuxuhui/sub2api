@@ -1623,6 +1623,20 @@
           </label>
           <p class="input-hint">{{ t('admin.accounts.openai.imagesHighResDesc') }}</p>
         </div>
+        <div>
+          <label
+            class="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-600"
+          >
+            <input
+              v-model="openAIImagesUsageSimulationEnabled"
+              type="checkbox"
+              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+              data-testid="openai-images-usage-simulation-toggle"
+            />
+            <span class="text-gray-700 dark:text-gray-200">{{ t('admin.accounts.openai.imagesUsageSimulation') }}</span>
+          </label>
+          <p class="input-hint">{{ t('admin.accounts.openai.imagesUsageSimulationDesc') }}</p>
+        </div>
       </div>
 
       <!-- Anthropic API Key 自动透传开关 -->
@@ -2775,6 +2789,7 @@ const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openAIImagesHighResEnabled = ref(false)
+const openAIImagesUsageSimulationEnabled = ref(false)
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
@@ -2989,6 +3004,13 @@ const applyOpenAIImagesHighRes = (credentials: Record<string, unknown>) => {
     credentials.openai_images_highres = true
   } else {
     delete credentials.openai_images_highres
+  }
+}
+const applyOpenAIImagesUsageSimulation = (credentials: Record<string, unknown>) => {
+  if (openAIImagesUsageSimulationEnabled.value) {
+    credentials.openai_images_usage_simulation = true
+  } else {
+    delete credentials.openai_images_usage_simulation
   }
 }
 const normalizeOpenAIResponsesMode = (mode: unknown): OpenAIResponsesMode => {
@@ -3210,6 +3232,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openAIResponsesMode.value = 'auto'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
   openAIImagesHighResEnabled.value = false
+  openAIImagesUsageSimulationEnabled.value = false
   openAICompactModelMappings.value = []
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
@@ -3229,6 +3252,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       )
       openAIImagesHighResEnabled.value =
         (newAccount.credentials as Record<string, unknown> | undefined)?.openai_images_highres === true
+      openAIImagesUsageSimulationEnabled.value =
+        (newAccount.credentials as Record<string, unknown> | undefined)?.openai_images_usage_simulation === true
       if (!openAITextGenerationCapabilityEnabled.value) {
         openAIResponsesMode.value = 'auto'
       }
@@ -3993,6 +4018,7 @@ const handleSubmit = async () => {
       if (props.account.platform === 'openai') {
         applyOpenAIEndpointCapabilities(newCredentials)
         applyOpenAIImagesHighRes(newCredentials)
+        applyOpenAIImagesUsageSimulation(newCredentials)
         const compactModelMapping = buildModelMappingObject('mapping', [], openAICompactModelMappings.value)
         if (compactModelMapping) {
           newCredentials.compact_model_mapping = compactModelMapping

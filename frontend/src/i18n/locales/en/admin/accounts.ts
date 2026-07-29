@@ -449,6 +449,9 @@ export default {
         imagesHighRes: 'Supports 2K/4K image output',
         imagesHighResDesc:
           'Image requests with an explicit 2K/4K size are routed only to accounts with this flag. Requests with auto or 1K sizes are unaffected.',
+        imagesUsageSimulation: 'Simulate official gpt-image-2 usage (token billing)',
+        imagesUsageSimulationDesc:
+          'When enabled, non-streaming gpt-image-2 image responses from this account get usage synthesized from the measured token table and are force-billed by tokens. Enable only for channels whose upstream usage is untrustworthy (e.g. adobe2api).',
         capabilityResponses: 'Responses',
         capabilityTextAuto: 'Responses / Chat Completions (Auto)',
         capabilityResponsesAuto: 'Responses (auto probe)',
