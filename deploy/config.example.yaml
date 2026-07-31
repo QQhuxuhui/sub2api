@@ -152,6 +152,10 @@ gateway:
   # OpenAI/Codex upstream response header timeout (seconds, 0=disabled)
   # OpenAI/Codex 等待上游响应头超时时间（秒，0=禁用本地响应头超时）
   openai_response_header_timeout: 0
+
+  # 网关请求协作式截止时间（秒）。0=不限制；取消 context-aware 上游调用，未输出时返回 504。
+  # 管理台「设置→请求整体超时」启用后覆盖此值。
+  request_timeout_seconds: 0
   # Max request body size in bytes (default: 256MB)
   # 请求体最大字节数（默认 256MB）
   max_body_size: 268435456

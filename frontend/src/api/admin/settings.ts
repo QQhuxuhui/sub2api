@@ -1257,6 +1257,42 @@ export async function updateStreamTimeoutSettings(
   return data;
 }
 
+// ==================== Request Timeout Settings ====================
+
+/**
+ * Gateway request timeout settings interface
+ */
+export interface RequestTimeoutSettings {
+  enabled: boolean;
+  timeout_seconds: number;
+}
+
+/**
+ * Get gateway request timeout settings
+ * @returns Request timeout settings
+ */
+export async function getRequestTimeoutSettings(): Promise<RequestTimeoutSettings> {
+  const { data } = await apiClient.get<RequestTimeoutSettings>(
+    "/admin/settings/request-timeout",
+  );
+  return data;
+}
+
+/**
+ * Update gateway request timeout settings
+ * @param settings - Request timeout settings to update
+ * @returns Updated settings
+ */
+export async function updateRequestTimeoutSettings(
+  settings: RequestTimeoutSettings,
+): Promise<RequestTimeoutSettings> {
+  const { data } = await apiClient.put<RequestTimeoutSettings>(
+    "/admin/settings/request-timeout",
+    settings,
+  );
+  return data;
+}
+
 // ==================== Rectifier Settings ====================
 
 /**
@@ -1449,6 +1485,8 @@ export const settingsAPI = {
   updateRateLimit429CooldownSettings,
   getStreamTimeoutSettings,
   updateStreamTimeoutSettings,
+  getRequestTimeoutSettings,
+  updateRequestTimeoutSettings,
   getRectifierSettings,
   updateRectifierSettings,
   getBetaPolicySettings,

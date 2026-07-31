@@ -687,6 +687,112 @@
             </div>
           </div>
 
+          <!-- Request Timeout Settings -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.requestTimeout.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.requestTimeout.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <!-- Loading State -->
+              <div
+                v-if="requestTimeoutLoading"
+                class="flex items-center gap-2 text-gray-500"
+              >
+                <div
+                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
+                ></div>
+                {{ t("common.loading") }}
+              </div>
+
+              <template v-else>
+                <!-- Enable Request Timeout -->
+                <div class="flex items-center justify-between">
+                  <div>
+                    <label class="font-medium text-gray-900 dark:text-white">{{
+                      t("admin.settings.requestTimeout.enabled")
+                    }}</label>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.requestTimeout.enabledHint") }}
+                    </p>
+                  </div>
+                  <Toggle v-model="requestTimeoutForm.enabled" />
+                </div>
+
+                <!-- Settings - Only show when enabled -->
+                <div
+                  v-if="requestTimeoutForm.enabled"
+                  class="space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700"
+                >
+                  <!-- Timeout Seconds -->
+                  <div>
+                    <label
+                      class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{ t("admin.settings.requestTimeout.timeoutSeconds") }}
+                    </label>
+                    <input
+                      v-model.number="requestTimeoutForm.timeout_seconds"
+                      type="number"
+                      min="1"
+                      max="3600"
+                      class="input w-32"
+                    />
+                    <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t("admin.settings.requestTimeout.timeoutSecondsHint")
+                      }}
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Save Button -->
+                <div
+                  class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700"
+                >
+                  <button
+                    type="button"
+                    @click="saveRequestTimeoutSettings"
+                    :disabled="requestTimeoutSaving"
+                    class="btn btn-primary btn-sm"
+                  >
+                    <svg
+                      v-if="requestTimeoutSaving"
+                      class="mr-1 h-4 w-4 animate-spin"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        class="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        stroke-width="4"
+                      ></circle>
+                      <path
+                        class="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    {{
+                      requestTimeoutSaving
+                        ? t("common.saving")
+                        : t("common.save")
+                    }}
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+
           <!-- Request Rectifier Settings -->
           <div class="card">
             <div
@@ -7741,6 +7847,14 @@ const streamTimeoutForm = reactive({
   threshold_window_minutes: 10,
 });
 
+// Request Timeout 状态
+const requestTimeoutLoading = ref(true);
+const requestTimeoutSaving = ref(false);
+const requestTimeoutForm = reactive({
+  enabled: false,
+  timeout_seconds: 240,
+});
+
 // Rectifier 状态
 const rectifierLoading = ref(true);
 const rectifierSaving = ref(false);
@@ -10290,6 +10404,40 @@ async function saveStreamTimeoutSettings() {
   }
 }
 
+// Request Timeout 方法
+async function loadRequestTimeoutSettings() {
+  requestTimeoutLoading.value = true;
+  try {
+    const settings = await adminAPI.settings.getRequestTimeoutSettings();
+    Object.assign(requestTimeoutForm, settings);
+  } catch (_error: unknown) {
+    // Silent fail - settings will use defaults
+  } finally {
+    requestTimeoutLoading.value = false;
+  }
+}
+
+async function saveRequestTimeoutSettings() {
+  requestTimeoutSaving.value = true;
+  try {
+    const updated = await adminAPI.settings.updateRequestTimeoutSettings({
+      enabled: requestTimeoutForm.enabled,
+      timeout_seconds: requestTimeoutForm.timeout_seconds,
+    });
+    Object.assign(requestTimeoutForm, updated);
+    appStore.showSuccess(t("admin.settings.requestTimeout.saved"));
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(
+        error,
+        t("admin.settings.requestTimeout.saveFailed"),
+      ),
+    );
+  } finally {
+    requestTimeoutSaving.value = false;
+  }
+}
+
 // Rectifier 方法
 async function loadRectifierSettings() {
   rectifierLoading.value = true;
@@ -10897,6 +11045,7 @@ onMounted(() => {
   loadModelMappingTemplate(modelMappingTemplatePlatform.value);
   loadRateLimit429CooldownSettings();
   loadStreamTimeoutSettings();
+  loadRequestTimeoutSettings();
   loadRectifierSettings();
   loadBetaPolicySettings();
   loadProviders();

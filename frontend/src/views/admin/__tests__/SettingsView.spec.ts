@@ -14,6 +14,8 @@ const {
   getRateLimit429CooldownSettings,
   updateRateLimit429CooldownSettings,
   getStreamTimeoutSettings,
+  getRequestTimeoutSettings,
+  updateRequestTimeoutSettings,
   getRectifierSettings,
   getBetaPolicySettings,
   getModelMappingTemplate,
@@ -38,6 +40,8 @@ const {
   getRateLimit429CooldownSettings: vi.fn(),
   updateRateLimit429CooldownSettings: vi.fn(),
   getStreamTimeoutSettings: vi.fn(),
+  getRequestTimeoutSettings: vi.fn(),
+  updateRequestTimeoutSettings: vi.fn(),
   getRectifierSettings: vi.fn(),
   getBetaPolicySettings: vi.fn(),
   getModelMappingTemplate: vi.fn(),
@@ -68,6 +72,8 @@ vi.mock("@/api", () => ({
       getRateLimit429CooldownSettings,
       updateRateLimit429CooldownSettings,
       getStreamTimeoutSettings,
+      getRequestTimeoutSettings,
+      updateRequestTimeoutSettings,
       getRectifierSettings,
       getBetaPolicySettings,
       getModelMappingTemplate,
@@ -550,6 +556,8 @@ describe("admin SettingsView model mapping template", () => {
     getOverloadCooldownSettings.mockReset().mockResolvedValue({});
     getRateLimit429CooldownSettings.mockReset().mockResolvedValue({});
     getStreamTimeoutSettings.mockReset().mockResolvedValue({});
+    getRequestTimeoutSettings.mockReset().mockResolvedValue({});
+    updateRequestTimeoutSettings.mockReset().mockImplementation(async (payload) => payload);
     getRectifierSettings.mockReset().mockResolvedValue({});
     getBetaPolicySettings.mockReset().mockResolvedValue({});
     getGroups.mockReset().mockResolvedValue([]);
@@ -616,6 +624,39 @@ describe("admin SettingsView model mapping template", () => {
     expect(updateModelMappingTemplate).toHaveBeenCalledWith("antigravity", {
       valid: "mapping",
     });
+  });
+
+  it("loads and saves request timeout settings", async () => {
+    getRequestTimeoutSettings.mockResolvedValueOnce({
+      enabled: true,
+      timeout_seconds: 120,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    const card = wrapper
+      .findAll(".card")
+      .find((node) => node.text().includes("admin.settings.requestTimeout.title"));
+    expect(card).toBeDefined();
+
+    const input = card?.find('input[type="number"]');
+    expect(input?.exists()).toBe(true);
+    await input?.setValue("90");
+
+    const saveButton = card
+      ?.findAll("button")
+      .find((node) => node.text().includes("common.save"));
+    expect(saveButton).toBeDefined();
+    await saveButton?.trigger("click");
+    await flushPromises();
+
+    expect(updateRequestTimeoutSettings).toHaveBeenCalledWith({
+      enabled: true,
+      timeout_seconds: 90,
+    });
+    expect(showSuccess).toHaveBeenCalledWith(
+      "admin.settings.requestTimeout.saved",
+    );
   });
 });
 

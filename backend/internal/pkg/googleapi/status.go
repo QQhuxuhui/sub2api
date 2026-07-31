@@ -16,6 +16,8 @@ func HTTPStatusToGoogleStatus(status int) string {
 		return "NOT_FOUND"
 	case http.StatusTooManyRequests:
 		return "RESOURCE_EXHAUSTED"
+	case http.StatusGatewayTimeout:
+		return "DEADLINE_EXCEEDED"
 	default:
 		if status >= 500 {
 			return "INTERNAL"

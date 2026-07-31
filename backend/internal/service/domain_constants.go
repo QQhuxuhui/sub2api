@@ -394,6 +394,14 @@ const (
 	SettingKeyStreamTimeoutSettings = "stream_timeout_settings"
 
 	// =========================
+	// Gateway Request Timeout
+	// =========================
+
+	// SettingKeyRequestTimeoutSettings stores JSON config for the gateway
+	// cooperative request deadline (cancels context-aware gateway work).
+	SettingKeyRequestTimeoutSettings = "request_timeout_settings"
+
+	// =========================
 	// Request Rectifier (请求整流器)
 	// =========================
 

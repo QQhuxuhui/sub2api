@@ -397,6 +397,12 @@ type StreamTimeoutSettings struct {
 	ThresholdWindowMinutes int    `json:"threshold_window_minutes"`
 }
 
+// RequestTimeoutSettings 网关请求整体超时配置 DTO
+type RequestTimeoutSettings struct {
+	Enabled        bool `json:"enabled"`
+	TimeoutSeconds int  `json:"timeout_seconds"`
+}
+
 // RectifierSettings 请求整流器配置 DTO
 type RectifierSettings struct {
 	Enabled                  bool     `json:"enabled"`

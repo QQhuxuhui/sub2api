@@ -876,6 +876,53 @@ func (s *SettingService) SetStreamTimeoutSettings(ctx context.Context, settings 
 	return s.settingRepo.Set(ctx, SettingKeyStreamTimeoutSettings, string(data))
 }
 
+// GetRequestTimeoutSettings 获取网关请求整体超时配置
+func (s *SettingService) GetRequestTimeoutSettings(ctx context.Context) (*RequestTimeoutSettings, error) {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyRequestTimeoutSettings)
+	if err != nil {
+		if errors.Is(err, ErrSettingNotFound) {
+			return DefaultRequestTimeoutSettings(), nil
+		}
+		return nil, fmt.Errorf("get request timeout settings: %w", err)
+	}
+	if value == "" {
+		return DefaultRequestTimeoutSettings(), nil
+	}
+
+	var settings RequestTimeoutSettings
+	if err := json.Unmarshal([]byte(value), &settings); err != nil {
+		return DefaultRequestTimeoutSettings(), nil
+	}
+
+	// 验证并修正配置值
+	if settings.TimeoutSeconds < 1 {
+		settings.TimeoutSeconds = 1
+	}
+	if settings.TimeoutSeconds > 3600 {
+		settings.TimeoutSeconds = 3600
+	}
+
+	return &settings, nil
+}
+
+// SetRequestTimeoutSettings 设置网关请求整体超时配置
+func (s *SettingService) SetRequestTimeoutSettings(ctx context.Context, settings *RequestTimeoutSettings) error {
+	if settings == nil {
+		return fmt.Errorf("settings cannot be nil")
+	}
+
+	if settings.TimeoutSeconds < 1 || settings.TimeoutSeconds > 3600 {
+		return fmt.Errorf("timeout_seconds must be between 1-3600")
+	}
+
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshal request timeout settings: %w", err)
+	}
+
+	return s.settingRepo.Set(ctx, SettingKeyRequestTimeoutSettings, string(data))
+}
+
 // GetDefaultPlatformQuotas 读取系统全局 platform quota JSON key，返回全部允许平台 x 3 window 的设置。
 // 永远返回包含全部允许 platform key 的 map（值可能为零值/nil 字段，表示"上层未配置 = 不限制"）。
 //

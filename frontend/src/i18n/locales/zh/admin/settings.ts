@@ -960,6 +960,16 @@ export default {
         saved: '流超时设置保存成功',
         saveFailed: '保存流超时设置失败'
       },
+      requestTimeout: {
+        title: '请求整体超时',
+        description: '为单个请求设置协作式截止时间，超时后取消使用请求上下文的上游调用',
+        enabled: '启用请求整体超时',
+        enabledHint: '关闭时回退到环境变量 GATEWAY_REQUEST_TIMEOUT_SECONDS（默认不限制）；WebSocket 连接不受影响',
+        timeoutSeconds: '超时时间（秒）',
+        timeoutSecondsHint: '从进入超时中间件开始计时（1-3600秒）；未输出时返回 504，已开始的流停止后续写入',
+        saved: '请求超时设置保存成功',
+        saveFailed: '保存请求超时设置失败'
+      },
       rectifier: {
         title: '请求整流器',
         description: '当上游返回特定错误时，自动修正请求参数并重试，提高请求成功率',

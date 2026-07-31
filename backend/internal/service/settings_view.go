@@ -437,6 +437,25 @@ func DefaultStreamTimeoutSettings() *StreamTimeoutSettings {
 	}
 }
 
+// RequestTimeoutSettings 网关请求协作式截止时间配置。
+// 启用后请求从进入超时中间件开始计时，超时即取消使用请求 context 的上游调用；
+// 尚未输出时返回 504，已开始的流停止后续写入；
+// 关闭时回退到配置文件/环境变量 gateway.request_timeout_seconds（0=不限制）。
+type RequestTimeoutSettings struct {
+	// Enabled 是否启用管理台配置的请求超时（覆盖配置文件取值）
+	Enabled bool `json:"enabled"`
+	// TimeoutSeconds 请求整体截止时间（秒），1-3600
+	TimeoutSeconds int `json:"timeout_seconds"`
+}
+
+// DefaultRequestTimeoutSettings 返回默认的请求超时配置（默认关闭）
+func DefaultRequestTimeoutSettings() *RequestTimeoutSettings {
+	return &RequestTimeoutSettings{
+		Enabled:        false,
+		TimeoutSeconds: 240,
+	}
+}
+
 // RectifierSettings 请求整流器配置
 type RectifierSettings struct {
 	Enabled                  bool     `json:"enabled"`                    // 总开关

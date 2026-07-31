@@ -965,6 +965,16 @@ export default {
         saved: 'Stream timeout settings saved',
         saveFailed: 'Failed to save stream timeout settings'
       },
+      requestTimeout: {
+        title: 'Request Timeout',
+        description: 'Set a cooperative request deadline that cancels upstream work using the request context',
+        enabled: 'Enable Request Timeout',
+        enabledHint: 'When disabled, falls back to the GATEWAY_REQUEST_TIMEOUT_SECONDS environment variable (unlimited by default); WebSocket connections are exempt',
+        timeoutSeconds: 'Timeout (seconds)',
+        timeoutSecondsHint: 'Measured from the timeout middleware entry (1-3600s); returns 504 before output and drops later stream writes',
+        saved: 'Request timeout settings saved',
+        saveFailed: 'Failed to save request timeout settings'
+      },
       rectifier: {
         title: 'Request Rectifier',
         description: 'Automatically fix request parameters and retry when upstream returns specific errors',

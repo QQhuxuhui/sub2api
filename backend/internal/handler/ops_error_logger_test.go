@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -139,6 +141,98 @@ func TestOpsErrorLoggerMiddleware_DoesNotBreakOuterMiddlewares(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, rec.Code)
 }
 
+func TestRequestTimeoutWithOpsAndCompactWriterDoesNotPanic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	r := gin.New()
+	r.POST(
+		"/v1/responses",
+		middleware2.RequestTimeout(60, nil),
+		OpsErrorLoggerMiddleware(nil),
+		middleware2.RequestTimeoutFinalizer(),
+		func(c *gin.Context) {
+			service.MarkOpenAICompactClientStream(c)
+			stop := service.StartOpenAICompactSSEKeepalive(c, time.Hour)
+			defer stop()
+			<-c.Request.Context().Done()
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx, cancel := context.WithTimeout(req.Context(), 20*time.Millisecond)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	require.NotPanics(t, func() { r.ServeHTTP(rec, req) })
+	require.Equal(t, http.StatusGatewayTimeout, rec.Code)
+	require.Contains(t, rec.Body.String(), "timeout_error")
+}
+
+func TestRequestTimeoutProductionOrderKeepsCommittedCompactStream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	r := gin.New()
+	r.POST(
+		"/v1/responses",
+		OpsErrorLoggerMiddleware(nil),
+		middleware2.RequestTimeout(60, nil),
+		middleware2.RequestTimeoutFinalizer(),
+		func(c *gin.Context) {
+			service.MarkOpenAICompactClientStream(c)
+			stop := service.StartOpenAICompactSSEKeepalive(c, 5*time.Millisecond)
+			defer stop()
+			<-c.Request.Context().Done()
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx, cancel := context.WithTimeout(req.Context(), 50*time.Millisecond)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	require.NotPanics(t, func() { r.ServeHTTP(rec, req) })
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), ": keepalive")
+	require.NotContains(t, rec.Body.String(), "timeout_error")
+}
+
+func TestOpsErrorLoggerCapturesGatewayTimeoutBodyAndType(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+	gin.SetMode(gin.TestMode)
+
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	r := gin.New()
+	r.POST(
+		"/v1/test",
+		OpsErrorLoggerMiddleware(ops),
+		middleware2.RequestTimeout(60, nil),
+		middleware2.RequestTimeoutFinalizer(),
+		func(c *gin.Context) {
+			<-c.Request.Context().Done()
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": gin.H{"type": "upstream_error", "message": "discarded upstream error"},
+			})
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/test", nil)
+	ctx, cancel := context.WithTimeout(req.Context(), 20*time.Millisecond)
+	defer cancel()
+	r.ServeHTTP(rec, req.WithContext(ctx))
+
+	require.Equal(t, http.StatusGatewayTimeout, rec.Code)
+	require.Equal(t, int64(1), OpsErrorLogQueueLength())
+	job := <-opsErrorLogQueue
+	require.Equal(t, http.StatusGatewayTimeout, job.entry.StatusCode)
+	require.Equal(t, "timeout_error", job.entry.ErrorType)
+	require.Equal(t, "network", job.entry.ErrorPhase)
+	require.Contains(t, job.entry.ErrorBody, "timeout_error")
+	require.NotContains(t, job.entry.ErrorBody, "discarded upstream error")
+}
+
 // setupOpsErrorLogTestQueue 阻止 enqueueOpsErrorLog 启动真实 worker，改用可检查的测试队列。
 func setupOpsErrorLogTestQueue(t *testing.T, size int) {
 	t.Helper()
@@ -242,6 +336,7 @@ func TestIsKnownOpsErrorType(t *testing.T) {
 		"api_error",
 		"not_found_error",
 		"forbidden_error",
+		"timeout_error",
 	}
 	for _, k := range known {
 		require.True(t, isKnownOpsErrorType(k), "expected known: %s", k)
@@ -976,6 +1071,14 @@ func TestParseOpsErrorResponsePreservesNestedStringCode(t *testing.T) {
 	require.Equal(t, "permission_error", parsed.ErrorType)
 	require.Equal(t, "GROUP_DELETED", parsed.Code)
 	require.Equal(t, "API Key 所属分组已删除", parsed.Message)
+}
+
+func TestParseOpsErrorResponseRecognizesGoogleDeadlineExceeded(t *testing.T) {
+	parsed := parseOpsErrorResponse([]byte(`{"error":{"code":504,"message":"gateway request timeout","status":"DEADLINE_EXCEEDED"}}`))
+
+	require.Equal(t, "timeout_error", parsed.ErrorType)
+	require.Equal(t, "504", parsed.Code)
+	require.Equal(t, "network", classifyOpsPhase(parsed.ErrorType, parsed.Message, parsed.Code))
 }
 
 func TestSetOpsEndpointContext_SetsContextKeys(t *testing.T) {

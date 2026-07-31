@@ -1202,6 +1202,7 @@ func parseOpsErrorResponse(body []byte) parsedOpsError {
 	if errObj, ok := m["error"].(map[string]any); ok {
 		t, _ := errObj["type"].(string)
 		msg, _ := errObj["message"].(string)
+		status, _ := errObj["status"].(string)
 		// Gemini googleError also uses "error": { code, message, status }
 		if msg == "" {
 			if v, ok := errObj["message"]; ok {
@@ -1209,8 +1210,12 @@ func parseOpsErrorResponse(body []byte) parsedOpsError {
 			}
 		}
 		if t == "" {
-			// Gemini error does not have "type" field.
-			t = "api_error"
+			// Gemini errors use status instead of type.
+			if strings.EqualFold(strings.TrimSpace(status), "DEADLINE_EXCEEDED") {
+				t = "timeout_error"
+			} else {
+				t = "api_error"
+			}
 		}
 		// For gemini error, capture numeric code as string for business-limited mapping if needed.
 		var code string
@@ -1287,7 +1292,8 @@ func isKnownOpsErrorType(t string) bool {
 		"overloaded_error",
 		"api_error",
 		"not_found_error",
-		"forbidden_error":
+		"forbidden_error",
+		"timeout_error":
 		return true
 	}
 	return false
@@ -1332,6 +1338,8 @@ func classifyOpsPhase(errType, message, code string) string {
 		return "request"
 	case "upstream_error", "overloaded_error":
 		return "upstream"
+	case "timeout_error":
+		return "network"
 	case "api_error":
 		if isOpsNoAvailableAccountMessage(msg) {
 			return "routing"

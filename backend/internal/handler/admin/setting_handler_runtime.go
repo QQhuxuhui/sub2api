@@ -172,6 +172,58 @@ func (h *SettingHandler) GetStreamTimeoutSettings(c *gin.Context) {
 	})
 }
 
+// GetRequestTimeoutSettings 获取网关请求整体超时配置
+// GET /api/v1/admin/settings/request-timeout
+func (h *SettingHandler) GetRequestTimeoutSettings(c *gin.Context) {
+	settings, err := h.settingService.GetRequestTimeoutSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.RequestTimeoutSettings{
+		Enabled:        settings.Enabled,
+		TimeoutSeconds: settings.TimeoutSeconds,
+	})
+}
+
+// UpdateRequestTimeoutSettingsRequest 更新网关请求整体超时配置请求
+type UpdateRequestTimeoutSettingsRequest struct {
+	Enabled        bool `json:"enabled"`
+	TimeoutSeconds int  `json:"timeout_seconds"`
+}
+
+// UpdateRequestTimeoutSettings 更新网关请求整体超时配置
+// PUT /api/v1/admin/settings/request-timeout
+func (h *SettingHandler) UpdateRequestTimeoutSettings(c *gin.Context) {
+	var req UpdateRequestTimeoutSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	settings := &service.RequestTimeoutSettings{
+		Enabled:        req.Enabled,
+		TimeoutSeconds: req.TimeoutSeconds,
+	}
+
+	if err := h.settingService.SetRequestTimeoutSettings(c.Request.Context(), settings); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	updatedSettings, err := h.settingService.GetRequestTimeoutSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.RequestTimeoutSettings{
+		Enabled:        updatedSettings.Enabled,
+		TimeoutSeconds: updatedSettings.TimeoutSeconds,
+	})
+}
+
 // GetRectifierSettings 获取请求整流器配置
 // GET /api/v1/admin/settings/rectifier
 func (h *SettingHandler) GetRectifierSettings(c *gin.Context) {
