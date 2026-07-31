@@ -372,10 +372,22 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 			return s.calculateOpenAIVideoCost(ctx, billingModel, apiKey, result, videoMultiplier), nil
 		}
 	}
-	if result != nil && result.ImageCount > 0 && !result.ImageUsageSimulated {
-		// 渠道定价为 token 计费时走 token 路径，否则走图片计费
-		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
-			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
+	if result != nil && result.ImageCount > 0 {
+		// 分组按次价优先级最高：配置了对应档 image_price 时始终走图片计费，
+		// 不被用量模拟（ImageUsageSimulated）或渠道 token 定价绕过
+		sizeTier := NormalizeImageBillingTierOrDefault(result.ImageSize)
+		imageKey := apiKey
+		if !apiKeyHasConfiguredImagePrice(imageKey, sizeTier) {
+			imageKey = s.apiKeyWithFreshGroupMediaPricing(ctx, apiKey)
+		}
+		if apiKeyHasConfiguredImagePrice(imageKey, sizeTier) {
+			return s.calculateOpenAIImageCost(ctx, billingModel, imageKey, result, imageMultiplier), nil
+		}
+		if !result.ImageUsageSimulated {
+			// 渠道定价为 token 计费时走 token 路径，否则走图片计费
+			if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
+				return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
+			}
 		}
 	}
 	if len(billingModels) == 0 || billingModel == "" {
