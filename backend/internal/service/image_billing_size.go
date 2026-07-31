@@ -53,12 +53,12 @@ func ClassifyImageBillingTier(size string) (string, bool) {
 		return geometry.Tier, true
 	}
 	// 表外尺寸按像素总量兜底，与档位的面积语义一致（1K/2K/4K 各档
-	// 不同宽高比的面积近似 1024²/2048²/2880² 网格）
-	area := width * height
+	// 不同宽高比的面积近似 1024²/2048²/2880² 网格）。用除法比较避免
+	// 用户提供的超大尺寸在 width*height 时发生整数溢出并错误降档
 	switch {
-	case area <= 1024*1024:
+	case width <= 1024*1024/height:
 		return ImageBillingSize1K, true
-	case area <= 2048*2048:
+	case width <= 2048*2048/height:
 		return ImageBillingSize2K, true
 	default:
 		return ImageBillingSize4K, true

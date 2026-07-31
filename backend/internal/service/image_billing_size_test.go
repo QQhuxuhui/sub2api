@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,6 +45,14 @@ func TestClassifyImageBillingTier(t *testing.T) {
 			require.Equal(t, tt.wantTier, gotTier)
 		})
 	}
+}
+
+func TestClassifyImageBillingTier_LargeDimensionsDoNotOverflow(t *testing.T) {
+	width := int(^uint(0)>>1)/2 + 1
+	tier, ok := ClassifyImageBillingTier(strconv.Itoa(width) + "x3")
+
+	require.True(t, ok)
+	require.Equal(t, ImageBillingSize4K, tier)
 }
 
 func TestResolveImageBillingSize(t *testing.T) {
