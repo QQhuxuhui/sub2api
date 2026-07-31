@@ -544,14 +544,22 @@ func normalizeOpenAIImageSizeTier(size string) string {
 	return NormalizeImageBillingTierOrDefault(size)
 }
 
-// openAIImageSizeRequiresHighRes 判断显式尺寸是否落在 2K/4K 档。
-// 与计费默认值不同：auto/空尺寸不要求高清账号，官方账号可照常处理。
+// openAIImageSizeRequiresHighRes 判断显式尺寸是否需要高清账号。
+// 路由口径与计费档位解耦：官方账号只能处理长边 ≤1024 的尺寸，计费档位改为
+// 面积/实测表语义后（如 1280x768 计 1K），路由仍按最长边判断，避免把官方
+// 账号处理不了的灵活尺寸调度过去。auto/空尺寸不要求高清账号。
 func openAIImageSizeRequiresHighRes(size string) bool {
-	tier, ok := ClassifyImageBillingTier(size)
+	switch strings.TrimSpace(strings.ToLower(size)) {
+	case "", "auto", "1k":
+		return false
+	case "2k", "4k":
+		return true
+	}
+	width, height, ok := parseImageBillingDimensions(size)
 	if !ok {
 		return false
 	}
-	return tier == ImageBillingSize2K || tier == ImageBillingSize4K
+	return width > 1024 || height > 1024
 }
 
 func (r *OpenAIImagesRequest) RequiresHighResImage() bool {

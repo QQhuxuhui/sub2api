@@ -152,9 +152,9 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_NormalizesOfficialAndCusto
 		{size: "3840x2160", wantTier: "4K"},
 		{size: "2160x3840", wantTier: "4K"},
 		{size: "1024X768", wantTier: "1K"},
-		{size: "1280x768", wantTier: "2K"},
-		{size: "2560x1440", wantTier: "4K"},
-		{size: "2560x1600", wantTier: "4K"},
+		{size: "1280x768", wantTier: "1K"},
+		{size: "2560x1440", wantTier: "2K"},
+		{size: "2560x1600", wantTier: "2K"},
 		{size: "auto", wantTier: "2K"},
 	}
 
@@ -186,8 +186,8 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_UnknownSizesDoNotBlockPass
 		wantTier string
 	}{
 		{size: "2048x1153", wantTier: "2K"},
-		{size: "4096x1024", wantTier: "4K"},
-		{size: "3840x1024", wantTier: "4K"},
+		{size: "4096x1024", wantTier: "2K"},
+		{size: "3840x1024", wantTier: "2K"},
 		{size: "512x512", wantTier: "1K"},
 		{size: "invalid", wantTier: "2K"},
 		{size: "999999999999999999999999999x2", wantTier: "2K"},
@@ -2017,7 +2017,7 @@ func TestForwardOpenAIImagesSimulation_OutputSizeDrivesBillingTier(t *testing.T)
 	}
 	parsed, err := svc.ParseOpenAIImagesRequest(ctx, body)
 	require.NoError(t, err)
-	require.Equal(t, ImageBillingSize2K, parsed.SizeTier, "请求尺寸本身归 2K 档")
+	require.Equal(t, ImageBillingSize1K, parsed.SizeTier, "请求尺寸 1280x720 是 16:9 的 1K 档")
 	account := &Account{ID: 40, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
 		"api_key":                                "test-api-key",
 		"base_url":                               "https://image-upstream.example/v1",

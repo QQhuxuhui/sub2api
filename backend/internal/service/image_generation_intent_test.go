@@ -240,9 +240,9 @@ func TestResolveOpenAIResponsesImageBillingConfigSupportsOfficialAndCustomSizes(
 			wantTier: "4K",
 		},
 		{
-			name:     "custom valid 2k",
+			name:     "custom valid 1k",
 			body:     []byte(`{"model":"gpt-5.5","tools":[{"type":"image_generation","model":"gpt-image-2","size":"1280x768"}]}`),
-			wantTier: "2K",
+			wantTier: "1K",
 		},
 		{
 			name:     "default image tool model supports flexible size",

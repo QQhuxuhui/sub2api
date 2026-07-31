@@ -47,14 +47,18 @@ func ClassifyImageBillingTier(size string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	maxEdge := width
-	if height > maxEdge {
-		maxEdge = height
+	// 54 格实测表命中（含竖版转置）时以模型原生档位为准：非方形的 2K 档
+	// 长边天然超过 2048（如 2560x1440、2304x1728），按最长边会错判成 4K
+	if geometry, ok := lookupOpenAIImageSize(width, height); ok {
+		return geometry.Tier, true
 	}
+	// 表外尺寸按像素总量兜底，与档位的面积语义一致（1K/2K/4K 各档
+	// 不同宽高比的面积近似 1024²/2048²/2880² 网格）
+	area := width * height
 	switch {
-	case maxEdge <= 1024:
+	case area <= 1024*1024:
 		return ImageBillingSize1K, true
-	case maxEdge <= 2048:
+	case area <= 2048*2048:
 		return ImageBillingSize2K, true
 	default:
 		return ImageBillingSize4K, true
