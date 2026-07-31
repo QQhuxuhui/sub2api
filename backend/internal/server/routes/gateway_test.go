@@ -65,6 +65,36 @@ func TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered(t *testing.T) {
 	}
 }
 
+func TestGatewayRoutesLegacyAntigravityModelsHasRequestDeadline(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	hasDeadline := false
+
+	RegisterGatewayRoutes(
+		router,
+		&handler.Handlers{
+			Gateway:       &handler.GatewayHandler{},
+			OpenAIGateway: &handler.OpenAIGatewayHandler{},
+		},
+		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
+			_, hasDeadline = c.Request.Context().Deadline()
+			c.AbortWithStatus(http.StatusNoContent)
+		}),
+		nil,
+		nil,
+		nil,
+		nil,
+		&config.Config{Gateway: config.GatewayConfig{RequestTimeoutSeconds: 60}},
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/antigravity/models", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.True(t, hasDeadline)
+}
+
 func TestGatewayRoutesOpenAIImagesPathsAreRegistered(t *testing.T) {
 	router := newGatewayRoutesTestRouter()
 

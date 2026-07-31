@@ -48,7 +48,8 @@ func StartOpenAICompactSSEKeepalive(c *gin.Context, interval time.Duration) func
 		stop:   make(chan struct{}),
 	}
 	c.Set(openAICompactSSEKeepaliveKey, k)
-	c.Writer = &openAICompactKeepaliveWriter{ResponseWriter: c.Writer, k: k}
+	wrapped := &openAICompactKeepaliveWriter{ResponseWriter: c.Writer, k: k}
+	c.Writer = wrapped
 
 	var reqDone <-chan struct{}
 	if c.Request != nil {
@@ -71,7 +72,13 @@ func StartOpenAICompactSSEKeepalive(c *gin.Context, interval time.Duration) func
 			timer.Reset(interval)
 		}
 	}()
-	return k.Stop
+	return func() {
+		k.Stop()
+		// 只恢复自己安装的 wrapper，避免覆盖后续中间件主动替换的 writer。
+		if c.Writer == wrapped {
+			c.Writer = k.writer
+		}
+	}
 }
 
 // beat 在锁内提交（首次）响应头并写出一条 SSE 注释行；返回 false 表示心跳已

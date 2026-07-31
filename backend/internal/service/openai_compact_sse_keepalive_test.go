@@ -63,11 +63,14 @@ func TestOpenAICompactSSEKeepalive_CommitsHeadersAndComments(t *testing.T) {
 
 func TestOpenAICompactSSEKeepalive_StopBeforeFirstBeatKeepsWriterUntouched(t *testing.T) {
 	c, rec := newCompactBridgeTestContext(t, true)
+	originalWriter := c.Writer
 	stop := StartOpenAICompactSSEKeepalive(c, time.Hour)
+	require.NotSame(t, originalWriter, c.Writer)
 	stop()
 	waitForKeepaliveBeats()
 	require.Zero(t, rec.Body.Len())
 	require.False(t, StopOpenAICompactSSEKeepaliveCommitted(c))
+	require.Same(t, originalWriter, c.Writer)
 }
 
 // 心跳已提交后，2xx 桥接续写事件而不重复提交响应头。
