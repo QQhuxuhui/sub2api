@@ -432,6 +432,27 @@ func (_u *UserUpdate) AddRpmLimit(v int) *UserUpdate {
 	return _u
 }
 
+// SetRequestTimeoutSeconds sets the "request_timeout_seconds" field.
+func (_u *UserUpdate) SetRequestTimeoutSeconds(v int) *UserUpdate {
+	_u.mutation.ResetRequestTimeoutSeconds()
+	_u.mutation.SetRequestTimeoutSeconds(v)
+	return _u
+}
+
+// SetNillableRequestTimeoutSeconds sets the "request_timeout_seconds" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableRequestTimeoutSeconds(v *int) *UserUpdate {
+	if v != nil {
+		_u.SetRequestTimeoutSeconds(*v)
+	}
+	return _u
+}
+
+// AddRequestTimeoutSeconds adds value to the "request_timeout_seconds" field.
+func (_u *UserUpdate) AddRequestTimeoutSeconds(v int) *UserUpdate {
+	_u.mutation.AddRequestTimeoutSeconds(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *UserUpdate) AddAPIKeyIDs(ids ...int64) *UserUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -1098,6 +1119,12 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(user.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.RequestTimeoutSeconds(); ok {
+		_spec.SetField(user.FieldRequestTimeoutSeconds, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRequestTimeoutSeconds(); ok {
+		_spec.AddField(user.FieldRequestTimeoutSeconds, field.TypeInt, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2108,6 +2135,27 @@ func (_u *UserUpdateOne) AddRpmLimit(v int) *UserUpdateOne {
 	return _u
 }
 
+// SetRequestTimeoutSeconds sets the "request_timeout_seconds" field.
+func (_u *UserUpdateOne) SetRequestTimeoutSeconds(v int) *UserUpdateOne {
+	_u.mutation.ResetRequestTimeoutSeconds()
+	_u.mutation.SetRequestTimeoutSeconds(v)
+	return _u
+}
+
+// SetNillableRequestTimeoutSeconds sets the "request_timeout_seconds" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableRequestTimeoutSeconds(v *int) *UserUpdateOne {
+	if v != nil {
+		_u.SetRequestTimeoutSeconds(*v)
+	}
+	return _u
+}
+
+// AddRequestTimeoutSeconds adds value to the "request_timeout_seconds" field.
+func (_u *UserUpdateOne) AddRequestTimeoutSeconds(v int) *UserUpdateOne {
+	_u.mutation.AddRequestTimeoutSeconds(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *UserUpdateOne) AddAPIKeyIDs(ids ...int64) *UserUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -2804,6 +2852,12 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(user.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.RequestTimeoutSeconds(); ok {
+		_spec.SetField(user.FieldRequestTimeoutSeconds, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRequestTimeoutSeconds(); ok {
+		_spec.AddField(user.FieldRequestTimeoutSeconds, field.TypeInt, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

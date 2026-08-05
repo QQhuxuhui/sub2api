@@ -2115,6 +2115,10 @@ func init() {
 	userDescRpmLimit := userFields[20].Descriptor()
 	// user.DefaultRpmLimit holds the default value on creation for the rpm_limit field.
 	user.DefaultRpmLimit = userDescRpmLimit.Default.(int)
+	// userDescRequestTimeoutSeconds is the schema descriptor for request_timeout_seconds field.
+	userDescRequestTimeoutSeconds := userFields[21].Descriptor()
+	// user.DefaultRequestTimeoutSeconds holds the default value on creation for the request_timeout_seconds field.
+	user.DefaultRequestTimeoutSeconds = userDescRequestTimeoutSeconds.Default.(int)
 	userallowedgroupFields := schema.UserAllowedGroup{}.Fields()
 	_ = userallowedgroupFields
 	// userallowedgroupDescCreatedAt is the schema descriptor for created_at field.

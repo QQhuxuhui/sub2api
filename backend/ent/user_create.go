@@ -354,6 +354,20 @@ func (_c *UserCreate) SetNillableRpmLimit(v *int) *UserCreate {
 	return _c
 }
 
+// SetRequestTimeoutSeconds sets the "request_timeout_seconds" field.
+func (_c *UserCreate) SetRequestTimeoutSeconds(v int) *UserCreate {
+	_c.mutation.SetRequestTimeoutSeconds(v)
+	return _c
+}
+
+// SetNillableRequestTimeoutSeconds sets the "request_timeout_seconds" field if the given value is not nil.
+func (_c *UserCreate) SetNillableRequestTimeoutSeconds(v *int) *UserCreate {
+	if v != nil {
+		_c.SetRequestTimeoutSeconds(*v)
+	}
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *UserCreate) AddAPIKeyIDs(ids ...int64) *UserCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -656,6 +670,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultRpmLimit
 		_c.mutation.SetRpmLimit(v)
 	}
+	if _, ok := _c.mutation.RequestTimeoutSeconds(); !ok {
+		v := user.DefaultRequestTimeoutSeconds
+		_c.mutation.SetRequestTimeoutSeconds(v)
+	}
 	return nil
 }
 
@@ -744,6 +762,9 @@ func (_c *UserCreate) check() error {
 	}
 	if _, ok := _c.mutation.RpmLimit(); !ok {
 		return &ValidationError{Name: "rpm_limit", err: errors.New(`ent: missing required field "User.rpm_limit"`)}
+	}
+	if _, ok := _c.mutation.RequestTimeoutSeconds(); !ok {
+		return &ValidationError{Name: "request_timeout_seconds", err: errors.New(`ent: missing required field "User.request_timeout_seconds"`)}
 	}
 	return nil
 }
@@ -867,6 +888,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RpmLimit(); ok {
 		_spec.SetField(user.FieldRpmLimit, field.TypeInt, value)
 		_node.RpmLimit = value
+	}
+	if value, ok := _c.mutation.RequestTimeoutSeconds(); ok {
+		_spec.SetField(user.FieldRequestTimeoutSeconds, field.TypeInt, value)
+		_node.RequestTimeoutSeconds = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1480,6 +1505,24 @@ func (u *UserUpsert) AddRpmLimit(v int) *UserUpsert {
 	return u
 }
 
+// SetRequestTimeoutSeconds sets the "request_timeout_seconds" field.
+func (u *UserUpsert) SetRequestTimeoutSeconds(v int) *UserUpsert {
+	u.Set(user.FieldRequestTimeoutSeconds, v)
+	return u
+}
+
+// UpdateRequestTimeoutSeconds sets the "request_timeout_seconds" field to the value that was provided on create.
+func (u *UserUpsert) UpdateRequestTimeoutSeconds() *UserUpsert {
+	u.SetExcluded(user.FieldRequestTimeoutSeconds)
+	return u
+}
+
+// AddRequestTimeoutSeconds adds v to the "request_timeout_seconds" field.
+func (u *UserUpsert) AddRequestTimeoutSeconds(v int) *UserUpsert {
+	u.Add(user.FieldRequestTimeoutSeconds, v)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -1928,6 +1971,27 @@ func (u *UserUpsertOne) AddRpmLimit(v int) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateRpmLimit() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRpmLimit()
+	})
+}
+
+// SetRequestTimeoutSeconds sets the "request_timeout_seconds" field.
+func (u *UserUpsertOne) SetRequestTimeoutSeconds(v int) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetRequestTimeoutSeconds(v)
+	})
+}
+
+// AddRequestTimeoutSeconds adds v to the "request_timeout_seconds" field.
+func (u *UserUpsertOne) AddRequestTimeoutSeconds(v int) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.AddRequestTimeoutSeconds(v)
+	})
+}
+
+// UpdateRequestTimeoutSeconds sets the "request_timeout_seconds" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateRequestTimeoutSeconds() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateRequestTimeoutSeconds()
 	})
 }
 
@@ -2545,6 +2609,27 @@ func (u *UserUpsertBulk) AddRpmLimit(v int) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateRpmLimit() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRpmLimit()
+	})
+}
+
+// SetRequestTimeoutSeconds sets the "request_timeout_seconds" field.
+func (u *UserUpsertBulk) SetRequestTimeoutSeconds(v int) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetRequestTimeoutSeconds(v)
+	})
+}
+
+// AddRequestTimeoutSeconds adds v to the "request_timeout_seconds" field.
+func (u *UserUpsertBulk) AddRequestTimeoutSeconds(v int) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.AddRequestTimeoutSeconds(v)
+	})
+}
+
+// UpdateRequestTimeoutSeconds sets the "request_timeout_seconds" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateRequestTimeoutSeconds() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateRequestTimeoutSeconds()
 	})
 }
 

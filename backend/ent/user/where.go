@@ -175,6 +175,11 @@ func RpmLimit(v int) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldRpmLimit, v))
 }
 
+// RequestTimeoutSeconds applies equality check predicate on the "request_timeout_seconds" field. It's identical to RequestTimeoutSecondsEQ.
+func RequestTimeoutSeconds(v int) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldRequestTimeoutSeconds, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldCreatedAt, v))
@@ -1383,6 +1388,46 @@ func RpmLimitLT(v int) predicate.User {
 // RpmLimitLTE applies the LTE predicate on the "rpm_limit" field.
 func RpmLimitLTE(v int) predicate.User {
 	return predicate.User(sql.FieldLTE(FieldRpmLimit, v))
+}
+
+// RequestTimeoutSecondsEQ applies the EQ predicate on the "request_timeout_seconds" field.
+func RequestTimeoutSecondsEQ(v int) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldRequestTimeoutSeconds, v))
+}
+
+// RequestTimeoutSecondsNEQ applies the NEQ predicate on the "request_timeout_seconds" field.
+func RequestTimeoutSecondsNEQ(v int) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldRequestTimeoutSeconds, v))
+}
+
+// RequestTimeoutSecondsIn applies the In predicate on the "request_timeout_seconds" field.
+func RequestTimeoutSecondsIn(vs ...int) predicate.User {
+	return predicate.User(sql.FieldIn(FieldRequestTimeoutSeconds, vs...))
+}
+
+// RequestTimeoutSecondsNotIn applies the NotIn predicate on the "request_timeout_seconds" field.
+func RequestTimeoutSecondsNotIn(vs ...int) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldRequestTimeoutSeconds, vs...))
+}
+
+// RequestTimeoutSecondsGT applies the GT predicate on the "request_timeout_seconds" field.
+func RequestTimeoutSecondsGT(v int) predicate.User {
+	return predicate.User(sql.FieldGT(FieldRequestTimeoutSeconds, v))
+}
+
+// RequestTimeoutSecondsGTE applies the GTE predicate on the "request_timeout_seconds" field.
+func RequestTimeoutSecondsGTE(v int) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldRequestTimeoutSeconds, v))
+}
+
+// RequestTimeoutSecondsLT applies the LT predicate on the "request_timeout_seconds" field.
+func RequestTimeoutSecondsLT(v int) predicate.User {
+	return predicate.User(sql.FieldLT(FieldRequestTimeoutSeconds, v))
+}
+
+// RequestTimeoutSecondsLTE applies the LTE predicate on the "request_timeout_seconds" field.
+func RequestTimeoutSecondsLTE(v int) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldRequestTimeoutSeconds, v))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

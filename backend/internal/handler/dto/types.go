@@ -33,6 +33,9 @@ type User struct {
 	// RPMLimit 用户级每分钟请求数上限（0 = 不限制），仅在所用分组未设置 rpm_limit 时作为兜底生效。
 	RPMLimit int `json:"rpm_limit"`
 
+	// RequestTimeoutSeconds 用户级网关请求整体超时（秒）；0 = 继承全局；-1 = 不限制。
+	RequestTimeoutSeconds int `json:"request_timeout_seconds"`
+
 	APIKeys       []APIKey           `json:"api_keys,omitempty"`
 	Subscriptions []UserSubscription `json:"subscriptions,omitempty"`
 }

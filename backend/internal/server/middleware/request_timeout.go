@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // requestTimeoutCacheTTL 运行时设置快照的本地缓存时长。
@@ -29,9 +31,23 @@ const requestTimeoutRefreshRetry = 5 * time.Second
 // requestTimeoutSecondsKey 存放本请求生效的超时秒数，供 Finalizer 构造错误消息。
 const requestTimeoutSecondsKey = "gw_request_timeout_seconds"
 
+// requestTimeoutControllerKey 存放本请求的超时控制器，
+// 供鉴权后的 RequestTimeoutUserOverride 调整 deadline。
+const requestTimeoutControllerKey = "gw_request_timeout_controller"
+
 type requestTimeoutSnapshot struct {
 	seconds   int
 	expiresAt time.Time
+}
+
+// requestTimeoutController 允许链路内层（鉴权之后）替换本请求的 deadline。
+// context deadline 只能收紧不能放宽，因此保留建立全局 deadline 之前的
+// baseCtx，用户级覆盖从 baseCtx 重新派生。
+type requestTimeoutController struct {
+	baseCtx   context.Context
+	startedAt time.Time
+	writer    *timeoutOverrideWriter
+	cancel    context.CancelFunc // 当前生效 deadline 的 cancel；覆盖时替换
 }
 
 // timeoutErrorBody 按稳定入口路径构造 504 错误响应体。协议由端点决定，
@@ -88,7 +104,10 @@ type timeoutOverrideWriter struct {
 }
 
 func (w *timeoutOverrideWriter) shouldOverride() bool {
+	// seconds <= 0 表示本请求未启用网关超时（含用户级 -1 撤销），writer 完全透明，
+	// 即使 deadlineCtx 因客户端自带 deadline 而超时也不改写。
 	return !w.overrode &&
+		w.seconds > 0 &&
 		!w.ResponseWriter.Written() &&
 		w.deadlineCtx.Err() == context.DeadlineExceeded
 }
@@ -117,7 +136,7 @@ func (w *timeoutOverrideWriter) writeTimeoutResponse() {
 }
 
 func (w *timeoutOverrideWriter) deadlineExceeded() bool {
-	return w.deadlineCtx.Err() == context.DeadlineExceeded
+	return w.seconds > 0 && w.deadlineCtx.Err() == context.DeadlineExceeded
 }
 
 func (w *timeoutOverrideWriter) WriteHeader(code int) {
@@ -218,6 +237,11 @@ func isWebSocketUpgrade(r *http.Request) bool {
 // 计时覆盖鉴权、分组校验和 handler 全程；到点后取消请求上下文，
 // 让所有基于 c.Request.Context() 的上游调用中断。
 //
+// 全局值（管理台运行时设置 > 配置文件 gateway.request_timeout_seconds）在此建立；
+// 鉴权之后由 RequestTimeoutUserOverride 按用户级 request_timeout_seconds 替换
+// deadline（可收紧或放宽）。为此本层总是安装 writer 与 controller——即使全局
+// 为 0（不限制），用户级仍可能需要建立 deadline。
+//
 // 超时后的响应统一为 504：deadline 之后的第一次写出由 timeoutOverrideWriter
 // 改写；handler 静默返回时由 RequestTimeoutFinalizer（链路最内层）补写，
 // 保证外层 Ops 错误日志能看到 504。鉴权阶段静默超时也由本层兜底补写，
@@ -225,6 +249,9 @@ func isWebSocketUpgrade(r *http.Request) bool {
 //
 // 局限：handler 既无视 context 取消又不写响应时，连接仍要等
 // 它返回才结束（现有转发路径都以 request context 发起上游调用，实际会及时返回）。
+// 已知边界：writer 与兜底以请求 context 的 DeadlineExceeded 判定超时，未区分
+// 网关自建 deadline 与父 context 更早的 deadline；若未来有上游中间件注入更短的
+// 父 deadline，504 消息会错误声称网关秒数（当前路由不存在这样的上游 deadline）。
 //
 // wsExemptPaths 列出真正的 WebSocket 路由；只有这些路径上的完整升级握手
 // 请求才豁免超时，防止任意请求伪造 Upgrade 头绕过限制。
@@ -308,17 +335,14 @@ func RequestTimeout(
 		}
 		startedAt := time.Now()
 		seconds := resolveSeconds()
-		if seconds <= 0 {
-			c.Next()
-			return
+		baseCtx := c.Request.Context()
+		ctx := baseCtx
+		cancel := context.CancelFunc(func() {})
+		if seconds > 0 {
+			ctx, cancel = context.WithDeadline(baseCtx, startedAt.Add(time.Duration(seconds)*time.Second))
+			c.Request = c.Request.WithContext(ctx)
+			c.Set(requestTimeoutSecondsKey, seconds)
 		}
-		ctx, cancel := context.WithDeadline(
-			c.Request.Context(),
-			startedAt.Add(time.Duration(seconds)*time.Second),
-		)
-		defer cancel()
-		c.Request = c.Request.WithContext(ctx)
-		c.Set(requestTimeoutSecondsKey, seconds)
 
 		originalWriter := c.Writer
 		timeoutWriter := &timeoutOverrideWriter{
@@ -328,16 +352,186 @@ func RequestTimeout(
 			seconds:        seconds,
 		}
 		c.Writer = timeoutWriter
+		ctrl := &requestTimeoutController{
+			baseCtx:   baseCtx,
+			startedAt: startedAt,
+			writer:    timeoutWriter,
+			cancel:    cancel,
+		}
+		c.Set(requestTimeoutControllerKey, ctrl)
 		// 内层中间件（如 Ops 日志）会池化复用自己的 writer 并在退出时校验
 		// c.Writer 归属，必须在返回前把 writer 还原，panic 时也不例外。
-		defer func() { c.Writer = originalWriter }()
+		// cancel 经由 ctrl 调用：用户级覆盖会把它替换成新 deadline 的 cancel。
+		defer func() {
+			c.Writer = originalWriter
+			ctrl.cancel()
+		}()
 
 		c.Next()
 
-		// 鉴权/分组校验阶段静默超时的兜底（正常 handler 路径由 Finalizer 处理）
-		if ctx.Err() == context.DeadlineExceeded && !timeoutWriter.Written() {
+		// 鉴权/分组校验阶段静默超时的兜底（正常 handler 路径由 Finalizer 处理）；
+		// 以最终生效的请求 context 为准（可能已被用户级覆盖替换）。
+		if c.Request.Context().Err() == context.DeadlineExceeded && !timeoutWriter.Written() && timeoutWriter.seconds > 0 {
 			timeoutWriter.writeTimeoutResponse()
 		}
+	}
+}
+
+// unlimitedRequestTimeoutSeconds 用户级"不限制"的唯一合法哨兵值。
+// 其余负值视为非法数据（DB 被绕过校验写入等），回退全局并告警。
+const unlimitedRequestTimeoutSeconds = -1
+
+// maxUserRequestTimeoutSeconds 用户级超时上限（1 天），与 DB CHECK 约束、管理 API
+// 校验一致。中间件对越界值（含历史缓存快照里的脏数据）同样防御。
+const maxUserRequestTimeoutSeconds = 86400
+
+// deadlineSwappedContext 组合两条 context 链：Done/Deadline/Err 来自 lifecycle
+// （从 baseCtx 重新派生的 deadline，或 baseCtx 本身），Value 优先走鉴权后的
+// values 链。替换 deadline 时必须保留鉴权阶段写入的值（ctxkey.UserID、
+// ctxkey.Group、ctxkey.ForcePlatform 等），否则调度平台、计费归属会错乱。
+//
+// values 必须经 context.WithoutCancel 包装：它会拦截标准库内部取消键的查找，
+// 使 context.Cause 不会命中旧（已被取消的）deadline 链；未命中时回退 lifecycle，
+// 保证 Err() 与 Cause() 一致（真实网关超时不会被 HTTP transport 当成客户端断开）。
+type deadlineSwappedContext struct {
+	context.Context // lifecycle：提供 Done/Deadline/Err
+	values          context.Context
+}
+
+func (c deadlineSwappedContext) Value(key any) any {
+	if v := c.values.Value(key); v != nil {
+		return v
+	}
+	return c.Context.Value(key)
+}
+
+// revertRequestTimeoutOverride 撤销一次已提交的 deadline 替换，恢复替换前的
+// （已到期的）context 与 writer 状态，让 504 兜底按原全局秒数收尾。
+func revertRequestTimeoutOverride(c *gin.Context, ctrl *requestTimeoutController, oldCtx context.Context, oldSeconds int) {
+	ctrl.cancel() // 取消刚建立的新 lifecycle（-1 分支为 no-op）
+	ctrl.cancel = func() {}
+	c.Request = c.Request.WithContext(oldCtx)
+	ctrl.writer.deadlineCtx = oldCtx
+	ctrl.writer.seconds = oldSeconds
+	c.Set(requestTimeoutSecondsKey, oldSeconds)
+}
+
+// RequestTimeoutUserOverride 注册在鉴权之后：按用户级 request_timeout_seconds
+// 调整本请求的 deadline。0 = 继承全局；-1 = 不限制（撤销全局 deadline）；
+// 1..86400 = 以请求进入时刻起算的用户专属超时，可收紧也可放宽全局值。
+// 依赖 RequestTimeout 存入的 controller；WS 豁免等未装 controller 的请求直接放行。
+// 用户值来自鉴权缓存快照中的 apiKey.User，零额外查库。
+//
+// 已超时/已断连的请求一律 c.Abort()，不再执行 handler（避免副作用），
+// 504 由外层 RequestTimeout 的兜底补写。deadline 替换提交后还会复检旧 context，
+// 防止全局 deadline 恰在"检查→提交"窗口内自然到期而被静默放宽。
+func RequestTimeoutUserOverride() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		v, ok := c.Get(requestTimeoutControllerKey)
+		if !ok {
+			c.Next()
+			return
+		}
+		ctrl, ok := v.(*requestTimeoutController)
+		if !ok || ctrl == nil {
+			c.Next()
+			return
+		}
+		apiKey, ok := GetAPIKeyFromContext(c)
+		if !ok || apiKey.User == nil {
+			c.Next()
+			return
+		}
+		oldCtx := c.Request.Context()
+		oldDeadline, oldHasDeadline := oldCtx.Deadline()
+		gatewayDeadlineActive := ctrl.writer.seconds > 0
+		// globalDeadlineExpired 判断全局 deadline 是否在逻辑上已到期。
+		// Err() 的发布依赖定时器回调，deadline 时刻到达后可能仍短暂为 nil；
+		// 而我们主动 oldCancel() 又会把状态固定为 Canceled。因此除 Err 外
+		// 必须直接与时钟比较，不能只依赖异步发布的 Err()。
+		// 仅在网关自己建立了 deadline 时才做时钟判定（seconds>0），
+		// 避免把测试/上游注入的父 context deadline 误认成网关超时。
+		globalDeadlineExpired := func() bool {
+			if !gatewayDeadlineActive {
+				return false
+			}
+			if oldCtx.Err() == context.DeadlineExceeded {
+				return true
+			}
+			return oldHasDeadline && !time.Now().Before(oldDeadline)
+		}
+		// 初检：已超时/已断开的请求不允许被用户级配置"复活"，且不执行 handler。
+		// 超时场景直接补写 504——Err 可能尚未发布，外层兜底的 Err 判断靠不住。
+		if globalDeadlineExpired() {
+			ctrl.writer.writeTimeoutResponse()
+			c.Abort()
+			return
+		}
+		if oldCtx.Err() != nil { // 客户端断连（Canceled）：中止即可，无需写响应
+			c.Abort()
+			return
+		}
+		switch seconds := apiKey.User.RequestTimeoutSeconds; {
+		case seconds == unlimitedRequestTimeoutSeconds:
+			// 不限制：撤销全局 deadline。生命周期回到 baseCtx（保留客户端断连取消），
+			// Value 走 WithoutCancel 包装的鉴权后 context。
+			oldSeconds := ctrl.writer.seconds
+			ctx := deadlineSwappedContext{Context: ctrl.baseCtx, values: context.WithoutCancel(oldCtx)}
+			c.Request = c.Request.WithContext(ctx)
+			ctrl.writer.deadlineCtx = ctx
+			ctrl.writer.seconds = 0
+			c.Set(requestTimeoutSecondsKey, 0)
+			oldCancel := ctrl.cancel
+			ctrl.cancel = func() {}
+			oldCancel()
+			// 提交后复检：全局 deadline 恰在初检与提交之间自然到期 → 撤销放宽并
+			// 按原全局秒数补写 504（时钟判定对 oldCancel 固定的 Canceled 免疫）。
+			if globalDeadlineExpired() {
+				revertRequestTimeoutOverride(c, ctrl, oldCtx, oldSeconds)
+				ctrl.writer.writeTimeoutResponse()
+				c.Abort()
+				return
+			}
+			// 客户端在初检后断开：unlimited 生命周期来自 baseCtx，同样中止。
+			if ctx.Err() != nil {
+				c.Abort()
+				return
+			}
+		case seconds > 0 && seconds <= maxUserRequestTimeoutSeconds:
+			oldSeconds := ctrl.writer.seconds
+			lifecycle, cancel := context.WithDeadline(ctrl.baseCtx, ctrl.startedAt.Add(time.Duration(seconds)*time.Second))
+			ctx := deadlineSwappedContext{Context: lifecycle, values: context.WithoutCancel(oldCtx)}
+			c.Request = c.Request.WithContext(ctx)
+			ctrl.writer.deadlineCtx = ctx
+			ctrl.writer.seconds = seconds
+			c.Set(requestTimeoutSecondsKey, seconds)
+			oldCancel := ctrl.cancel
+			ctrl.cancel = cancel
+			oldCancel()
+			// 提交后复检：全局 deadline 恰在初检与提交之间自然到期 → 撤销放宽并
+			// 按原全局秒数补写 504（时钟判定对 oldCancel 固定的 Canceled 免疫）。
+			if globalDeadlineExpired() {
+				revertRequestTimeoutOverride(c, ctrl, oldCtx, oldSeconds)
+				ctrl.writer.writeTimeoutResponse()
+				c.Abort()
+				return
+			}
+			// 用户 deadline 在鉴权完成时已经过期（WithDeadline 会同步发布
+			// DeadlineExceeded，兜底可写 504），或客户端在初检后断开 → 中止。
+			if lifecycle.Err() != nil {
+				c.Abort()
+				return
+			}
+		case seconds != 0:
+			// 契约只定义 -1 与 1..86400；其余值（< -1 或 > 86400）不生效，
+			// 维持全局 deadline 并告警。
+			logger.FromContext(c.Request.Context()).Warn(
+				"invalid user request_timeout_seconds, falling back to global timeout",
+				zap.Int("request_timeout_seconds", seconds),
+				zap.Int64("user_id", apiKey.User.ID),
+			)
+		}
+		c.Next()
 	}
 }
 
@@ -351,8 +545,12 @@ func RequestTimeoutFinalizer() gin.HandlerFunc {
 		if !ok {
 			return
 		}
+		secondsInt, _ := seconds.(int)
+		// 用户级 -1（不限制）会把秒数键归零撤销超时；deadline 若来自客户端 context 也不补写。
+		if secondsInt <= 0 {
+			return
+		}
 		if c.Request.Context().Err() == context.DeadlineExceeded && !c.Writer.Written() {
-			secondsInt, _ := seconds.(int)
 			c.JSON(http.StatusGatewayTimeout, timeoutErrorBody(c.Request.URL.Path, secondsInt))
 		}
 	}

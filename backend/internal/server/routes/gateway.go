@@ -31,6 +31,7 @@ func RegisterGatewayRoutes(
 		"/responses",
 		"/backend-api/codex/responses",
 	)
+	requestTimeoutUserOverride := middleware.RequestTimeoutUserOverride()
 	requestTimeoutFinalizer := middleware.RequestTimeoutFinalizer()
 	clientRequestID := middleware.ClientRequestID()
 	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
@@ -95,7 +96,8 @@ func RegisterGatewayRoutes(
 	}
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
-	// Ops 位于 timeout 外层以捕获最终 504；timeout 仍在鉴权之前建立 deadline。
+	// Ops 位于 timeout 外层以捕获最终 504；timeout 在鉴权之前建立全局 deadline，
+	// 鉴权之后由 UserOverride 按用户级 request_timeout_seconds 替换 deadline。
 	// Finalizer 在链尾补写 handler 静默返回的 504。
 	gateway.Use(bodyLimit)
 	gateway.Use(clientRequestID)
@@ -104,6 +106,7 @@ func RegisterGatewayRoutes(
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.Use(requireGroupAnthropic)
+	gateway.Use(requestTimeoutUserOverride)
 	gateway.Use(requestTimeoutFinalizer)
 	{
 		// /v1/messages: auto-route based on group platform
@@ -209,6 +212,7 @@ func RegisterGatewayRoutes(
 	gemini.Use(endpointNorm)
 	gemini.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
 	gemini.Use(requireGroupGoogle)
+	gemini.Use(requestTimeoutUserOverride)
 	gemini.Use(requestTimeoutFinalizer)
 	{
 		gemini.GET("/models", h.Gateway.GeminiV1BetaListModels)
@@ -225,13 +229,13 @@ func RegisterGatewayRoutes(
 		}
 		h.Gateway.Responses(c)
 	}
-	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutFinalizer, responsesHandler)
-	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutFinalizer, responsesHandler)
-	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutFinalizer, func(c *gin.Context) {
+	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, responsesHandler)
+	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, responsesHandler)
+	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, func(c *gin.Context) {
 		h.OpenAIGateway.ResponsesWebSocket(c)
 	})
 	codexDirect := r.Group("/backend-api/codex")
-	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutFinalizer)
+	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer)
 	{
 		codexDirect.POST("/responses", responsesHandler)
 		codexDirect.POST("/responses/*subpath", responsesHandler)
@@ -241,14 +245,14 @@ func RegisterGatewayRoutes(
 		codexDirect.GET("/models", h.OpenAIGateway.CodexModels)
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
-	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutFinalizer, func(c *gin.Context) {
+	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, func(c *gin.Context) {
 		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 			h.OpenAIGateway.ChatCompletions(c)
 			return
 		}
 		h.Gateway.ChatCompletions(c)
 	})
-	r.POST("/embeddings", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutFinalizer, func(c *gin.Context) {
+	r.POST("/embeddings", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformOpenAI {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
@@ -261,13 +265,13 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.Embeddings(c)
 	})
-	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutFinalizer, imagesHandler)
-	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutFinalizer, imagesHandler)
-	r.POST("/videos/generations", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutFinalizer, videoGenerationHandler)
-	r.GET("/videos/:request_id", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutFinalizer, videoStatusHandler)
+	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, imagesHandler)
+	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, imagesHandler)
+	r.POST("/videos/generations", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, videoGenerationHandler)
+	r.GET("/videos/:request_id", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, videoStatusHandler)
 
 	// Antigravity 模型列表
-	r.GET("/antigravity/models", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutFinalizer, h.Gateway.AntigravityModels)
+	r.GET("/antigravity/models", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, h.Gateway.AntigravityModels)
 
 	// Antigravity 专用路由（仅使用 antigravity 账户，不混合调度）
 	antigravityV1 := r.Group("/antigravity/v1")
@@ -279,6 +283,7 @@ func RegisterGatewayRoutes(
 	antigravityV1.Use(middleware.ForcePlatform(service.PlatformAntigravity))
 	antigravityV1.Use(gin.HandlerFunc(apiKeyAuth))
 	antigravityV1.Use(requireGroupAnthropic)
+	antigravityV1.Use(requestTimeoutUserOverride)
 	antigravityV1.Use(requestTimeoutFinalizer)
 	{
 		antigravityV1.POST("/messages", h.Gateway.Messages)
@@ -296,6 +301,7 @@ func RegisterGatewayRoutes(
 	antigravityV1Beta.Use(middleware.ForcePlatform(service.PlatformAntigravity))
 	antigravityV1Beta.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
 	antigravityV1Beta.Use(requireGroupGoogle)
+	antigravityV1Beta.Use(requestTimeoutUserOverride)
 	antigravityV1Beta.Use(requestTimeoutFinalizer)
 	{
 		antigravityV1Beta.GET("/models", h.Gateway.GeminiV1BetaListModels)

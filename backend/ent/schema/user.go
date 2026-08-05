@@ -115,6 +115,10 @@ func (User) Fields() []ent.Field {
 		// 用户级每分钟请求数上限（0 = 不限制）。仅当所在分组未设置 rpm_limit 时作为兜底生效。
 		field.Int("rpm_limit").
 			Default(0),
+
+		// 用户级网关请求整体超时（秒）。0 = 继承全局设置；-1 = 不限制（唯一合法负值）；>0 = 用户专属超时（≤86400）。
+		field.Int("request_timeout_seconds").
+			Default(0),
 	}
 }
 

@@ -536,7 +536,10 @@ export default {
         selectStatus: '选择状态',
         rpmLimit: '每分钟请求数 (RPM)',
         rpmLimitPlaceholder: '0 表示不限制',
-        rpmLimitHint: '该用户每分钟最大请求数，0 = 不限制；仅在所用分组未设置 rpm_limit 时作为兜底生效'
+        rpmLimitHint: '该用户每分钟最大请求数，0 = 不限制；仅在所用分组未设置 rpm_limit 时作为兜底生效',
+        requestTimeout: '请求整体超时（秒）',
+        requestTimeoutPlaceholder: '0 表示继承全局设置',
+        requestTimeoutHint: '该用户单次请求的最长处理时间，超时网关返回 504；0 = 继承全局设置，-1 = 不限制，最大 86400'
       },
       adjustBalance: '调整余额',
       adjustConcurrency: '调整并发数',

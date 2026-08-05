@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 15 // v15: include group video pricing and normalize_anthropic_envelope
+const apiKeyAuthSnapshotVersion = 16 // v16: include user request_timeout_seconds
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -235,6 +235,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			BalanceNotifyExtraEmails:   apiKey.User.BalanceNotifyExtraEmails,
 			TotalRecharged:             apiKey.User.TotalRecharged,
 			RPMLimit:                   apiKey.User.RPMLimit,
+			RequestTimeoutSeconds:      apiKey.User.RequestTimeoutSeconds,
 		},
 	}
 
@@ -326,6 +327,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			BalanceNotifyExtraEmails:   snapshot.User.BalanceNotifyExtraEmails,
 			TotalRecharged:             snapshot.User.TotalRecharged,
 			RPMLimit:                   snapshot.User.RPMLimit,
+			RequestTimeoutSeconds:      snapshot.User.RequestTimeoutSeconds,
 			UserGroupRPMOverride:       snapshot.User.UserGroupRPMOverride,
 		},
 	}

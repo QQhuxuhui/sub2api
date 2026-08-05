@@ -55,6 +55,11 @@ type User struct {
 	// 且该 (用户, 分组) 无 rpm_override 时作为全局兜底生效，计数键 rpm:u:{userID}:{min}。
 	RPMLimit int
 
+	// RequestTimeoutSeconds 用户级网关请求整体超时（秒）。
+	// 0 = 继承全局设置；-1 = 不限制（唯一合法负值）；>0 = 用户专属超时秒数（上限 86400）。
+	// 其余负值视为非法数据，中间件回退全局并告警。
+	RequestTimeoutSeconds int
+
 	// UserGroupRPMOverride 来自 auth cache snapshot 的 (user, group) RPM 覆盖值。
 	// nil = 该 API Key 对应的 (user, group) 无 override；非 nil 时 checkRPM 直接使用，
 	// 避免每请求查 DB。字段不持久化到数据库。

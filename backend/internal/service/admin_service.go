@@ -121,30 +121,34 @@ type AdminService interface {
 
 // CreateUserInput represents input for creating a new user via admin operations.
 type CreateUserInput struct {
-	Email         string
-	Password      string
-	Username      string
-	Notes         string
-	Role          string // 空字符串表示使用默认角色(user);合法值 admin/user
-	Balance       *float64
-	Concurrency   int
-	RPMLimit      int
-	AllowedGroups []int64
+	Email       string
+	Password    string
+	Username    string
+	Notes       string
+	Role        string // 空字符串表示使用默认角色(user);合法值 admin/user
+	Balance     *float64
+	Concurrency int
+	RPMLimit    int
+	// RequestTimeoutSeconds 用户级网关请求整体超时（秒）；0 = 继承全局；-1 = 不限制。
+	RequestTimeoutSeconds int
+	AllowedGroups         []int64
 	// ActorAdminID 执行本次操作的管理员ID(来自JWT)，仅用于权限敏感操作的审计日志。
 	ActorAdminID int64
 }
 
 type UpdateUserInput struct {
-	Email         string
-	Password      string
-	Username      *string
-	Notes         *string
-	Role          string   // 空字符串表示"未提供"(不修改);合法值 admin/user
-	Balance       *float64 // 使用指针区分"未提供"和"设置为0"
-	Concurrency   *int     // 使用指针区分"未提供"和"设置为0"
-	RPMLimit      *int     // 使用指针区分"未提供"和"设置为0"
-	Status        string
-	AllowedGroups *[]int64 // 使用指针区分"未提供"和"设置为空数组"
+	Email       string
+	Password    string
+	Username    *string
+	Notes       *string
+	Role        string   // 空字符串表示"未提供"(不修改);合法值 admin/user
+	Balance     *float64 // 使用指针区分"未提供"和"设置为0"
+	Concurrency *int     // 使用指针区分"未提供"和"设置为0"
+	RPMLimit    *int     // 使用指针区分"未提供"和"设置为0"
+	// RequestTimeoutSeconds 用户级网关请求整体超时（秒）；nil 未提供；0 继承全局；-1 不限制。
+	RequestTimeoutSeconds *int
+	Status                string
+	AllowedGroups         *[]int64 // 使用指针区分"未提供"和"设置为空数组"
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates map[int64]*float64

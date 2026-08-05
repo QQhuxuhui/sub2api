@@ -477,7 +477,10 @@ export default {
         selectStatus: 'Select status',
         rpmLimit: 'Requests Per Minute (RPM)',
         rpmLimitPlaceholder: '0 = unlimited',
-        rpmLimitHint: 'Max requests per minute for this user; 0 = unlimited. Acts as a fallback only when the group has no rpm_limit set.'
+        rpmLimitHint: 'Max requests per minute for this user; 0 = unlimited. Acts as a fallback only when the group has no rpm_limit set.',
+        requestTimeout: 'Request timeout (seconds)',
+        requestTimeoutPlaceholder: '0 = inherit global setting',
+        requestTimeoutHint: 'Max end-to-end time per request for this user; the gateway returns 504 on timeout. 0 = inherit global, -1 = unlimited, max 86400.'
       },
       columns: {
         user: 'User',

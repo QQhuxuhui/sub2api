@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -362,4 +363,335 @@ func TestRequestTimeoutSetsDeadlineOnContext(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
 	require.True(t, hasDeadline)
 	require.WithinDuration(t, start.Add(240*time.Second), deadline, 5*time.Second)
+}
+
+// newUserOverrideTimeoutRouter 模拟线上顺序：RequestTimeout（全局 deadline）在鉴权之前，
+// UserOverride 在鉴权之后按用户值替换 deadline。
+func newUserOverrideTimeoutRouter(cfgSeconds, userSeconds int, handler gin.HandlerFunc) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	fakeAuth := func(c *gin.Context) {
+		c.Set(string(ContextKeyAPIKey), &service.APIKey{
+			User: &service.User{RequestTimeoutSeconds: userSeconds},
+		})
+	}
+	r.Any("/v1/test", RequestTimeout(cfgSeconds, nil), fakeAuth, RequestTimeoutUserOverride(), RequestTimeoutFinalizer(), handler)
+	return r
+}
+
+func TestRequestTimeoutUserOverrideShortensGlobal(t *testing.T) {
+	// 全局 60s，用户 1s：以用户值为准，超时返回 504
+	r := newUserOverrideTimeoutRouter(60, 1, func(c *gin.Context) {
+		deadline, ok := c.Request.Context().Deadline()
+		require.True(t, ok)
+		require.WithinDuration(t, time.Now().Add(time.Second), deadline, 500*time.Millisecond)
+		<-c.Request.Context().Done()
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+	require.Equal(t, http.StatusGatewayTimeout, w.Code)
+	require.Contains(t, w.Body.String(), "timeout_error")
+}
+
+func TestRequestTimeoutUserOverrideExtendsGlobal(t *testing.T) {
+	// 全局 1s，用户 600s：用户值可放宽全局限制
+	var deadline time.Time
+	var hasDeadline bool
+	r := newUserOverrideTimeoutRouter(1, 600, func(c *gin.Context) {
+		deadline, hasDeadline = c.Request.Context().Deadline()
+		c.Status(http.StatusOK)
+	})
+	start := time.Now()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, hasDeadline)
+	require.WithinDuration(t, start.Add(600*time.Second), deadline, 5*time.Second)
+}
+
+func TestRequestTimeoutUserOverrideUnlimited(t *testing.T) {
+	// 用户 -1：豁免全局超时，不设置 deadline
+	r := newUserOverrideTimeoutRouter(1, -1, func(c *gin.Context) {
+		_, hasDeadline := c.Request.Context().Deadline()
+		require.False(t, hasDeadline)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRequestTimeoutUserZeroInheritsGlobal(t *testing.T) {
+	// 用户 0：继承全局配置
+	var deadline time.Time
+	var hasDeadline bool
+	r := newUserOverrideTimeoutRouter(240, 0, func(c *gin.Context) {
+		deadline, hasDeadline = c.Request.Context().Deadline()
+		c.Status(http.StatusOK)
+	})
+	start := time.Now()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+	require.True(t, hasDeadline)
+	require.WithinDuration(t, start.Add(240*time.Second), deadline, 5*time.Second)
+}
+
+func TestRequestTimeoutGlobalCoversAuthPhaseBeforeOverride(t *testing.T) {
+	// 全局 deadline 必须在鉴权之前建立（鉴权含 DB/缓存访问，不能无限等待），
+	// 用户级覆盖只在鉴权之后替换 deadline。
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	var authHasDeadline bool
+	var authDeadline, handlerDeadline time.Time
+	fakeAuth := func(c *gin.Context) {
+		authDeadline, authHasDeadline = c.Request.Context().Deadline()
+		c.Set(string(ContextKeyAPIKey), &service.APIKey{
+			User: &service.User{RequestTimeoutSeconds: 600},
+		})
+	}
+	r.Any("/v1/test", RequestTimeout(60, nil), fakeAuth, RequestTimeoutUserOverride(), RequestTimeoutFinalizer(), func(c *gin.Context) {
+		handlerDeadline, _ = c.Request.Context().Deadline()
+		c.Status(http.StatusOK)
+	})
+	start := time.Now()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, authHasDeadline, "auth phase must run under the global deadline")
+	require.WithinDuration(t, start.Add(60*time.Second), authDeadline, 5*time.Second)
+	require.WithinDuration(t, start.Add(600*time.Second), handlerDeadline, 5*time.Second)
+}
+
+func TestRequestTimeoutUserOverridePreservesAuthContextValues(t *testing.T) {
+	// 替换 deadline 不能丢失鉴权阶段写入的 context 值（UserID/Group/ForcePlatform），
+	// 否则 Antigravity 平台调度、计费归属会错乱。
+	for name, userSeconds := range map[string]int{"unlimited -1": -1, "extend 600": 600, "shorten 30": 30} {
+		t.Run(name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			r := gin.New()
+			group := &service.Group{ID: 7, Platform: service.PlatformAntigravity, Status: service.StatusActive}
+			fakeAuth := func(c *gin.Context) {
+				ctx := c.Request.Context()
+				ctx = context.WithValue(ctx, ctxkey.ForcePlatform, service.PlatformAntigravity)
+				ctx = context.WithValue(ctx, ctxkey.UserID, int64(42))
+				ctx = context.WithValue(ctx, ctxkey.Group, group)
+				c.Request = c.Request.WithContext(ctx)
+				c.Set(string(ContextKeyAPIKey), &service.APIKey{
+					User: &service.User{ID: 42, RequestTimeoutSeconds: userSeconds},
+				})
+			}
+			r.Any("/v1/test", RequestTimeout(60, nil), fakeAuth, RequestTimeoutUserOverride(), RequestTimeoutFinalizer(), func(c *gin.Context) {
+				ctx := c.Request.Context()
+				require.Equal(t, int64(42), ctx.Value(ctxkey.UserID), "UserID 必须在 deadline 替换后保留")
+				require.Same(t, group, ctx.Value(ctxkey.Group), "Group 必须在 deadline 替换后保留")
+				require.Equal(t, service.PlatformAntigravity, ctx.Value(ctxkey.ForcePlatform), "ForcePlatform 必须在 deadline 替换后保留")
+				c.Status(http.StatusOK)
+			})
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+			require.Equal(t, http.StatusOK, w.Code)
+		})
+	}
+}
+
+func TestRequestTimeoutUserOverrideCannotReviveExpiredRequest(t *testing.T) {
+	// 鉴权耗尽全局时限仍返回成功时，用户级 -1/更长超时不得"复活"请求：
+	// 链路中止、handler 不执行（避免副作用），按 504 收尾。
+	for name, userSeconds := range map[string]int{"unlimited -1": -1, "extend 600": 600} {
+		t.Run(name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			r := gin.New()
+			fakeSlowAuth := func(c *gin.Context) {
+				<-c.Request.Context().Done() // 鉴权超过全局时限后才"成功"
+				c.Set(string(ContextKeyAPIKey), &service.APIKey{
+					User: &service.User{ID: 42, RequestTimeoutSeconds: userSeconds},
+				})
+			}
+			handlerRan := false
+			r.Any("/v1/test", RequestTimeout(1, nil), fakeSlowAuth, RequestTimeoutUserOverride(), RequestTimeoutFinalizer(), func(c *gin.Context) {
+				handlerRan = true
+				c.JSON(http.StatusOK, gin.H{"ok": true})
+			})
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+			require.False(t, handlerRan, "已超时请求不得继续执行 handler")
+			require.Equal(t, http.StatusGatewayTimeout, w.Code)
+			require.Contains(t, w.Body.String(), "timeout_error")
+			require.NotContains(t, w.Body.String(), `"ok":true`)
+		})
+	}
+}
+
+func TestRequestTimeoutUserOverrideAbortsWhenUserDeadlineAlreadyExpired(t *testing.T) {
+	// 用户专属超时从请求进入时刻起算：鉴权耗时已超过用户时限时，
+	// handler 不执行，直接按用户秒数 504 收尾。
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	fakeSlowAuth := func(c *gin.Context) {
+		time.Sleep(1100 * time.Millisecond) // 超过用户 1s 时限，但在全局 60s 之内
+		c.Set(string(ContextKeyAPIKey), &service.APIKey{
+			User: &service.User{ID: 42, RequestTimeoutSeconds: 1},
+		})
+	}
+	handlerRan := false
+	r.Any("/v1/test", RequestTimeout(60, nil), fakeSlowAuth, RequestTimeoutUserOverride(), RequestTimeoutFinalizer(), func(c *gin.Context) {
+		handlerRan = true
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+	require.False(t, handlerRan, "用户时限已耗尽的请求不得执行 handler")
+	require.Equal(t, http.StatusGatewayTimeout, w.Code)
+	require.Contains(t, w.Body.String(), "timeout_error")
+	require.Contains(t, w.Body.String(), "within 1 seconds")
+}
+
+func TestRequestTimeoutUserOverrideKeepsCauseConsistentWithErr(t *testing.T) {
+	// 替换 deadline 后，用户超时到期时 Err 与 Cause 必须一致为 DeadlineExceeded；
+	// 若 Cause 命中被取消的旧全局链会得到 Canceled，HTTP transport 会把真实网关
+	// 超时误判成客户端断开。
+	var errAtTimeout, causeAtTimeout error
+	r := newUserOverrideTimeoutRouter(60, 1, func(c *gin.Context) {
+		ctx := c.Request.Context()
+		<-ctx.Done()
+		errAtTimeout = ctx.Err()
+		causeAtTimeout = context.Cause(ctx)
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+	require.Equal(t, http.StatusGatewayTimeout, w.Code)
+	require.ErrorIs(t, errAtTimeout, context.DeadlineExceeded)
+	require.ErrorIs(t, causeAtTimeout, context.DeadlineExceeded,
+		"Cause 不得命中已取消的旧全局 deadline 链（Canceled）")
+}
+
+func TestRequestTimeoutUserOverrideRejectsOversizedValue(t *testing.T) {
+	// 契约上限 86400；缓存快照里的超大脏值不生效，维持全局 deadline。
+	var deadline time.Time
+	var hasDeadline bool
+	r := newUserOverrideTimeoutRouter(60, 100000, func(c *gin.Context) {
+		deadline, hasDeadline = c.Request.Context().Deadline()
+		c.Status(http.StatusOK)
+	})
+	start := time.Now()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, hasDeadline)
+	require.WithinDuration(t, start.Add(60*time.Second), deadline, 5*time.Second)
+}
+
+func TestRequestTimeoutUserOverrideRejectsInvalidNegative(t *testing.T) {
+	// 契约只定义 -1；其余负值（非法数据）不生效，维持全局 deadline。
+	var deadline time.Time
+	var hasDeadline bool
+	r := newUserOverrideTimeoutRouter(60, -5, func(c *gin.Context) {
+		deadline, hasDeadline = c.Request.Context().Deadline()
+		c.Status(http.StatusOK)
+	})
+	start := time.Now()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, hasDeadline)
+	require.WithinDuration(t, start.Add(60*time.Second), deadline, 5*time.Second)
+}
+
+// staleDeadlineCtx 模拟"deadline 时刻已到但定时器回调尚未发布 Err"的竞态窗口。
+type staleDeadlineCtx struct {
+	context.Context
+	deadline time.Time
+}
+
+func (c staleDeadlineCtx) Deadline() (time.Time, bool) { return c.deadline, true }
+func (c staleDeadlineCtx) Err() error                  { return nil }
+
+// maskedErrCtx 模拟"初检读取 Err 时取消尚不可见"的竞态窗口。
+type maskedErrCtx struct{ context.Context }
+
+func (c maskedErrCtx) Err() error                  { return nil }
+func (c maskedErrCtx) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+// installFakeTimeoutController 按 RequestTimeout 的方式手工装配 writer 与
+// controller，以便向 override 注入构造出的竞态 context。
+func installFakeTimeoutController(reqCtx context.Context, baseCtx context.Context, startedAt time.Time, seconds int) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request = c.Request.WithContext(reqCtx)
+		original := c.Writer
+		tw := &timeoutOverrideWriter{
+			ResponseWriter: original,
+			path:           c.Request.URL.Path,
+			deadlineCtx:    reqCtx,
+			seconds:        seconds,
+		}
+		c.Writer = tw
+		c.Set(requestTimeoutControllerKey, &requestTimeoutController{
+			baseCtx:   baseCtx,
+			startedAt: startedAt,
+			writer:    tw,
+			cancel:    func() {},
+		})
+		defer func() { c.Writer = original }()
+		c.Next()
+	}
+}
+
+func TestRequestTimeoutUserOverrideDetectsExpiryBeforeErrPublished(t *testing.T) {
+	// 全局 deadline 时刻已过但 Err() 尚未发布（定时器回调滞后）：
+	// 仅靠 Err 判定会放行并让 oldCancel 把状态固定为 Canceled，复检失效。
+	// 时钟判定必须兜住：不执行 handler，直接按全局秒数 504。
+	for name, userSeconds := range map[string]int{"unlimited -1": -1, "extend 600": 600} {
+		t.Run(name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			r := gin.New()
+			handlerRan := false
+			install := func(c *gin.Context) {
+				baseCtx := c.Request.Context()
+				stale := staleDeadlineCtx{Context: baseCtx, deadline: time.Now().Add(-10 * time.Millisecond)}
+				installFakeTimeoutController(stale, baseCtx, time.Now().Add(-61*time.Second), 60)(c)
+			}
+			fakeAuth := func(c *gin.Context) {
+				c.Set(string(ContextKeyAPIKey), &service.APIKey{
+					User: &service.User{ID: 42, RequestTimeoutSeconds: userSeconds},
+				})
+			}
+			r.Any("/v1/test", install, fakeAuth, RequestTimeoutUserOverride(), RequestTimeoutFinalizer(), func(c *gin.Context) {
+				handlerRan = true
+				c.JSON(http.StatusOK, gin.H{"ok": true})
+			})
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+			require.False(t, handlerRan, "逻辑上已超时的请求不得执行 handler")
+			require.Equal(t, http.StatusGatewayTimeout, w.Code)
+			require.Contains(t, w.Body.String(), "timeout_error")
+			require.Contains(t, w.Body.String(), "within 60 seconds")
+		})
+	}
+}
+
+func TestRequestTimeoutUserOverrideUnlimitedAbortsFreshDisconnect(t *testing.T) {
+	// 客户端在初检之后、unlimited context 提交之前断开：
+	// baseCtx 已取消（Canceled），提交后的 ctx.Err() 复检必须中止，不得进入 handler。
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	handlerRan := false
+	install := func(c *gin.Context) {
+		baseCtx, cancelBase := context.WithCancel(c.Request.Context())
+		cancelBase()                             // 断连已发生
+		masked := maskedErrCtx{Context: baseCtx} // 但初检视角 Err 仍不可见
+		installFakeTimeoutController(masked, baseCtx, time.Now(), 60)(c)
+	}
+	fakeAuth := func(c *gin.Context) {
+		c.Set(string(ContextKeyAPIKey), &service.APIKey{
+			User: &service.User{ID: 42, RequestTimeoutSeconds: -1},
+		})
+	}
+	r.Any("/v1/test", install, fakeAuth, RequestTimeoutUserOverride(), RequestTimeoutFinalizer(), func(c *gin.Context) {
+		handlerRan = true
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+	require.False(t, handlerRan, "已断连的请求不得进入 handler")
+	require.NotContains(t, w.Body.String(), `"ok":true`)
 }
