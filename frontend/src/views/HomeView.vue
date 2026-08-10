@@ -48,7 +48,7 @@
         <!-- Logo + Site Name -->
         <div class="flex min-w-0 items-center gap-3">
           <div class="h-9 w-9 shrink-0 overflow-hidden rounded-xl shadow-sm">
-            <img :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
+            <img :src="siteLogo || '/logo.svg'" alt="Logo" class="h-full w-full object-contain" />
           </div>
           <span class="truncate text-base font-semibold text-gray-900 dark:text-white">
             {{ siteName }}

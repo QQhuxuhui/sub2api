@@ -77,6 +77,12 @@ func NewOpsHandler(opsService *service.OpsService, notifyDispatchers ...*service
 	return &OpsHandler{opsService: opsService, notifyDispatcher: notifyDispatcher}
 }
 
+// ProvideOpsHandler is the wire-friendly (non-variadic) constructor. wire 不支持
+// 可变参数 provider，故用固定签名包一层，把可选的 notifyDispatcher 显式作为依赖注入。
+func ProvideOpsHandler(opsService *service.OpsService, notifyDispatcher *service.OpsNotifyDispatcher) *OpsHandler {
+	return NewOpsHandler(opsService, notifyDispatcher)
+}
+
 // GetErrorLogs lists ops error logs.
 // applyOpsErrorSortParams reads sort_by/sort_order query params into the filter.
 // Column whitelist and order normalization live in the repository; unknown
@@ -391,8 +397,8 @@ func (h *OpsHandler) ListRequestErrorUpstreamErrors(c *gin.Context) {
 		filter.EndTime = &endTime
 	}
 	filter.View = "all"
-	filter.Phase = "upstream"
-	// 上游错误列表需含 status<400 的 recovered 行,显式豁免客户端可见守卫。
+	filter.ErrorPhasesAny = []string{"upstream", "account_auth"}
+	// Provider-health list includes recovered inference and credential rows.
 	filter.IncludeRecoveredUpstream = true
 	filter.Owner = "provider"
 	filter.Source = strings.TrimSpace(c.Query("error_source"))
@@ -475,8 +481,8 @@ func (h *OpsHandler) ListUpstreamErrors(c *gin.Context) {
 	}
 
 	filter.View = parseOpsViewParam(c)
-	filter.Phase = "upstream"
-	// 上游错误列表需含 status<400 的 recovered 行,显式豁免客户端可见守卫。
+	filter.ErrorPhasesAny = []string{"upstream", "account_auth"}
+	// Provider-health list includes recovered inference and credential rows.
 	filter.IncludeRecoveredUpstream = true
 	filter.Owner = "provider"
 	filter.Source = strings.TrimSpace(c.Query("error_source"))

@@ -208,10 +208,11 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 }
 
 // applyChannelImageInputPrice 应用渠道图片输入价到定价快照。
-// nil = 未配置 → 归零（computeTokenBreakdown 回退到 input 价）；
+// nil = 未配置 → 归零且不设 Explicit（computeTokenBreakdown 回退到文本输入价，
+// 避免 LiteLLM 的 input_cost_per_image_token 泄漏进渠道自定义定价）；
 // 非 nil = 显式配置 → 使用配置值并置 Explicit（显式 0 不回退，即图片输入免费）。
 func applyChannelImageInputPrice(chPricing *ChannelModelPricing, pricing *ModelPricing) {
-	if chPricing.ImageInputPrice != nil {
+	if chPricing != nil && chPricing.ImageInputPrice != nil {
 		pricing.ImageInputPricePerToken = *chPricing.ImageInputPrice
 		pricing.ImageInputPriceExplicit = true
 	} else {
@@ -282,15 +283,13 @@ func intervalToModelPricing(iv *PricingInterval, supportsCacheBreakdown bool, ch
 		pricing.CacheReadPricePerTokenPriority = *iv.CacheReadPrice
 	}
 	// 渠道定价存在时，ImageOutputPrice / ImageInputPrice 显式覆盖
+	// （区间不携带图片输入价，图片输入价用渠道级配置，与 image_output 一致）。
 	if chPricing != nil {
 		pricing.ImageOutputPriceExplicit = true
 		if chPricing.ImageOutputPrice != nil {
 			pricing.ImageOutputPricePerToken = *chPricing.ImageOutputPrice
 		}
-		if chPricing.ImageInputPrice != nil {
-			pricing.ImageInputPricePerToken = *chPricing.ImageInputPrice
-			pricing.ImageInputPriceExplicit = true
-		}
+		applyChannelImageInputPrice(chPricing, pricing)
 	}
 	return pricing
 }

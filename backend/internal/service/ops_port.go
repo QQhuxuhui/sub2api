@@ -12,8 +12,6 @@ type OpsRepository interface {
 	// CountErrorLogs 统计窗口内匹配过滤条件的错误条数(error_count 告警指标用)。
 	CountErrorLogs(ctx context.Context, filter *OpsErrorLogFilter) (int64, error)
 	GetErrorLogByID(ctx context.Context, id int64) (*OpsErrorLogDetail, error)
-	// LookupDeletedKeyAudit 按明文 key 反查最近一条已删除 key 审计;未命中返回 (nil, nil)。
-	LookupDeletedKeyAudit(ctx context.Context, key string) (*DeletedKeyAuditResult, error)
 	ListRequestDetails(ctx context.Context, filter *OpsRequestDetailFilter) ([]*OpsRequestDetail, int64, error)
 	BatchInsertSystemLogs(ctx context.Context, inputs []*OpsInsertSystemLogInput) (int64, error)
 	ListSystemLogs(ctx context.Context, filter *OpsSystemLogFilter) (*OpsSystemLogList, error)
@@ -63,12 +61,6 @@ type OpsRepository interface {
 	UpsertDailyMetrics(ctx context.Context, startTime, endTime time.Time) error
 	GetLatestHourlyBucketStart(ctx context.Context) (time.Time, bool, error)
 	GetLatestDailyBucketDate(ctx context.Context) (time.Time, bool, error)
-}
-
-// DeletedKeyAuditResult 是按明文 key 反查 deleted_api_key_audits 的结果。
-type DeletedKeyAuditResult struct {
-	UserID  int64
-	KeyName string
 }
 
 type OpsInsertErrorLogInput struct {
@@ -129,12 +121,7 @@ type OpsInsertErrorLogInput struct {
 
 	CreatedAt time.Time
 
-	// 已删除 key 归因(仅 INVALID_API_KEY 认证失败时可能非空)
-	AttemptedKeyPrefix    string // 提交 key 的脱敏前缀(前 8 位)
-	DeletedKeyOwnerUserID *int64 // 反查命中的原所有者 user_id
-	DeletedKeyName        string // 反查命中的 key 名称
-
-	// 有效(未删除)key 报错时快照的 key 脱敏前缀(前 8 位);与 AttemptedKeyPrefix 互斥。
+	// 有效(未删除)key 报错时快照的 key 脱敏前缀(前 8 位)。
 	// 落库快照而非读时 JOIN:key 之后被删(key 列被 tombstone 覆盖)仍保留当时前缀。
 	APIKeyPrefix string
 }
@@ -196,6 +183,7 @@ type OpsInsertSystemMetricsInput struct {
 
 type OpsInsertSystemLogInput struct {
 	CreatedAt       time.Time
+	Host            string
 	Level           string
 	Component       string
 	Message         string
@@ -212,6 +200,7 @@ type OpsInsertSystemLogInput struct {
 type OpsSystemLogFilter struct {
 	StartTime *time.Time
 	EndTime   *time.Time
+	Host      string
 
 	Level     string
 	Component string
@@ -232,6 +221,7 @@ type OpsSystemLogFilter struct {
 type OpsSystemLogCleanupFilter struct {
 	StartTime *time.Time
 	EndTime   *time.Time
+	Host      string
 
 	Level     string
 	Component string

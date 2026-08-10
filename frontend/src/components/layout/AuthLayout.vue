@@ -29,7 +29,7 @@
                   class="h-14 w-14 shrink-0 overflow-hidden rounded-2xl shadow-lg shadow-primary-500/20"
                 >
                   <img
-                    :src="siteLogo || '/logo.png'"
+                    :src="siteLogo || '/logo.svg'"
                     alt="Logo"
                     class="h-full w-full object-contain"
                   />
@@ -162,7 +162,7 @@
                   class="inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl shadow-lg shadow-primary-500/20"
                 >
                   <img
-                    :src="siteLogo || '/logo.png'"
+                    :src="siteLogo || '/logo.svg'"
                     alt="Logo"
                     class="h-full w-full object-contain"
                   />
