@@ -36,9 +36,13 @@ type SystemSettings struct {
 	InvitationCodeEnabled            bool                     `json:"invitation_code_enabled"`
 	TotpEnabled                      bool                     `json:"totp_enabled"`                   // TOTP 双因素认证
 	TotpEncryptionKeyConfigured      bool                     `json:"totp_encryption_key_configured"` // TOTP 加密密钥是否已配置
-	SessionBindingEnabled            bool                     `json:"session_binding_enabled"`        // 会话 IP/UA 绑定
-	StepUpEnabled                    bool                     `json:"step_up_enabled"`                // 敏感操作 step-up 2FA
-	AuditLogRetentionDays            int                      `json:"audit_log_retention_days"`       // 审计日志保留天数
+	PasskeyEnabled                   bool                     `json:"passkey_enabled"`
+	PasskeyConfigured                bool                     `json:"passkey_configured"`
+	PasskeyRPID                      string                   `json:"passkey_rp_id"`
+	PasskeyRPOrigins                 []string                 `json:"passkey_rp_origins"`
+	SessionBindingEnabled            bool                     `json:"session_binding_enabled"`  // 会话 IP/UA 绑定
+	StepUpEnabled                    bool                     `json:"step_up_enabled"`          // 敏感操作 step-up 2FA
+	AuditLogRetentionDays            int                      `json:"audit_log_retention_days"` // 审计日志保留天数
 	LoginAgreementEnabled            bool                     `json:"login_agreement_enabled"`
 	LoginAgreementMode               string                   `json:"login_agreement_mode"`
 	LoginAgreementUpdatedAt          string                   `json:"login_agreement_updated_at"`
@@ -52,11 +56,23 @@ type SystemSettings struct {
 	SMTPFromName           string `json:"smtp_from_name"`
 	SMTPUseTLS             bool   `json:"smtp_use_tls"`
 
-	TurnstileEnabled             bool     `json:"turnstile_enabled"`
-	TurnstileSiteKey             string   `json:"turnstile_site_key"`
-	TurnstileSecretKeyConfigured bool     `json:"turnstile_secret_key_configured"`
-	APIKeyACLTrustForwardedIP    bool     `json:"api_key_acl_trust_forwarded_ip"`
-	ForwardedClientIPHeaders     []string `json:"forwarded_client_ip_headers"`
+	TurnstileEnabled                       bool     `json:"turnstile_enabled"`
+	TurnstileSiteKey                       string   `json:"turnstile_site_key"`
+	TurnstileSecretKeyConfigured           bool     `json:"turnstile_secret_key_configured"`
+	TencentCaptchaEnabled                  bool     `json:"tencent_captcha_enabled"`
+	TencentCaptchaAppID                    string   `json:"tencent_captcha_app_id"`
+	TencentCaptchaAppSecretKeyConfigured   bool     `json:"tencent_captcha_app_secret_key_configured"`
+	TencentCaptchaCloudSecretIDConfigured  bool     `json:"tencent_captcha_cloud_secret_id_configured"`
+	TencentCaptchaCloudSecretKeyConfigured bool     `json:"tencent_captcha_cloud_secret_key_configured"`
+	TencentCaptchaRegion                   string   `json:"tencent_captcha_region"`
+	AliyunCaptchaEnabled                   bool     `json:"aliyun_captcha_enabled"`
+	AliyunCaptchaAccessKeyID               string   `json:"aliyun_captcha_access_key_id"`
+	AliyunCaptchaAccessKeySecretConfigured bool     `json:"aliyun_captcha_access_key_secret_configured"`
+	AliyunCaptchaSceneID                   string   `json:"aliyun_captcha_scene_id"`
+	AliyunCaptchaPrefix                    string   `json:"aliyun_captcha_prefix"`
+	AliyunCaptchaRegion                    string   `json:"aliyun_captcha_region"`
+	APIKeyACLTrustForwardedIP              bool     `json:"api_key_acl_trust_forwarded_ip"`
+	ForwardedClientIPHeaders               []string `json:"forwarded_client_ip_headers"`
 
 	LinuxDoConnectEnabled                bool   `json:"linuxdo_connect_enabled"`
 	LinuxDoConnectClientID               string `json:"linuxdo_connect_client_id"`
@@ -140,6 +156,7 @@ type SystemSettings struct {
 	TelegramURL                 string           `json:"telegram_url"`
 	QQGroupURL                  string           `json:"qq_group_url"`
 	HomeContent                 string           `json:"home_content"`
+	CompactHomeEnabled          bool             `json:"compact_home_enabled"`
 	HideCcsImportButton         bool             `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled bool             `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL     string           `json:"purchase_subscription_url"`
@@ -197,6 +214,9 @@ type SystemSettings struct {
 	AntigravityUserAgentVersion            string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent                   string `json:"openai_codex_user_agent"`
 	OpenAIImageChromeImpersonation         bool   `json:"openai_image_chrome_impersonation"`
+	OpenAICodexClientVersion               string `json:"openai_codex_client_version"`
+	OpenAICodexClientVersionSynced         string `json:"openai_codex_client_version_synced"`
+	OpenAICodexVersionAutoSyncEnabled      bool   `json:"openai_codex_version_auto_sync_enabled"`
 
 	// codex_cli_only 加固
 	MinCodexVersion                      string `json:"min_codex_version"`
@@ -289,6 +309,11 @@ type SystemSettings struct {
 	// Available Channels feature switch (user-facing aggregate view)
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
 
+	// Model Plaza feature (public group/model pricing showcase)
+	ModelPlazaEnabled     bool   `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth bool   `json:"model_plaza_require_auth"`
+	ModelPlazaDescription string `json:"model_plaza_description"`
+
 	// 风控中心功能开关
 	RiskControlEnabled bool `json:"risk_control_enabled"`
 
@@ -323,6 +348,7 @@ type PublicSettings struct {
 	PasswordResetEnabled             bool                     `json:"password_reset_enabled"`
 	InvitationCodeEnabled            bool                     `json:"invitation_code_enabled"`
 	TotpEnabled                      bool                     `json:"totp_enabled"` // TOTP 双因素认证
+	PasskeyEnabled                   bool                     `json:"passkey_enabled"`
 	LoginAgreementEnabled            bool                     `json:"login_agreement_enabled"`
 	LoginAgreementMode               string                   `json:"login_agreement_mode"`
 	LoginAgreementUpdatedAt          string                   `json:"login_agreement_updated_at"`
@@ -330,6 +356,13 @@ type PublicSettings struct {
 	LoginAgreementDocuments          []LoginAgreementDocument `json:"login_agreement_documents"`
 	TurnstileEnabled                 bool                     `json:"turnstile_enabled"`
 	TurnstileSiteKey                 string                   `json:"turnstile_site_key"`
+	TencentCaptchaEnabled            bool                     `json:"tencent_captcha_enabled"`
+	TencentCaptchaAppID              string                   `json:"tencent_captcha_app_id"`
+	TencentCaptchaRegion             string                   `json:"tencent_captcha_region"`
+	AliyunCaptchaEnabled             bool                     `json:"aliyun_captcha_enabled"`
+	AliyunCaptchaSceneID             string                   `json:"aliyun_captcha_scene_id"`
+	AliyunCaptchaPrefix              string                   `json:"aliyun_captcha_prefix"`
+	AliyunCaptchaRegion              string                   `json:"aliyun_captcha_region"`
 	SiteName                         string                   `json:"site_name"`
 	SiteLogo                         string                   `json:"site_logo"`
 	SiteSubtitle                     string                   `json:"site_subtitle"`
@@ -339,6 +372,7 @@ type PublicSettings struct {
 	TelegramURL                      string                   `json:"telegram_url"`
 	QQGroupURL                       string                   `json:"qq_group_url"`
 	HomeContent                      string                   `json:"home_content"`
+	CompactHomeEnabled               bool                     `json:"compact_home_enabled"`
 	HideCcsImportButton              bool                     `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled      bool                     `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL          string                   `json:"purchase_subscription_url"`
@@ -373,6 +407,9 @@ type PublicSettings struct {
 	ChannelMonitorDefaultIntervalSeconds int  `json:"channel_monitor_default_interval_seconds"`
 
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
+
+	ModelPlazaEnabled     bool `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth bool `json:"model_plaza_require_auth"`
 
 	AffiliateEnabled bool `json:"affiliate_enabled"`
 

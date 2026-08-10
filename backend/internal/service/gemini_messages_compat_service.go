@@ -582,6 +582,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForAIStudioEndpoints(ctx cont
 }
 
 func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+	beginUpstreamResponseModelObservation(c)
 	startTime := time.Now()
 
 	var req struct {
@@ -639,9 +640,9 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			if req.Stream {
 				action = "streamGenerateContent"
 			}
-			fullURL := fmt.Sprintf("%s/v1beta/models/%s:%s", strings.TrimRight(normalizedBaseURL, "/"), mappedModel, action)
-			if req.Stream {
-				fullURL += "?alt=sse"
+			fullURL, err := buildGeminiAIStudioModelActionURL(normalizedBaseURL, mappedModel, action, req.Stream)
+			if err != nil {
+				return nil, "", err
 			}
 
 			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
@@ -713,9 +714,9 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					return nil, "", err
 				}
 
-				fullURL := fmt.Sprintf("%s/v1beta/models/%s:%s", strings.TrimRight(normalizedBaseURL, "/"), mappedModel, action)
-				if useUpstreamStream {
-					fullURL += "?alt=sse"
+				fullURL, err := buildGeminiAIStudioModelActionURL(normalizedBaseURL, mappedModel, action, useUpstreamStream)
+				if err != nil {
+					return nil, "", err
 				}
 
 				restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
@@ -1073,6 +1074,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
 			}
 			collectedBytes, _ := json.Marshal(collected)
+			upstreamResponseModelObserverFromContext(c).ObserveGemini(collectedBytes)
 			claudeResp, usageObj2 := convertGeminiToClaudeMessage(collected, originalModel, collectedBytes, false)
 			c.JSON(http.StatusOK, claudeResp)
 			usage = usageObj2
@@ -1096,16 +1098,18 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	}
 
 	return &ForwardResult{
-		RequestID:      requestID,
-		Usage:          *usage,
-		Model:          originalModel,
-		UpstreamModel:  mappedModel,
-		Stream:         req.Stream,
-		Duration:       time.Since(startTime),
-		FirstTokenMs:   firstTokenMs,
-		ImageCount:     imageCount,
-		ImageSize:      imageSize,
-		ImageInputSize: imageInputSize,
+		RequestID:                     requestID,
+		Usage:                         *usage,
+		Model:                         originalModel,
+		UpstreamModel:                 mappedModel,
+		UpstreamResponseModel:         observedUpstreamResponseModel(c),
+		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+		Stream:                        req.Stream,
+		Duration:                      time.Since(startTime),
+		FirstTokenMs:                  firstTokenMs,
+		ImageCount:                    imageCount,
+		ImageSize:                     imageSize,
+		ImageInputSize:                imageInputSize,
 	}, nil
 }
 
@@ -1118,6 +1122,7 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 }
 
 func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
+	beginUpstreamResponseModelObservation(c)
 	startTime := time.Now()
 
 	if strings.TrimSpace(originalModel) == "" {
@@ -1182,9 +1187,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				return nil, "", err
 			}
 
-			fullURL := fmt.Sprintf("%s/v1beta/models/%s:%s", strings.TrimRight(normalizedBaseURL, "/"), mappedModel, upstreamAction)
-			if useUpstreamStream {
-				fullURL += "?alt=sse"
+			fullURL, err := buildGeminiAIStudioModelActionURL(normalizedBaseURL, mappedModel, upstreamAction, useUpstreamStream)
+			if err != nil {
+				return nil, "", err
 			}
 
 			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
@@ -1250,9 +1255,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					return nil, "", err
 				}
 
-				fullURL := fmt.Sprintf("%s/v1beta/models/%s:%s", strings.TrimRight(normalizedBaseURL, "/"), mappedModel, upstreamAction)
-				if useUpstreamStream {
-					fullURL += "?alt=sse"
+				fullURL, err := buildGeminiAIStudioModelActionURL(normalizedBaseURL, mappedModel, upstreamAction, useUpstreamStream)
+				if err != nil {
+					return nil, "", err
 				}
 
 				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
@@ -1607,6 +1612,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to read upstream stream")
 			}
 			b, _ := json.Marshal(collected)
+			// 先观察还原前的原始上游响应（上游响应模型审计；对 dev 的 pro 伪装线
+			// 这里的 mismatch 恰好可作伪装链路健康监控），再做 dev 的图片 usage 调整。
+			upstreamResponseModelObserverFromContext(c).ObserveGemini(b)
 			if nb, u, ok := applyGeminiImageUsageAdjustment(b, imageUsageParams); ok {
 				b = nb
 				usageObj = u
@@ -1634,16 +1642,18 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	}
 
 	return &ForwardResult{
-		RequestID:      requestID,
-		Usage:          *usage,
-		Model:          originalModel,
-		UpstreamModel:  mappedModel,
-		Stream:         stream,
-		Duration:       time.Since(startTime),
-		FirstTokenMs:   firstTokenMs,
-		ImageCount:     imageCount,
-		ImageSize:      imageSize,
-		ImageInputSize: imageInputSize,
+		RequestID:                     requestID,
+		Usage:                         *usage,
+		Model:                         originalModel,
+		UpstreamModel:                 mappedModel,
+		UpstreamResponseModel:         observedUpstreamResponseModel(c),
+		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+		Stream:                        stream,
+		Duration:                      time.Since(startTime),
+		FirstTokenMs:                  firstTokenMs,
+		ImageCount:                    imageCount,
+		ImageSize:                     imageSize,
+		ImageInputSize:                imageInputSize,
 	}, nil
 }
 
@@ -2006,6 +2016,11 @@ func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context,
 	if err != nil {
 		return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
 	}
+	observer := upstreamResponseModelObserverFromContext(c)
+	if observer == nil {
+		observer = beginUpstreamResponseModelObservation(c)
+	}
+	observer.ObserveGemini(unwrappedBody)
 
 	var geminiResp map[string]any
 	if err := json.Unmarshal(unwrappedBody, &geminiResp); err != nil {
@@ -2030,7 +2045,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 		return nil, errors.New("streaming not supported")
 	}
 
-	messageID := "msg_" + randomHex(12)
+	messageID := generateAnthropicMsgID()
 	messageStart := map[string]any{
 		"type": "message_start",
 		"message": map[string]any{
@@ -2089,6 +2104,11 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 		if err != nil {
 			continue
 		}
+		observer := upstreamResponseModelObserverFromContext(c)
+		if observer == nil {
+			observer = beginUpstreamResponseModelObservation(c)
+		}
+		observer.ObserveGemini(unwrappedBytes)
 
 		var geminiResp map[string]any
 		if err := json.Unmarshal(unwrappedBytes, &geminiResp); err != nil {
@@ -2299,6 +2319,21 @@ func randomHex(nBytes int) string {
 	b := make([]byte, nBytes)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// generateAnthropicMsgID 生成 Anthropic 官方格式的 message ID：msg_01 + 22 位 Base62
+func generateAnthropicMsgID() string {
+	const charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	const idLen = 22
+	randomBytes := make([]byte, idLen)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "msg_01" + randomHex(11)
+	}
+	b := make([]byte, idLen)
+	for i := range b {
+		b[i] = charset[int(randomBytes[i])%len(charset)]
+	}
+	return "msg_01" + string(b)
 }
 
 func (s *GeminiMessagesCompatService) writeClaudeError(c *gin.Context, status int, errType, message string) error {
@@ -2751,6 +2786,11 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 			respBody = unwrappedBody
 		}
 	}
+	observer := upstreamResponseModelObserverFromContext(c)
+	if observer == nil {
+		observer = beginUpstreamResponseModelObservation(c)
+	}
+	observer.ObserveGemini(respBody)
 
 	var adjustedUsage *ClaudeUsage
 	if nb, u, ok := applyGeminiImageUsageAdjustment(respBody, imageUsage); ok {
@@ -2808,6 +2848,10 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 
 	reader := bufio.NewReader(resp.Body)
 	usage := &ClaudeUsage{}
+	observer := upstreamResponseModelObserverFromContext(c)
+	if observer == nil {
+		observer = beginUpstreamResponseModelObservation(c)
+	}
 	var firstTokenMs *int
 	flashState := &geminiFlashImageStreamState{}
 
@@ -2854,6 +2898,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					} else if u := extractGeminiUsage(rawBytes); u != nil {
 						usage = u
 					}
+					observer.ObserveGemini(rawBytes)
 
 					if firstTokenMs == nil {
 						ms := int(time.Since(startTime).Milliseconds())
@@ -2897,10 +2942,13 @@ func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, ac
 	if account == nil {
 		return nil, errors.New("account is nil")
 	}
-	path = strings.TrimSpace(path)
-	if path == "" || !strings.HasPrefix(path, "/") {
+	// path 会被直接拼到上游 base URL 后面，因此按路径护栏逐片段校验，
+	// 见 upstream_path_guard.go。
+	sanitizedPath, ok := sanitizedUpstreamPathSuffix(path)
+	if !ok || sanitizedPath == "" {
 		return nil, errors.New("invalid path")
 	}
+	path = sanitizedPath
 
 	baseURL := account.GetGeminiBaseURL(geminicli.AIStudioBaseURL)
 	normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
@@ -3027,7 +3075,7 @@ func convertGeminiToClaudeMessage(geminiResp map[string]any, originalModel strin
 	}
 
 	resp := map[string]any{
-		"id":            "msg_" + randomHex(12),
+		"id":            generateAnthropicMsgID(),
 		"type":          "message",
 		"role":          "assistant",
 		"model":         originalModel,

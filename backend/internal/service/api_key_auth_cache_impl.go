@@ -14,7 +14,12 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 18 // v18: merged snapshot — user request_timeout_seconds (dev v16) + OpenAI group Live gate (upstream v17)
+// v19: merged snapshot — dev fields (user request_timeout_seconds, group normalize_anthropic_envelope)
+// + upstream group profit control fields (ProfitControlEnabled/ProfitMinMargin/ProfitSafetyBuffer).
+// Both dev and upstream independently bumped to v18 for divergent field sets; the merged snapshot is a
+// superset of both, so bump to v19 to force refresh of any pre-merge v18 snapshot that lacks the other
+// line's fields.
+const apiKeyAuthSnapshotVersion = 19
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -422,6 +427,9 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			PeakStart:                       apiKey.Group.PeakStart,
 			PeakEnd:                         apiKey.Group.PeakEnd,
 			PeakRateMultiplier:              apiKey.Group.PeakRateMultiplier,
+			ProfitControlEnabled:            apiKey.Group.ProfitControlEnabled,
+			ProfitMinMargin:                 apiKey.Group.ProfitMinMargin,
+			ProfitSafetyBuffer:              apiKey.Group.ProfitSafetyBuffer,
 		}
 	}
 	return snapshot
@@ -511,6 +519,9 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			PeakStart:                       snapshot.Group.PeakStart,
 			PeakEnd:                         snapshot.Group.PeakEnd,
 			PeakRateMultiplier:              snapshot.Group.PeakRateMultiplier,
+			ProfitControlEnabled:            snapshot.Group.ProfitControlEnabled,
+			ProfitMinMargin:                 snapshot.Group.ProfitMinMargin,
+			ProfitSafetyBuffer:              snapshot.Group.ProfitSafetyBuffer,
 		}
 	}
 	s.compileAPIKeyIPRules(apiKey)
