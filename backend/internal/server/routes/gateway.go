@@ -193,7 +193,10 @@ func RegisterGatewayRoutes(
 	gateway.Use(requestTimeout)
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
-	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
+	// billing 是不需要分组的特殊只读路由，故在 requireGroup/UserOverride/Finalizer
+	// 加入 Group 之前注册。Gin 在注册时固定中间件链，因此这里单独补挂用户级超时
+	// 覆盖与 Finalizer，确保 request_timeout_seconds（含 -1 豁免）对本路由同样生效。
+	gateway.GET("/sub2api/billing", requestTimeoutUserOverride, requestTimeoutFinalizer, h.Gateway.KeyBillingInfo)
 	gateway.Use(compositeTarget)
 	gateway.Use(requireGroupAnthropic)
 	gateway.Use(requestTimeoutUserOverride)

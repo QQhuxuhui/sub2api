@@ -73,16 +73,17 @@ func tryModelFilePricing(billingService *BillingService, model string, tokens Us
 		return &breakdown.TotalCost
 	}
 	textInputTokens, imageInputTokens := splitInputTokenCounts(tokens)
+	textOutputTokens, imageOutputTokens := splitOutputTokenCounts(tokens)
 	imageInputPrice := pricing.ImageInputPricePerToken
 	if imageInputPrice == 0 && !pricing.ImageInputPriceExplicit {
 		imageInputPrice = pricing.InputPricePerToken
 	}
 	cost := float64(textInputTokens)*pricing.InputPricePerToken +
 		float64(imageInputTokens)*imageInputPrice +
-		float64(tokens.OutputTokens)*pricing.OutputPricePerToken +
+		float64(textOutputTokens)*pricing.OutputPricePerToken +
 		float64(tokens.CacheCreationTokens)*pricing.CacheCreationPricePerToken +
 		float64(tokens.CacheReadTokens)*pricing.CacheReadPricePerToken +
-		float64(tokens.ImageOutputTokens)*pricing.ImageOutputPricePerToken
+		float64(imageOutputTokens)*pricing.ImageOutputPricePerToken
 	if cost <= 0 {
 		return nil
 	}
@@ -219,6 +220,7 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *
 		return *ptr
 	}
 	textInputTokens, imageInputTokens := splitInputTokenCounts(tokens)
+	textOutputTokens, imageOutputTokens := splitOutputTokenCounts(tokens)
 	inputPrice := deref(p.InputPrice)
 	imageInputPrice := deref(p.ImageInputPrice)
 	if p.ImageInputPrice == nil {
@@ -226,10 +228,10 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *
 	}
 	cost := float64(textInputTokens)*inputPrice +
 		float64(imageInputTokens)*imageInputPrice +
-		float64(tokens.OutputTokens)*deref(p.OutputPrice) +
+		float64(textOutputTokens)*deref(p.OutputPrice) +
 		float64(tokens.CacheCreationTokens)*deref(p.CacheWritePrice) +
 		float64(tokens.CacheReadTokens)*deref(p.CacheReadPrice) +
-		float64(tokens.ImageOutputTokens)*deref(p.ImageOutputPrice)
+		float64(imageOutputTokens)*deref(p.ImageOutputPrice)
 	if cost <= 0 {
 		return nil
 	}
@@ -247,6 +249,22 @@ func splitInputTokenCounts(tokens UsageTokens) (textInputTokens, imageInputToken
 		imageInputTokens = tokens.InputTokens
 	}
 	return textInputTokens, imageInputTokens
+}
+
+// splitOutputTokenCounts 把总输出 token 拆成文本与图片两部分（ImageOutputTokens 是
+// OutputTokens 的子集）。账号成本统计需按图/文不同价分别计费，避免图片输出 token 被
+// 重复计入文本输出；与 billing_service.computeTokenBreakdown 的输出拆分口径一致。
+func splitOutputTokenCounts(tokens UsageTokens) (textOutputTokens, imageOutputTokens int) {
+	if tokens.ImageOutputTokens <= 0 {
+		return tokens.OutputTokens, 0
+	}
+	imageOutputTokens = tokens.ImageOutputTokens
+	textOutputTokens = tokens.OutputTokens - imageOutputTokens
+	if textOutputTokens < 0 {
+		textOutputTokens = 0
+		imageOutputTokens = tokens.OutputTokens
+	}
+	return textOutputTokens, imageOutputTokens
 }
 
 // applyAccountStatsCost resolves the account stats cost for a usage log entry.
