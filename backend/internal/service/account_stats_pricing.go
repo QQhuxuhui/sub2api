@@ -78,12 +78,17 @@ func tryModelFilePricing(billingService *BillingService, model string, tokens Us
 	if imageInputPrice == 0 && !pricing.ImageInputPriceExplicit {
 		imageInputPrice = pricing.InputPricePerToken
 	}
+	imageOutputPrice := pricing.ImageOutputPricePerToken
+	if imageOutputPrice == 0 && !pricing.ImageOutputPriceExplicit {
+		// 未配置图片输出档时回退普通输出价，与正式计费口径一致；显式 0 则免费不回退。
+		imageOutputPrice = pricing.OutputPricePerToken
+	}
 	cost := float64(textInputTokens)*pricing.InputPricePerToken +
 		float64(imageInputTokens)*imageInputPrice +
 		float64(textOutputTokens)*pricing.OutputPricePerToken +
 		float64(tokens.CacheCreationTokens)*pricing.CacheCreationPricePerToken +
 		float64(tokens.CacheReadTokens)*pricing.CacheReadPricePerToken +
-		float64(imageOutputTokens)*pricing.ImageOutputPricePerToken
+		float64(imageOutputTokens)*imageOutputPrice
 	if cost <= 0 {
 		return nil
 	}
@@ -226,12 +231,17 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *
 	if p.ImageInputPrice == nil {
 		imageInputPrice = inputPrice
 	}
+	imageOutputPrice := deref(p.ImageOutputPrice)
+	if p.ImageOutputPrice == nil {
+		// 未配置图片输出价时回退普通输出价（渠道价用 nil 表示未配置）；显式指向 0 则免费。
+		imageOutputPrice = deref(p.OutputPrice)
+	}
 	cost := float64(textInputTokens)*inputPrice +
 		float64(imageInputTokens)*imageInputPrice +
 		float64(textOutputTokens)*deref(p.OutputPrice) +
 		float64(tokens.CacheCreationTokens)*deref(p.CacheWritePrice) +
 		float64(tokens.CacheReadTokens)*deref(p.CacheReadPrice) +
-		float64(imageOutputTokens)*deref(p.ImageOutputPrice)
+		float64(imageOutputTokens)*imageOutputPrice
 	if cost <= 0 {
 		return nil
 	}

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
@@ -169,5 +170,57 @@ func TestGatewayRoutesKeyBillingInfoEndToEnd(t *testing.T) {
 			}
 		}`, w.Body.String())
 		require.Zero(t, rateRepo.lookupCalls)
+	})
+}
+
+// TestGatewayRoutesKeyBillingUserTimeoutOverride 验证 /v1/sub2api/billing 路由确实
+// 经过用户级超时中间件（该路由需跳过 requireGroup 而单独挂载 UserOverride/Finalizer）。
+// 复刻 billing 路由的中间件链：全局 RequestTimeout → 鉴权(注入带用户超时的 apiKey) →
+// UserOverride → Finalizer → handler，断言 handler 收到的 deadline 由用户级超时决定。
+func TestGatewayRoutesKeyBillingUserTimeoutOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	newRouter := func(userTimeoutSeconds int, deadline *time.Time, hasDeadline *bool) *gin.Engine {
+		router := gin.New()
+		router.Use(servermiddleware.RequestTimeout(60, nil)) // 全局 60s
+		router.Use(func(c *gin.Context) {                    // 模拟鉴权：注入带用户级超时的 apiKey
+			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
+				User: &service.User{RequestTimeoutSeconds: userTimeoutSeconds},
+			})
+			c.Next()
+		})
+		router.GET("/v1/sub2api/billing",
+			servermiddleware.RequestTimeoutUserOverride(),
+			servermiddleware.RequestTimeoutFinalizer(),
+			func(c *gin.Context) {
+				*deadline, *hasDeadline = c.Request.Context().Deadline()
+				c.Status(http.StatusOK)
+			})
+		return router
+	}
+
+	t.Run("positive user timeout overrides global deadline", func(t *testing.T) {
+		var deadline time.Time
+		var hasDeadline bool
+		router := newRouter(3600, &deadline, &hasDeadline) // 用户 1 小时，远大于全局 60s
+		start := time.Now()
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing", nil))
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.True(t, hasDeadline, "billing 路由应经 UserOverride 设置用户级 deadline")
+		// deadline 应≈ start+3600s（用户级），而非 start+60s（全局），证明 UserOverride 对本路由生效。
+		require.WithinDuration(t, start.Add(3600*time.Second), deadline, 30*time.Second)
+	})
+
+	t.Run("minus one cancels global deadline", func(t *testing.T) {
+		var deadline time.Time
+		var hasDeadline bool
+		router := newRouter(-1, &deadline, &hasDeadline) // -1 = 不限制
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing", nil))
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.False(t, hasDeadline, "-1 应撤销全局 deadline，billing 路由 handler 不应带 deadline")
 	})
 }

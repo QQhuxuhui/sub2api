@@ -247,6 +247,34 @@ func TestCalculateStatsCost_TokenBilling_WithImageOutput(t *testing.T) {
 	require.InDelta(t, 0.28, *result, 1e-12)
 }
 
+func TestCalculateStatsCost_ImageOutputPriceMissing_FallsBackToOutput(t *testing.T) {
+	pricing := &ChannelModelPricing{
+		BillingMode: BillingModeToken,
+		InputPrice:  testPtrFloat64(0.001),
+		OutputPrice: testPtrFloat64(0.002),
+		// ImageOutputPrice 未配置(nil)→ 图片输出应回退普通输出价，避免少计
+	}
+	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50, ImageOutputTokens: 10}
+	result := calculateStatsCost(pricing, tokens, 1)
+	require.NotNil(t, result)
+	// 100*0.001 + (50-10)*0.002 + 10*0.002(回退) = 0.1 + 0.08 + 0.02 = 0.2
+	require.InDelta(t, 0.2, *result, 1e-12)
+}
+
+func TestCalculateStatsCost_ImageOutputPriceExplicitZero_Free(t *testing.T) {
+	pricing := &ChannelModelPricing{
+		BillingMode:      BillingModeToken,
+		InputPrice:       testPtrFloat64(0.001),
+		OutputPrice:      testPtrFloat64(0.002),
+		ImageOutputPrice: testPtrFloat64(0), // 显式 0 → 图片输出免费，不回退
+	}
+	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50, ImageOutputTokens: 10}
+	result := calculateStatsCost(pricing, tokens, 1)
+	require.NotNil(t, result)
+	// 100*0.001 + (50-10)*0.002 + 10*0 = 0.1 + 0.08 + 0 = 0.18
+	require.InDelta(t, 0.18, *result, 1e-12)
+}
+
 func TestCalculateStatsCost_TokenBilling_WithImageInput(t *testing.T) {
 	pricing := &ChannelModelPricing{
 		BillingMode:     BillingModeToken,
@@ -578,6 +606,37 @@ func TestTryModelFilePricing_WithImageOutput(t *testing.T) {
 	// ImageOutputTokens 是 OutputTokens 的子集，文本输出须相减，避免图片输出被重复计费：
 	// 100*0.001 + (50-10)*0.002 + 10*0.01 = 0.1 + 0.08 + 0.1 = 0.28
 	require.InDelta(t, 0.28, *result, 1e-12)
+}
+
+func TestTryModelFilePricing_ImageOutputPriceMissing_FallsBackToOutput(t *testing.T) {
+	bs := newTestBillingServiceWithPrices(map[string]*ModelPricing{
+		"claude-sonnet-4": {
+			InputPricePerToken:  0.001,
+			OutputPricePerToken: 0.002,
+			// ImageOutputPricePerToken 未配置(0 且非显式)→ 回退普通输出价
+		},
+	})
+	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50, ImageOutputTokens: 10}
+	result := tryModelFilePricing(bs, "claude-sonnet-4", tokens)
+	require.NotNil(t, result)
+	// 100*0.001 + (50-10)*0.002 + 10*0.002(回退) = 0.1 + 0.08 + 0.02 = 0.2
+	require.InDelta(t, 0.2, *result, 1e-12)
+}
+
+func TestTryModelFilePricing_ImageOutputPriceExplicitZero_Free(t *testing.T) {
+	bs := newTestBillingServiceWithPrices(map[string]*ModelPricing{
+		"claude-sonnet-4": {
+			InputPricePerToken:       0.001,
+			OutputPricePerToken:      0.002,
+			ImageOutputPricePerToken: 0,
+			ImageOutputPriceExplicit: true, // 显式 0 → 图片输出免费，不回退
+		},
+	})
+	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50, ImageOutputTokens: 10}
+	result := tryModelFilePricing(bs, "claude-sonnet-4", tokens)
+	require.NotNil(t, result)
+	// 100*0.001 + (50-10)*0.002 + 10*0 = 0.1 + 0.08 + 0 = 0.18
+	require.InDelta(t, 0.18, *result, 1e-12)
 }
 
 func TestTryModelFilePricing_WithCacheTokens(t *testing.T) {
