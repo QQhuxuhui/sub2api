@@ -1183,8 +1183,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			trimmedData := strings.TrimSpace(data)
 			rawEventType := strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String())
 			observer.ObserveOpenAI(dataBytes, rawEventType)
-			if needModelReplace && strings.Contains(data, mappedModel) {
-				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
+			forceNorm := shouldNormalizeResponseModel(c)
+			if (needModelReplace && strings.Contains(data, mappedModel)) || forceNorm {
+				line = s.replaceModelInSSELine(line, mappedModel, originalModel, forceNorm)
 				if replacedData, replaced := extractOpenAISSEDataLine(line); replaced {
 					dataBytes = []byte(replacedData)
 					trimmedData = strings.TrimSpace(replacedData)
@@ -1406,8 +1407,8 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	if contentType == "" {
 		contentType = "application/json"
 	}
-	if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
-		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
+	if forceNorm := shouldNormalizeResponseModel(c); (originalModel != "" && mappedModel != "" && originalModel != mappedModel) || forceNorm {
+		body = s.replaceModelInResponseBody(body, mappedModel, originalModel, forceNorm)
 	}
 	body, err = restoreOpenAIResponsesNamespacePayload(c, body)
 	if err != nil {
@@ -1449,8 +1450,8 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		}
 		finalResponse = supplementCompactionItemFromSSE(c, finalResponse, bodyText)
 		body = finalResponse
-		if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
-			body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
+		if forceNorm := shouldNormalizeResponseModel(c); (originalModel != "" && mappedModel != "" && originalModel != mappedModel) || forceNorm {
+			body = s.replaceModelInResponseBody(body, mappedModel, originalModel, forceNorm)
 		}
 		// Correct tool calls in final response
 		body = s.correctToolCallsInResponseBody(body)
@@ -1469,8 +1470,8 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
 		}
 		usage = s.parseSSEUsageFromBody(bodyText)
-		if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
-			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
+		if forceNorm := shouldNormalizeResponseModel(c); (originalModel != "" && mappedModel != "" && originalModel != mappedModel) || forceNorm {
+			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel, forceNorm)
 		}
 		body = []byte(bodyText)
 	}

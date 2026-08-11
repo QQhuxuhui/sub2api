@@ -423,7 +423,13 @@ func appendOpenAIResponsesRequestPathSuffix(baseURL, suffix string) string {
 	return trimmedBase + trimmedSuffix
 }
 
-func (s *OpenAIGatewayService) replaceModelInResponseBody(body []byte, fromModel, toModel string) []byte {
+// force 为 true 时（分组开启 normalize_response_model）不比较原值，只要字段存在就改写，
+// 把上游偷换的模型名一并归一化；response.model 嵌套字段同样处理。
+func (s *OpenAIGatewayService) replaceModelInResponseBody(body []byte, fromModel, toModel string, force bool) []byte {
+	if force {
+		body = forceSetJSONStringField(body, "model", toModel)
+		return forceSetJSONStringField(body, "response.model", toModel)
+	}
 	// 使用 gjson/sjson 精确替换 model 字段，避免全量 JSON 反序列化
 	if m := gjson.GetBytes(body, "model"); m.Exists() && m.Str == fromModel {
 		newBody, err := sjson.SetBytes(body, "model", toModel)

@@ -580,6 +580,8 @@ export interface Group {
   claude_code_only: boolean
   // Anthropic 信封规范化
   normalize_anthropic_envelope: boolean
+  // 响应模型名归一化：将响应体 model 字段改写为客户端请求的模型名
+  normalize_response_model: boolean
   fallback_group_id: number | null
   fallback_group_id_on_invalid_request: number | null
   // OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
@@ -782,6 +784,7 @@ export interface CreateGroupRequest {
   profit_safety_buffer?: number
   claude_code_only?: boolean
   normalize_anthropic_envelope?: boolean
+  normalize_response_model?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
   mcp_xml_inject?: boolean
@@ -838,6 +841,7 @@ export interface UpdateGroupRequest {
   profit_safety_buffer?: number
   claude_code_only?: boolean
   normalize_anthropic_envelope?: boolean
+  normalize_response_model?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
   mcp_xml_inject?: boolean

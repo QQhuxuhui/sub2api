@@ -837,7 +837,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		flusher.Flush()
 	}
 
-	needModelReplace := originalModel != mappedModel
+	// 分组开启 normalize_response_model 时，即便没有模型映射也要改写（上游可能偷换模型）。
+	forceNormalizeModel := shouldNormalizeResponseModel(c)
+	needModelReplace := originalModel != mappedModel || forceNormalizeModel
 	clientDisconnected := false // 客户端断开标志，断开后继续读取上游以获取完整usage
 	sawTerminalEvent := false
 	useNoopDeltaKeepalive := c != nil && c.Request != nil && shouldUseClaudeCodeNoopDeltaKeepalive(c.GetHeader("User-Agent"))
@@ -968,7 +970,8 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 		if needModelReplace {
 			if msg, ok := event["message"].(map[string]any); ok {
-				if model, ok := msg["model"].(string); ok && model == mappedModel {
+				// forceNormalizeModel：不比较原值，把上游偷换的模型名一并归一化。
+				if model, ok := msg["model"].(string); ok && (model == mappedModel || forceNormalizeModel) && model != originalModel {
 					msg["model"] = originalModel
 					eventChanged = true
 				}
@@ -1463,9 +1466,10 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		}
 	}
 
-	// 如果有模型映射，替换响应中的model字段
-	if originalModel != mappedModel {
-		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
+	// 如果有模型映射，替换响应中的model字段。
+	// 分组开启 normalize_response_model 时无条件归一化（含上游偷换模型的情形）。
+	if forceNorm := shouldNormalizeResponseModel(c); originalModel != mappedModel || forceNorm {
+		body = s.replaceModelInResponseBody(body, mappedModel, originalModel, forceNorm)
 	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -1494,7 +1498,12 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 
 // replaceModelInResponseBody 替换响应体中的model字段
 // 使用 gjson/sjson 精确替换，避免全量 JSON 反序列化
-func (s *GatewayService) replaceModelInResponseBody(body []byte, fromModel, toModel string) []byte {
+// force 为 true 时（分组开启 normalize_response_model）不比较原值，只要 model 字段
+// 存在就改写为 toModel，从而把上游偷换的模型名也归一化掉。
+func (s *GatewayService) replaceModelInResponseBody(body []byte, fromModel, toModel string, force bool) []byte {
+	if force {
+		return forceSetJSONStringField(body, "model", toModel)
+	}
 	if m := gjson.GetBytes(body, "model"); m.Exists() && m.Str == fromModel {
 		newBody, err := sjson.SetBytes(body, "model", toModel)
 		if err != nil {

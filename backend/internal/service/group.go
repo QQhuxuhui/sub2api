@@ -64,6 +64,11 @@ type Group struct {
 
 	// 非原生渠道响应信封规范化开关
 	NormalizeAnthropicEnvelope bool
+
+	// NormalizeResponseModel 为 true 时，回给客户端的响应体 model 字段无条件归一化为
+	// 客户端请求的模型（隐藏上游偷换，如 gemini-3.1-pro → gemini-3.1-pro-low）。
+	// 观测点在改写之前，usage_logs 仍记录上游真实模型。
+	NormalizeResponseModel bool
 	FallbackGroupID            *int64
 	// 无效请求兜底分组（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64

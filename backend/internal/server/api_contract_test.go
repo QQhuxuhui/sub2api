@@ -355,6 +355,7 @@ func TestAPIContracts(t *testing.T) {
 						"description": "desc",
 						"platform": "anthropic",
 						"normalize_anthropic_envelope": false,
+						"normalize_response_model": false,
 						"rate_multiplier": 1.5,
 						"peak_rate_enabled": false,
 						"peak_start": "",

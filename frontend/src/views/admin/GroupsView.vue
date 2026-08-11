@@ -1444,6 +1444,42 @@
           </div>
         </div>
 
+        <!-- 响应模型名归一化（全平台通用，不限 anthropic） -->
+        <div class="border-t pt-4">
+          <div class="mb-1.5 flex items-center gap-1">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.normalizeResponseModel") }}
+            </label>
+          </div>
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              @click="
+                createForm.normalize_response_model =
+                  !createForm.normalize_response_model
+              "
+              :class="[
+                'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
+                createForm.normalize_response_model
+                  ? 'bg-primary-500'
+                  : 'bg-gray-300 dark:bg-dark-600',
+              ]"
+            >
+              <span
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  createForm.normalize_response_model
+                    ? 'translate-x-6'
+                    : 'translate-x-1',
+                ]"
+              />
+            </button>
+            <span class="text-sm text-gray-500 dark:text-gray-400">
+              {{ t("admin.groups.normalizeResponseModelDesc") }}
+            </span>
+          </div>
+        </div>
+
         <!-- Codex 网页搜索按次计费（仅 openai 平台） -->
         <div
           v-if="createForm.platform === 'openai'"
@@ -3073,6 +3109,42 @@
                 {{ t("admin.groups.normalizeEnvelope.desc") }}
               </span>
             </div>
+          </div>
+        </div>
+
+        <!-- 响应模型名归一化（全平台通用，不限 anthropic） -->
+        <div class="border-t pt-4">
+          <div class="mb-1.5 flex items-center gap-1">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.normalizeResponseModel") }}
+            </label>
+          </div>
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              @click="
+                editForm.normalize_response_model =
+                  !editForm.normalize_response_model
+              "
+              :class="[
+                'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
+                editForm.normalize_response_model
+                  ? 'bg-primary-500'
+                  : 'bg-gray-300 dark:bg-dark-600',
+              ]"
+            >
+              <span
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  editForm.normalize_response_model
+                    ? 'translate-x-6'
+                    : 'translate-x-1',
+                ]"
+              />
+            </button>
+            <span class="text-sm text-gray-500 dark:text-gray-400">
+              {{ t("admin.groups.normalizeResponseModelDesc") }}
+            </span>
           </div>
         </div>
 
@@ -4800,6 +4872,8 @@ const createForm = reactive({
   claude_code_only: false,
   // Anthropic 信封规范化
   normalize_anthropic_envelope: false,
+  // 响应模型名归一化（全平台可用）
+  normalize_response_model: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
@@ -5156,6 +5230,8 @@ const editForm = reactive({
   claude_code_only: false,
   // Anthropic 信封规范化
   normalize_anthropic_envelope: false,
+  // 响应模型名归一化（全平台可用）
+  normalize_response_model: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
@@ -5603,6 +5679,7 @@ const closeCreateModal = () => {
   createForm.profit_safety_buffer_percent = 0;
   createForm.claude_code_only = false;
   createForm.normalize_anthropic_envelope = false;
+  createForm.normalize_response_model = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
   resetMessagesDispatchFormState(createForm);
@@ -5819,6 +5896,7 @@ const handleEdit = async (group: AdminGroup) => {
   );
   editForm.claude_code_only = group.claude_code_only || false;
   editForm.normalize_anthropic_envelope = group.normalize_anthropic_envelope || false;
+  editForm.normalize_response_model = group.normalize_response_model || false;
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
     group.fallback_group_id_on_invalid_request;

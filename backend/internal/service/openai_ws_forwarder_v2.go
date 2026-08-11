@@ -704,8 +704,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			return nil, errors.New("ws finished without final response")
 		}
 
-		if needModelReplace {
-			finalResponse = s.replaceModelInResponseBody(finalResponse, mappedModel, originalModel)
+		if forceNorm := shouldNormalizeResponseModel(c); needModelReplace || forceNorm {
+			finalResponse = s.replaceModelInResponseBody(finalResponse, mappedModel, originalModel, forceNorm)
 		}
 		finalResponse = s.correctToolCallsInResponseBody(finalResponse)
 		populateOpenAIUsageFromResponseJSON(finalResponse, usage)

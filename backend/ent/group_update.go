@@ -695,6 +695,20 @@ func (_u *GroupUpdate) SetNillableNormalizeAnthropicEnvelope(v *bool) *GroupUpda
 	return _u
 }
 
+// SetNormalizeResponseModel sets the "normalize_response_model" field.
+func (_u *GroupUpdate) SetNormalizeResponseModel(v bool) *GroupUpdate {
+	_u.mutation.SetNormalizeResponseModel(v)
+	return _u
+}
+
+// SetNillableNormalizeResponseModel sets the "normalize_response_model" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableNormalizeResponseModel(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetNormalizeResponseModel(*v)
+	}
+	return _u
+}
+
 // SetFallbackGroupID sets the "fallback_group_id" field.
 func (_u *GroupUpdate) SetFallbackGroupID(v int64) *GroupUpdate {
 	_u.mutation.ResetFallbackGroupID()
@@ -1534,6 +1548,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.NormalizeAnthropicEnvelope(); ok {
 		_spec.SetField(group.FieldNormalizeAnthropicEnvelope, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.NormalizeResponseModel(); ok {
+		_spec.SetField(group.FieldNormalizeResponseModel, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.FallbackGroupID(); ok {
 		_spec.SetField(group.FieldFallbackGroupID, field.TypeInt64, value)
@@ -2605,6 +2622,20 @@ func (_u *GroupUpdateOne) SetNillableNormalizeAnthropicEnvelope(v *bool) *GroupU
 	return _u
 }
 
+// SetNormalizeResponseModel sets the "normalize_response_model" field.
+func (_u *GroupUpdateOne) SetNormalizeResponseModel(v bool) *GroupUpdateOne {
+	_u.mutation.SetNormalizeResponseModel(v)
+	return _u
+}
+
+// SetNillableNormalizeResponseModel sets the "normalize_response_model" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableNormalizeResponseModel(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetNormalizeResponseModel(*v)
+	}
+	return _u
+}
+
 // SetFallbackGroupID sets the "fallback_group_id" field.
 func (_u *GroupUpdateOne) SetFallbackGroupID(v int64) *GroupUpdateOne {
 	_u.mutation.ResetFallbackGroupID()
@@ -3474,6 +3505,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.NormalizeAnthropicEnvelope(); ok {
 		_spec.SetField(group.FieldNormalizeAnthropicEnvelope, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.NormalizeResponseModel(); ok {
+		_spec.SetField(group.FieldNormalizeResponseModel, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.FallbackGroupID(); ok {
 		_spec.SetField(group.FieldFallbackGroupID, field.TypeInt64, value)

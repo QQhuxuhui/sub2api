@@ -19,7 +19,9 @@ import (
 // Both dev and upstream independently bumped to v18 for divergent field sets; the merged snapshot is a
 // superset of both, so bump to v19 to force refresh of any pre-merge v18 snapshot that lacks the other
 // line's fields.
-const apiKeyAuthSnapshotVersion = 19
+// v20: group normalize_response_model（响应模型名归一化开关）加入快照投影；
+// 不 bump 则存量 v19 快照会被继续复用，网关侧读到的开关恒为 false。
+const apiKeyAuthSnapshotVersion = 20
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -409,6 +411,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			WebSearchPricePerCall:           apiKey.Group.WebSearchPricePerCall,
 			ClaudeCodeOnly:                  apiKey.Group.ClaudeCodeOnly,
 			NormalizeAnthropicEnvelope:      apiKey.Group.NormalizeAnthropicEnvelope,
+			NormalizeResponseModel:          apiKey.Group.NormalizeResponseModel,
 			FallbackGroupID:                 apiKey.Group.FallbackGroupID,
 			FallbackGroupIDOnInvalidRequest: apiKey.Group.FallbackGroupIDOnInvalidRequest,
 			ModelRouting:                    apiKey.Group.ModelRouting,
@@ -501,6 +504,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			WebSearchPricePerCall:           snapshot.Group.WebSearchPricePerCall,
 			ClaudeCodeOnly:                  snapshot.Group.ClaudeCodeOnly,
 			NormalizeAnthropicEnvelope:      snapshot.Group.NormalizeAnthropicEnvelope,
+			NormalizeResponseModel:          snapshot.Group.NormalizeResponseModel,
 			FallbackGroupID:                 snapshot.Group.FallbackGroupID,
 			FallbackGroupIDOnInvalidRequest: snapshot.Group.FallbackGroupIDOnInvalidRequest,
 			ModelRouting:                    snapshot.Group.ModelRouting,

@@ -1091,6 +1091,9 @@ export default {
         title: '原生响应信封规范化',
         desc: '对该分组的 Vertex 等非原生渠道，将响应规范化为第一方 Anthropic 形状'
       },
+      normalizeResponseModel: '响应模型名归一化',
+      normalizeResponseModelDesc:
+        '开启后，返回给客户端的响应体中 model 字段将统一改写为客户端请求的模型名，隐藏上游实际返回的模型差异（如 pro→pro-low）。不影响计费与用量日志记录的上游真实模型。',
       openaiMessages: {
         title: 'OpenAI Messages 调度配置',
         allowDispatch: '允许 /v1/messages 调度',

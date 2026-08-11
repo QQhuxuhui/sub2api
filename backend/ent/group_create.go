@@ -525,6 +525,20 @@ func (_c *GroupCreate) SetNillableNormalizeAnthropicEnvelope(v *bool) *GroupCrea
 	return _c
 }
 
+// SetNormalizeResponseModel sets the "normalize_response_model" field.
+func (_c *GroupCreate) SetNormalizeResponseModel(v bool) *GroupCreate {
+	_c.mutation.SetNormalizeResponseModel(v)
+	return _c
+}
+
+// SetNillableNormalizeResponseModel sets the "normalize_response_model" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableNormalizeResponseModel(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetNormalizeResponseModel(*v)
+	}
+	return _c
+}
+
 // SetFallbackGroupID sets the "fallback_group_id" field.
 func (_c *GroupCreate) SetFallbackGroupID(v int64) *GroupCreate {
 	_c.mutation.SetFallbackGroupID(v)
@@ -1002,6 +1016,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultNormalizeAnthropicEnvelope
 		_c.mutation.SetNormalizeAnthropicEnvelope(v)
 	}
+	if _, ok := _c.mutation.NormalizeResponseModel(); !ok {
+		v := group.DefaultNormalizeResponseModel
+		_c.mutation.SetNormalizeResponseModel(v)
+	}
 	if _, ok := _c.mutation.ModelRoutingEnabled(); !ok {
 		v := group.DefaultModelRoutingEnabled
 		_c.mutation.SetModelRoutingEnabled(v)
@@ -1178,6 +1196,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.NormalizeAnthropicEnvelope(); !ok {
 		return &ValidationError{Name: "normalize_anthropic_envelope", err: errors.New(`ent: missing required field "Group.normalize_anthropic_envelope"`)}
+	}
+	if _, ok := _c.mutation.NormalizeResponseModel(); !ok {
+		return &ValidationError{Name: "normalize_response_model", err: errors.New(`ent: missing required field "Group.normalize_response_model"`)}
 	}
 	if _, ok := _c.mutation.ModelRoutingEnabled(); !ok {
 		return &ValidationError{Name: "model_routing_enabled", err: errors.New(`ent: missing required field "Group.model_routing_enabled"`)}
@@ -1410,6 +1431,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.NormalizeAnthropicEnvelope(); ok {
 		_spec.SetField(group.FieldNormalizeAnthropicEnvelope, field.TypeBool, value)
 		_node.NormalizeAnthropicEnvelope = value
+	}
+	if value, ok := _c.mutation.NormalizeResponseModel(); ok {
+		_spec.SetField(group.FieldNormalizeResponseModel, field.TypeBool, value)
+		_node.NormalizeResponseModel = value
 	}
 	if value, ok := _c.mutation.FallbackGroupID(); ok {
 		_spec.SetField(group.FieldFallbackGroupID, field.TypeInt64, value)
@@ -2226,6 +2251,18 @@ func (u *GroupUpsert) SetNormalizeAnthropicEnvelope(v bool) *GroupUpsert {
 // UpdateNormalizeAnthropicEnvelope sets the "normalize_anthropic_envelope" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateNormalizeAnthropicEnvelope() *GroupUpsert {
 	u.SetExcluded(group.FieldNormalizeAnthropicEnvelope)
+	return u
+}
+
+// SetNormalizeResponseModel sets the "normalize_response_model" field.
+func (u *GroupUpsert) SetNormalizeResponseModel(v bool) *GroupUpsert {
+	u.Set(group.FieldNormalizeResponseModel, v)
+	return u
+}
+
+// UpdateNormalizeResponseModel sets the "normalize_response_model" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateNormalizeResponseModel() *GroupUpsert {
+	u.SetExcluded(group.FieldNormalizeResponseModel)
 	return u
 }
 
@@ -3247,6 +3284,20 @@ func (u *GroupUpsertOne) SetNormalizeAnthropicEnvelope(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateNormalizeAnthropicEnvelope() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateNormalizeAnthropicEnvelope()
+	})
+}
+
+// SetNormalizeResponseModel sets the "normalize_response_model" field.
+func (u *GroupUpsertOne) SetNormalizeResponseModel(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetNormalizeResponseModel(v)
+	})
+}
+
+// UpdateNormalizeResponseModel sets the "normalize_response_model" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateNormalizeResponseModel() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateNormalizeResponseModel()
 	})
 }
 
@@ -4483,6 +4534,20 @@ func (u *GroupUpsertBulk) SetNormalizeAnthropicEnvelope(v bool) *GroupUpsertBulk
 func (u *GroupUpsertBulk) UpdateNormalizeAnthropicEnvelope() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateNormalizeAnthropicEnvelope()
+	})
+}
+
+// SetNormalizeResponseModel sets the "normalize_response_model" field.
+func (u *GroupUpsertBulk) SetNormalizeResponseModel(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetNormalizeResponseModel(v)
+	})
+}
+
+// UpdateNormalizeResponseModel sets the "normalize_response_model" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateNormalizeResponseModel() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateNormalizeResponseModel()
 	})
 }
 

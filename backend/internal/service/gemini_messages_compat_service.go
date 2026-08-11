@@ -1619,6 +1619,11 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				b = nb
 				usageObj = u
 			}
+			// 分组开启 normalize_response_model：把 modelVersion 归一化为客户端请求的模型，
+			// 隐藏上游偷换（观测已在上一行完成，usage_logs 仍记录上游真实模型）。
+			if shouldNormalizeResponseModel(c) {
+				b = forceSetJSONStringField(b, "modelVersion", originalModel)
+			}
 			c.Data(http.StatusOK, "application/json", b)
 			usage = usageObj
 		} else {
@@ -2797,6 +2802,11 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 		respBody = nb
 		adjustedUsage = u
 	}
+	// 分组开启 normalize_response_model：modelVersion 归一化为客户端请求的模型
+	// （观测点在上方 ObserveGemini，审计仍记录上游真实模型）。
+	if shouldNormalizeResponseModel(c) {
+		respBody = forceSetJSONStringField(respBody, "modelVersion", imageUsage.Model)
+	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
@@ -2816,6 +2826,8 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 }
 
 func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, isOAuth bool, imageUsage geminiImageUsageParams) (*geminiNativeStreamResult, error) {
+	// 分组级「响应模型名归一化」开关，逐块改写 modelVersion 时使用（每块重复查 context 无必要）。
+	forceNormalizeModel := shouldNormalizeResponseModel(c)
 	if s.cfg != nil && s.cfg.Gateway.GeminiDebugResponseHeaders {
 		logger.LegacyPrintf("service.gemini_messages_compat", "[GeminiAPI] ========== Streaming Response Headers ==========")
 		for key, values := range resp.Header {
@@ -2902,6 +2914,15 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 						usage = u
 					}
 					observer.ObserveGemini(observedRaw)
+
+					// 分组开启 normalize_response_model：逐块把 modelVersion 归一化为
+					// 客户端请求的模型（观测已用改写前的 observedRaw 完成）。
+					if forceNormalizeModel {
+						if nb := forceSetJSONStringField(rawBytes, "modelVersion", imageUsage.Model); string(nb) != string(rawBytes) {
+							rawBytes = nb
+							rawToWrite = string(nb)
+						}
+					}
 
 					if firstTokenMs == nil {
 						ms := int(time.Since(startTime).Milliseconds())

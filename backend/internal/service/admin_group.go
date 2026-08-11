@@ -479,6 +479,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		WebSearchPricePerCall:           webSearchPricePerCall,
 		ClaudeCodeOnly:                  input.ClaudeCodeOnly,
 		NormalizeAnthropicEnvelope:      input.NormalizeAnthropicEnvelope,
+		NormalizeResponseModel:          input.NormalizeResponseModel,
 		FallbackGroupID:                 input.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: fallbackOnInvalidRequest,
 		ModelRouting:                    input.ModelRouting,
@@ -763,6 +764,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	// Claude Code 客户端限制
 	if input.ClaudeCodeOnly != nil {
 		group.ClaudeCodeOnly = *input.ClaudeCodeOnly
+	}
+	if input.NormalizeResponseModel != nil {
+		group.NormalizeResponseModel = *input.NormalizeResponseModel
 	}
 	if input.NormalizeAnthropicEnvelope != nil {
 		group.NormalizeAnthropicEnvelope = *input.NormalizeAnthropicEnvelope

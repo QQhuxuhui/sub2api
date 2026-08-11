@@ -517,8 +517,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 			// Replace model in response if needed.
 			// Fast path: most events do not contain model field values.
-			if needModelReplace && mappedModel != "" && strings.Contains(line, mappedModel) {
-				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
+			if forceNorm := shouldNormalizeResponseModel(c); (needModelReplace && mappedModel != "" && strings.Contains(line, mappedModel)) || forceNorm {
+				line = s.replaceModelInSSELine(line, mappedModel, originalModel, forceNorm)
 			}
 			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
 			if guardFirstOutput {
@@ -833,13 +833,24 @@ func openAICompatPayloadWithEventType(payload, eventType string) string {
 	return patched
 }
 
-func (s *OpenAIGatewayService) replaceModelInSSELine(line, fromModel, toModel string) string {
+func (s *OpenAIGatewayService) replaceModelInSSELine(line, fromModel, toModel string, force bool) string {
 	data, ok := extractOpenAISSEDataLine(line)
 	if !ok {
 		return line
 	}
 	if data == "" || data == "[DONE]" {
 		return line
+	}
+
+	// force（分组开启 normalize_response_model）：不比较原值，且顶层 model 与嵌套
+	// response.model 两个字段都改写——默认路径命中第一个就返回，归一化不能只改一半。
+	if force {
+		newData := forceSetJSONStringFieldString(data, "model", toModel)
+		newData = forceSetJSONStringFieldString(newData, "response.model", toModel)
+		if newData == data {
+			return line
+		}
+		return "data: " + newData
 	}
 
 	// 使用 gjson 精确检查 model 字段，避免全量 JSON 反序列化
@@ -1164,8 +1175,8 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	usage := &usageValue
 
 	// Replace model in response if needed
-	if originalModel != mappedModel {
-		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
+	if forceNorm := shouldNormalizeResponseModel(c); originalModel != mappedModel || forceNorm {
+		body = s.replaceModelInResponseBody(body, mappedModel, originalModel, forceNorm)
 	}
 	body, err = restoreGrokResponsesClientToolPayload(c, body)
 	if err != nil {
@@ -1239,8 +1250,8 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		}
 		finalResponse = supplementCompactionItemFromSSE(c, finalResponse, bodyText)
 		body = finalResponse
-		if originalModel != mappedModel {
-			body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
+		if forceNorm := shouldNormalizeResponseModel(c); originalModel != mappedModel || forceNorm {
+			body = s.replaceModelInResponseBody(body, mappedModel, originalModel, forceNorm)
 		}
 		// Correct tool calls in final response
 		body = s.correctToolCallsInResponseBody(body)
@@ -1263,8 +1274,8 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
 		}
 		usage = s.parseSSEUsageFromBody(bodyText)
-		if originalModel != mappedModel {
-			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
+		if forceNorm := shouldNormalizeResponseModel(c); originalModel != mappedModel || forceNorm {
+			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel, forceNorm)
 		}
 		body = []byte(bodyText)
 	}
@@ -1749,13 +1760,13 @@ func (s *OpenAIGatewayService) parseSSEUsageFromBody(body string) *OpenAIUsage {
 	return usage
 }
 
-func (s *OpenAIGatewayService) replaceModelInSSEBody(body, fromModel, toModel string) string {
+func (s *OpenAIGatewayService) replaceModelInSSEBody(body, fromModel, toModel string, force bool) string {
 	lines := strings.Split(body, "\n")
 	for i, line := range lines {
 		if _, ok := extractOpenAISSEDataLine(line); !ok {
 			continue
 		}
-		lines[i] = s.replaceModelInSSELine(line, fromModel, toModel)
+		lines[i] = s.replaceModelInSSELine(line, fromModel, toModel, force)
 	}
 	return strings.Join(lines, "\n")
 }

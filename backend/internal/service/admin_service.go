@@ -246,6 +246,7 @@ type CreateGroupInput struct {
 	WebSearchPricePerCall      *float64
 	ClaudeCodeOnly             bool // 仅允许 Claude Code 客户端
 	NormalizeAnthropicEnvelope bool
+	NormalizeResponseModel     bool
 	FallbackGroupID            *int64 // 降级分组 ID
 	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64
@@ -312,6 +313,7 @@ type UpdateGroupInput struct {
 	WebSearchPricePerCall      *float64
 	ClaudeCodeOnly             *bool // 仅允许 Claude Code 客户端
 	NormalizeAnthropicEnvelope *bool
+	NormalizeResponseModel     *bool
 	FallbackGroupID            *int64 // 降级分组 ID
 	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64

@@ -163,6 +163,11 @@ func (Group) Fields() []ent.Field {
 		field.Bool("normalize_anthropic_envelope").
 			Default(false).
 			Comment("是否对该分组的非原生渠道(Vertex等)响应做原生信封规范化"),
+
+		// 响应模型名归一化开关 (added by migration 196)
+		field.Bool("normalize_response_model").
+			Default(false).
+			Comment("是否把回给客户端的响应体 model 无条件归一化为客户端请求的模型(隐藏上游偷换)"),
 		field.Int64("fallback_group_id").
 			Optional().
 			Nillable().

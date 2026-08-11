@@ -88,6 +88,8 @@ const (
 	FieldClaudeCodeOnly = "claude_code_only"
 	// FieldNormalizeAnthropicEnvelope holds the string denoting the normalize_anthropic_envelope field in the database.
 	FieldNormalizeAnthropicEnvelope = "normalize_anthropic_envelope"
+	// FieldNormalizeResponseModel holds the string denoting the normalize_response_model field in the database.
+	FieldNormalizeResponseModel = "normalize_response_model"
 	// FieldFallbackGroupID holds the string denoting the fallback_group_id field in the database.
 	FieldFallbackGroupID = "fallback_group_id"
 	// FieldFallbackGroupIDOnInvalidRequest holds the string denoting the fallback_group_id_on_invalid_request field in the database.
@@ -239,6 +241,7 @@ var Columns = []string{
 	FieldWebSearchPricePerCall,
 	FieldClaudeCodeOnly,
 	FieldNormalizeAnthropicEnvelope,
+	FieldNormalizeResponseModel,
 	FieldFallbackGroupID,
 	FieldFallbackGroupIDOnInvalidRequest,
 	FieldModelRouting,
@@ -348,6 +351,8 @@ var (
 	DefaultClaudeCodeOnly bool
 	// DefaultNormalizeAnthropicEnvelope holds the default value on creation for the "normalize_anthropic_envelope" field.
 	DefaultNormalizeAnthropicEnvelope bool
+	// DefaultNormalizeResponseModel holds the default value on creation for the "normalize_response_model" field.
+	DefaultNormalizeResponseModel bool
 	// DefaultModelRoutingEnabled holds the default value on creation for the "model_routing_enabled" field.
 	DefaultModelRoutingEnabled bool
 	// DefaultMcpXMLInject holds the default value on creation for the "mcp_xml_inject" field.
@@ -574,6 +579,11 @@ func ByClaudeCodeOnly(opts ...sql.OrderTermOption) OrderOption {
 // ByNormalizeAnthropicEnvelope orders the results by the normalize_anthropic_envelope field.
 func ByNormalizeAnthropicEnvelope(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldNormalizeAnthropicEnvelope, opts...).ToFunc()
+}
+
+// ByNormalizeResponseModel orders the results by the normalize_response_model field.
+func ByNormalizeResponseModel(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldNormalizeResponseModel, opts...).ToFunc()
 }
 
 // ByFallbackGroupID orders the results by the fallback_group_id field.

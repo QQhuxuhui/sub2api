@@ -235,6 +235,11 @@ func NormalizeAnthropicEnvelope(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldNormalizeAnthropicEnvelope, v))
 }
 
+// NormalizeResponseModel applies equality check predicate on the "normalize_response_model" field. It's identical to NormalizeResponseModelEQ.
+func NormalizeResponseModel(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldNormalizeResponseModel, v))
+}
+
 // FallbackGroupID applies equality check predicate on the "fallback_group_id" field. It's identical to FallbackGroupIDEQ.
 func FallbackGroupID(v int64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldFallbackGroupID, v))
@@ -1838,6 +1843,16 @@ func NormalizeAnthropicEnvelopeEQ(v bool) predicate.Group {
 // NormalizeAnthropicEnvelopeNEQ applies the NEQ predicate on the "normalize_anthropic_envelope" field.
 func NormalizeAnthropicEnvelopeNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldNormalizeAnthropicEnvelope, v))
+}
+
+// NormalizeResponseModelEQ applies the EQ predicate on the "normalize_response_model" field.
+func NormalizeResponseModelEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldNormalizeResponseModel, v))
+}
+
+// NormalizeResponseModelNEQ applies the NEQ predicate on the "normalize_response_model" field.
+func NormalizeResponseModelNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldNormalizeResponseModel, v))
 }
 
 // FallbackGroupIDEQ applies the EQ predicate on the "fallback_group_id" field.

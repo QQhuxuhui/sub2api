@@ -1093,6 +1093,9 @@ export default {
         title: 'Normalize Anthropic Envelope',
         desc: 'Rewrite Vertex/non-native channel responses to first-party Anthropic shape for this group'
       },
+      normalizeResponseModel: 'Normalize Response Model Name',
+      normalizeResponseModelDesc:
+        'When enabled, the model field in responses returned to clients is rewritten to the model name the client requested, hiding differences in the model actually returned upstream (e.g. pro to pro-low). Billing and usage logs still record the real upstream model.',
       openaiMessages: {
         title: 'OpenAI Messages Dispatch',
         allowDispatch: 'Allow /v1/messages dispatch',
