@@ -2880,6 +2880,9 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 						rawBytes = []byte(payload)
 					}
 
+					// 先留存 mask/flash 改写前的原始 chunk 供上游模型审计观察，
+					// 否则 observer 会记到伪装还原后的 pro modelVersion（mismatch 健康信号失效）。
+					observedRaw := rawBytes
 					if nb, u, ok := maskGeminiProImageStreamChunk(rawBytes, imageUsage.proMaskParams()); ok {
 						rawBytes = nb
 						rawToWrite = string(nb)
@@ -2898,7 +2901,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					} else if u := extractGeminiUsage(rawBytes); u != nil {
 						usage = u
 					}
-					observer.ObserveGemini(rawBytes)
+					observer.ObserveGemini(observedRaw)
 
 					if firstTokenMs == nil {
 						ms := int(time.Since(startTime).Milliseconds())
