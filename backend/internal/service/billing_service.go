@@ -1062,11 +1062,9 @@ func (s *BillingService) computeTokenBreakdown(
 	}
 
 	bd := &CostBreakdown{}
-	// 分离图片输入 token 与文本输入 token（多模态 embedding、图片编辑等图文不同价场景）。
-	// dev 口径：图片输入费用与文本输入一并计入 InputCost（生产 usage_logs 无独立
-	// image_input_cost 列，历史与线上报表均按 input_cost 含图片输入结算）。上游 62d57c02
-	// 曾把图片输入拆入独立 ImageInputCost，此处刻意回退以保持生产计价口径不变；
-	// ImageInputCost 字段仍保留（恒 0）以兼容上游读取该字段的下游代码。
+	// 分离图片输入 token 与文本输入 token（多模态 embedding、图片编辑、gpt-image-2 图生图等
+	// 图文不同价场景）。InputCost 仅计文本输入，图片输入费用单独记入 ImageInputCost，
+	// 落库到 usage_logs.image_input_cost（迁移 179），便于图文明细对账；TotalCost 口径不变。
 	// ImageInputTokens 为 0 时（绝大多数 chat/vision 流量）走原始单价路径，行为不变。
 	if tokens.ImageInputTokens > 0 {
 		imageInputTokens := tokens.ImageInputTokens
@@ -1081,7 +1079,8 @@ func (s *BillingService) computeTokenBreakdown(
 			// 渠道显式配置 0 则不回退（图片输入免费）。
 			imageInputPrice = inputPrice
 		}
-		bd.InputCost = float64(textInputTokens)*inputPrice + float64(imageInputTokens)*imageInputPrice
+		bd.InputCost = float64(textInputTokens) * inputPrice
+		bd.ImageInputCost = float64(imageInputTokens) * imageInputPrice
 	} else {
 		bd.InputCost = float64(tokens.InputTokens) * inputPrice
 	}

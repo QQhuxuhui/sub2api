@@ -2165,7 +2165,8 @@ func TestForwardOpenAIImagesSimulation_RecordUsageBillsSynthesizedTokens(t *test
 	require.NotNil(t, usageRepo.lastLog)
 	require.NotNil(t, usageRepo.lastLog.BillingMode)
 	require.Equal(t, string(BillingModeToken), *usageRepo.lastLog.BillingMode)
-	require.InDelta(t, 0.012114, usageRepo.lastLog.InputCost, 1e-12)
+	require.InDelta(t, 0.00005, usageRepo.lastLog.InputCost, 1e-12)      // 文本 10×5e-6
+	require.InDelta(t, 0.012064, usageRepo.lastLog.ImageInputCost, 1e-12) // 图片 1508×8e-6，独立入 ImageInputCost
 	require.InDelta(t, 0.00588, usageRepo.lastLog.ImageOutputCost, 1e-12)
 	require.InDelta(t, 0.017994, usageRepo.lastLog.TotalCost, 1e-12)
 	require.Equal(t, 1, userRepo.deductCalls)
@@ -2274,8 +2275,9 @@ func TestForwardOpenAIImagesSimulation_ChannelTokenPricingBillsImageInputAtChann
 	require.NotNil(t, usageRepo.lastLog)
 	require.NotNil(t, usageRepo.lastLog.BillingMode)
 	require.Equal(t, string(BillingModeToken), *usageRepo.lastLog.BillingMode)
-	// 输入侧 1518 token 全按渠道 input 价 3e-6（text 10 + image 1508 回退），图片输出按渠道 15e-6。
-	require.InDelta(t, 0.004554, usageRepo.lastLog.InputCost, 1e-12)
+	// 文本 10×3e-6 入 InputCost；图片 1508 未配图片价回退 input 价 3e-6，独立入 ImageInputCost；图片输出按渠道 15e-6。
+	require.InDelta(t, 0.00003, usageRepo.lastLog.InputCost, 1e-12)
+	require.InDelta(t, 0.004524, usageRepo.lastLog.ImageInputCost, 1e-12)
 	require.InDelta(t, 0.00294, usageRepo.lastLog.ImageOutputCost, 1e-12)
 	require.InDelta(t, 0.007494, usageRepo.lastLog.TotalCost, 1e-12)
 }
@@ -2337,8 +2339,9 @@ func TestForwardOpenAIImagesSimulation_ChannelExplicitImageInputPrice(t *testing
 	})
 	require.NoError(t, err)
 	require.NotNil(t, usageRepo.lastLog)
-	// text 10×3e-6 + image 1508×8e-6 = 0.01209_4；图片输出 196×15e-6 = 0.00294。
-	require.InDelta(t, 0.012094, usageRepo.lastLog.InputCost, 1e-12)
+	// text 10×3e-6 入 InputCost；image 1508×8e-6 = 0.012064 独立入 ImageInputCost；图片输出 196×15e-6 = 0.00294。
+	require.InDelta(t, 0.00003, usageRepo.lastLog.InputCost, 1e-12)
+	require.InDelta(t, 0.012064, usageRepo.lastLog.ImageInputCost, 1e-12)
 	require.InDelta(t, 0.00294, usageRepo.lastLog.ImageOutputCost, 1e-12)
 	require.InDelta(t, 0.015034, usageRepo.lastLog.TotalCost, 1e-12)
 }

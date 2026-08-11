@@ -1578,17 +1578,20 @@ func TestComputeTokenBreakdown_ImageInputPriceExplicitSemantics(t *testing.T) {
 
 	base := &ModelPricing{InputPricePerToken: 3e-6, OutputPricePerToken: 15e-6, ImageOutputPricePerToken: 15e-6, ImageOutputPriceExplicit: true}
 	bd := svc.computeTokenBreakdown(base, tokens, 1, "", false)
-	require.InDelta(t, 1518*3e-6, bd.InputCost, 1e-12, "未配置图片输入价：回退 input 价")
+	require.InDelta(t, 10*3e-6, bd.InputCost, 1e-12, "未配置图片输入价：文本按 input 价")
+	require.InDelta(t, 1508*3e-6, bd.ImageInputCost, 1e-12, "未配置图片输入价：图片回退 input 价，独立入 ImageInputCost")
 
 	withPrice := &ModelPricing{InputPricePerToken: 3e-6, ImageInputPricePerToken: 8e-6, ImageInputPriceExplicit: true,
 		OutputPricePerToken: 15e-6, ImageOutputPricePerToken: 15e-6, ImageOutputPriceExplicit: true}
 	bd = svc.computeTokenBreakdown(withPrice, tokens, 1, "", false)
-	require.InDelta(t, 10*3e-6+1508*8e-6, bd.InputCost, 1e-12, "显式图片输入价生效")
+	require.InDelta(t, 10*3e-6, bd.InputCost, 1e-12, "显式图片输入价：文本按 input 价")
+	require.InDelta(t, 1508*8e-6, bd.ImageInputCost, 1e-12, "显式图片输入价生效，独立入 ImageInputCost")
 
 	freeImage := &ModelPricing{InputPricePerToken: 3e-6, ImageInputPricePerToken: 0, ImageInputPriceExplicit: true,
 		OutputPricePerToken: 15e-6, ImageOutputPricePerToken: 15e-6, ImageOutputPriceExplicit: true}
 	bd = svc.computeTokenBreakdown(freeImage, tokens, 1, "", false)
-	require.InDelta(t, 10*3e-6, bd.InputCost, 1e-12, "显式 0：图片输入免费，不回退")
+	require.InDelta(t, 10*3e-6, bd.InputCost, 1e-12, "显式 0：文本按 input 价")
+	require.Zero(t, bd.ImageInputCost, "显式 0：图片输入免费，ImageInputCost 为 0")
 }
 
 func TestGetModelPricingWithChannel_OverrideAllFields(t *testing.T) {

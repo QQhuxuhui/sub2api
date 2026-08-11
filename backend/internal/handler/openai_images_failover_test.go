@@ -100,7 +100,7 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 			Schedulable: true,
 			Concurrency: 0,
 			Priority:    0,
-			Credentials: map[string]any{"access_token": "token-1"},
+			Credentials: map[string]any{"access_token": "token-1", "openai_images_highres": true},
 		},
 		{
 			ID:          2,
@@ -111,7 +111,7 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 			Schedulable: true,
 			Concurrency: 0,
 			Priority:    1,
-			Credentials: map[string]any{"access_token": "token-2"},
+			Credentials: map[string]any{"access_token": "token-2", "openai_images_highres": true},
 		},
 	}
 	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}
