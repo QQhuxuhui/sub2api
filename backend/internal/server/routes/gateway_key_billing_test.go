@@ -34,10 +34,15 @@ func (r *keyBillingRouteAPIKeyRepo) GetByKeyForAuth(_ context.Context, key strin
 type keyBillingRouteRateRepo struct {
 	service.UserGroupRateRepository
 	lookupCalls int
+	// handler 经 c.Request.Context() 把请求 context 一路传到这里，因此这是观测
+	// billing 路由真实中间件链（全局超时 → 鉴权 → 用户级覆盖）结果的唯一可靠位置。
+	ctxDeadline    time.Time
+	ctxHasDeadline bool
 }
 
-func (r *keyBillingRouteRateRepo) GetByUserAndGroup(context.Context, int64, int64) (*float64, error) {
+func (r *keyBillingRouteRateRepo) GetByUserAndGroup(ctx context.Context, _ int64, _ int64) (*float64, error) {
 	r.lookupCalls++
+	r.ctxDeadline, r.ctxHasDeadline = ctx.Deadline()
 	return nil, nil
 }
 
@@ -46,6 +51,13 @@ func (r *keyBillingRouteRateRepo) GetRPMOverrideByUserAndGroup(context.Context, 
 }
 
 func newKeyBillingRouteTestRouter(runMode string) (*gin.Engine, *keyBillingRouteRateRepo, string) {
+	return newKeyBillingRouteTestRouterWithTimeouts(runMode, 0, 0)
+}
+
+// newKeyBillingRouteTestRouterWithTimeouts 走与生产一致的 RegisterGatewayRoutes 注册，
+// 可指定全局网关超时与用户级 request_timeout_seconds，用于验证 billing 路由是否真的
+// 挂上了用户级超时中间件（该路由需跳过 requireGroup，故在 Group 之前单独注册）。
+func newKeyBillingRouteTestRouterWithTimeouts(runMode string, globalTimeoutSeconds, userTimeoutSeconds int) (*gin.Engine, *keyBillingRouteRateRepo, string) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{
 		ID:               42,
@@ -55,7 +67,10 @@ func newKeyBillingRouteTestRouter(runMode string) (*gin.Engine, *keyBillingRoute
 		SubscriptionType: service.SubscriptionTypeStandard,
 		RateMultiplier:   0.75,
 	}
-	user := &service.User{ID: 7, Role: service.RoleUser, Status: service.StatusActive, Balance: 10}
+	user := &service.User{
+		ID: 7, Role: service.RoleUser, Status: service.StatusActive, Balance: 10,
+		RequestTimeoutSeconds: userTimeoutSeconds,
+	}
 	var groupID *int64
 	var apiKeyGroup *service.Group
 	if runMode != config.RunModeSimple {
@@ -71,7 +86,10 @@ func newKeyBillingRouteTestRouter(runMode string) (*gin.Engine, *keyBillingRoute
 		GroupID: groupID,
 		Group:   apiKeyGroup,
 	}
-	cfg := &config.Config{RunMode: runMode}
+	cfg := &config.Config{
+		RunMode: runMode,
+		Gateway: config.GatewayConfig{RequestTimeoutSeconds: globalTimeoutSeconds},
+	}
 	rateRepo := &keyBillingRouteRateRepo{}
 	apiKeyService := service.NewAPIKeyService(
 		&keyBillingRouteAPIKeyRepo{apiKey: apiKey}, nil, nil, nil, rateRepo, nil, cfg,
@@ -173,54 +191,63 @@ func TestGatewayRoutesKeyBillingInfoEndToEnd(t *testing.T) {
 	})
 }
 
-// TestGatewayRoutesKeyBillingUserTimeoutOverride 验证 /v1/sub2api/billing 路由确实
-// 经过用户级超时中间件（该路由需跳过 requireGroup 而单独挂载 UserOverride/Finalizer）。
-// 复刻 billing 路由的中间件链：全局 RequestTimeout → 鉴权(注入带用户超时的 apiKey) →
-// UserOverride → Finalizer → handler，断言 handler 收到的 deadline 由用户级超时决定。
+// TestGatewayRoutesKeyBillingUserTimeoutOverride 验证 /v1/sub2api/billing 经真实
+// RegisterGatewayRoutes 注册后确实挂上了用户级超时中间件。该路由需跳过 requireGroup
+// 而在 Group 之前注册，Gin 注册时即固定中间件链，若漏挂 UserOverride/Finalizer，
+// 用户的 request_timeout_seconds（含 -1 豁免）对它就不生效。
+//
+// 观测点是 rate repo 收到的 context —— handler 经 c.Request.Context() 一路传下来，
+// 因此断言的是真实链路结果，而非测试自建的中间件栈。
 func TestGatewayRoutesKeyBillingUserTimeoutOverride(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	const globalTimeout = 60
 
-	newRouter := func(userTimeoutSeconds int, deadline *time.Time, hasDeadline *bool) *gin.Engine {
-		router := gin.New()
-		router.Use(servermiddleware.RequestTimeout(60, nil)) // 全局 60s
-		router.Use(func(c *gin.Context) {                    // 模拟鉴权：注入带用户级超时的 apiKey
-			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
-				User: &service.User{RequestTimeoutSeconds: userTimeoutSeconds},
-			})
-			c.Next()
-		})
-		router.GET("/v1/sub2api/billing",
-			servermiddleware.RequestTimeoutUserOverride(),
-			servermiddleware.RequestTimeoutFinalizer(),
-			func(c *gin.Context) {
-				*deadline, *hasDeadline = c.Request.Context().Deadline()
-				c.Status(http.StatusOK)
-			})
-		return router
+	doRequest := func(t *testing.T, router *gin.Engine, key string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing", nil)
+		req.Header.Set("Authorization", "Bearer "+key)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
 	}
 
-	t.Run("positive user timeout overrides global deadline", func(t *testing.T) {
-		var deadline time.Time
-		var hasDeadline bool
-		router := newRouter(3600, &deadline, &hasDeadline) // 用户 1 小时，远大于全局 60s
+	// 反向对照：不设用户级超时时应落在全局 deadline 上。这条锁住"链路里确实有全局
+	// 超时"，否则下面 -1 的用例可能因为压根没挂超时而假通过。
+	t.Run("no user override keeps global deadline", func(t *testing.T) {
+		router, rateRepo, key := newKeyBillingRouteTestRouterWithTimeouts(config.RunModeStandard, globalTimeout, 0)
 		start := time.Now()
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing", nil))
 
-		require.Equal(t, http.StatusOK, rec.Code)
-		require.True(t, hasDeadline, "billing 路由应经 UserOverride 设置用户级 deadline")
-		// deadline 应≈ start+3600s（用户级），而非 start+60s（全局），证明 UserOverride 对本路由生效。
-		require.WithinDuration(t, start.Add(3600*time.Second), deadline, 30*time.Second)
+		w := doRequest(t, router, key)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, 1, rateRepo.lookupCalls)
+		require.True(t, rateRepo.ctxHasDeadline, "全局超时应给 billing 路由建立 deadline")
+		require.WithinDuration(t, start.Add(globalTimeout*time.Second), rateRepo.ctxDeadline, 30*time.Second)
+	})
+
+	t.Run("positive user timeout overrides global deadline", func(t *testing.T) {
+		router, rateRepo, key := newKeyBillingRouteTestRouterWithTimeouts(config.RunModeStandard, globalTimeout, 3600)
+		start := time.Now()
+
+		w := doRequest(t, router, key)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, 1, rateRepo.lookupCalls)
+		require.True(t, rateRepo.ctxHasDeadline)
+		// deadline 必须≈ start+3600s（用户级），而非 start+60s（全局）：
+		// 若 billing 路由漏挂 UserOverride，这里会是全局 60s 而判定失败。
+		require.WithinDuration(t, start.Add(3600*time.Second), rateRepo.ctxDeadline, 30*time.Second)
+		require.Greater(t, time.Until(rateRepo.ctxDeadline), 10*time.Minute,
+			"用户级超时未生效（deadline 仍是全局 60s）")
 	})
 
 	t.Run("minus one cancels global deadline", func(t *testing.T) {
-		var deadline time.Time
-		var hasDeadline bool
-		router := newRouter(-1, &deadline, &hasDeadline) // -1 = 不限制
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing", nil))
+		router, rateRepo, key := newKeyBillingRouteTestRouterWithTimeouts(config.RunModeStandard, globalTimeout, -1)
 
-		require.Equal(t, http.StatusOK, rec.Code)
-		require.False(t, hasDeadline, "-1 应撤销全局 deadline，billing 路由 handler 不应带 deadline")
+		w := doRequest(t, router, key)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, 1, rateRepo.lookupCalls)
+		require.False(t, rateRepo.ctxHasDeadline,
+			"-1 应撤销全局 deadline；仍有 deadline 说明 billing 路由漏挂 UserOverride")
 	})
 }
