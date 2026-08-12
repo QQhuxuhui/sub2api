@@ -950,7 +950,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				if failoverErr := s.poolModeSkippedFailoverError(c, account, resp.StatusCode, respBody, upstreamReqID); failoverErr != nil {
 					return nil, failoverErr
 				}
-				return nil, s.writeGeminiMappedError(c, account, http.StatusInternalServerError, upstreamReqID, respBody)
+				return nil, s.writeGeminiSkippedError(c, account, resp, upstreamReqID, respBody)
 			case ErrorPolicyMatched, ErrorPolicyTempUnscheduled:
 				if policy == ErrorPolicyMatched {
 					s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
@@ -1465,13 +1465,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					return nil, failoverErr
 				}
 				respBody = unwrapIfNeeded(isOAuth, respBody)
-				contentType := resp.Header.Get("Content-Type")
-				if contentType == "" {
-					contentType = "application/json"
-				}
-				MarkResponseCommitted(c)
-				c.Data(http.StatusInternalServerError, contentType, respBody)
-				return nil, fmt.Errorf("gemini upstream error: %d (skipped by error policy)", resp.StatusCode)
+				return nil, s.writeGeminiNativeSkippedError(c, account, resp, requestID, respBody)
 			case ErrorPolicyMatched, ErrorPolicyTempUnscheduled:
 				if policy == ErrorPolicyMatched {
 					s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
@@ -1742,6 +1736,105 @@ func (s *GeminiMessagesCompatService) poolModeSkippedFailoverError(c *gin.Contex
 		ResponseBody:           respBody,
 		RetryableOnSameAccount: account.IsPoolModeRetryableStatus(statusCode),
 	}
+}
+
+// geminiSkippedPassthrough 让 ErrorPolicySkipped 分支也过一遍错误透传规则。
+//
+// 这条分支的既有约定是「未命中账号错误策略的错误一律 500」（见
+// antigravity_gateway_service.go 同名约定），但它是先把状态码换成 500 再往下走的：
+// 原生链路根本没调规则引擎，compat 链路调了却只让它看见 500——error_codes 匹配不到
+// 上游真实的 400，passthrough_code 透出来的也是 500。上游一个可操作的 400
+// （内容审核拦截）到客户端就成了服务端故障，客户端会拿同一个必然失败的提示词重试。
+//
+// 命中返回 (status, message, true)；未命中返回 (0, "", false)，由调用方维持 500 约定。
+func geminiSkippedPassthrough(c *gin.Context, upstreamStatus int, respBody []byte) (int, string, bool) {
+	status, _, errMsg, matched := applyErrorPassthroughRule(
+		c,
+		PlatformGemini,
+		upstreamStatus,
+		respBody,
+		http.StatusInternalServerError,
+		"upstream_error",
+		"",
+	)
+	if !matched {
+		return 0, "", false
+	}
+	return status, errMsg, true
+}
+
+// recordGeminiSkippedOpsError 记录 ErrorPolicySkipped 分支的上游错误诊断信息，
+// 字段与 writeGeminiMappedError 里的那份保持一致。
+//
+// 命中透传规则时会直接写响应返回、绕过 writeGeminiMappedError，诊断信息必须在这里补：
+// 规则可以把上游 400 改写成任意状态码（比如 418），响应本身就不再携带真实上游状态，
+// 监控端只能靠这条事件还原「上游到底返回了什么、哪个账号、哪个 request id」。
+// skip_monitoring 的抑制发生在下游中间件（读 OpsSkipPassthroughKey），不受这里影响。
+func (s *GeminiMessagesCompatService) recordGeminiSkippedOpsError(c *gin.Context, account *Account, upstreamStatus int, upstreamRequestID string, respBody []byte) {
+	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
+	upstreamDetail := ""
+	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
+		if maxBytes <= 0 {
+			maxBytes = 2048
+		}
+		upstreamDetail = truncateString(string(respBody), maxBytes)
+	}
+	setOpsUpstreamError(c, upstreamStatus, upstreamMsg, upstreamDetail)
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:           account.Platform,
+		AccountID:          account.ID,
+		AccountName:        account.Name,
+		UpstreamStatusCode: upstreamStatus,
+		UpstreamRequestID:  upstreamRequestID,
+		Kind:               "http_error",
+		Message:            upstreamMsg,
+		Detail:             upstreamDetail,
+	})
+}
+
+// writeGeminiNativeSkippedError 渲染原生 Gemini 链路上 ErrorPolicySkipped 的上游错误。
+// 命中透传规则时按 Google 错误结构出规则给的状态码与文案，与 failover 耗尽路径
+// （handler.handleGeminiFailoverExhausted）保持一致；未命中仍原样透传响应体 + 500。
+//
+// 状态码与 Content-Type 一律从 resp 上取，不接受调用方传入——这个 bug 的成因就是
+// 调用方在这里把真实状态码换成了 500，签名上就不给这个机会。respBody 单独传是因为
+// 它可能已经过 unwrapIfNeeded，和 resp.Body 不是一份东西。
+//
+// 这条分支原来两种走向都不记 ops 事件（compat 那边至少还经 writeGeminiMappedError 记一次），
+// 原生链路的这类错误在监控里是完全不可见的，一并补上。
+func (s *GeminiMessagesCompatService) writeGeminiNativeSkippedError(c *gin.Context, account *Account, resp *http.Response, upstreamRequestID string, respBody []byte) error {
+	upstreamStatus := resp.StatusCode
+	s.recordGeminiSkippedOpsError(c, account, upstreamStatus, upstreamRequestID, respBody)
+	if status, msg, matched := geminiSkippedPassthrough(c, upstreamStatus, respBody); matched {
+		_ = s.writeGoogleError(c, status, msg)
+		return fmt.Errorf("gemini upstream error: %d (passthrough rule matched)", upstreamStatus)
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	MarkResponseCommitted(c)
+	c.Data(http.StatusInternalServerError, contentType, respBody)
+	return fmt.Errorf("gemini upstream error: %d (skipped by error policy)", upstreamStatus)
+}
+
+// writeGeminiSkippedError 是 compat（Claude 结构）链路上的同一件事，
+// 同样只从 resp 上取真实状态码。
+// 未命中时仍按 500 走既有的兜底映射：真实状态码只用于规则匹配，不改变兜底行为。
+func (s *GeminiMessagesCompatService) writeGeminiSkippedError(c *gin.Context, account *Account, resp *http.Response, upstreamRequestID string, respBody []byte) error {
+	upstreamStatus := resp.StatusCode
+	if status, msg, matched := geminiSkippedPassthrough(c, upstreamStatus, respBody); matched {
+		// 未命中时下面的 writeGeminiMappedError 会自己记一次，只有这条捷径需要补。
+		s.recordGeminiSkippedOpsError(c, account, upstreamStatus, upstreamRequestID, respBody)
+		MarkResponseCommitted(c)
+		c.JSON(status, gin.H{
+			"type":  "error",
+			"error": gin.H{"type": "upstream_error", "message": msg},
+		})
+		return fmt.Errorf("upstream error: %d (passthrough rule matched)", upstreamStatus)
+	}
+	return s.writeGeminiMappedError(c, account, http.StatusInternalServerError, upstreamRequestID, respBody)
 }
 
 func sleepGeminiBackoff(attempt int) {
