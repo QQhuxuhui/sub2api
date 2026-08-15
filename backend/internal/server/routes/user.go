@@ -25,6 +25,9 @@ func RegisterUserRoutes(
 	// 用户管理面变更类操作入审计（含 TOTP 启用/禁用、step-up 验证、密码修改等安全事件）
 	authenticated.Use(gin.HandlerFunc(auditLog))
 	{
+		// 团队消耗看板（聚合统计属重查询，用独立计数桶限流，不挤占 /usage 的额度）
+		registerTeamRoutes(authenticated, h.TeamOps, panelRateLimiter.Scoped("team"))
+
 		// 用户接口
 		user := authenticated.Group("/user")
 		{

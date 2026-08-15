@@ -5,6 +5,10 @@ import (
 	"sort"
 )
 
+// roundCents 把金额取整到 2 位小数，也就是界面上真正渲染出来的精度。
+// 汇总侧的展示值走它，行侧走 AllocateDisplay——后者在取整之外还要把差额摊回各行。
+func roundCents(f float64) float64 { return math.Round(f*100) / 100 }
+
 // AllocateDisplay 把各行金额取整到 2 位小数，并把
 //
 //	round(total) - Σround(row)

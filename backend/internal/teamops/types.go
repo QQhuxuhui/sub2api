@@ -38,6 +38,17 @@ type RowQuery struct {
 	PageSize int
 }
 
+// Conclusion 是概览条下面那句结论。判定逻辑属于结论句阶段，本阶段服务层恒返回 nil，
+// 前端据此渲染中性句（设计文档 §7）。类型现在就定下来，是为了 /summary 的响应形状
+// 从第一版起就带上 conclusion 这个键，前端不必为它做兼容分支。
+type Conclusion struct {
+	Kind        string `json:"kind"` // growth | absolute | new
+	GroupKey    string `json:"group_key"`
+	DisplayName string `json:"display_name"`
+	Text        string `json:"text"`
+	ExtraCount  int    `json:"extra_count"`
+}
+
 // Summary 是看板顶部的汇总。TotalCost 与各行 CurrentCost 之和恒等，
 // 由 TestSummaryEqualsSumOfRows 钉住：两处口径一旦分叉，页面上就会出现
 // 「明细加起来不等于总数」这种没人能自查的账。

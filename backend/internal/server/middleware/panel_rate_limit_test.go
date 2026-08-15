@@ -200,6 +200,48 @@ func TestPanelRateLimiterHeavyUsesHeavyRPM(t *testing.T) {
 	require.Contains(t, allower.counts, "panel:heavy:user:7")
 }
 
+// Scoped 的存在理由就是「不与 Heavy 共用计数桶」。这条用例同时钉住两件事：
+// 键里带上了 scope 名，以及同一个用户跑满 Scoped 之后 Heavy 仍然放行。
+// 少了后半句，把 Scoped 实现成 Heavy 的别名也能全绿。
+func TestPanelRateLimiterScopedUsesSeparateBucket(t *testing.T) {
+	allower := &fakePanelAllower{}
+	p := &PanelRateLimiter{
+		limiter:        allower,
+		settingService: newPanelRateLimitTestService(t, `{"enabled":true,"user_rpm":100,"heavy_rpm":1,"exempt_admin":true,"public_ip_rpm":0}`),
+	}
+
+	scoped := newPanelTestRouter(p.Scoped("team"), &panelTestIdentity{userID: 11, role: service.RoleUser})
+	require.Equal(t, http.StatusOK, performPanelRequest(scoped, "127.0.0.1:1000").Code)
+	require.Equal(t, http.StatusTooManyRequests, performPanelRequest(scoped, "127.0.0.1:1000").Code)
+
+	// 同一用户的既有重查询端点不受影响
+	heavy := newPanelTestRouter(p.Heavy(), &panelTestIdentity{userID: 11, role: service.RoleUser})
+	require.Equal(t, http.StatusOK, performPanelRequest(heavy, "127.0.0.1:1000").Code)
+
+	allower.mu.Lock()
+	defer allower.mu.Unlock()
+	require.Contains(t, allower.counts, "panel:heavy:team:user:11")
+	require.Contains(t, allower.counts, "panel:heavy:user:11")
+}
+
+// Scoped 沿用 Heavy 档配额：heavy_rpm 为 0（该档关闭）时不计数、直接放行。
+func TestPanelRateLimiterScopedFollowsHeavyQuota(t *testing.T) {
+	allower := &fakePanelAllower{}
+	p := &PanelRateLimiter{
+		limiter:        allower,
+		settingService: newPanelRateLimitTestService(t, `{"enabled":true,"user_rpm":100,"heavy_rpm":0,"exempt_admin":true,"public_ip_rpm":0}`),
+	}
+
+	router := newPanelTestRouter(p.Scoped("team"), &panelTestIdentity{userID: 12, role: service.RoleUser})
+	for i := 0; i < 3; i++ {
+		require.Equal(t, http.StatusOK, performPanelRequest(router, "127.0.0.1:1000").Code)
+	}
+
+	allower.mu.Lock()
+	defer allower.mu.Unlock()
+	require.Empty(t, allower.counts)
+}
+
 func TestPanelRateLimiterAdminExemption(t *testing.T) {
 	// 豁免开启：管理员不计数
 	p := &PanelRateLimiter{
