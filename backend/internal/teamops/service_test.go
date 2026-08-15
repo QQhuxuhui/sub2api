@@ -422,6 +422,9 @@ func TestSummary_FlagsRetentionWarningWithCutDateWhenCurrentPeriodIsPartial(t *t
 // 若 cut date 直接取边界时刻所在的自然日，提示条会写成
 // 「本期 05-17 – 08-15 / 可查数据自 05-17 起」——自相矛盾，而那天的前半天确实缺数据。
 // 告警一旦成立，cut date 必须严格晚于本期起点。
+//
+// 这条只覆盖零点正常存在的时区；午夜缺口那一类由
+// TestSummary_RetentionCutDateIsAfterPeriodStartInTimezoneWithoutMidnight 单独钉。
 func TestSummary_RetentionCutDateIsAlwaysAfterPeriodStart(t *testing.T) {
 	t.Parallel()
 	s := newTestService(&fakeRepo{}, 90, fixedNow)
@@ -431,6 +434,39 @@ func TestSummary_RetentionCutDateIsAlwaysAfterPeriodStart(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, dto.RetentionWarning)
 	require.Equal(t, "2026-05-17", dto.Period.StartDate)
+	require.Greater(t, dto.RetentionWarning.CutDate, dto.Period.StartDate,
+		"提示条不能写成「本期自 X 起 / 可查数据自 X 起」")
+}
+
+// 「本期起点落在边界当天 → cut date 必须晚一天」这条不变量在**午夜不存在**的时区里
+// 需要额外处理，而 UTC / Asia/Shanghai 这类时区无论处理与否结果都一样——
+// 用它们做用例，「处理了午夜缺口」和「没处理」输出逐字相同，钉不住任何东西。
+//
+// America/Santiago 2025-09-07 的 00:00 直接跳到 01:00：在本地时区上做「加一天」，
+// time.Date 会把不存在的零点规范化成前一天 23:00，加完还落在 09-06，
+// cut date 又变回本期起点那一天，自相矛盾的提示条原样复现。
+func TestRetentionCutDate_SurvivesTimezoneWithoutMidnight(t *testing.T) {
+	t.Parallel()
+	santiago, err := time.LoadLocation("America/Santiago")
+	require.NoError(t, err)
+	// 边界落在 2025-09-06 01:00 -04:00，也就是「午夜缺口」那天的前一天。
+	cutoff := time.Date(2025, 9, 6, 5, 0, 0, 0, time.UTC)
+
+	require.Equal(t, "2025-09-07", retentionCutDate(cutoff, santiago))
+}
+
+func TestSummary_RetentionCutDateIsAfterPeriodStartInTimezoneWithoutMidnight(t *testing.T) {
+	t.Parallel()
+	// now − 90 天 = 2025-09-06 05:00 UTC = 2025-09-06 01:00 -04:00。
+	// 本期起点 2025-09-06 00:00 -04:00 早于它，告警成立。
+	now := time.Date(2025, 12, 5, 5, 0, 0, 0, time.UTC)
+	s := newTestService(&fakeRepo{}, 90, now)
+
+	dto, err := s.Summary(context.Background(), 1, "2025-09-06", "2025-12-05", "America/Santiago")
+	require.NoError(t, err)
+	require.Equal(t, "2025-09-06", dto.Period.StartDate)
+	require.NotNil(t, dto.RetentionWarning)
+	require.Equal(t, "2025-09-07", dto.RetentionWarning.CutDate)
 	require.Greater(t, dto.RetentionWarning.CutDate, dto.Period.StartDate,
 		"提示条不能写成「本期自 X 起 / 可查数据自 X 起」")
 }
