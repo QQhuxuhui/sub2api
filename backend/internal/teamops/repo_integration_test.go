@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -617,7 +618,32 @@ func TestListRows_MaskedKeyOnlyForSingleLiveKeyGroup(t *testing.T) {
 
 	require.Nil(t, byKey["o:王磊"].MaskedKey, "合并了 2 把令牌的组不该出任何一把的掩码")
 	require.NotNil(t, byKey["k:3"].MaskedKey)
-	require.Equal(t, teamops.MaskKey("sk-test-3"), *byKey["k:3"].MaskedKey)
+	// 断字面量，不断 teamops.MaskKey(...)：拿函数自己去断函数，等式恒成立，
+	// 把 MaskKey 的函数体换成 `return key`（明文密钥直接下发）都不会红。
+	// "sk-test-3" 是 9 个字符，走 len<=12 的短分支：前 4 位 + "***"。
+	require.Equal(t, "sk-t***", *byKey["k:3"].MaskedKey)
+}
+
+// productionShapedKey 是生产里真实的密钥形态：sk- 前缀 + 32 位，共 35 个字符。
+// seed 里其他令牌都是 sk-test-<id>（≤10 字符），只走 MaskKey 的短分支；
+// 长分支（前 6 + "..." + 后 4）在这条测试之前一次都没被执行过，
+// 而 repo.go 的注释承诺它与 frontend/src/utils/maskApiKey.ts 逐字等价。
+const productionShapedKey = "sk-abcdefghijklmnopqrstuvwxyz012345"
+
+func TestListRows_MaskedKeyOfProductionLengthKey(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 14)
+	seedKeyWithSecret(t, ctx, 110, 14, "生产形态令牌", productionShapedKey)
+	seedLog(t, ctx, 14, 110, 1.0, inPeriod)
+
+	cur, prev := newTestPeriods(t)
+	rows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 14, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	row := rowsByGroupKey(rows)["k:110"]
+	require.NotNil(t, row.MaskedKey)
+	require.Equal(t, "sk-abc...2345", *row.MaskedKey,
+		"长密钥走前 6 + \"...\" + 后 4，与 frontend/src/utils/maskApiKey.ts 一致")
 }
 
 // tiebreakGroups 是等额分组的个数。刻意取大：8 个分组时，规划器碰巧就按 group_key
@@ -799,4 +825,166 @@ func TestListRows_OwnerNamesNormalizeBeforeGrouping(t *testing.T) {
 	require.Equal(t, 3, byKey["o:alice"].KeyCount)
 	require.Contains(t, byKey, "o:\u00e9", "NFC 合成形是分组键的规范形")
 	require.Equal(t, 2, byKey["o:\u00e9"].KeyCount, "预组合 é 与 e+U+0301 是同一个人")
+}
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1：评审跑出的三条「变异存活」+ 三条 Minor 的守卫。
+// ---------------------------------------------------------------------------
+
+// seedKeyWithSecret 与 seedKey 的区别只在于密钥原文由调用方给，
+// 用来构造 sk- + 32 位这种生产形态的密钥。
+func seedKeyWithSecret(t *testing.T, ctx context.Context, id, userID int64, name, secret string) {
+	t.Helper()
+	_, err := integrationDB.ExecContext(ctx, `
+		INSERT INTO api_keys (id, user_id, key, name, status)
+		VALUES ($1, $2, $3, $4, 'active')
+	`, id, userID, secret, name)
+	require.NoError(t, err)
+}
+
+func setKeyLastUsed(t *testing.T, ctx context.Context, id int64, at time.Time) {
+	t.Helper()
+	res, err := integrationDB.ExecContext(ctx,
+		`UPDATE api_keys SET last_used_at = $2 WHERE id = $1`, id, at)
+	require.NoError(t, err)
+	n, err := res.RowsAffected()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n)
+}
+
+var (
+	lastUsedEarly = time.Date(2026, 8, 9, 8, 0, 0, 0, time.UTC)
+	lastUsedLate  = time.Date(2026, 8, 12, 9, 30, 0, 0, time.UTC)
+)
+
+// seedLastUsed 造一个归属组里两把「最后使用时间」不同的令牌，外加一把从没用过的。
+// 两个时间刻意不等距也不同日，MIN / MAX / MIN+1天 三种取法两两不同。
+func seedLastUsed(t *testing.T, ctx context.Context) {
+	seedUser(t, ctx, 15)
+	seedKey(t, ctx, 120, 15, "孙九-旧")
+	seedKey(t, ctx, 121, 15, "孙九-新")
+	seedKey(t, ctx, 122, 15, "从未使用")
+	seedOwner(t, ctx, 120, 15, "孙九")
+	seedOwner(t, ctx, 121, 15, "孙九")
+	setKeyLastUsed(t, ctx, 120, lastUsedEarly)
+	setKeyLastUsed(t, ctx, 121, lastUsedLate)
+	seedLog(t, ctx, 15, 120, 1.0, inPeriod)
+	seedLog(t, ctx, 15, 121, 2.0, inPeriod)
+}
+
+func TestListRows_LastUsedAtTakesLatestInGroup(t *testing.T) {
+	ctx := context.Background()
+	seedLastUsed(t, ctx)
+
+	cur, prev := newTestPeriods(t)
+	rows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 15, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	row := rowsByGroupKey(rows)["o:孙九"]
+	require.NotNil(t, row.LastUsedAt, "组里有令牌用过，这一列不能是空")
+	require.True(t, row.LastUsedAt.Equal(lastUsedLate),
+		"「最后使用」取组内最晚的一把，实际拿到 %v，期望 %v", row.LastUsedAt, lastUsedLate)
+}
+
+func TestListRows_LastUsedAtNilWhenNeverUsed(t *testing.T) {
+	ctx := context.Background()
+	seedLastUsed(t, ctx)
+
+	cur, prev := newTestPeriods(t)
+	rows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 15, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	row := rowsByGroupKey(rows)["k:122"]
+	require.Nil(t, row.LastUsedAt, "从没用过的令牌必须是 null，不能拿别的时间顶上")
+}
+
+// 分页护栏：这些入参在 handler 层会被 response.ParsePagination 夹住，
+// 但仓储层不该依赖调用方 —— 少了护栏，Page=0 会拼出 `OFFSET -50`，
+// PostgreSQL 直接报 `OFFSET must not be negative`，一个 ?page=0 就是 500。
+func TestListRows_ClampsPaginationInputs(t *testing.T) {
+	ctx := context.Background()
+	seedTiebreak(t, ctx) // 30 个等额分组
+	cur, prev := newTestPeriods(t)
+
+	query := func(page, pageSize int) []teamops.Row {
+		rows, total := listRows(t, ctx, teamops.RowQuery{
+			UserID: 7, Cur: cur, Prev: prev, Sort: "cost", Order: "desc",
+			Page: page, PageSize: pageSize,
+		})
+		require.EqualValues(t, tiebreakGroups, total)
+		return rows
+	}
+
+	t.Run("Page=0 当作第一页", func(t *testing.T) {
+		require.Equal(t, []string{"o:u00", "o:u01", "o:u02"}, groupKeys(query(0, 3)))
+	})
+	t.Run("Page 为负当作第一页", func(t *testing.T) {
+		require.Equal(t, []string{"o:u00", "o:u01", "o:u02"}, groupKeys(query(-7, 3)))
+	})
+	t.Run("PageSize=0 回落到默认页长", func(t *testing.T) {
+		require.Len(t, query(1, 0), 20, "默认页长 20")
+	})
+	t.Run("PageSize 超上限回落到默认页长", func(t *testing.T) {
+		require.Len(t, query(1, 5000), 20)
+	})
+	t.Run("Page 极大不溢出成负 OFFSET", func(t *testing.T) {
+		// (Page-1)*PageSize 在 int 上会溢出成负数，同样拼出负 OFFSET。
+		require.Empty(t, query(math.MaxInt, 10), "翻到天边就是没有行，不是报错")
+	})
+}
+
+func seedLikeWildcards(t *testing.T, ctx context.Context) {
+	seedUser(t, ctx, 16)
+	seedKey(t, ctx, 130, 16, "50%折扣")
+	seedKey(t, ctx, 131, 16, "5005 号") // 含 "50" 但不含 "50%"
+	seedKey(t, ctx, 132, 16, "a_b")
+	seedKey(t, ctx, 133, 16, "axb") // 单字通配下会被 "a_b" 误命中
+	for id := int64(130); id <= 133; id++ {
+		seedLog(t, ctx, 16, id, 1.0, inPeriod)
+	}
+}
+
+// 搜索词里的 LIKE 元字符必须转义。不是注入（搜索词一直走绑定参数），
+// 是搜出来的结果不对：搜 "%" 命中全部、搜 "_" 变单字通配。
+func TestListRows_SearchEscapesLikeWildcards(t *testing.T) {
+	ctx := context.Background()
+	seedLikeWildcards(t, ctx)
+	cur, prev := newTestPeriods(t)
+
+	search := func(q string) []string {
+		rows, total := listRows(t, ctx, teamops.RowQuery{
+			UserID: 16, Cur: cur, Prev: prev, Sort: "cost", Order: "desc",
+			Page: 1, PageSize: 50, Q: q,
+		})
+		require.EqualValues(t, len(rows), total)
+		return groupKeys(rows)
+	}
+
+	t.Run("百分号是字面量", func(t *testing.T) {
+		require.Equal(t, []string{"k:130"}, search("50%"), "不该把 '5005 号' 也捞上来")
+	})
+	t.Run("下划线是字面量", func(t *testing.T) {
+		require.Equal(t, []string{"k:132"}, search("a_b"), "不该把 'axb' 也捞上来")
+	})
+	t.Run("反斜杠是字面量", func(t *testing.T) {
+		require.Empty(t, search(`\`), "孤立的反斜杠不能让整条 LIKE 变成非法模式")
+	})
+}
+
+// 显示名要 btrim：归属名两侧的空格是合法的（迁移的 CHECK 只拦纯空白），
+// 但看板上不能渲染成「 周八 」，也不能让它与 "周八" 显示成两个不同的人。
+func TestListRows_DisplayNameIsTrimmed(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 17)
+	seedKey(t, ctx, 140, 17, "令牌-140")
+	seedOwner(t, ctx, 140, 17, " 周八 ")
+	seedLog(t, ctx, 17, 140, 1.0, inPeriod)
+
+	cur, prev := newTestPeriods(t)
+	rows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 17, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.Len(t, rows, 1)
+	require.Equal(t, "周八", rows[0].DisplayName, "显示名必须去掉两侧空格")
+	require.Equal(t, "o:周八", rows[0].GroupKey)
 }
