@@ -105,8 +105,8 @@ func orderDir(order string) string {
 
 // likeEscaper 把搜索词里的 LIKE 元字符转义掉。不转的话，搜 "%" 命中全部行、
 // 搜 "_" 变成单字通配 —— 不是注入（搜索词一直是绑定参数），是搜出来的结果不对。
-// 反斜杠必须放在第一位：NewReplacer 单趟替换、不会再回头处理换出来的文本，
-// 所以顺序只影响可读性，但把它写在前面能表明「先转义转义符本身」这个意图。
+// NewReplacer 单趟替换、不会再回头处理自己换出来的文本，所以三条规则的先后顺序
+// 不影响结果；反斜杠写在第一位只是表明「先转义转义符本身」这个意图。
 // PostgreSQL 的 LIKE 默认转义符就是反斜杠，不需要额外的 ESCAPE 子句。
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
@@ -259,13 +259,19 @@ FROM g`
 // 软删的令牌 key 被改写成 __deleted__<id>__<nano>，取后 4 位会渲染出纳秒尾巴，
 // 所以调用方必须在软删时短路，不要走到这里 —— ListRows 的 single_key 已经把
 // 「组里唯一一把且未软删」作为出码条件。
+//
+// 唯一残留的分叉在长度口径：JS 按 UTF-16 码元计长，这里按 rune 计长，
+// 只有非 BMP 字符（如 emoji）才会算出不同的长度。密钥全是 ASCII，实际取不到。
 func MaskKey(key string) string {
 	if key == "" {
 		return ""
 	}
 	runes := []rune(key)
 	if len(runes) <= 12 {
-		return string(runes[:4]) + "***"
+		// 上界必须夹住：JS 的 slice(0, 4) 在长度不足 4 时返回整个字符串，
+		// 而 runes[:4] 会切进底层数组的零值区，产出 "abc\x00***" 这种带 NUL 的字符串；
+		// 若某次 []rune 转换的 cap 恰好等于 len，同一行直接 panic。
+		return string(runes[:min(4, len(runes))]) + "***"
 	}
 	return string(runes[:6]) + "..." + string(runes[len(runes)-4:])
 }

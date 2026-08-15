@@ -624,10 +624,13 @@ func TestListRows_MaskedKeyOnlyForSingleLiveKeyGroup(t *testing.T) {
 	require.Equal(t, "sk-t***", *byKey["k:3"].MaskedKey)
 }
 
-// productionShapedKey 是生产里真实的密钥形态：sk- 前缀 + 32 位，共 35 个字符。
-// seed 里其他令牌都是 sk-test-<id>（≤10 字符），只走 MaskKey 的短分支；
-// 长分支（前 6 + "..." + 后 4）在这条测试之前一次都没被执行过，
+// productionShapedKey 是一把 35 字符的长密钥，用来走 MaskKey 的长分支。
+// seed 里其他令牌都是 sk-test-<id>（≤10 字符），只走短分支；长分支
+// （前 6 + "..." + 后 4）在这条测试之前一次都没被执行过，
 // 而 repo.go 的注释承诺它与 frontend/src/utils/maskApiKey.ts 逐字等价。
+// 生产里真正生成的密钥是 sk- + 32 字节的 hex，共 67 个字符
+// （service/api_key_service.go 的 GenerateKey），比这个常量更长；
+// 两者都远超 12，走的是同一条分支，67 字符的形态由 mask_test.go 直接覆盖。
 const productionShapedKey = "sk-abcdefghijklmnopqrstuvwxyz012345"
 
 func TestListRows_MaskedKeyOfProductionLengthKey(t *testing.T) {
@@ -939,7 +942,11 @@ func seedLikeWildcards(t *testing.T, ctx context.Context) {
 	seedKey(t, ctx, 131, 16, "5005 号") // 含 "50" 但不含 "50%"
 	seedKey(t, ctx, 132, 16, "a_b")
 	seedKey(t, ctx, 133, 16, "axb") // 单字通配下会被 "a_b" 误命中
-	for id := int64(130); id <= 133; id++ {
+	// 名字里同时含反斜杠和一个会被它转义的 "%"。没有这一把，反斜杠的两条用例
+	// 转义与不转义都返空 —— 搜索词恒被包成 %…%，末尾那个 % 兜住了所有非法模式，
+	// 「守不住任何东西」的空断言。有了它，两条用例的期望结果才会随实现变化。
+	seedKey(t, ctx, 134, 16, `c\%d`)
+	for id := int64(130); id <= 134; id++ {
 		seedLog(t, ctx, 16, id, 1.0, inPeriod)
 	}
 }
@@ -967,7 +974,14 @@ func TestListRows_SearchEscapesLikeWildcards(t *testing.T) {
 		require.Equal(t, []string{"k:132"}, search("a_b"), "不该把 'axb' 也捞上来")
 	})
 	t.Run("反斜杠是字面量", func(t *testing.T) {
-		require.Empty(t, search(`\`), "孤立的反斜杠不能让整条 LIKE 变成非法模式")
+		// 转义后是 %\\%（任意 + 一个字面反斜杠 + 任意），只命中名字里真有反斜杠的那把。
+		// 不转义则是 %\%（任意 + 一个字面百分号），只命中以 % 结尾的名字 —— 一把都没有。
+		require.Equal(t, []string{"k:134"}, search(`\`), "反斜杠要当字面量搜，不是当转义符吃掉后面的字符")
+	})
+	t.Run("反斜杠不吞掉后面的元字符", func(t *testing.T) {
+		// 转义后是 %\\\%%：字面反斜杠 + 字面百分号，只命中 `c\%d`。
+		// 不转义则是 %\%%：退化成「含有百分号」，会把 "50%折扣" 一起捞上来。
+		require.Equal(t, []string{"k:134"}, search(`\%`), "不该把 '50%折扣' 也捞上来")
 	})
 }
 
