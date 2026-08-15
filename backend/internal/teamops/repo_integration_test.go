@@ -97,8 +97,8 @@ func TestMain(m *testing.M) {
 		_ = container.Terminate(ctx)
 		os.Exit(1)
 	}
-	// ⚠️ 迁移只在这里跑一次。v1 让每个测试开头都调 ApplyMigrations——
-	// 每次都要抢全库 advisory lock + 比对 196 个文件的 SHA256，纯浪费。
+	// 迁移只在 TestMain 跑一次。ApplyMigrations 每次调用都要抢一次全库 advisory lock，
+	// 并逐个重算、比对全部迁移文件的 SHA256；把它放进每个测试开头纯属浪费。
 	if err := repository.ApplyMigrations(ctx, integrationDB); err != nil {
 		log.Printf("failed to apply db migrations: %v", err)
 		_ = integrationDB.Close()
@@ -113,11 +113,26 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// testTx 返回一个测试结束时自动回滚的事务，形态同
+// backend/internal/repository/integration_harness_test.go:203-212。
+// 所有写入都必须走它：TestMain 只跑一次而 m.Run() 可以跑多轮（go test -count=2），
+// 直接往 integrationDB 里写会让第二轮撞主键，红成「合法名字被拒」的假象。
+func testTx(t *testing.T) *sql.Tx {
+	t.Helper()
+
+	tx, err := integrationDB.BeginTx(context.Background(), nil)
+	require.NoError(t, err, "begin tx")
+	t.Cleanup(func() {
+		_ = tx.Rollback()
+	})
+	return tx
+}
+
 func TestTeamKeyOwnersTableExists(t *testing.T) {
 	ctx := context.Background() // 迁移已在 TestMain 跑过一次，这里不要重复调 ApplyMigrations
 
-	// ⚠️ 必须取**全部**主键列并断言长度为 1。
-	// v1 用 QueryRow 只取首行 —— 对 PRIMARY KEY (api_key_id, user_id) 也会返回 api_key_id，
+	// 必须取**全部**主键列再断言整个数组。只取首行的写法对
+	// PRIMARY KEY (api_key_id, user_id) 也会返回 api_key_id，
 	// 于是「防复合键」的断言在复合键下照样 PASS，等于没有守卫。
 	var pkCols []string
 	err := integrationDB.QueryRowContext(ctx, `
@@ -130,7 +145,7 @@ func TestTeamKeyOwnersTableExists(t *testing.T) {
 	require.Equal(t, []string{"api_key_id"}, pkCols,
 		"主键必须是 api_key_id 单列（复合键会允许跨用户重复认领）")
 
-	// 表**不应该**有任何外键（挂 FK 的四个副作用见迁移文件注释）
+	// 表**不应该**有任何外键（不挂外键的四条原因见迁移文件注释）
 	var fkCount int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM pg_constraint
@@ -138,21 +153,58 @@ func TestTeamKeyOwnersTableExists(t *testing.T) {
 	`).Scan(&fkCount))
 	require.Equal(t, 0, fkCount, "team_key_owners 不能挂外键")
 
-	// CHECK 约束：空白归属名必须被拒。
-	// ⚠️ v1 用了不存在的 api_key_id=999999 —— 表还挂着 FK 时先炸的是外键不是 CHECK，
-	// 把 CHECK 整句从迁移里删掉测试照样绿。现在表无 FK，但仍要断言**错误码**而不是只断 require.Error。
-	_, err = integrationDB.ExecContext(ctx, `
-		INSERT INTO team_key_owners (api_key_id, user_id, owner_name) VALUES (900001, 1, '   ')
-	`)
-	require.Error(t, err)
-	var pqErr *pq.Error
-	require.ErrorAs(t, err, &pqErr)
-	require.Equal(t, pq.ErrorCode("23514"), pqErr.Code, "必须是 CHECK 违反（23514），不是别的约束")
-	require.Equal(t, "team_key_owners_name_not_blank", pqErr.Constraint)
+	// CHECK 约束：只由空白构成的归属名必须被拒，否则看板上会出现一行「空名字」的归属组。
+	//
+	// 断言错误码而不是只断 require.Error：本表没有外键、没有唯一约束以外的其他约束，
+	// 只断 require.Error 的话，插入因任何别的原因失败都会让测试变绿 ——
+	// 把 CHECK 整句从迁移里删掉都未必红。断到 23514 + 约束名才能证明拦截确实来自这条 CHECK。
+	//
+	// 剪除集必须覆盖非 ASCII 空白：btrim(string) 的默认剪除集只有 U+0020，
+	// 制表/换行/NBSP/全角空格都会漏过去，而 normalize(..., NFC) 不折叠 NBSP（那是 NFKC 的事）。
+	blankNames := []struct {
+		desc  string
+		value string
+	}{
+		{"ASCII 空格", "   "},
+		{"制表符", "\t\t"},
+		{"换行", "\n"},
+		{"回车", "\r"},
+		{"NBSP U+00A0", "\u00a0"},
+		{"全角空格 U+3000", "\u3000"},
+		{"混合空白", " \t\u00a0\u3000\n"},
+	}
+	for i, tc := range blankNames {
+		t.Run("拒绝纯空白归属名/"+tc.desc, func(t *testing.T) {
+			tx := testTx(t)
 
-	// 反向对照：合法名字必须能插进去（证明没有过度拦截）
-	_, err = integrationDB.ExecContext(ctx, `
-		INSERT INTO team_key_owners (api_key_id, user_id, owner_name) VALUES (900002, 1, ' 王磊 ')
-	`)
-	require.NoError(t, err)
+			_, err := tx.ExecContext(ctx,
+				`INSERT INTO team_key_owners (api_key_id, user_id, owner_name) VALUES ($1, 1, $2)`,
+				900100+i, tc.value)
+			require.Error(t, err)
+			var pqErr *pq.Error
+			require.ErrorAs(t, err, &pqErr)
+			require.Equal(t, pq.ErrorCode("23514"), pqErr.Code, "必须是 CHECK 违反（23514），不是别的约束")
+			require.Equal(t, "team_key_owners_name_not_blank", pqErr.Constraint)
+		})
+	}
+
+	// 反向对照：合法名字必须能插进去，证明剪除集没有过度拦截 ——
+	// 只有**整个字符串**都是空白才该被拒，名字两侧带空白（含全角空格）不该被拒。
+	legalNames := []struct {
+		desc  string
+		value string
+	}{
+		{"两侧 ASCII 空格", " 王磊 "},
+		{"两侧全角空格", "\u3000王磊\u3000"},
+	}
+	for i, tc := range legalNames {
+		t.Run("接受合法归属名/"+tc.desc, func(t *testing.T) {
+			tx := testTx(t)
+
+			_, err := tx.ExecContext(ctx,
+				`INSERT INTO team_key_owners (api_key_id, user_id, owner_name) VALUES ($1, 1, $2)`,
+				900200+i, tc.value)
+			require.NoError(t, err)
+		})
+	}
 }
