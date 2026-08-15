@@ -23,17 +23,6 @@ func sumDisplayCents(amounts []float64) int64 {
 	return total
 }
 
-func TestRoundCents(t *testing.T) {
-	t.Parallel()
-
-	// 单个数字的取整。一组数字不能各自调它——那正是 59.2% 对不上账的写法，
-	// 成组的取整走 AllocateDisplay。
-	require.Equal(t, 0.0, roundCents(0))
-	require.Equal(t, 1.0, roundCents(1.004))
-	require.Equal(t, 1.01, roundCents(1.006))
-	require.Equal(t, 12.35, roundCents(12.3456))
-}
-
 func TestAllocateDisplay_SumEqualsRoundedTotal(t *testing.T) {
 	t.Parallel()
 	// 三行各 0.005：各自四舍五入成 0.01，加起来 0.03，而总额 0.015 只显示成 0.02。

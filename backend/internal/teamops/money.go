@@ -5,11 +5,6 @@ import (
 	"sort"
 )
 
-// roundCents 把金额取整到 2 位小数——页面上金额的唯一渲染精度。
-// 单个数字的取整用它，一组数字的取整必须用 AllocateDisplay：
-// 各行分别 roundCents 之后加起来不等于总额 roundCents 的概率是 59.2%。
-func roundCents(f float64) float64 { return math.Round(f*100) / 100 }
-
 // AllocateDisplay 把各行金额取整到 2 位小数，并把
 //
 //	round(total) - Σround(row)
