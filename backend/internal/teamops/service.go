@@ -160,12 +160,32 @@ func (s *Service) Summary(ctx context.Context, userID int64, startDate, endDate,
 	if CurBeyondRetention(pair.Cur, s.retentionDays, now) {
 		dto.RetentionWarning = &RetentionWarning{
 			Kind: "period_partial",
-			// 切点按用户时区格式化，与 period / compare 里的日期同一口径。
-			CutDate: now.In(pair.Cur.Start.Location()).AddDate(0, 0, -s.retentionDays).Format(dateLayout),
+			// 切点与 CurBeyondRetention 判定用的是**同一个表达式**算出的同一个时刻。
+			CutDate: retentionCutDate(now.AddDate(0, 0, -s.retentionDays), pair.Cur.Start.Location()),
 		}
 	}
 
 	return dto, nil
+}
+
+// retentionCutDate 把保留边界那个**时刻**换算成提示条上写的那个**日期**：
+// 用户时区里第一个完整可查的自然日。
+//
+// 直接取边界时刻所在的自然日是不行的：判定比的是时刻（本期起点早于边界即告警），
+// 而边界落在那一天的中途，那天只剩半天数据。于是本期起点恰好是边界当天时，
+// 提示条会写成「本期 05-17 – 08-15 / 可查数据自 05-17 起」——自相矛盾，
+// 而且那半天的数据确实是缺的。向上取到下一个完整自然日之后，
+// 告警成立时 cut date 必定晚于本期起点，提示条和判定说的才是同一件事。
+//
+// 换算在**用户时区**里做，与 period / compare 里的日期同一口径：跨零点时
+// 同一个边界时刻在两个时区里落在不同的自然日上。
+func retentionCutDate(cutoff time.Time, loc *time.Location) string {
+	c := cutoff.In(loc)
+	day := time.Date(c.Year(), c.Month(), c.Day(), 0, 0, 0, 0, loc)
+	if day.Before(c) {
+		day = day.AddDate(0, 0, 1)
+	}
+	return day.Format(dateLayout)
 }
 
 // Rows 给出当页的分组行与分组总行数。

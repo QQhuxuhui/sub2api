@@ -29,14 +29,17 @@ type fakeRepo struct {
 	gotCur    Period
 	gotPrev   Period
 	gotQuery  RowQuery
+	calls     int
 }
 
 func (f *fakeRepo) Summary(_ context.Context, userID int64, cur, prev Period) (Summary, error) {
+	f.calls++
 	f.gotUserID, f.gotCur, f.gotPrev = userID, cur, prev
 	return f.summary, f.summaryErr
 }
 
 func (f *fakeRepo) ListRows(_ context.Context, q RowQuery) ([]Row, int64, error) {
+	f.calls++
 	f.gotQuery = q
 	return f.rows, f.total, f.rowsErr
 }
@@ -147,6 +150,27 @@ func TestResolvePeriods_WrapsUnparsableDateWithSentinel(t *testing.T) {
 
 	_, err := s.resolvePeriods("2026-8-1", "2026-08-15", "UTC", fixedNow)
 	require.ErrorIs(t, err, ErrInvalidDate)
+}
+
+// 时区参数也要 trim：带空格的时区名 LoadLocation 认不出来，会静默回落到服务器时区，
+// 于是用户选的时区被丢掉，区间边界切在另一个时区的零点上——金额差一点点，没有报错。
+//
+// 断言写成「两个不同时区必须给出不同的边界」而不是「必须等于某个具体时区」：
+// 后者在服务器时区恰好就是被测时区的机器上会漏判，而前者在任何机器上都成立
+// （不 trim 时两者都回落到同一个服务器时区，边界会相等）。
+func TestResolvePeriods_TrimsTimezoneParameter(t *testing.T) {
+	t.Parallel()
+	s := newTestService(nil, 90, fixedNow)
+
+	tokyo, err := s.resolvePeriods("2026-08-01", "2026-08-15", " Asia/Tokyo ", fixedNow)
+	require.NoError(t, err)
+	utc, err := s.resolvePeriods("2026-08-01", "2026-08-15", " UTC ", fixedNow)
+	require.NoError(t, err)
+
+	require.Equal(t, 9*time.Hour, utc.Cur.Start.Sub(tokyo.Cur.Start),
+		"东京零点比 UTC 零点早 9 小时；两者相等说明时区参数被丢掉了")
+	require.Equal(t, "Asia/Tokyo", tokyo.Cur.Timezone)
+	require.Equal(t, "UTC", utc.Cur.Timezone)
 }
 
 // ---------- finalizeRows ----------
@@ -309,17 +333,27 @@ func TestSummary_RoundsDisplayAmountsAndKeepsRawTotal(t *testing.T) {
 	require.Equal(t, 7, dto.OwnedKeyCount)
 }
 
-func TestSummary_FillsDeltaFromDisplayAmounts(t *testing.T) {
+// 环比用的是**展示值**（已取整到分），不是原值。界面上写着 120.01 与 100.00，
+// 环比额就必须是 20.01；拿原值算出来的 20.002 会让用户当场用计算器证伪。
+//
+// 选例必须让两种口径算出不同的数：120.006 取整成 120.01、100.004 取整成 100.00，
+// 展示口径给 +20.01 / 20.01，原值口径给 +20.0012 / 20.002。
+// 整数金额（120 / 100）两种口径同解，钉不住任何东西。
+func TestSummary_FillsDeltaFromDisplayAmountsNotRawAmounts(t *testing.T) {
 	t.Parallel()
-	repo := &fakeRepo{summary: Summary{TotalCost: 120, PrevCost: 100}}
+	repo := &fakeRepo{summary: Summary{TotalCost: 120.006, PrevCost: 100.004}}
 	s := newTestService(repo, 90, fixedNow)
 
 	dto, err := s.Summary(context.Background(), 1, "2026-08-01", "2026-08-15", "UTC")
 	require.NoError(t, err)
-	require.NotNil(t, dto.DeltaPct)
-	require.InDelta(t, 20.0, *dto.DeltaPct, 1e-9)
+	require.InDelta(t, 120.01, dto.TotalCost, 1e-9)
+	require.InDelta(t, 100.00, dto.PrevCost, 1e-9)
 	require.NotNil(t, dto.DeltaAbs)
-	require.InDelta(t, 20.0, *dto.DeltaAbs, 1e-9)
+	require.InDelta(t, 20.01, *dto.DeltaAbs, 1e-6)
+	require.NotNil(t, dto.DeltaPct)
+	require.InDelta(t, 20.01, *dto.DeltaPct, 1e-6)
+	// 界面上「本期 − 上期 == 环比额」必须逐位成立。
+	require.InDelta(t, dto.TotalCost-dto.PrevCost, *dto.DeltaAbs, 1e-9)
 }
 
 func TestSummary_LeavesDeltaNilWhenPrevIsZero(t *testing.T) {
@@ -370,16 +404,55 @@ func TestSummary_OmitsRetentionWarningWhenCurrentPeriodIsWithinRetention(t *test
 
 // 本期起点早于保留边界时，对账条要降级成「可查消耗」并说明起点，
 // 否则用户会把一个被截断过的数字当成全量。
+//
+// 边界时刻是 2026-05-17 12:00 UTC，那天只剩半天数据，所以第一个**完整**可查的
+// 自然日是 05-18。
 func TestSummary_FlagsRetentionWarningWithCutDateWhenCurrentPeriodIsPartial(t *testing.T) {
 	t.Parallel()
-	// 保留 90 天时边界落在 2026-05-17，本期起点 05-16 在它之前。
 	s := newTestService(&fakeRepo{}, 90, fixedNow)
 
 	dto, err := s.Summary(context.Background(), 1, "2026-05-16", "2026-08-15", "UTC")
 	require.NoError(t, err)
 	require.NotNil(t, dto.RetentionWarning)
 	require.Equal(t, "period_partial", dto.RetentionWarning.Kind)
-	require.Equal(t, "2026-05-17", dto.RetentionWarning.CutDate)
+	require.Equal(t, "2026-05-18", dto.RetentionWarning.CutDate)
+}
+
+// 告警的判定比的是**时刻**，提示条给的是**日期**。本期起点恰好落在边界那一天时，
+// 若 cut date 直接取边界时刻所在的自然日，提示条会写成
+// 「本期 05-17 – 08-15 / 可查数据自 05-17 起」——自相矛盾，而那天的前半天确实缺数据。
+// 告警一旦成立，cut date 必须严格晚于本期起点。
+func TestSummary_RetentionCutDateIsAlwaysAfterPeriodStart(t *testing.T) {
+	t.Parallel()
+	s := newTestService(&fakeRepo{}, 90, fixedNow)
+
+	// 起点 05-17 00:00 UTC 早于边界 05-17 12:00 UTC，告警成立。
+	dto, err := s.Summary(context.Background(), 1, "2026-05-17", "2026-08-15", "UTC")
+	require.NoError(t, err)
+	require.NotNil(t, dto.RetentionWarning)
+	require.Equal(t, "2026-05-17", dto.Period.StartDate)
+	require.Greater(t, dto.RetentionWarning.CutDate, dto.Period.StartDate,
+		"提示条不能写成「本期自 X 起 / 可查数据自 X 起」")
+}
+
+// cut date 必须在**用户时区**里算，与 period / compare 的日期同一口径。
+// 同一个边界时刻在两个时区里落在不同的自然日上，算错时区就会给出一个差一天的提示。
+func TestSummary_RetentionCutDateUsesUserTimezone(t *testing.T) {
+	t.Parallel()
+	// 边界时刻 = 2026-05-17 20:00 UTC = 2026-05-18 04:00 +0800。
+	// UTC 用户的第一个完整日是 05-18，上海用户的是 05-19。
+	now := time.Date(2026, 8, 15, 20, 0, 0, 0, time.UTC)
+	s := newTestService(&fakeRepo{}, 90, now)
+
+	utc, err := s.Summary(context.Background(), 1, "2026-05-16", "2026-08-15", "UTC")
+	require.NoError(t, err)
+	require.NotNil(t, utc.RetentionWarning)
+	require.Equal(t, "2026-05-18", utc.RetentionWarning.CutDate)
+
+	shanghai, err := s.Summary(context.Background(), 1, "2026-05-16", "2026-08-15", "Asia/Shanghai")
+	require.NoError(t, err)
+	require.NotNil(t, shanghai.RetentionWarning)
+	require.Equal(t, "2026-05-19", shanghai.RetentionWarning.CutDate)
 }
 
 // 结论句属于后续阶段。恒为 nil 是本阶段对前端的承诺（前端据此渲染中性句）。
@@ -408,7 +481,8 @@ func TestSummary_DoesNotQueryRepoWhenPeriodIsInvalid(t *testing.T) {
 
 	_, err := s.Summary(context.Background(), 1, "2026-01-01", "2026-08-15", "UTC")
 	require.ErrorIs(t, err, ErrRangeTooLong)
-	require.Zero(t, repo.gotUserID)
+	// 区间上限挡的就是"又慢又不全的查询"，参数不合法时那条查询根本不该发出去。
+	require.Zero(t, repo.calls)
 }
 
 // ---------- Rows ----------

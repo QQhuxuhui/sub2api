@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 
@@ -91,7 +92,10 @@ func TestGetSummary_RejectsTooLongRange(t *testing.T) {
 	require.Contains(t, w.Body.String(), "92")
 }
 
-func TestGetSummary_RejectsInvertedRange(t *testing.T) {
+// 起止填反和格式填错是两种不同的用户错误、两条不同的失败路径，却都产出 400。
+// 只断言状态码的话，把两条分支的文案对调也全绿——而用户会看到「日期格式不正确」，
+// 拿着格式完全正确的日期反复改格式。所以必须断言文案落在了对的那条分支上。
+func TestGetSummary_RejectsInvertedRangeWithItsOwnMessage(t *testing.T) {
 	t.Parallel()
 	h := NewHandler(NewService(nil, 90))
 	c, w := newTestContext("/?start_date=2026-08-15&end_date=2026-08-01&timezone=UTC", 1)
@@ -99,11 +103,12 @@ func TestGetSummary_RejectsInvertedRange(t *testing.T) {
 	h.GetSummary(c)
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "开始日期不能晚于结束日期")
 }
 
 // 日期格式不对是用户的输入问题，必须是 400。回 500 的话前端会渲染
 // 「服务器错误，请稍后重试」，用户会一直重试同一个错日期。
-func TestGetSummary_RejectsMalformedDateAsBadRequest(t *testing.T) {
+func TestGetSummary_RejectsMalformedDateWithItsOwnMessage(t *testing.T) {
 	t.Parallel()
 	h := NewHandler(NewService(nil, 90))
 	c, w := newTestContext("/?start_date=08%2F01%2F2026&end_date=2026-08-15&timezone=UTC", 1)
@@ -111,9 +116,21 @@ func TestGetSummary_RejectsMalformedDateAsBadRequest(t *testing.T) {
 	h.GetSummary(c)
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "YYYY-MM-DD")
 }
 
-func TestListRows_RejectsMalformedDateAsBadRequest(t *testing.T) {
+func TestListRows_RejectsInvertedRangeWithItsOwnMessage(t *testing.T) {
+	t.Parallel()
+	h := NewHandler(NewService(nil, 90))
+	c, w := newTestContext("/?start_date=2026-08-15&end_date=2026-08-01&timezone=UTC", 1)
+
+	h.ListRows(c)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "开始日期不能晚于结束日期")
+}
+
+func TestListRows_RejectsMalformedDateWithItsOwnMessage(t *testing.T) {
 	t.Parallel()
 	h := NewHandler(NewService(nil, 90))
 	c, w := newTestContext("/?start_date=08%2F01%2F2026&end_date=2026-08-15&timezone=UTC", 1)
@@ -121,6 +138,7 @@ func TestListRows_RejectsMalformedDateAsBadRequest(t *testing.T) {
 	h.ListRows(c)
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "YYYY-MM-DD")
 }
 
 // 查询参数名一旦读错（startDate / from / begin_date 之类），用户选的周期会被静默忽略，
@@ -138,6 +156,68 @@ func TestGetSummary_ReadsPeriodFromQueryParameters(t *testing.T) {
 	require.Equal(t, "2026-07-01", repo.gotCur.StartDate)
 	require.Equal(t, "2026-07-31", repo.gotCur.EndDate)
 	require.Equal(t, "2026-06-01", repo.gotPrev.StartDate)
+}
+
+// 与 GetSummary 同形的一条。ListRows 侧不能沿用「本月 1 日 – 今天」这种区间：
+// 那恰好就是参数缺失时的默认区间，读错参数名和读对参数名产出逐字相同的响应，
+// 测试全绿而用户在表格上选的结束日被静默忽略——行数据按"今天"算、概览卡按用户
+// 选的算，两个数字对不上且没有任何报错。所以这里必须用非默认区间。
+func TestListRows_ReadsPeriodFromQueryParameters(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{}
+	h := NewHandler(newTestService(repo, 90, fixedNow))
+	c, w := newTestContext("/?start_date=2026-07-02&end_date=2026-07-20&timezone=UTC", 7)
+
+	h.ListRows(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, int64(7), repo.gotQuery.UserID)
+	require.Equal(t, "2026-07-02", repo.gotQuery.Cur.StartDate)
+	require.Equal(t, "2026-07-20", repo.gotQuery.Cur.EndDate)
+	// 19 天的自定义区间走等长紧邻：06-13 – 07-01。
+	require.Equal(t, "2026-06-13", repo.gotQuery.Prev.StartDate)
+	require.Equal(t, "2026-07-01", repo.gotQuery.Prev.EndDate)
+}
+
+// 时区参数决定区间边界切在哪个零点上，而 /user/team 与 /usage 的口径必须一致
+// （设计文档 §10.3 的验收线就建立在这上面）。读错参数名会静默回落到服务器时区，
+// 金额差一点点、没有任何报错，本地开发（服务器与浏览器同为 UTC）完全复现不出来。
+//
+// 断言写成「两个不同时区必须给出相差 9 小时的边界」而不是「必须等于某个具体时区」：
+// 后者在服务器时区恰好就是被测时区的机器上会漏判，前者在任何机器上都成立
+// （读不到参数时两次都回落到同一个服务器时区，边界会相等）。
+func TestGetSummary_ReadsTimezoneFromQueryParameters(t *testing.T) {
+	t.Parallel()
+	utcRepo := &fakeRepo{}
+	c, w := newTestContext("/?start_date=2026-08-01&end_date=2026-08-15&timezone=UTC", 1)
+	NewHandler(newTestService(utcRepo, 90, fixedNow)).GetSummary(c)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	tokyoRepo := &fakeRepo{}
+	c, w = newTestContext("/?start_date=2026-08-01&end_date=2026-08-15&timezone=Asia%2FTokyo", 1)
+	NewHandler(newTestService(tokyoRepo, 90, fixedNow)).GetSummary(c)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	require.Equal(t, 9*time.Hour, utcRepo.gotCur.Start.Sub(tokyoRepo.gotCur.Start),
+		"两次边界相等说明 timezone 参数没被读到")
+	require.Equal(t, "Asia/Tokyo", tokyoRepo.gotCur.Timezone)
+}
+
+func TestListRows_ReadsTimezoneFromQueryParameters(t *testing.T) {
+	t.Parallel()
+	utcRepo := &fakeRepo{}
+	c, w := newTestContext("/?start_date=2026-08-01&end_date=2026-08-15&timezone=UTC", 1)
+	NewHandler(newTestService(utcRepo, 90, fixedNow)).ListRows(c)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	tokyoRepo := &fakeRepo{}
+	c, w = newTestContext("/?start_date=2026-08-01&end_date=2026-08-15&timezone=Asia%2FTokyo", 1)
+	NewHandler(newTestService(tokyoRepo, 90, fixedNow)).ListRows(c)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	require.Equal(t, 9*time.Hour, utcRepo.gotQuery.Cur.Start.Sub(tokyoRepo.gotQuery.Cur.Start),
+		"两次边界相等说明 timezone 参数没被读到")
+	require.Equal(t, "Asia/Tokyo", tokyoRepo.gotQuery.Cur.Timezone)
 }
 
 func TestGetSummary_ReturnsSummaryEnvelope(t *testing.T) {
