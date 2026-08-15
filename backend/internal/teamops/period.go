@@ -41,8 +41,14 @@ type PeriodPair struct {
 //   - end_date 含当日：内部 +1 天作为右开边界
 func ParsePeriod(startDate, endDate, userTZ string, now time.Time) (Period, error) {
 	if startDate == "" || endDate == "" {
-		// 默认本月 1 日 → 今天
-		n := timezone.NowInUserLocation(userTZ)
+		// 默认本月 1 日 → 今天。时区回落语义与 timezone.ParseInUserLocation 一致：
+		// userTZ 为空或非法时用服务器时区，不报错。
+		n := now.In(timezone.Location())
+		if userTZ != "" {
+			if loc, err := time.LoadLocation(userTZ); err == nil {
+				n = now.In(loc)
+			}
+		}
 		startDate = time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, n.Location()).Format(dateLayout)
 		endDate = n.Format(dateLayout)
 	}
@@ -60,7 +66,9 @@ func ParsePeriod(startDate, endDate, userTZ string, now time.Time) (Period, erro
 	}
 	end := endDay.AddDate(0, 0, 1) // 右开边界：end_date 含当日
 
-	if end.Sub(start) > time.Duration(MaxRangeDays)*24*time.Hour {
+	// 按自然日比较而不是按时长：AddDate 是夏令时感知的，跨回拨那天有 25 小时，
+	// 用 end.Sub(start) 与 92*24h 比会把一个合法的 92 个自然日区间误拒。
+	if end.After(start.AddDate(0, 0, MaxRangeDays)) {
 		return Period{}, ErrRangeTooLong
 	}
 

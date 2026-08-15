@@ -19,6 +19,9 @@ func TestParsePeriod_EndDateIsInclusive(t *testing.T) {
 		"end 必须是 end_date 次日零点（右开），否则会漏掉最后一天")
 }
 
+// 这条断言不可被「和上面那条 +08:00 的断言重复」为由简化掉：单点的 +08:00 断言在服务器时区
+// 恰好也是 Asia/Shanghai 的机器上不会红（实测过：把实现换成忽略 userTZ 的服务器时区解析，
+// 只有这条跨时区比较变红）。只有拿两个不同时区互相比较，才与服务器时区取值无关。
 func TestParsePeriod_UserTimezoneShiftsBoundary(t *testing.T) {
 	t.Parallel()
 	sh, err := ParsePeriod("2026-08-15", "2026-08-15", "Asia/Shanghai", time.Now())
@@ -98,6 +101,36 @@ func TestParsePeriod_DefaultsToCurrentMonthInUserTimezone(t *testing.T) {
 
 	days := int(end.Sub(start).Hours()/24) + 1
 	require.Equal(t, p.Start.AddDate(0, 0, days), p.End, "End 仍是 end_date 次日零点")
+}
+
+func TestParsePeriod_DefaultsUseInjectedNow(t *testing.T) {
+	t.Parallel()
+	// 该时刻在 UTC 是 03-14，在上海已经跨到 03-15，默认区间的终点必须跟着用户时区走
+	now := time.Date(2026, 3, 14, 20, 0, 0, 0, time.UTC)
+
+	sh, err := ParsePeriod("", "", "Asia/Shanghai", now)
+	require.NoError(t, err)
+	require.Equal(t, "2026-03-01", sh.StartDate, "默认区间起点是 now 所在月的 1 日，按传入的 now 算")
+	require.Equal(t, "2026-03-15", sh.EndDate, "默认区间终点是 now 在用户时区里的当天")
+	require.Equal(t, "2026-03-01T00:00:00+08:00", sh.Start.Format(time.RFC3339))
+	require.Equal(t, "2026-03-16T00:00:00+08:00", sh.End.Format(time.RFC3339))
+
+	utc, err := ParsePeriod("", "", "UTC", now)
+	require.NoError(t, err)
+	require.Equal(t, "2026-03-14", utc.EndDate, "同一时刻在 UTC 还是 03-14")
+}
+
+func TestParsePeriod_DSTFallBackDoesNotShrinkLimit(t *testing.T) {
+	t.Parallel()
+	// 纽约 2026-11-01 夏令时回拨，那天有 25 小时。10-01→12-31 是整 92 个自然日，
+	// 但墙上时长是 92*24h+1h：上限必须按自然日判，按时长判会把这个合法区间误拒。
+	p, err := ParsePeriod("2026-10-01", "2026-12-31", "America/New_York", time.Now())
+	require.NoError(t, err, "跨夏令时回拨的整 92 天必须放行")
+	require.Equal(t, 92*24*time.Hour+time.Hour, p.End.Sub(p.Start),
+		"这段区间的墙上时长确实超过 92*24h，正是时长比较会误判的原因")
+
+	_, err = ParsePeriod("2026-09-30", "2026-12-31", "America/New_York", time.Now())
+	require.ErrorIs(t, err, ErrRangeTooLong, "同一时区下 93 个自然日仍然必须拒绝")
 }
 
 func TestCurBeyondRetention(t *testing.T) {
