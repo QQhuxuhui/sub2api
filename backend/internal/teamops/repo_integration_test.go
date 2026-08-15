@@ -5,6 +5,7 @@ package teamops_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
+	"github.com/Wei-Shaw/sub2api/internal/teamops"
 	// lib/pq 既提供 database/sql 的 "postgres" 驱动（init 注册），也提供 pq.Array / pq.Error。
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
@@ -207,4 +209,594 @@ func TestTeamKeyOwnersTableExists(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+// ============================================================================
+// 分组查询（Repo.ListRows / Repo.Summary）
+// ============================================================================
+
+func TestListRows_GroupsByOwnerOrKeyName(t *testing.T) {
+	ctx := context.Background() // 迁移已在 TestMain 跑过一次，这里不要重复调 ApplyMigrations
+	seedBasic(t, ctx)
+
+	repo := teamops.NewRepo(integrationDB)
+	cur, err := teamops.ParsePeriod("2026-08-01", "2026-08-15", "UTC", time.Now())
+	require.NoError(t, err)
+	rows, total, err := repo.ListRows(ctx, teamops.RowQuery{
+		UserID: 1, Cur: cur, Prev: teamops.DerivePrev(cur),
+		Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 3, total, "王磊(2把合并) + 李然(未设归属) + 张三(未设归属) = 3 行")
+
+	byKey := map[string]teamops.Row{}
+	for _, r := range rows {
+		byKey[r.GroupKey] = r
+	}
+
+	wl, ok := byKey["o:王磊"]
+	require.True(t, ok, "有归属的按 'o:'+lower(归属) 分组")
+	require.Equal(t, "王磊", wl.DisplayName)
+	require.True(t, wl.ByOwner)
+	require.Equal(t, 2, wl.KeyCount)
+	require.InDelta(t, 300.0, wl.CurrentCost, 0.0001)
+
+	lr, ok := byKey["k:3"]
+	require.True(t, ok, "没归属的按 'k:'+api_key_id 分组")
+	require.Equal(t, "李然", lr.DisplayName, "没归属时显示名 = 令牌名")
+	require.False(t, lr.ByOwner)
+}
+
+func TestListRows_SameNamedKeysDoNotMerge(t *testing.T) {
+	ctx := context.Background() // 迁移已在 TestMain 跑过一次，这里不要重复调 ApplyMigrations
+	seedSameName(t, ctx)        // 两把都叫「测试」、都没归属
+
+	repo := teamops.NewRepo(integrationDB)
+	cur, err := teamops.ParsePeriod("2026-08-01", "2026-08-15", "UTC", time.Now())
+	require.NoError(t, err)
+	_, total, err := repo.ListRows(ctx, teamops.RowQuery{
+		UserID: 2, Cur: cur, Prev: teamops.DerivePrev(cur),
+		Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total, "两把同名但未设归属的令牌必须各自成行，不能误合并")
+}
+
+// TestListRows_OwnerNameCollidingWithSyntheticKey 钉住 'o:' / 'k:' 类型前缀。
+//
+// 断言选的是「两行不合并」，不是「group_key 唯一」：GROUP BY 天然保证每个键只出一行，
+// 所以「唯一」这条无论实现怎么错都不会红，等于没有守卫。前缀塌掉（比如归属侧不带 'o:'）
+// 的真实后果是归属名 "k:7" 与令牌 7 的合成键撞成同一个值、两行被合并成一行，
+// 总行数从 2 掉到 1 —— 这才是能红的断言。
+func TestListRows_OwnerNameCollidingWithSyntheticKey(t *testing.T) {
+	ctx := context.Background() // 迁移已在 TestMain 跑过一次，这里不要重复调 ApplyMigrations
+	seedCollision(t, ctx)       // 令牌 id=7 无归属；另一把令牌归属名恰好是 "k:7"
+
+	repo := teamops.NewRepo(integrationDB)
+	cur, err := teamops.ParsePeriod("2026-08-01", "2026-08-15", "UTC", time.Now())
+	require.NoError(t, err)
+	rows, total, err := repo.ListRows(ctx, teamops.RowQuery{
+		UserID: 3, Cur: cur, Prev: teamops.DerivePrev(cur),
+		Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total, "归属名 'k:7' 与令牌 7 的合成键必须落在不同的分组键上")
+
+	seen := map[string]int{}
+	byName := map[string]teamops.Row{}
+	for _, r := range rows {
+		seen[r.GroupKey]++
+		byName[r.DisplayName] = r
+	}
+	for k, n := range seen {
+		require.Equal(t, 1, n, "group_key %q 出现了 %d 次，必须唯一", k, n)
+	}
+	require.Contains(t, byName, "七号令牌", "无归属的令牌 7 单独成行")
+	require.Contains(t, byName, "k:7", "归属名叫 'k:7' 的那一行单独成行")
+	require.InDelta(t, 3.0, byName["七号令牌"].CurrentCost, 0.0001)
+	require.InDelta(t, 4.0, byName["k:7"].CurrentCost, 0.0001)
+}
+
+func TestSummaryEqualsSumOfRows(t *testing.T) {
+	ctx := context.Background() // 迁移已在 TestMain 跑过一次，这里不要重复调 ApplyMigrations
+	seedBasic(t, ctx)
+
+	repo := teamops.NewRepo(integrationDB)
+	cur, err := teamops.ParsePeriod("2026-08-01", "2026-08-15", "UTC", time.Now())
+	require.NoError(t, err)
+	prev := teamops.DerivePrev(cur)
+
+	rows, _, err := repo.ListRows(ctx, teamops.RowQuery{
+		UserID: 1, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 1000,
+	})
+	require.NoError(t, err)
+	s, err := repo.Summary(ctx, 1, cur, prev)
+	require.NoError(t, err)
+
+	var sum float64
+	for _, r := range rows {
+		sum += r.CurrentCost
+	}
+	require.InDelta(t, s.TotalCost, sum, 1e-9, "恒等式：Σ各行 == 总额")
+	// 只断恒等式的话，两边一起塌成 0 也是绿的。钉住绝对值，金额列取错（total_cost 恒为 0）
+	// 或区间写错都会红。
+	require.InDelta(t, 360.0, s.TotalCost, 1e-9, "seedBasic 的四条日志合计 360")
+	require.Equal(t, 3, s.RowCount)
+	require.Equal(t, 4, s.KeyCount)
+	require.Equal(t, 2, s.OwnedKeyCount, "只有令牌 1、2 设了归属")
+	require.InDelta(t, 300.0, s.TopRowCost, 1e-9, "最大一行是王磊的 300")
+}
+
+// ---------------------------------------------------------------------------
+// seed 辅助：直接裸 SQL 造数据。每组测试用**独立的 user_id 段**做隔离，
+// 并用 t.Cleanup 删掉自己造的行，保证 go test -count=2 第二轮不撞主键。
+// 造数据一律不改 schema（不 ALTER TABLE / DROP CONSTRAINT）：这是共享测试容器，
+// 改了就永久污染，同包后续测试全跑在被改过的库上。
+// ---------------------------------------------------------------------------
+
+func seedUser(t *testing.T, ctx context.Context, userID int64) {
+	t.Helper()
+	_, err := integrationDB.ExecContext(ctx, `
+		INSERT INTO users (id, email, password_hash, role, status)
+		VALUES ($1, $2, 'x', 'user', 'active') ON CONFLICT (id) DO NOTHING
+	`, userID, fmt.Sprintf("u%d@example.com", userID))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		// api_keys.user_id 与 usage_logs.user_id 都是 ON DELETE CASCADE，删用户即连根拔起。
+		_, _ = integrationDB.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, userID)
+	})
+}
+
+func seedKey(t *testing.T, ctx context.Context, id, userID int64, name string) {
+	t.Helper()
+	_, err := integrationDB.ExecContext(ctx, `
+		INSERT INTO api_keys (id, user_id, key, name, status)
+		VALUES ($1, $2, $3, $4, 'active')
+	`, id, userID, fmt.Sprintf("sk-test-%d", id), name)
+	require.NoError(t, err)
+}
+
+// softDeleteKey 把令牌标成软删。软删令牌的消耗仍要计入金额、但不计入「几把令牌」，
+// 需要这个状态的测试用它，不要去 DELETE 物理行。
+func softDeleteKey(t *testing.T, ctx context.Context, id int64) {
+	t.Helper()
+	res, err := integrationDB.ExecContext(ctx,
+		`UPDATE api_keys SET deleted_at = NOW() WHERE id = $1`, id)
+	require.NoError(t, err)
+	n, err := res.RowsAffected()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n, "软删的令牌必须存在，否则测试在造一个空状态")
+}
+
+// account_id 不能硬编码成 1：usage_logs.account_id 是
+//
+//	account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE，
+//
+// 而 teamops 用的是全新空库、accounts 零行 —— 硬编码会让每个集成测试第一次运行就报 23503。
+// accounts.type 同样是 NOT NULL 且没有默认值，必须显式给。
+var seededAccountID int64
+
+func ensureAccount(t *testing.T, ctx context.Context) int64 {
+	t.Helper()
+	if seededAccountID != 0 {
+		return seededAccountID
+	}
+	err := integrationDB.QueryRowContext(ctx, `
+		INSERT INTO accounts (name, platform, type, status)
+		VALUES ('teamops-test', 'anthropic', 'apikey', 'active')
+		RETURNING id
+	`).Scan(&seededAccountID)
+	require.NoError(t, err, "建 account 失败——先确认 accounts 表的必填列，照 001_init.sql 补齐")
+	return seededAccountID
+}
+
+// seedLog 只写 actual_cost。total_cost 留默认 0，于是「金额列取错」这类改动会让所有
+// 金额断言掉到 0 而变红。request_id 拼进了时间戳：usage_logs 上有
+// UNIQUE (request_id, api_key_id)，同一把令牌同一时刻插两条会撞唯一索引。
+func seedLog(t *testing.T, ctx context.Context, userID, keyID int64, cost float64, at time.Time) {
+	t.Helper()
+	accountID := ensureAccount(t, ctx)
+	_, err := integrationDB.ExecContext(ctx, `
+		INSERT INTO usage_logs (user_id, api_key_id, account_id, request_id, model, actual_cost, created_at)
+		VALUES ($1, $2, $3, $4, 'test-model', $5, $6)
+	`, userID, keyID, accountID, fmt.Sprintf("req-%d-%d-%d", userID, keyID, at.UnixNano()), cost, at)
+	require.NoError(t, err)
+}
+
+// seedOwner 必须自带清理：team_key_owners 不挂外键，删用户不会级联到它，
+// 少了这个 Cleanup，go test -count=2 第二轮就会撞 api_key_id 主键。
+func seedOwner(t *testing.T, ctx context.Context, keyID, userID int64, owner string) {
+	t.Helper()
+	_, err := integrationDB.ExecContext(ctx, `
+		INSERT INTO team_key_owners (api_key_id, user_id, owner_name) VALUES ($1, $2, $3)
+	`, keyID, userID, owner)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(),
+			`DELETE FROM team_key_owners WHERE api_key_id = $1`, keyID)
+	})
+}
+
+var (
+	inPeriod   = time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	inPeriod2  = time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	inPrevOnly = time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) // 落在 DerivePrev 推出的上期里
+)
+
+func seedBasic(t *testing.T, ctx context.Context) {
+	seedUser(t, ctx, 1)
+	seedKey(t, ctx, 1, 1, "王磊")
+	seedKey(t, ctx, 2, 1, "王磊-批处理")
+	seedKey(t, ctx, 3, 1, "李然")
+	seedKey(t, ctx, 4, 1, "张三")
+	seedOwner(t, ctx, 1, 1, "王磊")
+	seedOwner(t, ctx, 2, 1, "王磊")
+	seedLog(t, ctx, 1, 1, 200.0, inPeriod)
+	seedLog(t, ctx, 1, 2, 100.0, inPeriod)
+	seedLog(t, ctx, 1, 3, 50.0, inPeriod)
+	seedLog(t, ctx, 1, 4, 10.0, inPeriod)
+}
+
+func seedSameName(t *testing.T, ctx context.Context) {
+	seedUser(t, ctx, 2)
+	seedKey(t, ctx, 11, 2, "测试")
+	seedKey(t, ctx, 12, 2, "测试")
+	seedLog(t, ctx, 2, 11, 5.0, inPeriod)
+	seedLog(t, ctx, 2, 12, 7.0, inPeriod)
+}
+
+func seedCollision(t *testing.T, ctx context.Context) {
+	seedUser(t, ctx, 3)
+	seedKey(t, ctx, 7, 3, "七号令牌") // 无归属 → group_key 会是 "k:7"
+	seedKey(t, ctx, 8, 3, "撞名令牌")
+	seedOwner(t, ctx, 8, 3, "k:7") // 归属名恰好等于另一把令牌的合成键
+	seedLog(t, ctx, 3, 7, 3.0, inPeriod)
+	seedLog(t, ctx, 3, 8, 4.0, inPeriod)
+}
+
+// ---------------------------------------------------------------------------
+// 以下测试补的是「brief 那四条测不到、但改坏了会静默上线」的部分：
+// 上期窗口、请求数、软删语义、翻页 tiebreaker、搜索、排序分支、跨用户隔离。
+// 每条都做过「实现改坏这条会不会红」的自检，结论记在
+// .superpowers/sdd/2026-08-15-team-usage-console/task-3-report.md。
+// ---------------------------------------------------------------------------
+
+func newTestPeriods(t *testing.T) (teamops.Period, teamops.Period) {
+	t.Helper()
+	cur, err := teamops.ParsePeriod("2026-08-01", "2026-08-15", "UTC", time.Now())
+	require.NoError(t, err)
+	return cur, teamops.DerivePrev(cur)
+}
+
+func listRows(t *testing.T, ctx context.Context, q teamops.RowQuery) ([]teamops.Row, int64) {
+	t.Helper()
+	rows, total, err := teamops.NewRepo(integrationDB).ListRows(ctx, q)
+	require.NoError(t, err)
+	return rows, total
+}
+
+func rowsByGroupKey(rows []teamops.Row) map[string]teamops.Row {
+	m := map[string]teamops.Row{}
+	for _, r := range rows {
+		m[r.GroupKey] = r
+	}
+	return m
+}
+
+func groupKeys(rows []teamops.Row) []string {
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.GroupKey)
+	}
+	return out
+}
+
+// seedPrevPeriod 造一把跨两个区间都有消耗的令牌：本期 2 笔共 30，上期 1 笔 7。
+// 上期与本期的金额、笔数都不相等，所以「上期窗口取成了本期」这种错会被算出来。
+func seedPrevPeriod(t *testing.T, ctx context.Context) {
+	seedUser(t, ctx, 4)
+	seedKey(t, ctx, 20, 4, "跨期令牌")
+	seedLog(t, ctx, 4, 20, 10.0, inPeriod)
+	seedLog(t, ctx, 4, 20, 20.0, inPeriod2)
+	seedLog(t, ctx, 4, 20, 7.0, inPrevOnly)
+}
+
+func TestListRows_SplitsCurrentAndPreviousPeriod(t *testing.T) {
+	ctx := context.Background()
+	seedPrevPeriod(t, ctx)
+
+	cur, prev := newTestPeriods(t)
+	rows, total := listRows(t, ctx, teamops.RowQuery{
+		UserID: 4, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.EqualValues(t, 1, total)
+	row := rowsByGroupKey(rows)["k:20"]
+
+	require.InDelta(t, 30.0, row.CurrentCost, 1e-9, "本期只认落在 [Cur.Start, Cur.End) 里的两笔")
+	require.InDelta(t, 7.0, row.PrevCost, 1e-9, "上期那笔在 7-20，只有 Prev 窗口能框住它")
+	require.EqualValues(t, 2, row.Requests)
+	require.EqualValues(t, 1, row.PrevRequests)
+}
+
+func TestSummary_SplitsCurrentAndPreviousPeriod(t *testing.T) {
+	ctx := context.Background()
+	seedPrevPeriod(t, ctx)
+
+	cur, prev := newTestPeriods(t)
+	s, err := teamops.NewRepo(integrationDB).Summary(ctx, 4, cur, prev)
+	require.NoError(t, err)
+	require.InDelta(t, 30.0, s.TotalCost, 1e-9)
+	require.InDelta(t, 7.0, s.PrevCost, 1e-9)
+	require.EqualValues(t, 2, s.Requests)
+	require.EqualValues(t, 1, s.PrevRequests)
+}
+
+// seedSoftDeleted 造两组：
+//   - o:赵六 —— 一把在、一把软删，用来分「金额算进来」和「令牌数不算」两件事。
+//   - k:32   —— 唯一一把且已软删，整组是「令牌都没了但账还在」。
+func seedSoftDeleted(t *testing.T, ctx context.Context) {
+	seedUser(t, ctx, 5)
+	seedKey(t, ctx, 30, 5, "赵六-主力")
+	seedKey(t, ctx, 31, 5, "赵六-已删")
+	seedKey(t, ctx, 32, 5, "孤儿已删")
+	seedOwner(t, ctx, 30, 5, "赵六")
+	seedOwner(t, ctx, 31, 5, "赵六")
+	seedLog(t, ctx, 5, 30, 12.0, inPeriod)
+	seedLog(t, ctx, 5, 31, 8.0, inPeriod)
+	seedLog(t, ctx, 5, 32, 3.0, inPeriod)
+	softDeleteKey(t, ctx, 31)
+	softDeleteKey(t, ctx, 32)
+}
+
+func TestListRows_SoftDeletedKeyCostStillCounts(t *testing.T) {
+	ctx := context.Background()
+	seedSoftDeleted(t, ctx)
+
+	cur, prev := newTestPeriods(t)
+	rows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 5, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	byKey := rowsByGroupKey(rows)
+	require.Contains(t, byKey, "o:赵六")
+	require.InDelta(t, 20.0, byKey["o:赵六"].CurrentCost, 1e-9,
+		"钱花掉了就是花掉了：软删令牌的 8 必须仍然计入归属组的金额")
+}
+
+func TestListRows_SoftDeletedKeyNotCountedInKeyCount(t *testing.T) {
+	ctx := context.Background()
+	seedSoftDeleted(t, ctx)
+
+	cur, prev := newTestPeriods(t)
+	rows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 5, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	row := rowsByGroupKey(rows)["o:赵六"]
+	require.Equal(t, 1, row.KeyCount, "只剩 1 把没被软删")
+	require.Equal(t, 2, row.KeyCountAll, "历史上一共 2 把")
+	require.False(t, row.AllDeleted, "还有一把活着")
+}
+
+func TestListRows_GroupWithOnlyDeletedKeysIsMarked(t *testing.T) {
+	ctx := context.Background()
+	seedSoftDeleted(t, ctx)
+
+	cur, prev := newTestPeriods(t)
+	rows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 5, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	row := rowsByGroupKey(rows)["k:32"]
+	require.True(t, row.AllDeleted)
+	require.Equal(t, 0, row.KeyCount)
+	require.Equal(t, 1, row.KeyCountAll)
+	require.InDelta(t, 3.0, row.CurrentCost, 1e-9)
+	require.Nil(t, row.MaskedKey,
+		"软删令牌的 key 已被改写成 __deleted__<id>__<nano>，掩码不能出这种码")
+}
+
+func TestSummary_KeyCountExcludesSoftDeleted(t *testing.T) {
+	ctx := context.Background()
+	seedSoftDeleted(t, ctx)
+
+	cur, prev := newTestPeriods(t)
+	s, err := teamops.NewRepo(integrationDB).Summary(ctx, 5, cur, prev)
+	require.NoError(t, err)
+	require.Equal(t, 1, s.KeyCount, "3 把里只有 1 把没被软删")
+	require.Equal(t, 1, s.OwnedKeyCount, "设了归属且没被软删的只有令牌 30")
+	require.InDelta(t, 23.0, s.TotalCost, 1e-9, "软删不影响金额口径")
+}
+
+func TestListRows_MaskedKeyOnlyForSingleLiveKeyGroup(t *testing.T) {
+	ctx := context.Background()
+	seedBasic(t, ctx)
+
+	cur, prev := newTestPeriods(t)
+	rows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 1, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	byKey := rowsByGroupKey(rows)
+
+	require.Nil(t, byKey["o:王磊"].MaskedKey, "合并了 2 把令牌的组不该出任何一把的掩码")
+	require.NotNil(t, byKey["k:3"].MaskedKey)
+	require.Equal(t, teamops.MaskKey("sk-test-3"), *byKey["k:3"].MaskedKey)
+}
+
+// tiebreakGroups 是等额分组的个数。刻意取大：8 个分组时，规划器碰巧就按 group_key
+// 顺序吐行，把 `, group_key ASC` 整条删掉测试照样绿 —— 那样的测试等于没守。
+// 分组多到几十个之后，HashAggregate 的出行顺序（按哈希桶）不可能再与字典序重合，
+// 删掉 tiebreaker 必红。带 tiebreaker 的正确实现顺序是完全确定的，所以调大不引入抖动。
+const tiebreakGroups = 30
+
+// seedTiebreak 造 tiebreakGroups 个等额分组，且**归属名的字典序与令牌 id 顺序相反**，
+// 免得「按 id 出行」这种顺序碰巧与期望一致。
+func seedTiebreak(t *testing.T, ctx context.Context) {
+	seedUser(t, ctx, 7)
+	for i := 0; i < tiebreakGroups; i++ {
+		keyID := int64(300 + i)
+		seedKey(t, ctx, keyID, 7, fmt.Sprintf("等额令牌-%d", i))
+		seedOwner(t, ctx, keyID, 7, fmt.Sprintf("u%02d", tiebreakGroups-1-i))
+		seedLog(t, ctx, 7, keyID, 1.0, inPeriod)
+	}
+}
+
+func TestListRows_EqualCostRowsPaginateWithStableTiebreaker(t *testing.T) {
+	ctx := context.Background()
+	seedTiebreak(t, ctx)
+
+	const pageSize = 10
+	cur, prev := newTestPeriods(t)
+	page := func(n int) []string {
+		rows, total := listRows(t, ctx, teamops.RowQuery{
+			UserID: 7, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: n, PageSize: pageSize,
+		})
+		require.EqualValues(t, tiebreakGroups, total)
+		return groupKeys(rows)
+	}
+
+	// 期望序列就是 group_key 的字典序切片：金额全相等，顺序只能由 tiebreaker 决定。
+	want := make([]string, 0, tiebreakGroups)
+	for i := 0; i < tiebreakGroups; i++ {
+		want = append(want, fmt.Sprintf("o:u%02d", i))
+	}
+	require.Equal(t, want[:pageSize], page(1))
+	require.Equal(t, want[pageSize:2*pageSize], page(2), "第二页必须紧接第一页，不重不漏")
+	require.Equal(t, want[2*pageSize:], page(3))
+}
+
+func seedSearch(t *testing.T, ctx context.Context) {
+	seedUser(t, ctx, 8)
+	seedKey(t, ctx, 50, 8, "支付网关")
+	seedKey(t, ctx, 51, 8, "结算脚本")
+	seedKey(t, ctx, 52, 8, "闲置令牌") // 本期零消耗，仍要成行
+	seedOwner(t, ctx, 50, 8, "钱七")
+	seedLog(t, ctx, 8, 50, 9.0, inPeriod)
+	seedLog(t, ctx, 8, 51, 6.0, inPeriod)
+}
+
+func TestListRows_Search(t *testing.T) {
+	ctx := context.Background()
+	seedSearch(t, ctx)
+	cur, prev := newTestPeriods(t)
+
+	query := func(q string) ([]teamops.Row, int64) {
+		return listRows(t, ctx, teamops.RowQuery{
+			UserID: 8, Cur: cur, Prev: prev, Sort: "cost", Order: "desc",
+			Page: 1, PageSize: 50, Q: q,
+		})
+	}
+
+	t.Run("空搜索不过滤", func(t *testing.T) {
+		rows, total := query("")
+		require.EqualValues(t, 3, total, "零消耗的令牌也要成行，否则用户看不到闲置的令牌")
+		require.Len(t, rows, 3)
+	})
+	t.Run("按归属名搜", func(t *testing.T) {
+		rows, total := query("钱七")
+		require.EqualValues(t, 1, total)
+		require.Equal(t, []string{"o:钱七"}, groupKeys(rows))
+	})
+	t.Run("按令牌名搜", func(t *testing.T) {
+		rows, total := query("结算")
+		require.EqualValues(t, 1, total)
+		require.Equal(t, []string{"k:51"}, groupKeys(rows))
+	})
+	t.Run("按密钥尾号搜", func(t *testing.T) {
+		rows, total := query("t-52")
+		require.EqualValues(t, 1, total)
+		require.Equal(t, []string{"k:52"}, groupKeys(rows))
+	})
+	t.Run("搜不到就是空", func(t *testing.T) {
+		rows, total := query("查无此人")
+		require.EqualValues(t, 0, total)
+		require.Empty(t, rows)
+	})
+}
+
+func TestListRows_OnlyReturnsCallersOwnKeys(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 9)
+	seedUser(t, ctx, 10)
+	seedKey(t, ctx, 60, 9, "我的令牌")
+	seedKey(t, ctx, 61, 10, "别人的令牌")
+	seedLog(t, ctx, 9, 60, 5.0, inPeriod)
+	seedLog(t, ctx, 10, 61, 500.0, inPeriod)
+
+	cur, prev := newTestPeriods(t)
+	rows, total := listRows(t, ctx, teamops.RowQuery{
+		UserID: 9, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.EqualValues(t, 1, total, "只能看到自己的令牌")
+	require.Equal(t, []string{"k:60"}, groupKeys(rows))
+	require.InDelta(t, 5.0, rows[0].CurrentCost, 1e-9, "别人的 500 不能漏进来")
+}
+
+// 排序名用纯 ASCII：中文的字典序取决于数据库 collation，钉住它等于钉住容器镜像的 locale。
+func TestListRows_SortByName(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 11)
+	seedKey(t, ctx, 70, 11, "charlie")
+	seedKey(t, ctx, 71, 11, "alpha")
+	seedKey(t, ctx, 72, 11, "bravo")
+	seedLog(t, ctx, 11, 70, 100.0, inPeriod) // 金额顺序与名字顺序刻意相反
+	seedLog(t, ctx, 11, 71, 10.0, inPeriod)
+	seedLog(t, ctx, 11, 72, 50.0, inPeriod)
+
+	cur, prev := newTestPeriods(t)
+	names := func(order string) []string {
+		rows, _ := listRows(t, ctx, teamops.RowQuery{
+			UserID: 11, Cur: cur, Prev: prev, Sort: "name", Order: order, Page: 1, PageSize: 50,
+		})
+		out := make([]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, r.DisplayName)
+		}
+		return out
+	}
+	require.Equal(t, []string{"alpha", "bravo", "charlie"}, names("asc"))
+	require.Equal(t, []string{"charlie", "bravo", "alpha"}, names("desc"))
+}
+
+func TestListRows_SortByDeltaPutsNoBaselineRowsLast(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 12)
+	seedKey(t, ctx, 80, 12, "翻倍")
+	seedKey(t, ctx, 81, 12, "微涨")
+	seedKey(t, ctx, 82, 12, "新令牌")
+	seedLog(t, ctx, 12, 80, 200.0, inPeriod)
+	seedLog(t, ctx, 12, 80, 100.0, inPrevOnly)
+	seedLog(t, ctx, 12, 81, 110.0, inPeriod)
+	seedLog(t, ctx, 12, 81, 100.0, inPrevOnly)
+	seedLog(t, ctx, 12, 82, 150.0, inPeriod) // 上期为 0：环比无基数
+
+	cur, prev := newTestPeriods(t)
+	rows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 12, Cur: cur, Prev: prev, Sort: "delta", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.Equal(t, []string{"k:80", "k:81", "k:82"}, groupKeys(rows),
+		"按环比降序：+100% > +10% > 无基数（NULLS LAST 沉底，不能因为金额大就排前面）")
+}
+
+// TestListRows_OwnerNamesNormalizeBeforeGrouping 钉住分组键归属侧的
+// lower(btrim(normalize(owner_name, NFC)))：这三层缺一层，"Alice" 与 "alice"、
+// 或者两种 Unicode 写法的同一个名字就会裂成两行。它同时也是与
+// migrations/196a_team_key_owners.sql 里表达式索引「逐字相同」的行为侧证据。
+func TestListRows_OwnerNamesNormalizeBeforeGrouping(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 13)
+	for i, owner := range []string{"Alice", "alice", " Alice ", "\u00e9", "e\u0301"} {
+		keyID := int64(90 + i)
+		seedKey(t, ctx, keyID, 13, fmt.Sprintf("令牌-%d", keyID))
+		seedOwner(t, ctx, keyID, 13, owner)
+		seedLog(t, ctx, 13, keyID, 1.0, inPeriod)
+	}
+
+	cur, prev := newTestPeriods(t)
+	rows, total := listRows(t, ctx, teamops.RowQuery{
+		UserID: 13, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.EqualValues(t, 2, total, "5 把令牌只该合成 2 个人：alice 与 é")
+	byKey := rowsByGroupKey(rows)
+	require.Contains(t, byKey, "o:alice", "大小写与两侧空格都不该产生新分组")
+	require.Equal(t, 3, byKey["o:alice"].KeyCount)
+	require.Contains(t, byKey, "o:\u00e9", "NFC 合成形是分组键的规范形")
+	require.Equal(t, 2, byKey["o:\u00e9"].KeyCount, "预组合 é 与 e+U+0301 是同一个人")
 }
