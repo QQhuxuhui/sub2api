@@ -293,6 +293,7 @@ g AS (
            SUM(kr.cur_req)   AS requests,
            SUM(kr.prev_req)  AS prev_requests,
            COUNT(*) FILTER (WHERE kr.deleted_at IS NULL) AS key_count,
+           COUNT(*) FILTER (WHERE kr.deleted_at IS NOT NULL) AS deleted_key_count,
            COUNT(*) FILTER (WHERE kr.deleted_at IS NULL
                               AND COALESCE(` + ownerNameExpr + `,'') <> '') AS owned_key_count
     FROM kr
@@ -302,7 +303,7 @@ g AS (
 )
 SELECT COALESCE(SUM(current_cost),0), COALESCE(SUM(prev_cost),0),
        COALESCE(MAX(current_cost),0), COUNT(*),
-       COALESCE(SUM(key_count),0), COALESCE(SUM(owned_key_count),0),
+       COALESCE(SUM(key_count),0), COALESCE(SUM(deleted_key_count),0), COALESCE(SUM(owned_key_count),0),
        COALESCE(SUM(requests),0), COALESCE(SUM(prev_requests),0)
 FROM g`
 
@@ -312,7 +313,7 @@ FROM g`
 	var s Summary
 	err := r.db.QueryRowContext(ctx, q, userID, cur.Start, cur.End, prev.Start, prev.End).Scan(
 		&s.TotalCost, &s.PrevCost, &s.TopRowCost, &s.RowCount,
-		&s.KeyCount, &s.OwnedKeyCount, &s.Requests, &s.PrevRequests,
+		&s.KeyCount, &s.DeletedKeyCount, &s.OwnedKeyCount, &s.Requests, &s.PrevRequests,
 	)
 	// 不要为 sql.ErrNoRows 开容错：这条 SELECT 没有 GROUP BY，聚合函数对空集也恒返回一行
 	// （COALESCE 把 NULL 兜成 0），ErrNoRows 结构性不可达。写了那个分支的害处在将来 ——

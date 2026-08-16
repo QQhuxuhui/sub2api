@@ -1392,3 +1392,32 @@ func TestListRows_LastUsedAtIgnoresSoftDeletedKeys(t *testing.T) {
 	require.Nil(t, row.LastUsedAt,
 		"存续的那把从没用过，就该是 —；显示软删那把的时间等于把两把令牌的属性混在一行")
 }
+
+// deleted_key_count 是对账条「含 N 把已删除令牌的历史消耗」的唯一数据来源。
+// KeyCount 只数存续令牌，前端从任何已下发字段都算不出 N。
+//
+// 关键：它必须与主查询的 HAVING 走同一份条件 —— 否则会把被 HAVING 滤掉的
+// 「零消耗软删令牌」也数进去，对账条写出的 N 比实际多。
+// 所以造型必须同时含「有消耗的软删」与「零消耗的软删」，两者数值不同才测得出来。
+func TestSummary_DeletedKeyCountCountsOnlyRowsThatSurviveHaving(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 26)
+	seedKey(t, ctx, 220, 26, "存续")
+	seedLog(t, ctx, 26, 220, 10.0, inPeriod)
+
+	seedKey(t, ctx, 221, 26, "删了但花过钱")
+	seedLog(t, ctx, 26, 221, 4.0, inPeriod)
+	softDeleteKey(t, ctx, 221)
+
+	seedKey(t, ctx, 222, 26, "删了且没花过钱") // 被 HAVING 滤掉，不该计入
+	softDeleteKey(t, ctx, 222)
+
+	cur, prev := newTestPeriods(t)
+	s, err := teamops.NewRepo(integrationDB).Summary(ctx, 26, cur, prev)
+	require.NoError(t, err)
+	require.Equal(t, 1, s.KeyCount, "只有 220 是存续的")
+	require.Equal(t, 1, s.DeletedKeyCount,
+		"只该数 221（成行的软删）；222 是零消耗软删、已被 HAVING 滤掉，数进去会让对账条的 N 偏大")
+	require.Equal(t, 2, s.RowCount)
+	require.InDelta(t, 14.0, s.TotalCost, 1e-9)
+}

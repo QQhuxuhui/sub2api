@@ -99,6 +99,7 @@ type SummaryDTO struct {
 	DeltaAbs         *float64          `json:"delta_abs"`
 	RowCount         int               `json:"row_count"`
 	KeyCount         int               `json:"key_count"`
+	DeletedKeyCount  int               `json:"deleted_key_count"`
 	OwnedKeyCount    int               `json:"owned_key_count"`
 	TopRowCost       float64           `json:"top_row_cost"`
 	RetentionWarning *RetentionWarning `json:"retention_warning"`
@@ -152,13 +153,14 @@ func (s *Service) Summary(ctx context.Context, userID int64, startDate, endDate,
 			EndDate:    pair.Prev.EndDate,
 			Comparable: pair.Comparable,
 		},
-		TotalCost:     roundCents(sum.TotalCost),
-		TotalCostRaw:  sum.TotalCost,
-		PrevCost:      roundCents(sum.PrevCost),
-		RowCount:      sum.RowCount,
-		KeyCount:      sum.KeyCount,
-		OwnedKeyCount: sum.OwnedKeyCount,
-		TopRowCost:    roundCents(sum.TopRowCost),
+		TotalCost:       roundCents(sum.TotalCost),
+		TotalCostRaw:    sum.TotalCost,
+		PrevCost:        roundCents(sum.PrevCost),
+		RowCount:        sum.RowCount,
+		KeyCount:        sum.KeyCount,
+		DeletedKeyCount: sum.DeletedKeyCount,
+		OwnedKeyCount:   sum.OwnedKeyCount,
+		TopRowCost:      roundCents(sum.TopRowCost),
 	}
 
 	if !pair.Comparable {

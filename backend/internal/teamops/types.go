@@ -63,12 +63,15 @@ type Conclusion struct {
 // 由 TestSummaryEqualsSumOfRows 钉住：两处口径一旦分叉，页面上就会出现
 // 「明细加起来不等于总数」这种没人能自查的账。
 type Summary struct {
-	TotalCost     float64
-	PrevCost      float64
-	TopRowCost    float64
-	RowCount      int
-	KeyCount      int
-	OwnedKeyCount int
-	Requests      int64
-	PrevRequests  int64
+	TotalCost  float64
+	PrevCost   float64
+	TopRowCost float64
+	RowCount   int
+	KeyCount   int
+	// DeletedKeyCount 是本期成行的分组里已软删的令牌数。对账条要写
+	// 「含 N 把已删除令牌的历史消耗」，而 KeyCount 只数存续令牌 —— 前端算不出 N。
+	DeletedKeyCount int
+	OwnedKeyCount   int
+	Requests        int64
+	PrevRequests    int64
 }
