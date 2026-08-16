@@ -149,6 +149,111 @@ func TestParsePeriod_DSTFallBackDoesNotShrinkLimit(t *testing.T) {
 	require.ErrorIs(t, err, ErrRangeTooLong, "同一时区下 93 个自然日仍然必须拒绝")
 }
 
+// 以下四条钉住「午夜不存在」的时区。America/Santiago 2026-09-06 与 America/Havana 2026-03-08
+// 的夏令时前拨都正好发生在 00:00：那一天的 00:00–00:59 整段不存在，00:00 直接跳到 01:00，
+// 而 time.Date 会把不存在的零点归一到**前一天** 23:00。
+//
+// 时区不可换成 UTC / Asia/Shanghai / America/New_York：那些时区里零点永远存在，
+// 正确实现与「直接解析本地零点再 AddDate」的错误实现产出逐字相同的结果，用例会变成空转。
+const (
+	santiagoGapDay = "2026-09-06" // 2026-09-06T00:00 不存在，当日首个有效时刻是 01:00-03:00
+	havanaGapDay   = "2026-03-08" // 2026-03-08T00:00 不存在，当日首个有效时刻是 01:00-04:00
+)
+
+func TestParsePeriod_MidnightGapDayStartsAtFirstValidInstant(t *testing.T) {
+	t.Parallel()
+	// 直接解析本地零点会得到 2026-09-05T23:00:00-04:00：起点掉进前一天，多查一小时；
+	// 右开边界同样被归一到 2026-09-06T23:00:00-04:00，请求日最后一小时的数据全漏。
+	p, err := ParsePeriod(santiagoGapDay, santiagoGapDay, "America/Santiago", time.Now())
+	require.NoError(t, err)
+	require.Equal(t, "2026-09-06T01:00:00-03:00", p.Start.Format(time.RFC3339), "起点是当日首个有效时刻")
+	require.Equal(t, "2026-09-07T00:00:00-03:00", p.End.Format(time.RFC3339), "右开边界是次日首个有效时刻")
+	require.Equal(t, santiagoGapDay, p.StartDate)
+	require.Equal(t, santiagoGapDay, p.EndDate, "展示日期不能跟着归一化退到前一天")
+
+	h, err := ParsePeriod(havanaGapDay, havanaGapDay, "America/Havana", time.Now())
+	require.NoError(t, err)
+	require.Equal(t, "2026-03-08T01:00:00-04:00", h.Start.Format(time.RFC3339))
+	require.Equal(t, "2026-03-09T00:00:00-04:00", h.End.Format(time.RFC3339))
+	require.Equal(t, havanaGapDay, h.StartDate)
+	require.Equal(t, havanaGapDay, h.EndDate)
+}
+
+func TestParsePeriod_DayBeforeMidnightGapKeepsItsLastHour(t *testing.T) {
+	t.Parallel()
+	// 缺口前一天的右开边界必须是缺口的另一端（09-06T01:00-03:00）。归一化会把它压回
+	// 09-05T23:00-04:00，于是 09-05 的最后一小时既不在这一天的区间里、也不在下一天的区间里。
+	prevDay, err := ParsePeriod("2026-09-05", "2026-09-05", "America/Santiago", time.Now())
+	require.NoError(t, err)
+	require.Equal(t, "2026-09-05T00:00:00-04:00", prevDay.Start.Format(time.RFC3339))
+	require.Equal(t, "2026-09-06T01:00:00-03:00", prevDay.End.Format(time.RFC3339))
+	require.Equal(t, "2026-09-05", prevDay.EndDate)
+
+	// 相邻两天首尾相接：既不留洞（缺口那一小时两边都查不到），也不重叠（同一笔算两次）
+	gapDay, err := ParsePeriod(santiagoGapDay, santiagoGapDay, "America/Santiago", time.Now())
+	require.NoError(t, err)
+	require.Equal(t, prevDay.End, gapDay.Start)
+
+	hPrevDay, err := ParsePeriod("2026-03-07", "2026-03-07", "America/Havana", time.Now())
+	require.NoError(t, err)
+	require.Equal(t, "2026-03-08T01:00:00-04:00", hPrevDay.End.Format(time.RFC3339))
+	require.Equal(t, "2026-03-07", hPrevDay.EndDate)
+}
+
+func TestDerivePrev_LandsOnFirstValidInstantOfMidnightGapDay(t *testing.T) {
+	t.Parallel()
+	// 上期正好落在缺口那一天：错误实现给出 2026-09-05T23:00:00-04:00，
+	// 界面上明写的对比区间跟着变成 09-05，与真实查询边界差一天。
+	cur, err := ParsePeriod("2026-09-07", "2026-09-07", "America/Santiago", time.Now())
+	require.NoError(t, err)
+	prev := DerivePrev(cur)
+	require.Equal(t, "2026-09-06T01:00:00-03:00", prev.Start.Format(time.RFC3339))
+	require.Equal(t, cur.Start, prev.End, "上期紧邻本期")
+	require.Equal(t, santiagoGapDay, prev.StartDate)
+	require.Equal(t, santiagoGapDay, prev.EndDate)
+	require.Equal(t, 1, naturalDaysBetween(t, prev.Start, prev.End), "仍是一整个自然日")
+
+	hCur, err := ParsePeriod("2026-03-09", "2026-03-09", "America/Havana", time.Now())
+	require.NoError(t, err)
+	hPrev := DerivePrev(hCur)
+	require.Equal(t, "2026-03-08T01:00:00-04:00", hPrev.Start.Format(time.RFC3339))
+	require.Equal(t, havanaGapDay, hPrev.StartDate)
+	require.Equal(t, havanaGapDay, hPrev.EndDate)
+}
+
+func TestDeriveCompare_MonthToDateEndingOnMidnightGapDay(t *testing.T) {
+	t.Parallel()
+	// 上月同期的最后一天正好是缺口那天。错误实现把右开边界算成 03-08T23:00-04:00，
+	// 既漏掉那天最后一小时，回推出来的 EndDate 还退到 03-07。
+	cur, err := ParsePeriod("2026-04-01", "2026-04-08", "America/Havana", time.Now())
+	require.NoError(t, err)
+	cmp := DeriveCompare(cur)
+	require.Equal(t, "2026-03-01", cmp.StartDate)
+	require.Equal(t, havanaGapDay, cmp.EndDate)
+	require.Equal(t, "2026-03-01T00:00:00-05:00", cmp.Start.Format(time.RFC3339))
+	require.Equal(t, "2026-03-09T00:00:00-04:00", cmp.End.Format(time.RFC3339))
+
+	sCur, err := ParsePeriod("2026-10-01", "2026-10-06", "America/Santiago", time.Now())
+	require.NoError(t, err)
+	sCmp := DeriveCompare(sCur)
+	require.Equal(t, "2026-09-01", sCmp.StartDate)
+	require.Equal(t, santiagoGapDay, sCmp.EndDate)
+	require.Equal(t, "2026-09-01T00:00:00-04:00", sCmp.Start.Format(time.RFC3339))
+	require.Equal(t, "2026-09-07T00:00:00-03:00", sCmp.End.Format(time.RFC3339))
+}
+
+func TestParsePeriod_RangeLimitCountsNaturalDaysAcrossMidnightGap(t *testing.T) {
+	t.Parallel()
+	// 07-01–09-30 是整 92 个自然日，但因为 09-06 少了一小时，墙上时长是 92*24h-1h。
+	// 上限按自然日判，不按时长判 —— 反过来也一样：少一小时不能让 93 天变成合法。
+	p, err := ParsePeriod("2026-07-01", "2026-09-30", "America/Santiago", time.Now())
+	require.NoError(t, err, "整 92 天必须放行")
+	require.Equal(t, 92*24*time.Hour-time.Hour, p.End.Sub(p.Start), "缺口让这段墙上时长少了一小时")
+
+	_, err = ParsePeriod("2026-06-30", "2026-09-30", "America/Santiago", time.Now())
+	require.ErrorIs(t, err, ErrRangeTooLong, "93 个自然日仍然必须拒绝")
+}
+
 // 以下四条覆盖设计文档 §4.4 的对比区间规则。后端只收到 start_date/end_date、收不到 preset 名，
 // 所以 DeriveCompare 只能从日期形态推断周期类型。
 func TestDeriveCompare_MonthToDateUsesPreviousMonthSameDays(t *testing.T) {
