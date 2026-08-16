@@ -1173,3 +1173,87 @@ func TestListRows_PeriodBoundariesAreHalfOpen(t *testing.T) {
 	require.InDelta(t, wantCur, s.TotalCost, 1e-9, "Summary 与 ListRows 必须同一份窗口")
 	require.InDelta(t, wantPrev, s.PrevCost, 1e-9)
 }
+
+// P0-4：归属名的剪除集与 NFC 归一必须四处一致。
+//
+// btrim(string) 的默认剪除集只有 U+0020。而 migrations/196a 的 CHECK 用的是扩展剪除集
+// E' \t\n\r 　'，于是「　王磊　」(U+3000) 和「 王磊 」(NBSP) 都能合法入库，
+// 查询侧却把它们当成三个不同的名字——同一个人在看板上裂成三行，display_name 还带着
+// 不可见 padding。真库实测：修复前 total=3，ASCII 对照组 total=1。
+//
+// 选例必须用**非 ASCII 空白**：TestListRows_DisplayNameIsTrimmed 用的是 " 周八 "，
+// 纯 ASCII 在默认剪除集下本来就能剪掉，那条用例对本缺陷完全无感。
+func TestListRows_TrimsNonASCIIWhitespaceInOwnerName(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 21)
+	// 全部写成显式转义：U+3000 与 U+00A0 在编辑器里与普通空格无法区分，
+	// 用字面量的话，一次「清理尾随空白」的批量格式化就能把这条用例变成 4 个相同的名字。
+	paddedNames := []string{
+		"王磊",
+		"\u3000王磊\u3000", // 全角空格
+		"\u00a0王磊\u00a0", // NBSP
+		"\t王磊\n",         // 制表 + 换行
+	}
+	for _, n := range paddedNames[1:] {
+		require.NotEqual(t, paddedNames[0], n, "padding 必须真的存在，否则本用例什么都没测")
+	}
+	for i, owner := range paddedNames {
+		keyID := int64(170 + i)
+		seedKey(t, ctx, keyID, 21, fmt.Sprintf("令牌-%d", keyID))
+		seedOwner(t, ctx, keyID, 21, owner)
+		seedLog(t, ctx, 21, keyID, 2.0, inPeriod)
+	}
+
+	cur, prev := newTestPeriods(t)
+	rows, total := listRows(t, ctx, teamops.RowQuery{
+		UserID: 21, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.EqualValues(t, 1, total,
+		"全角空格、NBSP、制表、换行 padding 都不该产生新分组，实得分组键 %v", groupKeys(rows))
+	require.Equal(t, "o:王磊", rows[0].GroupKey)
+	// 断字面量相等而不是 Contains：display_name 走的是 MAX(ownerNameExpr)，
+	// 剪除集漏一个字符时它会带着不可见 padding 原样下发给前端，而 Contains 照样通过。
+	require.Equal(t, "王磊", rows[0].DisplayName,
+		"display_name 必须与分组键同一份规范形，不能带不可见 padding")
+	require.Equal(t, 4, rows[0].KeyCount)
+	require.InDelta(t, 8.0, rows[0].CurrentCost, 1e-9)
+}
+
+// P0-4 附带：搜索与 display_name 也必须走 normalize(..., NFC)。
+//
+// 修复前 normalize 只出现在分组键里，于是 NFD 形式落库的 "José" 在列表里看得见
+// （display_name 原样返回 NFD），按 NFC 搜索却是 0 行——用户看得见的名字搜不出来。
+//
+// 两侧断言缺一不可：只断搜索命中的话，把 display_name 的 normalize 去掉不会变红；
+// 只断 display_name 的话，把搜索的 normalize 去掉也不会变红。
+func TestListRows_SearchMatchesAcrossUnicodeNormalizationForms(t *testing.T) {
+	ctx := context.Background()
+	const (
+		// 写成显式转义而不是字面量：这两个字符串在任何编辑器里看起来**一模一样**，
+		// 一次无意的 Unicode 归一化保存就会让它们变成同一个值，这条用例当场退化成不动点。
+		nfd = "Jose\u0301" // J o s e + U+0301 组合尖音符
+		nfc = "Jos\u00e9"  // J o s U+00E9 预组合
+	)
+	require.NotEqual(t, nfd, nfc, "两个归一化形必须是不同的字节序列，否则本用例什么都没测")
+	seedUser(t, ctx, 22)
+	seedKey(t, ctx, 180, 22, "令牌-180")
+	seedOwner(t, ctx, 180, 22, nfd)
+	seedLog(t, ctx, 22, 180, 5.0, inPeriod)
+
+	cur, prev := newTestPeriods(t)
+	base := teamops.RowQuery{
+		UserID: 22, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	}
+
+	all, _ := listRows(t, ctx, base)
+	require.Len(t, all, 1)
+	require.Equal(t, nfc, all[0].DisplayName,
+		"落库的是 NFD，下发给前端的必须是与分组键同一份的 NFC 合成形")
+
+	q := base
+	q.Q = nfc
+	hit, total := listRows(t, ctx, q)
+	require.EqualValues(t, 1, total, "用户搜的是自己在列表里看到的那个名字，必须命中")
+	// 分组键是 lower(...) 后的规范形，display_name 不是 —— 两者刻意不同口径。
+	require.Equal(t, "o:jos\u00e9", hit[0].GroupKey)
+}

@@ -34,16 +34,34 @@ func NewRepo(db *sql.DB) *Repo {
 	return &Repo{db: db}
 }
 
+// ownerTrimChars 是归属名的剪除集，全包唯一的一份，SQL 里凡是 btrim 归属名都要带上它。
+//
+// btrim(string) 的默认剪除集**只有 U+0020**：制表、换行、回车、NBSP(U+00A0)、
+// 全角空格(U+3000) 全都漏过去。漏掉的后果不是「多一个空格」——
+// 「王磊」/「　王磊　」(U+3000)/「 王磊 」(U+00A0) 三种写法会裂成三个独立分组，
+// 同一个人在看板上出现三行，display_name 还带着不可见 padding。
+// normalize(..., NFC) 救不了：NFC 不把 NBSP 折成空格（那是 NFKC 干的）。
+//
+// 这个字面量必须与 migrations/196a_team_key_owners.sql 里 CHECK 与
+// team_key_owners_user_name_idx 的剪除集**逐字相同**：CHECK 与查询不一致会让
+// 「入库时合法、查询时算空名」的行出现，索引表达式不一致则规划器直接用不上索引。
+const ownerTrimChars = `E' \t\n\r\u00A0\u3000'`
+
+// ownerNameExpr 是归属名的规范形：先 NFC 合成，再按 ownerTrimChars 剪两端。
+// 分组键、display_name、搜索、owned_key_count 四处必须全都用它 ——
+// 少一处就有一处的口径与另外三处对不上：normalize 只加在分组键上时，
+// NFD 形式落库的 "José" 在列表里看得见，按 NFC 搜索却是 0 行（已实跑复现）。
+//
+// 与 migrations/196a 里 team_key_owners_user_name_idx 的表达式逐字对应
+// （索引侧写的是裸列名 owner_name，这里是 o.owner_name，其余一字不差）。
+const ownerNameExpr = `btrim(normalize(o.owner_name, NFC), ` + ownerTrimChars + `)`
+
 // groupKeyExpr 是全文件唯一的分组键定义。SELECT 与 GROUP BY 必须用同一份，
 // 否则会出现 "同一 group_key 两行" 的 bug（见 spec §4.1）。
 // 'o:' / 'k:' 类型前缀不可省：归属名是用户自由填写的文本，可能恰好等于合成键
 // （归属名 "k:7" 与令牌 7 撞车），少了前缀两行会被误并成一行。
-//
-// 归属侧的表达式 lower(btrim(normalize(o.owner_name, NFC))) 必须与
-// migrations/196a_team_key_owners.sql 里 team_key_owners_user_name_idx 的表达式**逐字相同**，
-// 差一个字符规划器就用不上那个表达式索引 —— 不报错，只是慢。
-const groupKeyExpr = `CASE WHEN COALESCE(btrim(o.owner_name),'') <> ''
-                           THEN 'o:' || lower(btrim(normalize(o.owner_name, NFC)))
+const groupKeyExpr = `CASE WHEN COALESCE(` + ownerNameExpr + `,'') <> ''
+                           THEN 'o:' || lower(` + ownerNameExpr + `)
                            ELSE 'k:' || kr.api_key_id END`
 
 // baseCTE 是本包所有聚合查询共用的前置 CTE。
@@ -151,8 +169,9 @@ func (r *Repo) ListRows(ctx context.Context, q RowQuery) ([]Row, int64, error) {
 	having := ""
 	if s := strings.TrimSpace(q.Q); s != "" {
 		args = append(args, "%"+escapeLike(strings.ToLower(s))+"%")
-		// 搜显示名、令牌名、密钥尾号
-		having = fmt.Sprintf(`HAVING lower(COALESCE(NULLIF(MAX(btrim(o.owner_name)),''), NULLIF(MAX(kr.name),''), '')) LIKE $%d
+		// 搜显示名、令牌名、密钥尾号。显示名侧走 ownerNameExpr，与分组键、display_name
+		// 同一份规范形：少了 normalize，NFD 形式落库的 "José" 列表里看得见、按 NFC 搜 0 行。
+		having = fmt.Sprintf(`HAVING lower(COALESCE(NULLIF(MAX(`+ownerNameExpr+`),''), NULLIF(MAX(kr.name),''), '')) LIKE $%d
                               OR lower(COALESCE(string_agg(COALESCE(kr.name,''), ' '), '')) LIKE $%d
                               OR lower(COALESCE(string_agg(COALESCE(right(kr.key, 4),''), ' '), '')) LIKE $%d`,
 			len(args), len(args), len(args))
@@ -160,8 +179,8 @@ func (r *Repo) ListRows(ctx context.Context, q RowQuery) ([]Row, int64, error) {
 
 	selectList := `
     ` + groupKeyExpr + ` AS group_key,
-    COALESCE(NULLIF(MAX(btrim(o.owner_name)),''), MAX(kr.name)) AS display_name,
-    bool_or(COALESCE(btrim(o.owner_name),'') <> '')          AS by_owner,
+    COALESCE(NULLIF(MAX(` + ownerNameExpr + `),''), MAX(kr.name)) AS display_name,
+    bool_or(COALESCE(` + ownerNameExpr + `,'') <> '')        AS by_owner,
     COUNT(*) FILTER (WHERE kr.deleted_at IS NULL)            AS key_count,
     COUNT(*)                                                 AS key_count_all,
     bool_and(kr.deleted_at IS NOT NULL)                      AS all_deleted,
@@ -246,7 +265,7 @@ g AS (
            SUM(kr.prev_req)  AS prev_requests,
            COUNT(*) FILTER (WHERE kr.deleted_at IS NULL) AS key_count,
            COUNT(*) FILTER (WHERE kr.deleted_at IS NULL
-                              AND COALESCE(btrim(o.owner_name),'') <> '') AS owned_key_count
+                              AND COALESCE(` + ownerNameExpr + `,'') <> '') AS owned_key_count
     FROM kr
     ` + ownerJoin + `
     GROUP BY ` + groupKeyExpr + `

@@ -15,8 +15,12 @@
 --      剪除集用 \u 转义而不是字面量，避免不可见字节进入这个被 SHA256 锁死的文件；
 --      E'' 的 \u 转义要求 server_encoding 为 UTF8。
 --      不要用 owner_name ~ '\S' 代替：PG 的 \s 等价 [[:space:]]，locale 相关，仍漏 NBSP。
---   4) 分组比较用 lower(btrim(normalize(owner_name, NFC)))，索引按它建。该表达式与
---      spec §4.1 主查询的分组键逐字相同，否则规划器用不上这个索引。
+--   4) 分组比较用 lower(btrim(normalize(owner_name, NFC), E' \t\n\r\u00A0\u3000'))，
+--      索引按它建。剪除集必须与上面 CHECK 的那一份、以及 internal/teamops/repo.go 的
+--      ownerTrimChars 逐字相同：查询侧用默认剪除集（只剪 U+0020）时，
+--      两侧带全角空格(U+3000) 或 NBSP(U+00A0) 的名字会与它的紧凑写法裂成两个分组，
+--      而 CHECK 认为它们是同一个合法名字；
+--      索引表达式差一个字符则规划器直接用不上这个索引 —— 不报错，只是慢。
 --      normalize() 需 PG13+（README 要求 15+），IMMUTABLE，可进表达式索引。
 --      用它代替 Go 侧的 golang.org/x/text，避免把 indirect 依赖提升为 direct。
 CREATE TABLE IF NOT EXISTS team_key_owners (
@@ -29,4 +33,4 @@ CREATE TABLE IF NOT EXISTS team_key_owners (
 );
 
 CREATE INDEX IF NOT EXISTS team_key_owners_user_name_idx
-    ON team_key_owners (user_id, lower(btrim(normalize(owner_name, NFC))));
+    ON team_key_owners (user_id, lower(btrim(normalize(owner_name, NFC), E' \t\n\r\u00A0\u3000')));
