@@ -64,6 +64,19 @@ const groupKeyExpr = `CASE WHEN COALESCE(` + ownerNameExpr + `,'') <> ''
                            THEN 'o:' || lower(` + ownerNameExpr + `)
                            ELSE 'k:' || kr.api_key_id END`
 
+// visibleGroupCond 决定一个分组是否成行。ListRows 的 HAVING 与 Summary 的 g CTE
+// **必须共用这一份**，否则 total 与分页、行数与对账条会各说各话。
+//
+// k 子查询刻意不过滤 deleted_at（"令牌删了但账还在"是设计意图，spec §7），
+// 代价是既没账、令牌也没了的软删令牌照样成行：每删一把令牌，看板就永久多一行 $0.00，
+// 对账条上的「N 行」跟着涨。真库实测 1 把在用 + 5 把零消耗软删 = 6 行。
+//
+// 保留「删了但花过钱」（那笔钱必须能被解释），只隐藏「删了且两期都没花过钱」。
+// 判两期而不只判本期：只判本期的话，上期花过钱的软删令牌会在环比列留下一个
+// 没有出处的基数。
+const visibleGroupCond = `(bool_or(kr.deleted_at IS NULL)
+       OR SUM(kr.cur_cost) <> 0 OR SUM(kr.prev_cost) <> 0)`
+
 // baseCTE 是本包所有聚合查询共用的前置 CTE。
 // 参数顺序固定：$1=user_id, $2=cur_start, $3=cur_end, $4=prev_start, $5=prev_end
 //
@@ -166,16 +179,24 @@ func (r *Repo) ListRows(ctx context.Context, q RowQuery) ([]Row, int64, error) {
 
 	args := []any{q.UserID, q.Cur.Start, q.Cur.End, q.Prev.Start, q.Prev.End}
 
-	having := ""
+	conds := []string{visibleGroupCond}
 	if s := strings.TrimSpace(q.Q); s != "" {
 		args = append(args, "%"+escapeLike(strings.ToLower(s))+"%")
 		// 搜显示名、令牌名、密钥尾号。显示名侧走 ownerNameExpr，与分组键、display_name
 		// 同一份规范形：少了 normalize，NFD 形式落库的 "José" 列表里看得见、按 NFC 搜 0 行。
-		having = fmt.Sprintf(`HAVING lower(COALESCE(NULLIF(MAX(`+ownerNameExpr+`),''), NULLIF(MAX(kr.name),''), '')) LIKE $%d
+		//
+		// 密钥尾号侧必须带 deleted_at FILTER，令牌名侧刻意**不带**：
+		// 软删会把 key 改写成 __deleted__<id>__<nano>，末 4 位是纳秒尾巴，
+		// 不过滤的话搜 "3141" 会命中一个存续密钥尾号是 "1111" 的分组——用户在搜出来的
+		// 那一行上找不到自己搜的那 4 位。而 name 是软删后原样保留的真实文本，
+		// 用户搜「赵六-已删」想找到那笔钱是合理意图，过滤掉反而是回归。
+		conds = append(conds, fmt.Sprintf(`(lower(COALESCE(NULLIF(MAX(`+ownerNameExpr+`),''), NULLIF(MAX(kr.name),''), '')) LIKE $%d
                               OR lower(COALESCE(string_agg(COALESCE(kr.name,''), ' '), '')) LIKE $%d
-                              OR lower(COALESCE(string_agg(COALESCE(right(kr.key, 4),''), ' '), '')) LIKE $%d`,
-			len(args), len(args), len(args))
+                              OR lower(COALESCE(string_agg(COALESCE(right(kr.key, 4),''), ' ')
+                                       FILTER (WHERE kr.deleted_at IS NULL), '')) LIKE $%d)`,
+			len(args), len(args), len(args)))
 	}
+	having := "HAVING " + strings.Join(conds, "\n  AND ")
 
 	selectList := `
     ` + groupKeyExpr + ` AS group_key,
@@ -196,7 +217,10 @@ func (r *Repo) ListRows(ctx context.Context, q RowQuery) ([]Row, int64, error) {
     SUM(kr.prev_cost)                                        AS prev_cost,
     SUM(kr.cur_req)                                          AS requests,
     SUM(kr.prev_req)                                         AS prev_requests,
-    MAX(kr.last_used_at)                                     AS last_used_at`
+    -- 与同一行其余「令牌属性」字段（key_count / single_key）统一按存续口径。
+    -- 不带 FILTER 时，活令牌从没用过、只有软删令牌用过的组会同时显示
+    -- 「活令牌的掩码」和「软删令牌的最后使用时间」——两个字段指的不是同一把令牌。
+    MAX(kr.last_used_at) FILTER (WHERE kr.deleted_at IS NULL) AS last_used_at`
 
 	body := baseCTE + `
 SELECT` + selectList + `
@@ -269,6 +293,7 @@ g AS (
     FROM kr
     ` + ownerJoin + `
     GROUP BY ` + groupKeyExpr + `
+    HAVING ` + visibleGroupCond + `
 )
 SELECT COALESCE(SUM(current_cost),0), COALESCE(SUM(prev_cost),0),
        COALESCE(MAX(current_cost),0), COUNT(*),

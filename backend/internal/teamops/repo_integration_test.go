@@ -1257,3 +1257,132 @@ func TestListRows_SearchMatchesAcrossUnicodeNormalizationForms(t *testing.T) {
 	// 分组键是 lower(...) 后的规范形，display_name 不是 —— 两者刻意不同口径。
 	require.Equal(t, "o:jos\u00e9", hit[0].GroupKey)
 }
+
+// P0-5：零消耗的软删令牌不该成行。
+//
+// k 子查询刻意不过滤 deleted_at（「令牌删了但账还在」是设计意图），代价是既没账、
+// 令牌也没了的软删令牌照样成行：每删一把令牌，看板永久多一行 $0.00，对账条的「N 行」跟着涨。
+// 真库实测修复前：1 把在用 + 5 把零消耗软删 = total 6、RowCount 6。
+//
+// 用例必须造 **cost==0** 的软删令牌。既有的 TestListRows_GroupWithOnlyDeletedKeysIsMarked
+// 造的是 cost=3.0 的软删令牌，复制那把等于没测——(软删 × 零消耗) 这一格正是两条既有用例
+// 恰好都漏掉的那一格。所以两种形态在同一条用例里对照，一条断「必须消失」、一条断「必须仍在」。
+func TestListRows_HidesSoftDeletedKeysWithNoSpend(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 23)
+	seedKey(t, ctx, 190, 23, "在用令牌")
+	seedLog(t, ctx, 23, 190, 9.0, inPeriod)
+
+	seedKey(t, ctx, 191, 23, "删了但花过钱")
+	seedLog(t, ctx, 23, 191, 4.0, inPeriod)
+	softDeleteKey(t, ctx, 191)
+
+	seedKey(t, ctx, 192, 23, "删了且上期花过钱")
+	seedLog(t, ctx, 23, 192, 6.0, inPrevOnly)
+	softDeleteKey(t, ctx, 192)
+
+	for id := int64(193); id <= 195; id++ { // 三把零消耗软删
+		seedKey(t, ctx, id, 23, fmt.Sprintf("删了也没花过钱-%d", id))
+		softDeleteKey(t, ctx, id)
+	}
+
+	cur, prev := newTestPeriods(t)
+	rows, total := listRows(t, ctx, teamops.RowQuery{
+		UserID: 23, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.EqualValues(t, 3, total,
+		"三把零消耗软删令牌必须全部消失，实得分组键 %v", groupKeys(rows))
+	byKey := rowsByGroupKey(rows)
+	require.Contains(t, byKey, "k:190")
+	require.Contains(t, byKey, "k:191", "删了但本期花过钱的必须仍在，那笔钱要有出处")
+	require.Contains(t, byKey, "k:192", "只在上期花过钱的也必须仍在，否则环比基数没有出处")
+	for _, gone := range []string{"k:193", "k:194", "k:195"} {
+		require.NotContains(t, byKey, gone, "既没账、令牌也没了，不该占一行 $0.00")
+	}
+
+	// total 与 Summary.RowCount 必须走同一份 HAVING，否则分页页数与对账条的「N 行」对不上。
+	s, err := teamops.NewRepo(integrationDB).Summary(ctx, 23, cur, prev)
+	require.NoError(t, err)
+	require.Equal(t, 3, s.RowCount, "Summary 的 g CTE 与 ListRows 的 HAVING 必须是同一份条件")
+	require.Equal(t, 1, s.KeyCount, "只有一把存续令牌")
+	require.InDelta(t, 13.0, s.TotalCost, 1e-9, "隐藏空行不能动金额：9 + 4")
+	require.InDelta(t, 6.0, s.PrevCost, 1e-9)
+}
+
+// P0-6：密钥尾号搜索不能命中软删墓碑的纳秒尾巴。
+//
+// 软删把 key 改写成 __deleted__<id>__<nano>，末 4 位是纳秒尾巴。string_agg 不带
+// deleted_at FILTER 时，搜那 4 位数字会命中一个存续密钥尾号完全不同的分组——
+// 用户在搜出来的那一行上找不到自己搜的那 4 位。
+//
+// 对照组不可省：只断「墓碑尾号搜不到」的话，把整个尾号搜索通道删掉也照样通过。
+func TestListRows_SearchIgnoresSoftDeletedKeyTombstoneSuffix(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 24)
+	seedKeyWithSecret(t, ctx, 200, 24, "存续", "sk-team-live-8642")
+	seedKey(t, ctx, 201, 24, "已删")
+	seedOwner(t, ctx, 200, 24, "钱七")
+	seedOwner(t, ctx, 201, 24, "钱七")
+	seedLog(t, ctx, 24, 200, 5.0, inPeriod)
+	seedLog(t, ctx, 24, 201, 5.0, inPeriod) // 有账，所以这一组不会被 P0-5 的 HAVING 滤掉
+	softDeleteKey(t, ctx, 201)
+
+	// 墓碑的末 4 位得从库里读，softDeleteKey 用的是调用时刻的纳秒。
+	var tombstone string
+	require.NoError(t, integrationDB.QueryRowContext(ctx,
+		`SELECT key FROM api_keys WHERE id = 201`).Scan(&tombstone))
+	require.True(t, strings.HasPrefix(tombstone, "__deleted__"), "软删必须改写 key，实得 %q", tombstone)
+	tombSuffix := tombstone[len(tombstone)-4:]
+	require.NotEqual(t, "8642", tombSuffix, "纳秒尾巴恰好等于存续密钥尾号时本用例无意义，重跑即可")
+
+	cur, prev := newTestPeriods(t)
+	base := teamops.RowQuery{
+		UserID: 24, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	}
+
+	q := base
+	q.Q = "8642"
+	_, total := listRows(t, ctx, q)
+	require.EqualValues(t, 1, total, "存续密钥的尾号必须搜得到（否则下一条断言在测一个坏掉的通道）")
+
+	q.Q = tombSuffix
+	rows, total := listRows(t, ctx, q)
+	require.EqualValues(t, 0, total,
+		"搜 %q 命中了 %v —— 那是软删墓碑的纳秒尾巴，用户在结果行上找不到自己搜的 4 位",
+		tombSuffix, groupKeys(rows))
+
+	// 钉住刻意的不对称：尾号通道过滤软删，**令牌名通道不过滤**。
+	// 少了这条，「顺手给 name 也加上 FILTER」这个看起来更一致的改动不会让任何用例变红，
+	// 而它会让用户再也搜不到已删令牌花掉的那笔钱（实测该变异此前存活）。
+	q.Q = "已删"
+	_, total = listRows(t, ctx, q)
+	require.EqualValues(t, 1, total,
+		"软删后 name 原样保留，搜「已删」想找到那笔钱是合理意图，不能跟着尾号一起被过滤掉")
+}
+
+// P0-6 附带（M-3）：last_used_at 也必须按存续口径。
+//
+// 活令牌从没用过、只有软删令牌用过时，不带 FILTER 的 MAX 会让同一行同时显示
+// 「活令牌的掩码」和「软删令牌的最后使用时间」——两个字段指的不是同一把令牌。
+func TestListRows_LastUsedAtIgnoresSoftDeletedKeys(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 25)
+	seedKey(t, ctx, 210, 25, "活的-从没用过")
+	seedKey(t, ctx, 211, 25, "删了-用过")
+	seedOwner(t, ctx, 210, 25, "孙九")
+	seedOwner(t, ctx, 211, 25, "孙九")
+	_, err := integrationDB.ExecContext(ctx,
+		`UPDATE api_keys SET last_used_at = $2 WHERE id = $1`, 211, inPeriod)
+	require.NoError(t, err)
+	seedLog(t, ctx, 25, 211, 7.0, inPeriod)
+	softDeleteKey(t, ctx, 211) // 只改 deleted_at 与 key，last_used_at 原样留着
+
+	cur, prev := newTestPeriods(t)
+	rows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 25, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	row := rowsByGroupKey(rows)["o:孙九"]
+	require.Equal(t, 1, row.KeyCount, "只有 210 是存续的")
+	require.Nil(t, row.LastUsedAt,
+		"存续的那把从没用过，就该是 —；显示软删那把的时间等于把两把令牌的属性混在一行")
+}
