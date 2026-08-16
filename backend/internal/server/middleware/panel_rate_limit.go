@@ -56,6 +56,16 @@ func (p *PanelRateLimiter) Heavy() gin.HandlerFunc {
 	return p.userScoped("heavy", func(s service.PanelRateLimitSettings) int { return s.HeavyRPM })
 }
 
+// Scoped 重查询接口的按用户限流，但用一个独立的计数桶；配额档位与 Heavy 相同。
+//
+// Heavy 的计数键是 "panel:heavy:user:<id>"，scope 段对所有 Heavy 路由恒为 "heavy"——
+// 全站重查询端点共用同一个每用户桶。新页面直接挂 Heavy 会挤占 /usage、/dashboard 的额度：
+// 用户在新页面上刷几下，先报 429 的是另一个标签页里的既有功能。
+// Scoped("team") 把键变成 "panel:heavy:team:user:<id>"，两边互不挤占。
+func (p *PanelRateLimiter) Scoped(name string) gin.HandlerFunc {
+	return p.userScoped("heavy:"+name, func(s service.PanelRateLimitSettings) int { return s.HeavyRPM })
+}
+
 func (p *PanelRateLimiter) userScoped(scope string, limitOf func(service.PanelRateLimitSettings) int) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if p == nil || p.limiter == nil || p.settingService == nil {
