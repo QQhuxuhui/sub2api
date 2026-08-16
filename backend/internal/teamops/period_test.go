@@ -3,6 +3,7 @@
 package teamops
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -96,6 +97,31 @@ func TestParsePeriod_RejectsInvertedRange(t *testing.T) {
 	p, err := ParsePeriod("2026-08-15", "2026-08-15", "UTC", time.Now())
 	require.NoError(t, err)
 	require.Equal(t, 24*time.Hour, p.End.Sub(p.Start))
+}
+
+// end_date 解析失败必须自成一条错误，且要能从错误文本里认出是**哪一侧**填错了。
+//
+// 只写 require.Error 是钉不住的：把这条分支的 `if err != nil { return ... }` 整段删掉，
+// endDay 会留在零值 0001-01-01，随后被 `endDay.Before(startDay)` 判成倒挂，
+// 照样返回一个非 nil 的错误 —— 用户拿到的却是「开始日期不能晚于结束日期」，
+// 对着一个格式填错的结束日期怎么改都改不出来。所以必须断前缀。
+//
+// 起点故意给一个能正常解析的日期：起点也填错的话，函数在起点那条分支就返回了，
+// 终点这条分支根本执行不到。
+func TestParsePeriod_RejectsMalformedEndDateWithItsOwnError(t *testing.T) {
+	t.Parallel()
+	_, err := ParsePeriod("2026-08-01", "2026-8-1", "UTC", time.Now())
+	require.Error(t, err)
+	require.True(t, strings.HasPrefix(err.Error(), "invalid end_date"),
+		"错误必须指明是 end_date 填错，实际是 %q", err.Error())
+	require.NotErrorIs(t, err, ErrRangeInverted,
+		"吞掉解析错误时零值终点会被判成倒挂，那是另一条完全不同的用户提示")
+
+	// 对照组：起点填错时前缀必须是 invalid start_date，两条分支不能串。
+	_, err = ParsePeriod("2026-8-1", "2026-08-15", "UTC", time.Now())
+	require.Error(t, err)
+	require.True(t, strings.HasPrefix(err.Error(), "invalid start_date"),
+		"错误必须指明是 start_date 填错，实际是 %q", err.Error())
 }
 
 func TestParsePeriod_DefaultsToCurrentMonthInUserTimezone(t *testing.T) {

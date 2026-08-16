@@ -129,6 +129,34 @@ func TestGetSummary_RejectsMalformedDateWithItsOwnMessage(t *testing.T) {
 	require.Contains(t, w.Body.String(), "YYYY-MM-DD")
 }
 
+// end_date 填错走的是解析层另一条 return，与 start_date 那条互不覆盖。
+// 那条分支若吞掉错误，零值终点会被判成倒挂 —— 状态码还是 400，但文案变成
+// 「开始日期不能晚于结束日期」，用户对着一个格式填错的结束日期怎么改都改不出来。
+// 所以这里断的是文案落在了「格式」那条分支上，不是只断 400。
+func TestGetSummary_RejectsMalformedEndDateWithItsOwnMessage(t *testing.T) {
+	t.Parallel()
+	h := NewHandler(NewService(nil, 90, true))
+	c, w := newTestContext("/?start_date=2026-08-01&end_date=2026-8-15&timezone=UTC", 1)
+
+	h.GetSummary(c)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "YYYY-MM-DD")
+	require.NotContains(t, w.Body.String(), "开始日期不能晚于结束日期")
+}
+
+func TestListRows_RejectsMalformedEndDateWithItsOwnMessage(t *testing.T) {
+	t.Parallel()
+	h := NewHandler(NewService(nil, 90, true))
+	c, w := newTestContext("/?start_date=2026-08-01&end_date=2026-8-15&timezone=UTC", 1)
+
+	h.ListRows(c)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "YYYY-MM-DD")
+	require.NotContains(t, w.Body.String(), "开始日期不能晚于结束日期")
+}
+
 func TestListRows_RejectsInvertedRangeWithItsOwnMessage(t *testing.T) {
 	t.Parallel()
 	h := NewHandler(NewService(nil, 90, true))

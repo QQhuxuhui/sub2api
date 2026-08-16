@@ -1074,3 +1074,102 @@ func TestListRows_IgnoresOwnerRowsBelongingToAnotherUser(t *testing.T) {
 	require.Equal(t, 2, s.RowCount, "Summary 的 g CTE 走的是同一个 JOIN，必须一起校验 user_id")
 	require.Equal(t, 0, s.OwnedKeyCount, "受害者没有任何一把令牌是自己设的归属")
 }
+
+// P0-2：期间边界 [Start, End) 的贴边守卫。
+//
+// 时区取 America/Santiago、区间取 2025-09-07：那一天的 00:00 整段不存在
+// （DST 前拨 00:00 → 01:00），首个有效时刻是 01:00-03:00，而 time.Date 会把
+// 不存在的零点归一到**前一天 23:00-04:00**。用 UTC 写这条用例，
+// 「dayStart 处理了午夜缺口」与「没处理」的输出逐字相同，等于只测了 SQL 一半。
+const boundaryTZ = "America/Santiago"
+
+// 七个贴边时刻各给一个 2 的幂，任意子集的和唯一 —— 哪一笔被算错都能从金额上读出来，
+// 不会两处错误互相抵消。
+const (
+	costBeforePrevStart = 1.0  // prev.Start − 1µs：两期都不该要
+	costAtPrevStart     = 2.0  // prev.Start：上期含左端
+	costBeforeCurStart  = 4.0  // cur.Start − 1µs == prev.End − 1µs：上期含右端前一刻
+	costAtCurStart      = 8.0  // cur.Start == prev.End：只能算本期，不能算上期
+	costBeforeCurEnd    = 16.0 // cur.End − 1µs：本期含右端前一刻
+	costAtCurEnd        = 32.0 // cur.End：右开，不该算进本期
+	costAtNaiveMidnight = 64.0 // 缺口日「本地零点」归一后的时刻：落在本期之外
+)
+
+// TestListRows_PeriodBoundariesAreHalfOpen 贴着 [Start, End) 的四个端点造数据。
+//
+// 所有 created_at 都从 Period 对象反推，一个日期常量都不写死：写死常量的用例在
+// 「整个当期窗口平移一天」这种变异下照样绿。步长用 time.Microsecond 而不是
+// time.Nanosecond —— PG 的 timestamptz 是微秒精度，纳秒会被截掉，
+// End−1ns 存进去等于 End，断言就成了不动点（下面有一条断言把这件事钉在真库上）。
+func TestListRows_PeriodBoundariesAreHalfOpen(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 20)
+	seedKey(t, ctx, 160, 20, "边界令牌")
+
+	cur, err := teamops.ParsePeriod("2025-09-07", "2025-09-07", boundaryTZ, time.Now())
+	require.NoError(t, err)
+	prev := teamops.DerivePrev(cur)
+	require.True(t, prev.End.Equal(cur.Start),
+		"两期必须首尾相接，否则「共用的那个端点归谁」这条断言什么都没测")
+
+	// 缺口日的「本地零点」：time.Date 把它归一到前一天 23:00-04:00。
+	// dayStart 没处理缺口的话，cur.Start 就等于这个时刻，下面这条断言先红。
+	loc := cur.Start.Location()
+	startDay, err := time.Parse("2006-01-02", cur.StartDate)
+	require.NoError(t, err)
+	naiveMidnight := time.Date(startDay.Year(), startDay.Month(), startDay.Day(), 0, 0, 0, 0, loc)
+	require.True(t, naiveMidnight.Before(cur.Start),
+		"缺口日不存在本地零点，首个有效时刻应为 01:00；naiveMidnight=%s cur.Start=%s",
+		naiveMidnight.Format(time.RFC3339), cur.Start.Format(time.RFC3339))
+
+	seedLog(t, ctx, 20, 160, costBeforePrevStart, prev.Start.Add(-time.Microsecond))
+	seedLog(t, ctx, 20, 160, costAtPrevStart, prev.Start)
+	seedLog(t, ctx, 20, 160, costBeforeCurStart, cur.Start.Add(-time.Microsecond))
+	seedLog(t, ctx, 20, 160, costAtCurStart, cur.Start)
+	seedLog(t, ctx, 20, 160, costBeforeCurEnd, cur.End.Add(-time.Microsecond))
+	seedLog(t, ctx, 20, 160, costAtCurEnd, cur.End)
+	seedLog(t, ctx, 20, 160, costAtNaiveMidnight, naiveMidnight)
+
+	// 真库上确认微秒没被截掉：End−1µs 存进去再读出来必须仍然严格小于 End。
+	// 这条一旦红，说明上面所有 Add(-time.Microsecond) 的用例都退化成了不动点。
+	var stored time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx,
+		`SELECT created_at FROM usage_logs WHERE user_id = $1 AND actual_cost = $2`,
+		20, costBeforeCurEnd).Scan(&stored))
+	require.True(t, stored.Before(cur.End),
+		"PG timestamptz 是微秒精度：End−1µs 必须原样落库，实际 %s 对 End %s",
+		stored.Format(time.RFC3339Nano), cur.End.Format(time.RFC3339Nano))
+
+	rows, total := listRows(t, ctx, teamops.RowQuery{
+		UserID: 20, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.EqualValues(t, 1, total)
+	row := rowsByGroupKey(rows)["k:160"]
+
+	wantCur := costAtCurStart + costBeforeCurEnd
+	wantPrev := costAtPrevStart + costBeforeCurStart + costAtNaiveMidnight
+	require.InDelta(t, wantCur, row.CurrentCost, 1e-9,
+		"本期是 [Start, End)：含 Start、含 End−1µs，不含 Start−1µs、不含 End")
+	require.EqualValues(t, 2, row.Requests)
+	require.InDelta(t, wantPrev, row.PrevCost, 1e-9,
+		"上期同样是 [Start, End)：共用的那个端点（prev.End == cur.Start）只归本期")
+	require.EqualValues(t, 3, row.PrevRequests)
+
+	// 两期不重不漏：金额之和必须等于「两窗口并集」这一段的金额。
+	// 右边界放宽、左边界收紧这类变异会让两边同时变，只断单侧有可能被抵消掉。
+	union, err := teamops.ParsePeriod(prev.StartDate, cur.EndDate, boundaryTZ, time.Now())
+	require.NoError(t, err)
+	require.True(t, union.Start.Equal(prev.Start) && union.End.Equal(cur.End),
+		"并集区间必须正好覆盖 [prev.Start, cur.End)")
+	unionRows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 20, Cur: union, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.InDelta(t, row.CurrentCost+row.PrevCost,
+		rowsByGroupKey(unionRows)["k:160"].CurrentCost, 1e-9,
+		"同一笔日志不能同时进两期，也不能两期都漏")
+
+	s, err := teamops.NewRepo(integrationDB).Summary(ctx, 20, cur, prev)
+	require.NoError(t, err)
+	require.InDelta(t, wantCur, s.TotalCost, 1e-9, "Summary 与 ListRows 必须同一份窗口")
+	require.InDelta(t, wantPrev, s.PrevCost, 1e-9)
+}
