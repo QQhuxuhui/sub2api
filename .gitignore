@@ -152,3 +152,6 @@ curl*.txt
 *.har
 *.pcap
 *.pcapng
+
+# Vitest / Vite cache at repo root
+.vite/

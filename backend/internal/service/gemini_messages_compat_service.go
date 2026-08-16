@@ -583,6 +583,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForAIStudioEndpoints(ctx cont
 
 func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
+	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
 
 	var req struct {
@@ -1075,6 +1076,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			}
 			collectedBytes, _ := json.Marshal(collected)
 			upstreamResponseModelObserverFromContext(c).ObserveGemini(collectedBytes)
+			observeGeminiImageOutputs(c, collectedBytes)
 			claudeResp, usageObj2 := convertGeminiToClaudeMessage(collected, originalModel, collectedBytes, false)
 			c.JSON(http.StatusOK, claudeResp)
 			usage = usageObj2
@@ -1090,12 +1092,9 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	}
 
 	// 图片生成计费
-	imageCount := 0
 	imageInputSize := s.extractImageInputSize(body)
 	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
-	if isImageGenerationModel(originalModel) {
-		imageCount = 1
-	}
+	imageCount := resolveGeminiImageCount(c, originalModel, mappedModel)
 
 	return &ForwardResult{
 		RequestID:                     requestID,
@@ -1123,6 +1122,7 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 
 func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
+	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
 
 	if strings.TrimSpace(originalModel) == "" {
@@ -1613,8 +1613,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				b = nb
 				usageObj = u
 			}
+			observeGeminiImageOutputs(c, b)
 			// 分组开启 normalize_response_model：把 modelVersion 归一化为客户端请求的模型，
-			// 隐藏上游偷换（观测已在上一行完成，usage_logs 仍记录上游真实模型）。
+			// 隐藏上游偷换（两处观测都已在上面完成，usage_logs 仍记录上游真实模型）。
 			if shouldNormalizeResponseModel(c) {
 				b = forceSetJSONStringField(b, "modelVersion", originalModel)
 			}
@@ -1634,11 +1635,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	}
 
 	// 图片生成计费
-	imageCount := 0
+	// imageInputSize 已在本函数上方（imageUsageParams 构造处）算过，这里不再重复声明。
 	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
-	if isImageGenerationModel(originalModel) {
-		imageCount = 1
-	}
+	imageCount := resolveGeminiImageCount(c, originalModel, mappedModel)
 
 	return &ForwardResult{
 		RequestID:                     requestID,
@@ -2119,6 +2118,7 @@ func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context,
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 	observer.ObserveGemini(unwrappedBody)
+	observeGeminiImageOutputs(c, unwrappedBody)
 
 	var geminiResp map[string]any
 	if err := json.Unmarshal(unwrappedBody, &geminiResp); err != nil {
@@ -2207,6 +2207,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 			observer = beginUpstreamResponseModelObservation(c)
 		}
 		observer.ObserveGemini(unwrappedBytes)
+		observeGeminiImageOutputs(c, unwrappedBytes)
 
 		var geminiResp map[string]any
 		if err := json.Unmarshal(unwrappedBytes, &geminiResp); err != nil {
@@ -2889,6 +2890,7 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 	observer.ObserveGemini(respBody)
+	observeGeminiImageOutputs(c, respBody)
 
 	var adjustedUsage *ClaudeUsage
 	if nb, u, ok := applyGeminiImageUsageAdjustment(respBody, imageUsage); ok {
@@ -3007,6 +3009,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 						usage = u
 					}
 					observer.ObserveGemini(observedRaw)
+					observeGeminiImageOutputs(c, rawBytes)
 
 					// 分组开启 normalize_response_model：逐块把 modelVersion 归一化为
 					// 客户端请求的模型（观测已用改写前的 observedRaw 完成）。
@@ -3287,6 +3290,11 @@ func (s *GeminiMessagesCompatService) handleGeminiUpstreamError(ctx context.Cont
 		return
 	}
 	if statusCode != 429 {
+		return
+	}
+	// 池模式账号不写账号级限流：账号留在池内，由 failover / 同号重试消化 429。
+	// 自定义错误码优先级高于池模式，开启后仍按其命中结果标记。
+	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
 		return
 	}
 
@@ -3865,7 +3873,7 @@ func cleanToolSchema(schema any) any {
 			if key == "$schema" || key == "$id" || key == "$ref" ||
 				key == "$defs" || key == "definitions" ||
 				key == "additionalProperties" || key == "patternProperties" || key == "minLength" ||
-				key == "maxLength" || key == "minItems" || key == "maxItems" {
+				key == "maxLength" || key == "minItems" || key == "maxItems" || key == "exclusiveMinimum" {
 				continue
 			}
 			// 递归清理嵌套对象
@@ -3886,6 +3894,13 @@ func cleanToolSchema(schema any) any {
 				delete(cleaned, "type")
 			}
 		}
+		if cleaned["type"] == "INTEGER" {
+			if minimum, ok := incrementIntegralSchemaBound(v["exclusiveMinimum"]); ok {
+				if existing, exists := cleaned["minimum"]; !exists || schemaNumberLess(existing, minimum) {
+					cleaned["minimum"] = minimum
+				}
+			}
+		}
 		return cleaned
 	case []any:
 		cleaned := make([]any, len(v))
@@ -3895,6 +3910,56 @@ func cleanToolSchema(schema any) any {
 		return cleaned
 	default:
 		return v
+	}
+}
+
+func incrementIntegralSchemaBound(value any) (any, bool) {
+	switch v := value.(type) {
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) || v != math.Trunc(v) || v+1 <= v {
+			return nil, false
+		}
+		return v + 1, true
+	case int:
+		if v == math.MaxInt {
+			return nil, false
+		}
+		return v + 1, true
+	case int64:
+		if v == math.MaxInt64 {
+			return nil, false
+		}
+		return v + 1, true
+	case json.Number:
+		i, err := v.Int64()
+		if err != nil || i == math.MaxInt64 {
+			return nil, false
+		}
+		return json.Number(fmt.Sprintf("%d", i+1)), true
+	default:
+		return nil, false
+	}
+}
+
+func schemaNumberLess(left, right any) bool {
+	leftNumber, leftOK := schemaNumberFloat64(left)
+	rightNumber, rightOK := schemaNumberFloat64(right)
+	return leftOK && rightOK && leftNumber < rightNumber
+}
+
+func schemaNumberFloat64(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, !math.IsNaN(v) && !math.IsInf(v, 0)
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case json.Number:
+		n, err := v.Float64()
+		return n, err == nil && !math.IsInf(n, 0)
+	default:
+		return 0, false
 	}
 }
 

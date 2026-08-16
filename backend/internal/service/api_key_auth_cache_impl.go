@@ -21,7 +21,13 @@ import (
 // line's fields.
 // v20: group normalize_response_model（响应模型名归一化开关）加入快照投影；
 // 不 bump 则存量 v19 快照会被继续复用，网关侧读到的开关恒为 false。
-const apiKeyAuthSnapshotVersion = 20
+// v21: 同步上游 v0.1.177。dev 与上游**又一次各自把版本号推到 19**（dev 走的是
+// normalize_anthropic_envelope 那条线，上游走的是 group search/audio/video_model_prices 计费字段），
+// 于是「版本号相同、字段集不同」的快照会在两边互相复用。合并后的快照是两者的超集，
+// 必须再 bump 一次强制刷新 —— 不 bump 的话，升级前写入的 v19/v20 快照会被当成有效，
+// 网关侧读到的 search/audio/video_model_prices 恒为零值（漏计费），
+// 或 normalize_response_model 恒为 false（开关失效）。
+const apiKeyAuthSnapshotVersion = 21
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -408,7 +414,12 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			VideoPrice480P:                  apiKey.Group.VideoPrice480P,
 			VideoPrice720P:                  apiKey.Group.VideoPrice720P,
 			VideoPrice1080P:                 apiKey.Group.VideoPrice1080P,
+			VideoModelPrices:                NormalizeVideoModelPrices(apiKey.Group.VideoModelPrices),
 			WebSearchPricePerCall:           apiKey.Group.WebSearchPricePerCall,
+			SearchPricePer1k:                apiKey.Group.SearchPricePer1k,
+			AudioRealtimePricePerMin:        apiKey.Group.AudioRealtimePricePerMin,
+			AudioTTSPricePerMillionChars:    apiKey.Group.AudioTTSPricePerMillionChars,
+			AudioSTTPricePerHour:            apiKey.Group.AudioSTTPricePerHour,
 			ClaudeCodeOnly:                  apiKey.Group.ClaudeCodeOnly,
 			NormalizeAnthropicEnvelope:      apiKey.Group.NormalizeAnthropicEnvelope,
 			NormalizeResponseModel:          apiKey.Group.NormalizeResponseModel,
@@ -501,7 +512,12 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			VideoPrice480P:                  snapshot.Group.VideoPrice480P,
 			VideoPrice720P:                  snapshot.Group.VideoPrice720P,
 			VideoPrice1080P:                 snapshot.Group.VideoPrice1080P,
+			VideoModelPrices:                NormalizeVideoModelPrices(snapshot.Group.VideoModelPrices),
 			WebSearchPricePerCall:           snapshot.Group.WebSearchPricePerCall,
+			SearchPricePer1k:                snapshot.Group.SearchPricePer1k,
+			AudioRealtimePricePerMin:        snapshot.Group.AudioRealtimePricePerMin,
+			AudioTTSPricePerMillionChars:    snapshot.Group.AudioTTSPricePerMillionChars,
+			AudioSTTPricePerHour:            snapshot.Group.AudioSTTPricePerHour,
 			ClaudeCodeOnly:                  snapshot.Group.ClaudeCodeOnly,
 			NormalizeAnthropicEnvelope:      snapshot.Group.NormalizeAnthropicEnvelope,
 			NormalizeResponseModel:          snapshot.Group.NormalizeResponseModel,
