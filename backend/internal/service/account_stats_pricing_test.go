@@ -300,7 +300,7 @@ func TestTryModelFilePricing_WithImageInput(t *testing.T) {
 	billingService := NewBillingService(&config.Config{}, pricingSvc)
 	tokens := UsageTokens{InputTokens: 1518, ImageInputTokens: 1508}
 
-	result := tryModelFilePricing(billingService, "gpt-image-2", tokens)
+	result := tryModelFilePricing(billingService, "gpt-image-2", tokens, "")
 	require.NotNil(t, result)
 	require.InDelta(t, 10*5e-6+1508*8e-6, *result, 1e-12)
 }
@@ -686,7 +686,7 @@ func TestTryModelFilePricing_ImageOutputPriceMissing_FallsBackToOutput(t *testin
 		},
 	})
 	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50, ImageOutputTokens: 10}
-	result := tryModelFilePricing(bs, "claude-sonnet-4", tokens)
+	result := tryModelFilePricing(bs, "claude-sonnet-4", tokens, "")
 	require.NotNil(t, result)
 	// 100*0.001 + (50-10)*0.002 + 10*0.002(回退) = 0.1 + 0.08 + 0.02 = 0.2
 	require.InDelta(t, 0.2, *result, 1e-12)
@@ -702,7 +702,7 @@ func TestTryModelFilePricing_ImageOutputPriceExplicitZero_Free(t *testing.T) {
 		},
 	})
 	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50, ImageOutputTokens: 10}
-	result := tryModelFilePricing(bs, "claude-sonnet-4", tokens)
+	result := tryModelFilePricing(bs, "claude-sonnet-4", tokens, "")
 	require.NotNil(t, result)
 	// 100*0.001 + (50-10)*0.002 + 10*0 = 0.1 + 0.08 + 0 = 0.18
 	require.InDelta(t, 0.18, *result, 1e-12)

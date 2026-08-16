@@ -195,7 +195,10 @@ func TestHandleNativeNonStreamingResponse_FeedsImageCounter(t *testing.T) {
 	}
 
 	svc := &GeminiMessagesCompatService{}
-	usage, err := svc.handleNativeNonStreamingResponse(c, resp, false)
+	// 第四个参数是本仓自研的 Gemini 图片 usage 参数（pro 伪装 / flash 修复）。
+	// 这里传零值：ProMaskEnabled 与 FlashRepairEnabled 均为 false，两条改写链路都不触发，
+	// 正合本用例的意图 —— 它只验「响应体有没有真的喂进图片计数器」。
+	usage, err := svc.handleNativeNonStreamingResponse(c, resp, false, geminiImageUsageParams{})
 	require.NoError(t, err)
 	require.NotNil(t, usage)
 
