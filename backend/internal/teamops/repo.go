@@ -84,6 +84,21 @@ kr AS (
     LEFT JOIN prev ON prev.api_key_id = k.id
 )`
 
+// ownerJoin 是全文件唯一的归属表连接。`AND o.user_id = $1` 不可省，也不可换成
+// 「靠 api_keys.id 全局唯一」这条推理：
+//
+// team_key_owners 不挂外键、没有 CHECK、没有触发器（见 migrations/196a 的四条理由），
+// 所以 team_key_owners.user_id ≡ api_keys.user_id 这条不变量没有任何数据库对象在保证它。
+// api_keys.id 全局唯一保证的是「每把令牌至多一行归属」，不保证那一行里的 user_id
+// 就是这把令牌的真归属人。少了这个条件，任何能往本表写行的人都可以给别人的令牌挂上
+// 自己写的 owner_name：金额不会跨用户泄露（k 子查询仍锁死 WHERE user_id = $1），
+// 但受害者看板上的分组名会变成攻击者写的字，分组结构也跟着被改。
+//
+// $1 已经是 user_id，不需要新参数；两处查询（ListRows 的 body、Summary 的 g CTE）
+// 必须用同一份文本。
+const ownerJoin = `LEFT JOIN team_key_owners o
+    ON o.api_key_id = kr.api_key_id AND o.user_id = $1`
+
 func sortExpr(sort string) string {
 	switch sort {
 	case "name":
@@ -167,7 +182,7 @@ func (r *Repo) ListRows(ctx context.Context, q RowQuery) ([]Row, int64, error) {
 	body := baseCTE + `
 SELECT` + selectList + `
 FROM kr
-LEFT JOIN team_key_owners o ON o.api_key_id = kr.api_key_id
+` + ownerJoin + `
 GROUP BY ` + groupKeyExpr + `
 ` + having
 
@@ -233,7 +248,7 @@ g AS (
            COUNT(*) FILTER (WHERE kr.deleted_at IS NULL
                               AND COALESCE(btrim(o.owner_name),'') <> '') AS owned_key_count
     FROM kr
-    LEFT JOIN team_key_owners o ON o.api_key_id = kr.api_key_id
+    ` + ownerJoin + `
     GROUP BY ` + groupKeyExpr + `
 )
 SELECT COALESCE(SUM(current_cost),0), COALESCE(SUM(prev_cost),0),

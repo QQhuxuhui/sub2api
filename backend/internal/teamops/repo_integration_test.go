@@ -1028,3 +1028,49 @@ func TestListRows_DisplayNameIsTrimmed(t *testing.T) {
 	require.Equal(t, "周八", rows[0].DisplayName, "显示名必须去掉两侧空格")
 	require.Equal(t, "o:周八", rows[0].GroupKey)
 }
+
+// ---------------------------------------------------------------------------
+// 修复轮次 2：全分支回扫（真 PG18 实跑 + 变异测试）确认的 6 条 P0 的守卫。
+// ---------------------------------------------------------------------------
+
+// P0-1：LEFT JOIN team_key_owners 必须校验 o.user_id。
+//
+// team_key_owners 不挂外键、没有 CHECK、没有触发器，唯一的写入端点（PUT /owners）
+// 还不存在，所以 team_key_owners.user_id ≡ api_keys.user_id 这条不变量没有任何
+// 数据库对象在保证。JOIN 不带 o.user_id 的话，任何能往本表写行的人都能给别人的令牌
+// 挂上自己写的归属名——金额不跨用户泄露（k 子查询仍锁死 user_id），但受害者看板上
+// 的分组名会变成攻击者写的字，分组结构也跟着被改。
+//
+// 断言选的是「攻击者的名字不出现在任何 display_name 里 + 那一行按令牌分组」，
+// 不是「total 不变」：受害者只有一把令牌时，挂不挂归属都是 1 行，行数钉不住任何东西。
+func TestListRows_IgnoresOwnerRowsBelongingToAnotherUser(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 18) // 受害者
+	seedUser(t, ctx, 19) // 攻击者
+	seedKey(t, ctx, 150, 18, "受害者令牌-A")
+	seedKey(t, ctx, 151, 18, "受害者令牌-B")
+	// 两行归属都指向受害者的令牌，但 user_id 写的是攻击者自己。
+	// 同一个 owner_name 落在两把令牌上：JOIN 漏判 user_id 时两行会被合并成一行。
+	seedOwner(t, ctx, 150, 19, "攻击者注入名")
+	seedOwner(t, ctx, 151, 19, "攻击者注入名")
+	seedLog(t, ctx, 18, 150, 11.0, inPeriod)
+	seedLog(t, ctx, 18, 151, 13.0, inPeriod)
+
+	cur, prev := newTestPeriods(t)
+	rows, total := listRows(t, ctx, teamops.RowQuery{
+		UserID: 18, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+
+	require.EqualValues(t, 2, total, "别人写的归属行不能把受害者的两把令牌并成一组")
+	for _, r := range rows {
+		require.NotEqual(t, "攻击者注入名", r.DisplayName, "别人写的归属名不能出现在受害者看板上")
+		require.False(t, r.ByOwner, "受害者自己没设过归属，这一行不该被标成按归属分组")
+		require.True(t, strings.HasPrefix(r.GroupKey, "k:"),
+			"没有合法归属时必须按令牌分组，实际 group_key=%q", r.GroupKey)
+	}
+
+	s, err := teamops.NewRepo(integrationDB).Summary(ctx, 18, cur, prev)
+	require.NoError(t, err)
+	require.Equal(t, 2, s.RowCount, "Summary 的 g CTE 走的是同一个 JOIN，必须一起校验 user_id")
+	require.Equal(t, 0, s.OwnedKeyCount, "受害者没有任何一把令牌是自己设的归属")
+}
