@@ -682,7 +682,11 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 		if forceTokenMode {
 			// 用量模拟（ImageUsageSimulated）强制 token 计费：仅当解析出的定价
 			// 确为 token 模式时走统一计费，否则跌落到默认 token 定价表。
-			input.Resolved = s.resolver.Resolve(ctx, PricingInput{Model: billingModel, GroupID: &gid})
+			// Group 必须一起传：上游 v0.1.177 起 PricingInput 带 Group，解析链
+			// Group → Channel → LiteLLM → Fallback 的第一档就靠它。漏传的话，
+			// 开了用量模拟的账号会绕过分组逐模型价卡、直接落到 LiteLLM 基础表，
+			// 与同分组同模型的普通请求同请求不同价（实测差 5 倍，方向不定）。
+			input.Resolved = s.resolver.Resolve(ctx, PricingInput{Model: billingModel, GroupID: &gid, Group: apiKey.Group})
 			if input.Resolved != nil && input.Resolved.Mode == BillingModeToken {
 				cost, err := s.billingService.CalculateCostUnified(input)
 				if err == nil && cost != nil && cost.BillingMode == "" {

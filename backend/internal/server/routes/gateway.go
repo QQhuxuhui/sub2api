@@ -38,10 +38,17 @@ func RegisterGatewayRoutes(
 	requestTimeout := middleware.RequestTimeout(
 		cfg.Gateway.RequestTimeoutSeconds,
 		settingService,
-		// 真正的 WebSocket 路由（GET + 完整升级握手才豁免超时）
+		// 真正的 WebSocket 路由（GET + 完整升级握手才豁免超时）。
+		// 名单是 c.Request.URL.Path 的**精确匹配**，所以带 /v1 前缀与根级镜像各要写一条。
+		// 漏掉一条的后果不是报错而是「聊到一半掉线」：全局 deadline 到点后 context 被取消，
+		// 而响应早已被 WS 升级提交（Written()==true），Finalizer 写不进 504，
+		// 客户端只看到连接莫名关闭、Ops 日志里也没有超时痕迹。
 		"/v1/responses",
 		"/responses",
 		"/backend-api/codex/responses",
+		// 上游 v0.1.177 新增的 Grok Voice Realtime（gateway.go 的 /v1/realtime 与根级 /realtime）。
+		"/v1/realtime",
+		"/realtime",
 	)
 	requestTimeoutUserOverride := middleware.RequestTimeoutUserOverride()
 	requestTimeoutFinalizer := middleware.RequestTimeoutFinalizer()
@@ -445,9 +452,9 @@ func RegisterGatewayRoutes(
 			h.OpenAIGateway.GrokVoice(c, endpoint)
 		}
 	}
-	r.POST("/tts", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, rootVoiceHandler("tts"))
-	r.POST("/stt", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, rootVoiceHandler("stt"))
-	r.POST("/custom-voices", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, rootVoiceHandler("custom-voices"))
+	r.POST("/tts", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, rootVoiceHandler("tts"))
+	r.POST("/stt", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, rootVoiceHandler("stt"))
+	r.POST("/custom-voices", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, rootVoiceHandler("custom-voices"))
 	rootCustomVoicePathHandler := func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformGrok {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
@@ -456,12 +463,12 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.GrokVoice(c, grokCustomVoiceEndpoint(c))
 	}
-	r.GET("/custom-voices", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, rootVoiceHandler("custom-voices"))
-	r.GET("/custom-voices/:voice_id/audio", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, rootCustomVoicePathHandler)
-	r.GET("/custom-voices/:voice_id", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, rootCustomVoicePathHandler)
-	r.PATCH("/custom-voices/:voice_id", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, rootCustomVoicePathHandler)
-	r.DELETE("/custom-voices/:voice_id", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, rootCustomVoicePathHandler)
-	r.GET("/realtime", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, func(c *gin.Context) {
+	r.GET("/custom-voices", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, rootVoiceHandler("custom-voices"))
+	r.GET("/custom-voices/:voice_id/audio", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, rootCustomVoicePathHandler)
+	r.GET("/custom-voices/:voice_id", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, rootCustomVoicePathHandler)
+	r.PATCH("/custom-voices/:voice_id", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, rootCustomVoicePathHandler)
+	r.DELETE("/custom-voices/:voice_id", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, rootCustomVoicePathHandler)
+	r.GET("/realtime", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformGrok {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found_error", "message": "Realtime API is not supported for this platform"}})
@@ -469,7 +476,7 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.GrokRealtime(c)
 	})
-	r.POST("/web_search", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, func(c *gin.Context) {
+	r.POST("/web_search", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformGrok {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found_error", "message": "Web Search API is not supported for this platform"}})
@@ -477,7 +484,7 @@ func RegisterGatewayRoutes(
 		}
 		h.Gateway.WebSearch(c)
 	})
-	r.POST("/x_search", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, func(c *gin.Context) {
+	r.POST("/x_search", bodyLimit, clientRequestID, opsErrorLogger, requestTimeout, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, requestTimeoutUserOverride, requestTimeoutFinalizer, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformGrok {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found_error", "message": "X Search API is not supported for this platform"}})
