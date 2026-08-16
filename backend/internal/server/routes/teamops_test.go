@@ -29,7 +29,7 @@ func newTeamRouteTestRouter() *gin.Engine {
 		c.Next()
 	})
 	auditLog := servermiddleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() })
-	handlers := &handler.Handlers{TeamOps: teamops.NewHandler(teamops.NewService(nil, 90))}
+	handlers := &handler.Handlers{TeamOps: teamops.NewHandler(teamops.NewService(nil, 90, true))}
 	RegisterUserRoutes(router.Group("/api/v1"), handlers, jwtAuth, auditLog, nil, nil)
 	return router
 }

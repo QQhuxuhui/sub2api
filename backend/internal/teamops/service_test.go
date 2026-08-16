@@ -44,9 +44,18 @@ func (f *fakeRepo) ListRows(_ context.Context, q RowQuery) ([]Row, int64, error)
 	return f.rows, f.total, f.rowsErr
 }
 
-// newTestService 用固定时钟构造 Service。
+// newTestService 用固定时钟构造 Service，聚合清理按**开着**算（生产默认就是开着）。
 func newTestService(repo teamRepo, retentionDays int, now time.Time) *Service {
-	s := NewService(repo, retentionDays)
+	return withFixedClock(NewService(repo, retentionDays, true), now)
+}
+
+// newTestServiceCleanupOff 构造「dashboard_aggregation.enabled=false」那种部署的服务层：
+// 保留清理作业压根不跑，usage_logs 是完整的，配置里的天数只是个没人用的死数。
+func newTestServiceCleanupOff(repo teamRepo, retentionDays int, now time.Time) *Service {
+	return withFixedClock(NewService(repo, retentionDays, false), now)
+}
+
+func withFixedClock(s *Service, now time.Time) *Service {
 	s.now = func() time.Time { return now }
 	return s
 }
@@ -585,9 +594,58 @@ func TestRows_PropagatesRepoError(t *testing.T) {
 	require.ErrorIs(t, err, boom)
 }
 
-func TestNewService_FallsBackToDefaultRetentionWhenUnconfigured(t *testing.T) {
+// 保留窗口不能只看天数，还要看保留清理这件事**做不做**。
+// 取值一律避开 90：viper 的默认值与 defaultRetentionDays 恰好都是 90，
+// 用 90 的话「读到了 enabled」和「压根没读」输出逐字相同，用例什么都钉不住。
+func TestNewService_RetentionWindowDependsOnCleanupBeingEnabled(t *testing.T) {
 	t.Parallel()
-	require.Equal(t, defaultRetentionDays, NewService(nil, 0).retentionDays)
-	require.Equal(t, defaultRetentionDays, NewService(nil, -1).retentionDays)
-	require.Equal(t, 45, NewService(nil, 45).retentionDays)
+
+	// 清理不跑：没人删 usage_logs，历史是完整的，0 就是字面意思「无限制」。
+	require.Equal(t, 0, NewService(nil, 0, false).retentionDays)
+	// 关闭时 dashboard_aggregation.retention.usage_logs_days 完全不被 config 校验，
+	// 多半只是停在 viper 默认值 90 上的一个死数，同样不该拿来当保留边界。
+	require.Equal(t, 0, NewService(nil, 90, false).retentionDays)
+	require.Equal(t, 0, NewService(nil, 45, false).retentionDays)
+
+	// 清理在跑：按配置的窗口判越界。
+	require.Equal(t, 45, NewService(nil, 45, true).retentionDays)
+	// 清理在跑却没给窗口：config 校验拦得住，但本层不该依赖调用方，保守按默认窗口判。
+	require.Equal(t, defaultRetentionDays, NewService(nil, 0, true).retentionDays)
+	require.Equal(t, defaultRetentionDays, NewService(nil, -1, true).retentionDays)
+}
+
+// 关掉聚合的部署（dashboard_aggregation.enabled=false）历史日志是完整的：环比照常给，
+// 也不该打「数据不完整」的提示条。开与关用**同一段区间、同一个天数**对照着断言，
+// 免得只断一侧时「两边都不给环比」这种实现也能全绿。
+func TestSummary_CleanupDisabledMeansNoRetentionLimit(t *testing.T) {
+	t.Parallel()
+	// 本期 2026-01 整月、上期 2025-12 整月，两段都远在 30 天窗口之外
+	const startDate, endDate = "2026-01-01", "2026-01-31"
+
+	on := newTestService(&fakeRepo{summary: Summary{TotalCost: 120, PrevCost: 100}}, 30, fixedNow)
+	onDTO, err := on.Summary(context.Background(), 1, startDate, endDate, "UTC")
+	require.NoError(t, err)
+	require.False(t, onDTO.Compare.Comparable, "清理开着时这段区间确实越界，环比认输")
+	require.NotNil(t, onDTO.RetentionWarning)
+
+	off := newTestServiceCleanupOff(&fakeRepo{summary: Summary{TotalCost: 120, PrevCost: 100}}, 30, fixedNow)
+	offDTO, err := off.Summary(context.Background(), 1, startDate, endDate, "UTC")
+	require.NoError(t, err)
+	require.True(t, offDTO.Compare.Comparable, "清理不跑就没有保留边界，环比照常给")
+	require.Nil(t, offDTO.Compare.Reason)
+	require.NotNil(t, offDTO.DeltaPct)
+	require.InDelta(t, 20.0, *offDTO.DeltaPct, 1e-9)
+	require.Nil(t, offDTO.RetentionWarning, "日志完整，不该打「数据不完整」的提示条")
+}
+
+// 行级环比走的是同一条判定，一起钉住：关闭清理时行上的 delta 不能被抹掉。
+func TestRows_CleanupDisabledKeepsRowDelta(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{rows: []Row{{GroupKey: "k:1", CurrentCost: 120, PrevCost: 100}}}
+	s := newTestServiceCleanupOff(repo, 30, fixedNow)
+
+	rows, _, err := s.Rows(context.Background(), 1, "2026-01-01", "2026-01-31", "UTC", "", "", "", 1, 20)
+	require.NoError(t, err)
+	require.NotNil(t, rows[0].DeltaPct)
+	require.InDelta(t, 20.0, *rows[0].DeltaPct, 1e-9)
 }

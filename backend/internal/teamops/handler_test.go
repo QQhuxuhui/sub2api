@@ -57,7 +57,7 @@ func decodeData(t *testing.T, body []byte) map[string]any {
 func TestGetSummary_RequiresAuthenticatedSubject(t *testing.T) {
 	t.Parallel()
 	// 仓储传 nil 是安全的：未认证在触达服务层之前就返回了。
-	h := NewHandler(NewService(nil, 90))
+	h := NewHandler(NewService(nil, 90, true))
 	c, w := newTestContext("/", 0)
 
 	h.GetSummary(c)
@@ -67,7 +67,7 @@ func TestGetSummary_RequiresAuthenticatedSubject(t *testing.T) {
 
 func TestListRows_RequiresAuthenticatedSubject(t *testing.T) {
 	t.Parallel()
-	h := NewHandler(NewService(nil, 90))
+	h := NewHandler(NewService(nil, 90, true))
 	c, w := newTestContext("/", 0)
 
 	h.ListRows(c)
@@ -92,7 +92,7 @@ func TestGetSummary_RejectsNonPositiveUserID(t *testing.T) {
 
 func TestGetSummary_RejectsTooLongRange(t *testing.T) {
 	t.Parallel()
-	h := NewHandler(NewService(nil, 90))
+	h := NewHandler(NewService(nil, 90, true))
 	c, w := newTestContext("/?start_date=2024-01-01&end_date=2026-08-15&timezone=UTC", 1)
 
 	h.GetSummary(c)
@@ -107,7 +107,7 @@ func TestGetSummary_RejectsTooLongRange(t *testing.T) {
 // 拿着格式完全正确的日期反复改格式。所以必须断言文案落在了对的那条分支上。
 func TestGetSummary_RejectsInvertedRangeWithItsOwnMessage(t *testing.T) {
 	t.Parallel()
-	h := NewHandler(NewService(nil, 90))
+	h := NewHandler(NewService(nil, 90, true))
 	c, w := newTestContext("/?start_date=2026-08-15&end_date=2026-08-01&timezone=UTC", 1)
 
 	h.GetSummary(c)
@@ -120,7 +120,7 @@ func TestGetSummary_RejectsInvertedRangeWithItsOwnMessage(t *testing.T) {
 // 「服务器错误，请稍后重试」，用户会一直重试同一个错日期。
 func TestGetSummary_RejectsMalformedDateWithItsOwnMessage(t *testing.T) {
 	t.Parallel()
-	h := NewHandler(NewService(nil, 90))
+	h := NewHandler(NewService(nil, 90, true))
 	c, w := newTestContext("/?start_date=08%2F01%2F2026&end_date=2026-08-15&timezone=UTC", 1)
 
 	h.GetSummary(c)
@@ -131,7 +131,7 @@ func TestGetSummary_RejectsMalformedDateWithItsOwnMessage(t *testing.T) {
 
 func TestListRows_RejectsInvertedRangeWithItsOwnMessage(t *testing.T) {
 	t.Parallel()
-	h := NewHandler(NewService(nil, 90))
+	h := NewHandler(NewService(nil, 90, true))
 	c, w := newTestContext("/?start_date=2026-08-15&end_date=2026-08-01&timezone=UTC", 1)
 
 	h.ListRows(c)
@@ -142,7 +142,7 @@ func TestListRows_RejectsInvertedRangeWithItsOwnMessage(t *testing.T) {
 
 func TestListRows_RejectsMalformedDateWithItsOwnMessage(t *testing.T) {
 	t.Parallel()
-	h := NewHandler(NewService(nil, 90))
+	h := NewHandler(NewService(nil, 90, true))
 	c, w := newTestContext("/?start_date=08%2F01%2F2026&end_date=2026-08-15&timezone=UTC", 1)
 
 	h.ListRows(c)

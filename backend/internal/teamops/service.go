@@ -8,9 +8,12 @@ import (
 	"time"
 )
 
-// defaultRetentionDays 是配置缺省时的保留窗口，与 dashboard_aggregation.retention.usage_logs_days
-// 的默认值一致。配置读出 0 时不能当成「没有保留期」：那会让越界判定全线放行，
-// 页面转而拿一段已被物理清理的区间算环比。
+// defaultRetentionDays 是「清理作业开着、但天数没配出来」时的兜底窗口，与
+// dashboard_aggregation.retention.usage_logs_days 的默认值一致。清理开着而窗口读成 0
+// 不能当成「没有保留期」：那会让越界判定全线放行，页面转而拿一段已被物理清理的区间算环比。
+//
+// 反过来，清理**没开**时 0 就是字面意思——日志没人删，什么都不该限。这两种 0 的区别
+// 由 NewService 的 retentionEnabled 参数携带，不能只看天数。
 const defaultRetentionDays = 90
 
 // ErrInvalidDate 标记 start_date / end_date 无法按 YYYY-MM-DD 解析。
@@ -32,16 +35,30 @@ type teamRepo interface {
 
 // Service 是团队消耗看板的服务层。
 type Service struct {
-	repo          teamRepo
+	repo teamRepo
+	// retentionDays 是**生效**的保留窗口天数。0 表示没有保留期限制（历史日志是完整的），
+	// 这层语义一路传到 ApplyRetention / CurBeyondRetention，别再在中间被改写成默认值。
 	retentionDays int
 	// now 只为让时间相关的结论（对比区间、保留期越界）在测试里可钉死，生产路径恒为 time.Now。
 	now func() time.Time
 }
 
-// NewService 构造服务层。retentionDays 取自 dashboard_aggregation.retention.usage_logs_days。
-func NewService(repo teamRepo, retentionDays int) *Service {
-	if retentionDays <= 0 {
-		retentionDays = defaultRetentionDays
+// NewService 构造服务层。
+//
+// retentionDays 取自 dashboard_aggregation.retention.usage_logs_days；
+// retentionEnabled 取自 dashboard_aggregation.enabled —— 保留清理是聚合作业的一部分，
+// 作业不跑就没人删 usage_logs。
+//
+// 两个参数必须一起看：config.go 的整个 retention 校验块都包在 `if c.DashboardAgg.Enabled` 里，
+// 关闭时 usage_logs_days 压根不校验（可以是 0，也可能停在 viper 默认值 90）。
+// 只看天数的话，关闭聚合的部署会被按 90 天砍——页面藏掉环比、打出「数据不完整」的提示条，
+// 而实际上全部日志都在。那种「少给了数」的故障上线后没人会报，用户只会以为本来就没这个数。
+func NewService(repo teamRepo, retentionDays int, retentionEnabled bool) *Service {
+	switch {
+	case !retentionEnabled:
+		retentionDays = 0 // 清理不跑：日志完整，无限制
+	case retentionDays <= 0:
+		retentionDays = defaultRetentionDays // 清理在跑却没给窗口：宁可保守，按默认窗口判越界
 	}
 	return &Service{repo: repo, retentionDays: retentionDays, now: time.Now}
 }
