@@ -164,12 +164,7 @@ func (s *Service) Summary(ctx context.Context, userID int64, startDate, endDate,
 	if !pair.Comparable {
 		reason := pair.IncomparableReason
 		dto.Compare.Reason = &reason
-	} else if dto.PrevCost > 0 {
-		// 环比用展示值算，保证界面上「本期 − 上期 == 环比额」逐位成立。
-		// 判分母也用展示值：上期不足一分时界面上的分母就是 0.00，
-		// 此时给出的百分比既没有意义也无法被用户验证，一律认输。
-		pct := (dto.TotalCost - dto.PrevCost) / dto.PrevCost * 100
-		abs := roundCents(dto.TotalCost - dto.PrevCost)
+	} else if pct, abs, ok := displayDelta(sum.TotalCost, sum.PrevCost); ok {
 		dto.DeltaPct = &pct
 		dto.DeltaAbs = &abs
 	}
@@ -183,6 +178,30 @@ func (s *Service) Summary(ctx context.Context, userID int64, startDate, endDate,
 	}
 
 	return dto, nil
+}
+
+// displayDelta 是环比的唯一一份算法，概览条（Summary）与表格行（finalizeRows）共用。
+//
+// 三件事全都用**展示值**（各自 roundCents 到分）：
+//
+//   - 算百分比与环比额：保证界面上「本期 − 上期 == 环比额」逐位成立；
+//   - 判分母是否为零：上期不足一分时界面上的分母就是 0.00，此时给出的百分比
+//     既没有意义也无法被用户验证，一律认输；
+//   - 环比额再取一次整：不取整会把 7042.857142857143 这种数原样塞进 JSON。
+//
+// 两处必须同源。曾经汇总走展示值、行级走未取整原值，于是 prev_raw=0.004 时
+// 页面顶部写着「上期 $0.00 / 环比 —」，而唯一那一行写着「+24900%」；prev_raw=0.005
+// 时两个数整整差 2 倍（9900 对 19900）。而设计文档 §6.1 的异常判定第一通道是
+// 「环比 ≥ +100%」，这种数会被选成结论句 Top1 顶到概览条上。
+//
+// ok=false 表示认输，调用方须保持 DeltaPct / DeltaAbs 为 nil：填 0 除的结果是 ±Inf，
+// 而 Inf 在 encoding/json 里直接让整个响应序列化失败——页面白屏。
+func displayDelta(cur, prev float64) (pct, abs float64, ok bool) {
+	c, p := roundCents(cur), roundCents(prev)
+	if p <= 0 {
+		return 0, 0, false
+	}
+	return (c - p) / p * 100, roundCents(c - p), true
 }
 
 // retentionCutDate 把保留边界那个**时刻**换算成提示条上写的那个**日期**：
@@ -253,14 +272,15 @@ func finalizeRows(rows []Row, comparable bool) {
 		values[i] = rows[i].CurrentCost
 		pageTotal += rows[i].CurrentCost
 
-		// 上期不可比、或上期为 0 时环比在数学上无定义，一律留空。
-		// 填 0 除的结果会得到 ±Inf，而 Inf 在 encoding/json 里直接让整个响应序列化失败——
-		// 页面白屏，日志里只有一行 "json: unsupported value"，看不出是哪一行数据引起的。
-		if !comparable || rows[i].PrevCost <= 0 {
+		// 上期不可比时环比一律留空。上期为 0（含「不足一分、展示成 0.00」）
+		// 的认输判定在 displayDelta 里，与概览条同一份算法。
+		if !comparable {
 			continue
 		}
-		pct := (rows[i].CurrentCost - rows[i].PrevCost) / rows[i].PrevCost * 100
-		abs := rows[i].CurrentCost - rows[i].PrevCost
+		pct, abs, ok := displayDelta(rows[i].CurrentCost, rows[i].PrevCost)
+		if !ok {
+			continue
+		}
 		rows[i].DeltaPct = &pct
 		rows[i].DeltaAbs = &abs
 	}

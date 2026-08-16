@@ -262,6 +262,48 @@ func TestFinalizeRows_ComputesDeltaBeforeDisplayAllocation(t *testing.T) {
 	}
 }
 
+// 上期不足一分时展示值就是 0.00，行级与汇总一样必须认输。
+// 0.004 是刻意选的：它 > 0（未取整口径下会算出 +24900%），但 roundCents 之后是 0.00。
+// 用 0 做用例的话，「判原值」和「判展示值」两种实现输出逐字相同，什么都钉不住。
+func TestFinalizeRows_LeavesDeltaNilWhenPrevRoundsToZero(t *testing.T) {
+	t.Parallel()
+	rows := []Row{{CurrentCost: 120, PrevCost: 0.004}}
+
+	finalizeRows(rows, true)
+
+	require.Nil(t, rows[0].DeltaPct,
+		"界面上的分母是 0.00，这时给出的百分比无法被用户验证，一律认输")
+	require.Nil(t, rows[0].DeltaAbs)
+}
+
+// 行级环比与汇总环比必须是同一套算法。曾经汇总走展示值、行级走未取整原值，
+// 于是同一段数据在页面上同时出现「上期 $0.00 / 环比 —」和唯一那一行的「+24900%」。
+//
+// 选例必须让两种口径给出不同的数：展示值 1.00 / 0.01 → +9900%，
+// 未取整原值 1.0 / 0.005 → +19900%，整整差 2 倍。整数金额两种口径同解，钉不住任何东西。
+func TestFinalizeRows_UsesSameDeltaAlgorithmAsSummary(t *testing.T) {
+	t.Parallel()
+	const curCost, prevCost = 1.0, 0.005
+
+	rows := []Row{{CurrentCost: curCost, PrevCost: prevCost}}
+	finalizeRows(rows, true)
+
+	s := newTestService(&fakeRepo{summary: Summary{TotalCost: curCost, PrevCost: prevCost}}, 90, fixedNow)
+	dto, err := s.Summary(context.Background(), 1, "2026-08-01", "2026-08-15", "UTC")
+	require.NoError(t, err)
+
+	require.NotNil(t, rows[0].DeltaPct)
+	require.NotNil(t, dto.DeltaPct)
+	require.InDelta(t, *dto.DeltaPct, *rows[0].DeltaPct, 1e-9,
+		"行级与汇总必须给出同一个环比")
+	// 只断「两边相等」的话，两边一起错成同一个数也是绿的，所以钉死绝对值。
+	require.InDelta(t, 9900.0, *rows[0].DeltaPct, 1e-9,
+		"展示值口径：(1.00 − 0.01) / 0.01 = +9900%%，不是原值口径的 +19900%%")
+	require.NotNil(t, rows[0].DeltaAbs)
+	require.InDelta(t, 0.99, *rows[0].DeltaAbs, 1e-9,
+		"环比额也要取整到分，否则 7042.857142857143 这种数会原样进 JSON")
+}
+
 // 异常标记属于结论句阶段，本阶段恒为 false。写成断言是为了让「顺手把它填上」的改动
 // 必须先来改这条测试，而不是悄悄让界面出现没有判定依据的红点。
 func TestFinalizeRows_KeepsAnomalyFlagUnset(t *testing.T) {

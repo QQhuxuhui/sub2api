@@ -11,7 +11,8 @@ import "time"
 //   - CurrentCost 是**展示值**，已按当页做过最大余数法分配（见 money.go 的 AllocateDisplay），
 //     保证 Σ 各行 == 对账条总额。代价是单行金额与原值最多差 1 分。
 //   - PrevCost 是**原值**，没有做过分配（分配只对当期做，上期不上对账条）。
-//   - DeltaAbs / DeltaPct 由**分配前的原值**算出。
+//   - DeltaAbs / DeltaPct 由**分配前金额的展示值**算出（两侧各自 roundCents 到分，
+//     见 service.go 的 displayDelta），与概览条上的环比同一份算法。
 //
 // 所以 CurrentCost − PrevCost 与 DeltaAbs 可以差 1~2 分。前端要显示上期金额就自己
 // 格式化 PrevCost，**不要拿它与 CurrentCost 做减法**，减出来的数与 DeltaAbs 对不上。
