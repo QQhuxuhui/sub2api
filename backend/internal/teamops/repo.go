@@ -150,8 +150,14 @@ func (r *Repo) ListRows(ctx context.Context, q RowQuery) ([]Row, int64, error) {
     COUNT(*) FILTER (WHERE kr.deleted_at IS NULL)            AS key_count,
     COUNT(*)                                                 AS key_count_all,
     bool_and(kr.deleted_at IS NOT NULL)                      AS all_deleted,
-    CASE WHEN COUNT(*) = 1 AND bool_and(kr.deleted_at IS NULL)
-         THEN MAX(kr.key) ELSE NULL END                      AS single_key,
+    -- 口径必须与上面的 key_count 完全一致：都只数没被软删的行。
+    -- 用未过滤的 COUNT(*) 的话，一个存续令牌 + 一个历史软删令牌的组会得出
+    -- key_count=1 但 single_key=NULL，前端按 key_count==1 走「显示掩码 + 复制」分支却拿到 null。
+    -- MAX 同样要带 FILTER：软删会把 key 改写成 __deleted__<id>__<nano>，
+    -- 取后 4 位会渲染出纳秒尾巴，而且那是一把已经不存在的令牌的原文位置。
+    CASE WHEN COUNT(*) FILTER (WHERE kr.deleted_at IS NULL) = 1
+         THEN MAX(kr.key) FILTER (WHERE kr.deleted_at IS NULL)
+         ELSE NULL END                                       AS single_key,
     SUM(kr.cur_cost)                                         AS current_cost,
     SUM(kr.prev_cost)                                        AS prev_cost,
     SUM(kr.cur_req)                                          AS requests,

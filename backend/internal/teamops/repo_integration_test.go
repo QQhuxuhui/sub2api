@@ -359,10 +359,15 @@ func seedKey(t *testing.T, ctx context.Context, id, userID int64, name string) {
 
 // softDeleteKey 把令牌标成软删。软删令牌的消耗仍要计入金额、但不计入「几把令牌」，
 // 需要这个状态的测试用它，不要去 DELETE 物理行。
+//
+// key 一起改写成 __deleted__<id>__<nano>，与生产的软删逐字一致
+// （repository/api_key_repo.go 的 SoftDelete，为的是腾出 key 上的唯一索引）。
+// 不照做的话，「软删令牌的掩码不能外泄」这类断言断的是一把现实中根本不存在的明文密钥。
 func softDeleteKey(t *testing.T, ctx context.Context, id int64) {
 	t.Helper()
 	res, err := integrationDB.ExecContext(ctx,
-		`UPDATE api_keys SET deleted_at = NOW() WHERE id = $1`, id)
+		`UPDATE api_keys SET deleted_at = NOW(), key = $2 WHERE id = $1`,
+		id, fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano()))
 	require.NoError(t, err)
 	n, err := res.RowsAffected()
 	require.NoError(t, err)
@@ -532,12 +537,24 @@ func TestSummary_SplitsCurrentAndPreviousPeriod(t *testing.T) {
 	require.EqualValues(t, 1, s.PrevRequests)
 }
 
+// liveKeyOfMixedGroup 是 o:赵六 组里**存续**那把令牌的密钥原文，liveKeyOfMixedGroupMask 是它的掩码
+// （35 字符，走 MaskKey 的长分支：前 6 + "..." + 后 4）。
+//
+// 数字开头是刻意的：同组另一把令牌软删后 key 变成 __deleted__31__<nano>，而数字在 C 与
+// en_US 两种排序规则下都排在下划线/字母之前。于是「MAX(kr.key) 忘了带 FILTER」这种半吊子修法
+// 一定会取到软删那把、掩码对不上而变红。反过来若让存续那把排在最大，MAX 碰巧取对，
+// 测试就成了空转。
+const (
+	liveKeyOfMixedGroup     = "0030-zhaoliu-abcdefghijklmnopqrstuv"
+	liveKeyOfMixedGroupMask = "0030-z...stuv"
+)
+
 // seedSoftDeleted 造两组：
-//   - o:赵六 —— 一把在、一把软删，用来分「金额算进来」和「令牌数不算」两件事。
+//   - o:赵六 —— 一把在、一把软删，用来分「金额算进来」「令牌数不算」「掩码取存续那把」三件事。
 //   - k:32   —— 唯一一把且已软删，整组是「令牌都没了但账还在」。
 func seedSoftDeleted(t *testing.T, ctx context.Context) {
 	seedUser(t, ctx, 5)
-	seedKey(t, ctx, 30, 5, "赵六-主力")
+	seedKeyWithSecret(t, ctx, 30, 5, "赵六-主力", liveKeyOfMixedGroup)
 	seedKey(t, ctx, 31, 5, "赵六-已删")
 	seedKey(t, ctx, 32, 5, "孤儿已删")
 	seedOwner(t, ctx, 30, 5, "赵六")
@@ -575,6 +592,15 @@ func TestListRows_SoftDeletedKeyNotCountedInKeyCount(t *testing.T) {
 	require.Equal(t, 1, row.KeyCount, "只剩 1 把没被软删")
 	require.Equal(t, 2, row.KeyCountAll, "历史上一共 2 把")
 	require.False(t, row.AllDeleted, "还有一把活着")
+
+	// key_count 与 single_key 必须同一口径。single_key 用未过滤的 COUNT(*) 时，
+	// 这一组会得出 key_count=1 但 masked_key=null：前端按 key_count==1 走
+	// 「显示掩码 + 复制按钮」的分支，拿到的却是 null。
+	require.NotNil(t, row.MaskedKey, "组里只剩一把存续令牌，必须出掩码")
+	// 断字面量而不是 teamops.MaskKey(...)：拿函数自己去断函数，等式恒成立。
+	require.Equal(t, liveKeyOfMixedGroupMask, *row.MaskedKey, "出的必须是**存续**那把的掩码")
+	require.NotContains(t, *row.MaskedKey, "__dele",
+		"软删那把的 key 是 __deleted__31__<nano>，一个字符都不能外泄")
 }
 
 func TestListRows_GroupWithOnlyDeletedKeysIsMarked(t *testing.T) {
