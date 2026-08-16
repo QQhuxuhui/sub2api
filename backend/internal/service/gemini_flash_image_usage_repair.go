@@ -38,13 +38,20 @@ func newGeminiImageUsageParams(model, action, imageSize string, requestBody []by
 	}
 }
 
+// proMaskParams 不带 ImageCount：流式调用方拿到累计张数后用 withImageCount 补上。
 func (p geminiImageUsageParams) proMaskParams() geminiProImageMaskParams {
 	return geminiProImageMaskParams{Enabled: p.ProMaskEnabled, Model: p.Model, Tier: p.ProTier}
 }
 
+func (m geminiProImageMaskParams) withImageCount(n int) geminiProImageMaskParams {
+	m.ImageCount = n
+	return m
+}
+
 func applyGeminiImageUsageAdjustment(body []byte, params geminiImageUsageParams) ([]byte, *ClaudeUsage, bool) {
 	if params.ProMaskEnabled {
-		return applyGeminiProImageMask(body, params.Model, params.ProTier)
+		// 非流式：传 0，让 applyGeminiProImageMask 自己从完整响应体数图片张数。
+		return applyGeminiProImageMask(body, params.Model, params.ProTier, 0)
 	}
 	if params.FlashRepairEnabled {
 		return repairGemini31FlashImageUsage(body, params.Model, params.FlashImageSize, geminiFlashUsageRepairOptions{

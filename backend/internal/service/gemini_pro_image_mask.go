@@ -67,18 +67,27 @@ func randInRange(min, max int) int {
 
 // synthesizeGeminiProImageUsage 按档位画像合成一份 pro 规范的 usage。
 // promptTokens<=0 时使用小默认值，避免 total 明显异常。
-func synthesizeGeminiProImageUsage(tier string, promptTokens int) geminiSynthUsage {
+// imageCount 是本次响应真正回吐的内联图片张数。image token 必须按张数乘：
+// 上游 v0.1.177 起 ImageCount 改为数真实图片 part（resolveGeminiImageCount），
+// 于是按次计费的分组回 N 张就收 N 份；伪装侧若仍只合成一张图的 token，
+// 按 token 计费的分组就只收 1 份 —— 同一笔请求在两种计费模式下差 N 倍。
+// 张数 <= 0 时按 1 张算（既是老行为，也避免把整笔 usage 合成成 0）。
+func synthesizeGeminiProImageUsage(tier string, promptTokens int, imageCount int) geminiSynthUsage {
 	p := geminiProImageProfile(tier)
 	if promptTokens <= 0 {
 		promptTokens = geminiProImageDefaultPromptTokens
 	}
+	if imageCount < 1 {
+		imageCount = 1
+	}
 	text := randInRange(p.TextMin, p.TextMax)
 	thoughts := randInRange(p.ThoughtsMin, p.ThoughtsMax)
-	candidates := p.ImageTokens + text
+	imageTokens := p.ImageTokens * imageCount
+	candidates := imageTokens + text
 	return geminiSynthUsage{
 		PromptTokens:     promptTokens,
 		TextTokens:       text,
-		ImageTokens:      p.ImageTokens,
+		ImageTokens:      imageTokens,
 		ThoughtsTokens:   thoughts,
 		CandidatesTokens: candidates,
 		TotalTokens:      promptTokens + candidates + thoughts,
@@ -175,7 +184,10 @@ func maskGeminiProImageResponseBody(body []byte, model string, s geminiSynthUsag
 // applyGeminiProImageMask 是响应处理器的统一入口：
 // 若为 pro 生图请求且响应非真 pro，则合成一次并改写 body、产出同源计费 usage。
 // 否则返回原 body、masked=false。
-func applyGeminiProImageMask(respBody []byte, model, tier string) (newBody []byte, usage *ClaudeUsage, masked bool) {
+// imageCount <= 0 时自己从 respBody 数（非流式响应体自带全部图片 part）。
+// 流式必须由调用方传入累计值：终结分块只带 finishReason 与 usage，
+// 图片 part 早在前面的分块里到达，在这里数只会得到 0。
+func applyGeminiProImageMask(respBody []byte, model, tier string, imageCount int) (newBody []byte, usage *ClaudeUsage, masked bool) {
 	if !isGeminiProImageModel(model) {
 		return respBody, nil, false
 	}
@@ -183,7 +195,10 @@ func applyGeminiProImageMask(respBody []byte, model, tier string) (newBody []byt
 		return respBody, nil, false
 	}
 	promptTokens := int(gjson.GetBytes(respBody, "usageMetadata.promptTokenCount").Int())
-	synth := synthesizeGeminiProImageUsage(tier, promptTokens)
+	if imageCount < 1 {
+		imageCount = countGeminiInlineImageOutputs(respBody)
+	}
+	synth := synthesizeGeminiProImageUsage(tier, promptTokens, imageCount)
 	nb, ok := maskGeminiProImageResponseBody(respBody, model, synth)
 	if !ok {
 		return respBody, nil, false
@@ -196,6 +211,9 @@ type geminiProImageMaskParams struct {
 	Enabled bool
 	Model   string
 	Tier    string
+	// ImageCount 是**累计**张数（observedGeminiImageOutputs），由流式调用方在每个分块
+	// 上刷新后传入。0 表示未知，交由 applyGeminiProImageMask 自己从 body 数。
+	ImageCount int
 }
 
 // maskGeminiProImageStreamChunk 处理单个 SSE data 分块：
@@ -209,7 +227,7 @@ func maskGeminiProImageStreamChunk(payload []byte, mask geminiProImageMaskParams
 	isFinal := gjson.GetBytes(payload, "candidates.0.finishReason").Exists()
 	hasUsage := gjson.GetBytes(payload, "usageMetadata").Exists()
 	if isFinal && hasUsage {
-		if nb, u, ok := applyGeminiProImageMask(payload, mask.Model, mask.Tier); ok {
+		if nb, u, ok := applyGeminiProImageMask(payload, mask.Model, mask.Tier, mask.ImageCount); ok {
 			return nb, u, true
 		}
 		return payload, nil, false

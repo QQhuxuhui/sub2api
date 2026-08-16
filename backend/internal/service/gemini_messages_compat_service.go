@@ -2990,7 +2990,13 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					// 先留存 mask/flash 改写前的原始 chunk 供上游模型审计观察，
 					// 否则 observer 会记到伪装还原后的 pro modelVersion（mismatch 健康信号失效）。
 					observedRaw := rawBytes
-					if nb, u, ok := maskGeminiProImageStreamChunk(rawBytes, imageUsage.proMaskParams()); ok {
+					// 图片计数必须在伪装**之前**刷新：pro 伪装的终结分块只带 finishReason
+					// 与 usage，图片 part 早在前面的分块里到达，在伪装里数只会得到 0。
+					// 用改写前的 rawBytes 数与改写后等价（伪装只动 modelVersion /
+					// usageMetadata / candidates.N.index，从不碰 content.parts[].inlineData），
+					// 但提前刷新才能让终结分块拿到含本块在内的累计值。
+					observeGeminiImageOutputs(c, rawBytes)
+					if nb, u, ok := maskGeminiProImageStreamChunk(rawBytes, imageUsage.proMaskParams().withImageCount(observedGeminiImageOutputs(c))); ok {
 						rawBytes = nb
 						rawToWrite = string(nb)
 						if u != nil {
@@ -3009,7 +3015,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 						usage = u
 					}
 					observer.ObserveGemini(observedRaw)
-					observeGeminiImageOutputs(c, rawBytes)
+					// observeGeminiImageOutputs 已在伪装之前刷新过，这里不再重复调用。
 
 					// 分组开启 normalize_response_model：逐块把 modelVersion 归一化为
 					// 客户端请求的模型（观测已用改写前的 observedRaw 完成）。

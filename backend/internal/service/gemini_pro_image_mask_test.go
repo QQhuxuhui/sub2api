@@ -3,6 +3,7 @@ package service
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
@@ -50,7 +51,7 @@ func TestSynthesizeGeminiProImageUsage(t *testing.T) {
 	geminiProImageIntn = func(n int) int { return 0 }
 	defer func() { geminiProImageIntn = orig }()
 
-	s := synthesizeGeminiProImageUsage("4K", 9)
+	s := synthesizeGeminiProImageUsage("4K", 9, 1)
 	if s.ImageTokens != 2000 {
 		t.Fatalf("ImageTokens = %d, want 2000", s.ImageTokens)
 	}
@@ -69,7 +70,7 @@ func TestSynthesizeGeminiProImageUsage(t *testing.T) {
 }
 
 func TestSynthesizeGeminiProImageUsageDefaultPrompt(t *testing.T) {
-	s := synthesizeGeminiProImageUsage("2K", 0)
+	s := synthesizeGeminiProImageUsage("2K", 0, 1)
 	if s.PromptTokens <= 0 {
 		t.Fatalf("PromptTokens = %d, want positive default when upstream missing", s.PromptTokens)
 	}
@@ -245,7 +246,7 @@ func TestApplyGeminiProImageMask(t *testing.T) {
 	defer func() { geminiProImageIntn = orig }()
 
 	// 映射响应触发
-	nb, u, masked := applyGeminiProImageMask([]byte(flashStrippedBody), "gemini-3-pro-image-preview", "2K")
+	nb, u, masked := applyGeminiProImageMask([]byte(flashStrippedBody), "gemini-3-pro-image-preview", "2K", 0)
 	if !masked {
 		t.Fatal("expected masked=true for flash response")
 	}
@@ -265,14 +266,91 @@ func TestApplyGeminiProImageMask(t *testing.T) {
 	}
 
 	// 真 pro 不触发
-	_, _, masked2 := applyGeminiProImageMask([]byte(proRealBody), "gemini-3-pro-image-preview", "2K")
+	_, _, masked2 := applyGeminiProImageMask([]byte(proRealBody), "gemini-3-pro-image-preview", "2K", 0)
 	if masked2 {
 		t.Error("genuine pro should not be masked")
 	}
 
 	// 非 pro 模型不触发
-	_, _, masked3 := applyGeminiProImageMask([]byte(flashStrippedBody), "gemini-3.1-flash-image", "2K")
+	_, _, masked3 := applyGeminiProImageMask([]byte(flashStrippedBody), "gemini-3.1-flash-image", "2K", 0)
 	if masked3 {
 		t.Error("non-pro model should not be masked")
 	}
+}
+
+// pro 伪装的 image token 必须按张数乘。
+//
+// 上游 v0.1.177 起 ImageCount 改为数真实的内联图片 part（resolveGeminiImageCount），
+// 按次计费的分组回 N 张就收 N 份；伪装侧若仍只合成一张图的 token，
+// 按 token 计费的分组只收 1 份 —— 同一笔请求在两种计费模式下差 N 倍。
+//
+// 断言用「N 张恰好是 1 张的 N 倍」而不是硬编码数值：档位表改了这条不会假红，
+// 而「忘了乘」仍然必红。text/thoughts 是随机量，所以只断 ImageTokens 与由它派生的差值。
+func TestSynthesizeGeminiProImageUsageScalesWithImageCount(t *testing.T) {
+	for _, tier := range []string{"1K", "2K", "4K"} {
+		one := synthesizeGeminiProImageUsage(tier, 100, 1)
+		three := synthesizeGeminiProImageUsage(tier, 100, 3)
+		require.Equal(t, one.ImageTokens*3, three.ImageTokens, "%s 档：3 张的 image token 必须是 1 张的 3 倍", tier)
+		require.Equal(t, three.ImageTokens, three.CandidatesTokens-three.TextTokens,
+			"%s 档：candidates 必须等于乘过张数的 image token 加 text", tier)
+		require.Equal(t, three.PromptTokens+three.CandidatesTokens+three.ThoughtsTokens, three.TotalTokens,
+			"%s 档：total 必须跟着一起变", tier)
+	}
+
+	// 张数缺失/非法一律按 1 张，既是老行为，也避免把整笔 usage 合成成 0。
+	base := synthesizeGeminiProImageUsage("2K", 100, 1)
+	for _, n := range []int{0, -1} {
+		require.Equal(t, base.ImageTokens, synthesizeGeminiProImageUsage("2K", 100, n).ImageTokens,
+			"imageCount=%d 必须回落到 1 张", n)
+	}
+}
+
+// 非流式：完整响应体自带全部图片 part，applyGeminiProImageMask 传 0 时必须自己数出来。
+func TestApplyGeminiProImageMaskCountsImagesFromBody(t *testing.T) {
+	const (
+		model = "gemini-3-pro-image-preview"
+		tier  = "2K"
+	)
+	img := `{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}`
+	body := func(parts string) []byte {
+		return []byte(`{"modelVersion":"gemini-3.1-flash-image","candidates":[{"content":{"parts":[` + parts +
+			`]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":7,"totalTokenCount":107}}`)
+	}
+
+	_, oneUsage, masked := applyGeminiProImageMask(body(img), model, tier, 0)
+	require.True(t, masked)
+	require.NotNil(t, oneUsage)
+
+	_, twoUsage, masked := applyGeminiProImageMask(body(img+","+img), model, tier, 0)
+	require.True(t, masked)
+	require.NotNil(t, twoUsage)
+
+	require.Equal(t, oneUsage.ImageOutputTokens*2, twoUsage.ImageOutputTokens,
+		"两张图的响应体必须计出两张的 image token —— 传 0 时要自己数 body，不能默认按 1 张")
+
+	// 显式传入的张数优先于 body 里数出来的：流式终结分块靠这条走累计值。
+	_, explicitUsage, masked := applyGeminiProImageMask(body(img), model, tier, 4)
+	require.True(t, masked)
+	require.Equal(t, oneUsage.ImageOutputTokens*4, explicitUsage.ImageOutputTokens,
+		"显式张数必须覆盖 body 里数出来的 1 张")
+}
+
+// 流式：终结分块只带 finishReason 与 usage，图片 part 早在前面的分块里到了。
+// 所以 maskGeminiProImageStreamChunk 必须吃调用方传入的累计张数，
+// 在终结分块自己数只会得到 0（→ 回落 1 张 → 少收 N-1 张的钱）。
+func TestMaskGeminiProImageStreamChunkUsesCarriedImageCount(t *testing.T) {
+	const model = "gemini-3-pro-image-preview"
+	final := []byte(`{"modelVersion":"gemini-3.1-flash-image","candidates":[{"content":{"parts":[{"text":"done"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":7,"totalTokenCount":107}}`)
+	require.Equal(t, 0, countGeminiInlineImageOutputs(final),
+		"前提：终结分块自身没有图片 part，否则本用例测不到「靠累计值」这件事")
+
+	base := geminiProImageMaskParams{Enabled: true, Model: model, Tier: "2K"}
+	_, oneUsage, ok := maskGeminiProImageStreamChunk(final, base.withImageCount(1))
+	require.True(t, ok)
+	require.NotNil(t, oneUsage)
+
+	_, threeUsage, ok := maskGeminiProImageStreamChunk(final, base.withImageCount(3))
+	require.True(t, ok)
+	require.Equal(t, oneUsage.ImageOutputTokens*3, threeUsage.ImageOutputTokens,
+		"累计张数没被 withImageCount 带进去 —— 流式多图会按 1 张收费")
 }

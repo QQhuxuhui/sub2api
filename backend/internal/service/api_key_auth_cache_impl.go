@@ -27,7 +27,10 @@ import (
 // 必须再 bump 一次强制刷新 —— 不 bump 的话，升级前写入的 v19/v20 快照会被当成有效，
 // 网关侧读到的 search/audio/video_model_prices 恒为零值（漏计费），
 // 或 normalize_response_model 恒为 false（开关失效）。
-const apiKeyAuthSnapshotVersion = 21
+// v22: 补投影 group 的 LongContextPricingEnabled 与 ModelPricing（上游 v0.1.177 新增
+// 却没进快照）。不 bump 则存量 v21 快照被继续复用，两个字段在网关侧恒为零值：
+// 分组逐模型价读不到、区间定价被压平到最低档。
+const apiKeyAuthSnapshotVersion = 22
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -423,6 +426,8 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			ClaudeCodeOnly:                  apiKey.Group.ClaudeCodeOnly,
 			NormalizeAnthropicEnvelope:      apiKey.Group.NormalizeAnthropicEnvelope,
 			NormalizeResponseModel:          apiKey.Group.NormalizeResponseModel,
+			LongContextPricingEnabled:       apiKey.Group.LongContextPricingEnabled,
+			ModelPricing:                    apiKey.Group.ModelPricing,
 			FallbackGroupID:                 apiKey.Group.FallbackGroupID,
 			FallbackGroupIDOnInvalidRequest: apiKey.Group.FallbackGroupIDOnInvalidRequest,
 			ModelRouting:                    apiKey.Group.ModelRouting,
@@ -521,6 +526,8 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			ClaudeCodeOnly:                  snapshot.Group.ClaudeCodeOnly,
 			NormalizeAnthropicEnvelope:      snapshot.Group.NormalizeAnthropicEnvelope,
 			NormalizeResponseModel:          snapshot.Group.NormalizeResponseModel,
+			LongContextPricingEnabled:       snapshot.Group.LongContextPricingEnabled,
+			ModelPricing:                    snapshot.Group.ModelPricing,
 			FallbackGroupID:                 snapshot.Group.FallbackGroupID,
 			FallbackGroupIDOnInvalidRequest: snapshot.Group.FallbackGroupIDOnInvalidRequest,
 			ModelRouting:                    snapshot.Group.ModelRouting,
