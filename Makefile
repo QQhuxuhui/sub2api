@@ -1,4 +1,4 @@
-.PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
+.PHONY: build build-backend build-frontend test test-race test-backend test-frontend test-frontend-critical
 
 FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/client.spec.ts \
@@ -23,6 +23,10 @@ build-frontend:
 
 # 运行测试（后端 + 前端）
 test: test-backend test-frontend
+
+# 后端带 -race 的两轮（见 backend/Makefile 的说明）
+test-race:
+	@$(MAKE) -C backend test-race
 
 test-backend:
 	@$(MAKE) -C backend test

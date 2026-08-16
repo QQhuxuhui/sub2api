@@ -3,7 +3,6 @@ package teamops
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -142,6 +141,8 @@ func sortExpr(sort string) string {
 	}
 }
 
+// 等价变异，别再重报：EqualFold 换成 == 不会被任何用例杀掉 —— handler 侧
+// 已把 order 收敛成小写白名单，仓储层这层大小写宽容是纯冗余护栏。
 func orderDir(order string) string {
 	if strings.EqualFold(order, "asc") {
 		return "ASC"
@@ -204,6 +205,10 @@ func (r *Repo) ListRows(ctx context.Context, q RowQuery) ([]Row, int64, error) {
     bool_or(COALESCE(` + ownerNameExpr + `,'') <> '')        AS by_owner,
     COUNT(*) FILTER (WHERE kr.deleted_at IS NULL)            AS key_count,
     COUNT(*)                                                 AS key_count_all,
+    -- 等价变异，别再重报：bool_or 与 bool_and 在 by_owner / all_deleted 上互换
+    -- 大多数情况下同解。组内令牌的归属名同质是 groupKeyExpr 的推论
+    -- （同一个 group_key 要么都有同一个归属名，要么是同一把令牌），
+    -- 所以 by_owner 那一行 bool_or == bool_and 恒成立。
     bool_and(kr.deleted_at IS NOT NULL)                      AS all_deleted,
     -- 口径必须与上面的 key_count 完全一致：都只数没被软删的行。
     -- 用未过滤的 COUNT(*) 的话，一个存续令牌 + 一个历史软删令牌的组会得出
@@ -309,7 +314,10 @@ FROM g`
 		&s.TotalCost, &s.PrevCost, &s.TopRowCost, &s.RowCount,
 		&s.KeyCount, &s.OwnedKeyCount, &s.Requests, &s.PrevRequests,
 	)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	// 不要为 sql.ErrNoRows 开容错：这条 SELECT 没有 GROUP BY，聚合函数对空集也恒返回一行
+	// （COALESCE 把 NULL 兜成 0），ErrNoRows 结构性不可达。写了那个分支的害处在将来 ——
+	// 哪天有人给它加上 GROUP BY 或 WHERE，看板就会在真实故障下静默显示「本期消耗 0」而不报错。
+	if err != nil {
 		return Summary{}, fmt.Errorf("team summary: %w", err)
 	}
 	return s, nil

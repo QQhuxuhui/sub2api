@@ -15,10 +15,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// gin.SetMode 写全局变量，必须在 init() 里一次性设完。写在构造函数里的话，
+// 任何人给本文件的用例加上 t.Parallel() 就会立刻产生数据竞争 ——
+// teamops 包正是这么中招的（见 a6f7ff60），而本仓测试默认并行已成肌肉记忆。
+func init() { gin.SetMode(gin.TestMode) }
+
 // newTeamRouteTestRouter 按生产路径注册用户路由。settingService 与 panelRateLimiter 传 nil：
 // 两者的中间件都在 nil 时放行，注册期也不解引用。
 func newTeamRouteTestRouter() *gin.Engine {
-	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	jwtAuth := servermiddleware.JWTAuthMiddleware(func(c *gin.Context) {
 		if c.GetHeader("Authorization") == "" {

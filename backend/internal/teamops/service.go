@@ -216,7 +216,7 @@ func displayDelta(cur, prev float64) (pct, abs float64, ok bool) {
 // 换算在**用户时区**里做，与 period / compare 里的日期同一口径：跨零点时
 // 同一个边界时刻在两个时区里落在不同的自然日上。
 //
-// 「加一天」这一步必须放到 UTC 里做，理由与 period.go 的 naturalDays 一样：UTC 没有
+// 「加一天」这一步必须放到 UTC 里做，理由与 period.go 的 civilDays 一样：UTC 没有
 // 夏令时。在本地时区上 AddDate 会踩到**午夜不存在**的时区——America/Santiago
 // 2025-09-07 的 00:00 直接跳到 01:00，time.Date 把它规范化成前一天 23:00，
 // 于是「加一天」加完还落在同一个自然日上，取整白做，自相矛盾的提示条原样复现。

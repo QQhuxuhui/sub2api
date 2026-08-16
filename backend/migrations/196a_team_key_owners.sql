@@ -6,8 +6,15 @@
 --      归属仍在」这个状态；CREATE TABLE ... REFERENCES 会在每次进程启动跑迁移时
 --      锁 api_keys/users；旧备份用 --clean --single-transaction 恢复时会因不认识的
 --      依赖整体回滚；上游对 api_keys/users 做表级 DDL 会让本 fork 起不来。
---      越权校验在应用层做（PUT /owners 的 WHERE id = ANY($1) AND user_id = $2），
---      孤儿行是惰性的：主查询的 k 子查询已把可见范围锁死在 WHERE user_id = :uid。
+--      代价是 team_key_owners.user_id ≡ api_keys.user_id 这条不变量**没有任何数据库对象
+--      在保证**，所以读侧必须自己校验：主查询的 LEFT JOIN 必须带 AND o.user_id = :uid。
+--      只靠 k 子查询的 WHERE user_id = :uid 是不够的 —— 它锁死的是**金额**的可见范围，
+--      不是归属名的来源，漏掉 JOIN 谓词时别人写的 owner_name 会出现在你的看板上
+--      并改变分组合并（已在真库复现，守卫见 repo_integration_test.go 的
+--      TestListRows_IgnoresOwnerRowsBelongingToAnotherUser）。
+--      写侧的越权校验将来由 PUT /user/team/owners 承担
+--      （WHERE id = ANY($1) AND user_id = $2）；该端点在后续 PR，本阶段尚不存在，
+--      因此目前本表在生产中恒为空。
 --   3) owner_name 为空 = 没有记录（DELETE），不是写空串。CHECK 拦住纯空白的名字。
 --      btrim 必须带显式剪除集：btrim(string) 的默认剪除集只有 U+0020，制表、换行、
 --      回车、NBSP(U+00A0)、全角空格(U+3000) 都能漏过去，在看板上渲染成一行空名字的

@@ -1,3 +1,9 @@
+// 本文件的用例**一律不得**调用 t.Parallel()，与同包其余 6 个测试文件的约定相反：
+//   - seededAccountID 是无锁懒加载的包级变量（已用 16 goroutine 探针实测出 DATA RACE）；
+//   - seedUser 用固定 email，并发插入会撞 users_email_unique_active；
+//   - 各用例用硬编码的 user_id / api_key_id 分区，并发下 t.Cleanup 的删除会互相踩。
+// 要并行化就得先把 fixture 改成每个用例独立取号，那是另一件事。
+//
 //go:build integration
 
 package teamops_test
