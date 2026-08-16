@@ -143,3 +143,12 @@ docs/*
 frontend/coverage/
 aicodex
 output/
+
+# 抓包 / curl 调试转储。历史上出现过：仓库根目录躺着含 2 个完整 API Key
+# 与线上 PG 主机/端口/用户/明文密码的 7600 行 curl 记录（未提交，已脱敏）。
+# 这类文件一律不进版本库。
+curl*.txt
+*-curl*.txt
+*.har
+*.pcap
+*.pcapng
