@@ -16,10 +16,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// gin.SetMode 写的是包级全局变量，而本文件的用例全都 t.Parallel()。
+// 放在每个用例都会走到的构造函数里，就是 N 个 goroutine 并发写同一个全局 ——
+// `go test -race` 会实打实地报 DATA RACE（不是理论风险，本分支就是这么被抓到的）。
+//
+// 用 init() 而不是 TestMain：本包已经有一个 TestMain（repo_integration_test.go，
+// 带 //go:build integration），而同一次构建里两个 TestMain 不能共存。
+// init() 在任何 tag 组合下都不冲突，且保证只执行一次、早于所有用例。
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
 // newTestContext 造一个已认证的 gin 上下文。userID 为 0 时不写入认证主体，
 // 用来覆盖「认证中间件缺位」这条分支。
 func newTestContext(target string, userID int64) (*gin.Context, *httptest.ResponseRecorder) {
-	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, target, nil)
