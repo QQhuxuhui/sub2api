@@ -2161,13 +2161,16 @@ func TestForwardOpenAIImagesSimulation_APIKeyGenerationIntegration(t *testing.T)
 		require.Equal(t, upstreamBody, recorder.Body.String())
 	})
 
-	// spec 集成清单 15：未知出图尺寸必须整体放弃模拟、逐字节透传。
-	t.Run("unknown output size", func(t *testing.T) {
-		unknownBody := `{"created":1710000021,"model":"gpt-image-2","data":[{"b64_json":"` + testPNGBase64(t, 1254, 1254) + `"}],"usage":{"input_tokens":30,"output_tokens":400,"total_tokens":430}}`
-		result, recorder := run(t, true, "", "gpt-image-2", unknownBody)
-		require.False(t, result.ImageUsageSimulated)
-		require.Equal(t, 400, result.Usage.OutputTokens)
-		require.Equal(t, unknownBody, recorder.Body.String())
+	// 表外出图尺寸（web 逆向 / 超分路径）改由官方公式计费，不再放弃模拟。
+	// 1254x1254 low 经公式为 229，恰与 codex 线实测文生图输出一致。
+	t.Run("off-table output size simulates via formula", func(t *testing.T) {
+		offTableBody := `{"created":1710000021,"model":"gpt-image-2","data":[{"b64_json":"` + testPNGBase64(t, 1254, 1254) + `"}],"usage":{"input_tokens":30,"output_tokens":400,"total_tokens":430}}`
+		result, recorder := run(t, true, "", "gpt-image-2", offTableBody)
+		require.True(t, result.ImageUsageSimulated)
+		require.Equal(t, 229, result.Usage.ImageOutputTokens)
+		require.Equal(t, 30, result.Usage.InputTokens)
+		require.Equal(t, int64(229), gjson.Get(recorder.Body.String(), "usage.output_tokens_details.image_tokens").Int())
+		require.Equal(t, "1254x1254", gjson.Get(recorder.Body.String(), "size").String())
 	})
 
 	// spec 集成清单 16：请求模型不在白名单（非仅 channel 映射后的上游模型）不模拟。

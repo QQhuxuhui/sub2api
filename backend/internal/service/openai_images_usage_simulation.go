@@ -193,25 +193,40 @@ func normalizeOpenAIImageQuality(raw string) (string, bool) {
 	}
 }
 
-func openAIImageOutputTokens(ratio, tier, quality string) (int, bool) {
-	tiers, ok := openAIImageTokenTable[ratio]
-	if !ok {
-		return 0, false
-	}
-	cell, ok := tiers[tier]
-	if !ok {
-		return 0, false
-	}
+// officialOpenAIImageOutputTokens reproduces the official gpt-image-2 output-token
+// formula. It matches all 54 measured cells in GPT_IMAGE_2_TOKEN_REFERENCE.md §4
+// byte-for-byte (verified in TestOfficialOpenAIImageOutputTokens*) and extends
+// safely to arbitrary WxH, so it replaces the fixed reference table for token
+// counting — off-table sizes no longer collapse to zero output tokens. The
+// one-cell lower bound only affects non-official extreme aspect ratios.
+//
+//	base   = {low:16, medium:48, high:96}
+//	other  = max(1, round(base * min(w,h) / max(w,h)))
+//	tokens = ceil(base * other * (2e6 + w*h) / 4e6)
+func officialOpenAIImageOutputTokens(width, height int, quality string) (int, bool) {
+	var base float64
 	switch quality {
 	case "low":
-		return cell.Low, true
+		base = 16
 	case "medium":
-		return cell.Medium, true
+		base = 48
 	case "high":
-		return cell.High, true
+		base = 96
 	default:
 		return 0, false
 	}
+	if width <= 0 || height <= 0 {
+		return 0, false
+	}
+	shorter := math.Min(float64(width), float64(height))
+	longer := math.Max(float64(width), float64(height))
+	// A decoded image always consumes at least one token cell on the short axis.
+	// Without the lower bound, sufficiently extreme but valid dimensions such as
+	// 1000x1 round to zero and silently produce zero output tokens.
+	other := math.Max(1, math.Round(base*shorter/longer))
+	pixels := float64(width) * float64(height)
+	tokens := math.Ceil(base * other * (2e6 + pixels) / 4e6)
+	return int(tokens), true
 }
 
 // decodeImageMeta streams base64 into DecodeConfig so large images do not require a second raw buffer.
@@ -298,10 +313,12 @@ func resolveOpenAIImageGeometryFromDecoded(root map[string]any) (openAIImageGeom
 	if !ok {
 		return openAIImageGeometry{}, "", false
 	}
-	geometry, ok := lookupOpenAIImageSize(width, height)
-	if !ok {
-		return openAIImageGeometry{}, "", false
-	}
+	// Token counting now uses officialOpenAIImageOutputTokens, which safely extends to
+	// any WxH, so the geometry is no longer gated on a reference-table hit. Gating
+	// here was what collapsed off-table sizes (e.g. 1536x1024, 3456x2304 from the
+	// web-reverse / upscale path) to zero output tokens. Ratio/Tier stay empty;
+	// only Width/Height feed the formula. The declared size, when present, is still
+	// a consistency check against the decoded pixels.
 	if declaredValue, exists := root["size"]; exists {
 		declared, validString := declaredValue.(string)
 		declaredWidth, declaredHeight, valid := parseOpenAIImageWidthHeight(declared)
@@ -309,7 +326,7 @@ func resolveOpenAIImageGeometryFromDecoded(root map[string]any) (openAIImageGeom
 			return openAIImageGeometry{}, "", false
 		}
 	}
-	return geometry, format, true
+	return openAIImageGeometry{Width: width, Height: height}, format, true
 }
 
 func resolveOpenAIImageGeometry(body []byte) (openAIImageGeometry, string, bool) {
@@ -380,7 +397,7 @@ func synthesizeOpenAIImagesUsage(
 	textInputTokens int,
 	imageInputTokens int,
 ) (openAIImagesSynthUsage, bool) {
-	imageOutputTokens, ok := openAIImageOutputTokens(geometry.Ratio, geometry.Tier, quality)
+	imageOutputTokens, ok := officialOpenAIImageOutputTokens(geometry.Width, geometry.Height, quality)
 	if !ok {
 		return openAIImagesSynthUsage{}, false
 	}

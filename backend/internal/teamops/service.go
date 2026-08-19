@@ -31,6 +31,7 @@ var ErrInvalidDate = errors.New("invalid date parameter")
 type teamRepo interface {
 	Summary(ctx context.Context, userID int64, cur, prev Period) (Summary, error)
 	ListRows(ctx context.Context, q RowQuery) ([]Row, int64, error)
+	EnrichRows(ctx context.Context, q EnrichQuery) (map[string]RowEnrichment, error)
 }
 
 // Service 是团队消耗看板的服务层。
@@ -104,6 +105,39 @@ type SummaryDTO struct {
 	TopRowCost       float64           `json:"top_row_cost"`
 	RetentionWarning *RetentionWarning `json:"retention_warning"`
 	Conclusion       *Conclusion       `json:"conclusion"`
+
+	// Requests / PrevRequests 早就在仓储层算着了，只是此前没下发。概览条要拿它算日均，
+	// 也是「平均单次」那一格的分母。
+	Requests     int64 `json:"requests"`
+	PrevRequests int64 `json:"prev_requests"`
+	// ActiveRowCount 是概览条「活跃成员 6/8」的分子，分母是 RowCount。
+	ActiveRowCount int `json:"active_row_count"`
+	// CacheHitRate 是 token 口径的全量命中率（0~100），分母为 0 时 nil，与行级同一份算法。
+	CacheHitRate *float64 `json:"cache_hit_rate"`
+	// CacheSavedCost 是**近似**的缓存节省额，见 Summary.CacheSavedCost 的口径说明。
+	// 这里不走 roundCents：它没有任何「Σ 各行 == 总额」式的恒等式要维持，
+	// 而取整会把不足一分的节省显示成 0.00、把 -0.004 序列化成 "-0"。格式化交给前端。
+	CacheSavedCost float64 `json:"cache_saved_cost"`
+}
+
+// cacheHitRate 是缓存命中率的唯一一份算法，概览条与表格行共用（与 displayDelta 同一个理由：
+// 两处分叉过一次就会有两个都说得通、但对不上的数字）。
+//
+// token 口径而不是请求口径：一次请求可以既读缓存、写缓存又吃新输入，按请求数算等于把
+// 「读了 90% 缓存」的请求算成一次完整命中。
+// cache_creation_tokens 是未命中的 prompt 写入，必须进入分母；漏掉它会系统性高估
+// Anthropic 等把缓存写入单列返回的模型。
+//
+// 分母为 0 时返回 nil 而不是 0：「本期没有任何输入 token」与「命中率 0%」是两回事，
+// 前者该在界面上显示「—」。返回 0 会让一个从没发过请求的成员显示成「缓存命中 0%」，
+// 读起来像是他把缓存用坏了。
+func cacheHitRate(inputTokens, cacheCreationTokens, cacheReadTokens int64) *float64 {
+	denom := inputTokens + cacheCreationTokens + cacheReadTokens
+	if denom <= 0 {
+		return nil
+	}
+	rate := 100 * float64(cacheReadTokens) / float64(denom)
+	return &rate
 }
 
 // resolvePeriods 把请求里的日期参数解析成「本期 + 对比区间 + 是否可比」。
@@ -161,6 +195,11 @@ func (s *Service) Summary(ctx context.Context, userID int64, startDate, endDate,
 		DeletedKeyCount: sum.DeletedKeyCount,
 		OwnedKeyCount:   sum.OwnedKeyCount,
 		TopRowCost:      roundCents(sum.TopRowCost),
+		Requests:        sum.Requests,
+		PrevRequests:    sum.PrevRequests,
+		ActiveRowCount:  sum.ActiveRowCount,
+		CacheHitRate:    cacheHitRate(sum.InputTokens, sum.CacheCreationTokens, sum.CacheReadTokens),
+		CacheSavedCost:  sum.CacheSavedCost,
 	}
 
 	if !pair.Comparable {
@@ -255,7 +294,128 @@ func (s *Service) Rows(ctx context.Context, userID int64, startDate, endDate, tz
 	}
 
 	finalizeRows(rows, pair.Comparable)
+	s.enrichRows(ctx, userID, pair.Cur, rows)
 	return rows, total, nil
+}
+
+// enrichRows 用当页补充查询把 TopModel / TopModelShare / Daily 填上。
+//
+// **失败一律降级，不往上抛**：这三个维度是锦上添花，而 ListRows 那一页金额、环比、
+// 请求数才是这个页面的本体。补充查询超时就整页 500 的话，一次慢查询能让用户连
+// 「谁花了多少钱」都看不到 —— 而那正是他打开这个页面要问的问题。
+//
+// 降级的形态要与「查到了但是零消耗」区分得开：
+//   - 查成功、该组本期没花钱 → Daily 是一串 0（长度仍等于本期天数），前端画一条贴底的线；
+//   - 查失败 → Daily 是**空数组**，前端据此不画线。画一条平的假线会让人以为
+//     这个人本期真的一分没花。
+//
+// 两种情况下 TopModel 都是 nil，前端一律渲染「—」。
+func (s *Service) enrichRows(ctx context.Context, userID int64, cur Period, rows []Row) {
+	labels := dailyLabels(cur)
+
+	enriched := map[string]RowEnrichment{}
+	ok := false
+	if keyIDs := pageKeyIDs(rows); len(keyIDs) > 0 {
+		got, err := s.repo.EnrichRows(ctx, EnrichQuery{UserID: userID, KeyIDs: keyIDs, Cur: cur})
+		if err == nil {
+			enriched, ok = got, true
+		}
+	}
+
+	for i := range rows {
+		if !ok {
+			rows[i].Daily = []float64{}
+			continue
+		}
+		e := enriched[rows[i].GroupKey] // 缺键取零值：该组本期没有任何日志
+		rows[i].Daily = spreadDaily(e.Daily, labels)
+		if model, share, hasTop := topModel(e.Models); hasTop {
+			rows[i].TopModel = &model
+			rows[i].TopModelShare = &share
+		}
+	}
+}
+
+// pageKeyIDs 把当页各行的令牌集合并成一份去重后的入参。
+//
+// 去重不是洁癖：同一把令牌出现两次会让 usage_logs ⋈ g 那一步把它的日志各算两遍，
+// 主力模型占比与趋势线直接翻倍。理论上 groupKeyExpr 保证一把令牌只落在一个分组里，
+// 但那是另一处代码的推论，这里花一个 map 把它变成本函数自己的保证。
+func pageKeyIDs(rows []Row) []int64 {
+	seen := map[int64]struct{}{}
+	out := make([]int64, 0, len(rows))
+	for _, r := range rows {
+		for _, id := range r.KeyIDs {
+			if _, dup := seen[id]; dup {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// topModel 从逐模型消耗里选出主力模型与它的占比（0~100）。
+//
+// 总额 <= 0 时认输（hasTop=false）：分组本期没花钱时「花得最多的模型」不是一个有意义的
+// 问题，而占比的分母就是那个 0 —— 算出来是 NaN 或 ±Inf，两者在 encoding/json 里
+// 都直接让整个响应序列化失败，页面白屏。
+//
+// 并列时取模型名字典序最小的那个。并列在真实数据里不常见，但一旦发生，
+// 不定序会让同一页刷新两次显示两个不同的主力模型 —— 用户会当成 bug 报上来，
+// 而这种「每次都不一样」的现象查起来极贵。
+func topModel(models map[string]float64) (name string, share float64, hasTop bool) {
+	var top float64
+	var total float64
+	for m, c := range models {
+		total += c
+		if name == "" || c > top || (c == top && m < name) {
+			name, top = m, c
+		}
+	}
+	if total <= 0 {
+		return "", 0, false
+	}
+	return name, 100 * top / total, true
+}
+
+// dailyLabels 给出本期逐自然日的日期标签。天数口径与 DerivePrev 用的是同一对
+// civilDay / civilDays —— 「本期有几个自然日」在本包只能有一个答案。
+//
+// 标签与仓储层日桶都取**用户时区**里的自然日（与 period.start_date 同一口径），
+// 因此前端拿下标对日期时是一一对应的。
+func dailyLabels(cur Period) []string {
+	first := civilDay(cur.Start)
+	n := civilDays(first, civilDay(cur.End))
+	if n <= 0 {
+		return nil
+	}
+	out := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, first.AddDate(0, 0, i).Format(dateLayout))
+	}
+	return out
+}
+
+// spreadDaily 把用户时区的日桶映射到同一时区的日期标签，返回与 labels 等长的数组。
+// 仓储层已经按本期边界过滤且用 cur.Timezone 分桶，因此正常返回的每个键都应命中 labels。
+// 越界键视为脏数据并忽略，不能夹进首尾格，否则一个点会混合两个不同自然日。
+func spreadDaily(buckets map[string]float64, labels []string) []float64 {
+	out := make([]float64, len(labels))
+	if len(labels) == 0 {
+		return out
+	}
+	idx := make(map[string]int, len(labels))
+	for i, d := range labels {
+		idx[d] = i
+	}
+	for day, v := range buckets {
+		if i, hit := idx[day]; hit {
+			out[i] += v
+		}
+	}
+	return out
 }
 
 // finalizeRows 把仓储层给出的原始行补成可直接渲染的行：先算环比，再把展示金额摊到分。
@@ -273,6 +433,16 @@ func finalizeRows(rows []Row, comparable bool) {
 	for i := range rows {
 		values[i] = rows[i].CurrentCost
 		pageTotal += rows[i].CurrentCost
+
+		// 平均单次与环比一样，用的是**分配前**的金额。放在下面那个分配循环里算的话，
+		// 分子会是被人为摊过 ±1 分的展示值：请求数只有个位数时，那 1 分足以让
+		// 「显著高于全局平均」的标黄判定翻面。Requests==0 时留 0，不做除法。
+		if rows[i].Requests > 0 {
+			rows[i].AvgCost = rows[i].CurrentCost / float64(rows[i].Requests)
+		}
+		rows[i].CacheHitRate = cacheHitRate(
+			rows[i].InputTokens, rows[i].CacheCreationTokens, rows[i].CacheReadTokens,
+		)
 
 		// 上期不可比时环比一律留空。上期为 0（含「不足一分、展示成 0.00」）
 		// 的认输判定在 displayDelta 里，与概览条同一份算法。

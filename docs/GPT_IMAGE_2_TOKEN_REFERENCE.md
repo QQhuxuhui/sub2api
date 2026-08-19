@@ -64,6 +64,23 @@ gpt-image-2 与 gpt-image-1 不同，**支持任意尺寸直到 4K**，需同时
 竖版按对应横版同值使用；目前只直接验证了 `720x1280` low = `1280x720` low = 106，
 其余竖版属于对称性推定。
 
+> **运行时计费改用官方公式，本表退居验证基准。**
+> `officialOpenAIImageOutputTokens`（`backend/internal/service/openai_images_usage_simulation.go`）
+> 实现下式，对本表 54 格逐格 byte-for-byte 命中，且对任意 `WxH` 安全外推，
+> 因此不再按尺寸表查表——表外尺寸（web 逆向 / 超分路径产出的 `1536x1024`、
+> `3456x2304` 等）不再塌成 0 output token。
+>
+> ```
+> base   = {low:16, medium:48, high:96}
+> other  = max(1, round(base × min(w,h) / max(w,h)))
+> tokens = ceil(base × other × (2e6 + w·h) / 4e6)
+> ```
+> `max(1, ...)` 只影响官方尺寸范围之外的极端长宽比，防止已解码图像被静默记为
+> 0 output token；54 个实测单元格的结果不变。
+>
+> 本表仍作为公式的回归基准（`TestOfficialOpenAIImageOutputTokensAllMeasuredCells`），
+> 并继续为计费档位（1K/2K/4K）分类提供精确命中来源（`image_billing_size.go`）。
+
 | 比例 | 档位 | 尺寸 | low | medium | high | low $ | med $ | high $ |
 |---|---|---|---|---|---|---|---|---|
 | 1:1 | 1K | 1024×1024 | 196 | 1756 | 7024 | 0.0059 | 0.0527 | 0.2107 |

@@ -260,7 +260,7 @@ func TestNormalizeOpenAIImageQuality(t *testing.T) {
 	}
 }
 
-func TestOpenAIImageOutputTokensAllMeasuredCells(t *testing.T) {
+func TestOfficialOpenAIImageOutputTokensAllMeasuredCells(t *testing.T) {
 	qualities := []struct {
 		name string
 		get  func(measuredOpenAIImageTokenRow) int
@@ -271,28 +271,69 @@ func TestOpenAIImageOutputTokensAllMeasuredCells(t *testing.T) {
 	}
 	checked := 0
 	for _, row := range measuredOpenAIImageTokenRows {
-		for _, quality := range qualities {
-			got, ok := openAIImageOutputTokens(row.ratio, row.tier, quality.name)
-			want := quality.get(row)
-			if !ok || got != want {
-				t.Errorf("openAIImageOutputTokens(%q, %q, %q) = %d, %v, want %d, true", row.ratio, row.tier, quality.name, got, ok, want)
+		// The formula reproduces every measured cell in both landscape and,
+		// for transposable ratios, the portrait transpose used in production.
+		dims := [][2]int{{row.width, row.height}}
+		if row.transposable && row.width != row.height {
+			dims = append(dims, [2]int{row.height, row.width})
+		}
+		for _, dim := range dims {
+			for _, quality := range qualities {
+				got, ok := officialOpenAIImageOutputTokens(dim[0], dim[1], quality.name)
+				want := quality.get(row)
+				if !ok || got != want {
+					t.Errorf("officialOpenAIImageOutputTokens(%d, %d, %q) = %d, %v, want %d, true", dim[0], dim[1], quality.name, got, ok, want)
+				}
+				checked++
 			}
-			checked++
 		}
 	}
-	if checked != 54 {
-		t.Fatalf("checked %d measured token cells, want 54", checked)
+	if checked < 54 {
+		t.Fatalf("checked %d measured token cells, want >= 54", checked)
 	}
 }
 
-func TestOpenAIImageOutputTokensRejectsUnknownCell(t *testing.T) {
-	for _, input := range [][3]string{
-		{"7:3", ImageBillingSize1K, "low"},
-		{"1:1", "8K", "low"},
-		{"1:1", ImageBillingSize1K, "ultra"},
+func TestOfficialOpenAIImageOutputTokensRejectsInvalidInput(t *testing.T) {
+	for _, tc := range []struct {
+		width, height int
+		quality       string
+	}{
+		{1024, 1024, "ultra"},
+		{1024, 1024, ""},
+		{0, 1024, "low"},
+		{1024, -1, "high"},
 	} {
-		if _, ok := openAIImageOutputTokens(input[0], input[1], input[2]); ok {
-			t.Errorf("openAIImageOutputTokens(%q, %q, %q) unexpectedly matched", input[0], input[1], input[2])
+		if _, ok := officialOpenAIImageOutputTokens(tc.width, tc.height, tc.quality); ok {
+			t.Errorf("officialOpenAIImageOutputTokens(%d, %d, %q) unexpectedly matched", tc.width, tc.height, tc.quality)
+		}
+	}
+}
+
+// TestOfficialOpenAIImageOutputTokensOffTable pins the regression: sizes absent
+// from the reference table (produced by the web-reverse / upscale path) must
+// yield positive, monotonic-by-quality output tokens instead of collapsing to
+// zero. Expected values are the formula evaluated directly.
+func TestOfficialOpenAIImageOutputTokensOffTable(t *testing.T) {
+	for _, dim := range [][2]int{
+		{1536, 1024}, {1024, 1536}, {2304, 1536}, {3456, 2304}, {2304, 3456}, {4096, 4096},
+	} {
+		low, okLow := officialOpenAIImageOutputTokens(dim[0], dim[1], "low")
+		med, okMed := officialOpenAIImageOutputTokens(dim[0], dim[1], "medium")
+		high, okHigh := officialOpenAIImageOutputTokens(dim[0], dim[1], "high")
+		if !okLow || !okMed || !okHigh {
+			t.Fatalf("off-table size %dx%d failed to produce tokens", dim[0], dim[1])
+		}
+		if !(low > 0 && med > low && high > med) {
+			t.Errorf("off-table size %dx%d tokens not positive/monotonic: low=%d medium=%d high=%d", dim[0], dim[1], low, med, high)
+		}
+	}
+}
+
+func TestOfficialOpenAIImageOutputTokensExtremeAspectRatioStaysPositive(t *testing.T) {
+	for _, quality := range []string{"low", "medium", "high"} {
+		got, ok := officialOpenAIImageOutputTokens(1000, 1, quality)
+		if !ok || got < 1 {
+			t.Errorf("officialOpenAIImageOutputTokens(1000, 1, %q) = %d, %v, want >= 1, true", quality, got, ok)
 		}
 	}
 }
@@ -343,16 +384,26 @@ func TestDecodeImageMeta(t *testing.T) {
 }
 
 func TestResolveOpenAIImageGeometryUsesActualImage(t *testing.T) {
+	// Geometry now carries only the decoded pixels; Ratio/Tier are no longer
+	// populated because token counting is formula-based, not table-keyed.
 	body := []byte(`{"size":"2048x2048","data":[{"b64_json":"` + testPNGBase64(t, 2048, 2048) + `"}]}`)
 	geometry, format, ok := resolveOpenAIImageGeometry(body)
-	if !ok || geometry.Ratio != "1:1" || geometry.Tier != ImageBillingSize2K || format != "png" {
+	if !ok || geometry.Width != 2048 || geometry.Height != 2048 || format != "png" {
 		t.Fatalf("resolveOpenAIImageGeometry() = %+v, %q, %v", geometry, format, ok)
 	}
 
 	body = []byte(`{"data":[{"b64_json":"` + testPNGBase64(t, 1280, 720) + `"}]}`)
 	geometry, format, ok = resolveOpenAIImageGeometry(body)
-	if !ok || geometry.Ratio != "16:9" || geometry.Tier != ImageBillingSize1K || format != "png" {
+	if !ok || geometry.Width != 1280 || geometry.Height != 720 || format != "png" {
 		t.Fatalf("resolveOpenAIImageGeometry() = %+v, %q, %v", geometry, format, ok)
+	}
+
+	// Off-table sizes (web-reverse / upscale path) now resolve instead of being
+	// rejected — this is the zero-token regression being fixed.
+	body = []byte(`{"size":"1536x1024","data":[{"b64_json":"` + testPNGBase64(t, 1536, 1024) + `"}]}`)
+	geometry, format, ok = resolveOpenAIImageGeometry(body)
+	if !ok || geometry.Width != 1536 || geometry.Height != 1024 || format != "png" {
+		t.Fatalf("off-table resolveOpenAIImageGeometry() = %+v, %q, %v", geometry, format, ok)
 	}
 }
 
@@ -366,7 +417,6 @@ func TestResolveOpenAIImageGeometryRejectsUntrustedMetadata(t *testing.T) {
 			body: []byte(`{"size":"2048x2048","data":[{"b64_json":"` + testPNGBase64(t, 1024, 1024) + `"}]}`),
 		},
 		{name: "declared size with invalid image", body: []byte(`{"size":"2048x2048","data":[{"b64_json":"aGk="}]}`)},
-		{name: "unknown actual size", body: []byte(`{"data":[{"b64_json":"` + testPNGBase64(t, 8, 8) + `"}]}`)},
 		{name: "url only", body: []byte(`{"size":"1024x1024","data":[{"url":"https://example.com/a.png"}]}`)},
 		{name: "empty data", body: []byte(`{"data":[]}`)},
 		{name: "invalid json", body: []byte(`not json`)},
@@ -489,9 +539,15 @@ func TestSynthesizeOpenAIImagesUsage(t *testing.T) {
 		t.Errorf("floored usage = %+v, %v", floor, ok)
 	}
 
-	unknownGeometry := openAIImageGeometry{Width: 10, Height: 10, Ratio: "7:3", Tier: ImageBillingSize1K}
-	if _, ok := synthesizeOpenAIImagesUsage(unknownGeometry, "low", 10, 0); ok {
-		t.Error("unknown geometry unexpectedly synthesized usage")
+	// Off-table geometry (10x10) now synthesizes via the formula; only
+	// non-positive dimensions and unknown qualities are rejected.
+	offTable := openAIImageGeometry{Width: 10, Height: 10}
+	if usage, ok := synthesizeOpenAIImagesUsage(offTable, "low", 10, 0); !ok || usage.ImageOutputTokens <= 0 {
+		t.Errorf("off-table geometry should synthesize positive usage, got %+v, %v", usage, ok)
+	}
+	invalidGeometry := openAIImageGeometry{Width: 0, Height: 10}
+	if _, ok := synthesizeOpenAIImagesUsage(invalidGeometry, "low", 10, 0); ok {
+		t.Error("non-positive geometry unexpectedly synthesized usage")
 	}
 	if _, ok := synthesizeOpenAIImagesUsage(geometry, "ultra", 10, 0); ok {
 		t.Error("unknown quality unexpectedly synthesized usage")

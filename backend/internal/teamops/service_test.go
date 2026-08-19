@@ -24,12 +24,16 @@ type fakeRepo struct {
 	rows       []Row
 	total      int64
 	rowsErr    error
+	enriched   map[string]RowEnrichment
+	enrichErr  error
 
-	gotUserID int64
-	gotCur    Period
-	gotPrev   Period
-	gotQuery  RowQuery
-	calls     int
+	gotUserID   int64
+	gotCur      Period
+	gotPrev     Period
+	gotQuery    RowQuery
+	gotEnrich   EnrichQuery
+	enrichCalls int
+	calls       int
 }
 
 func (f *fakeRepo) Summary(_ context.Context, userID int64, cur, prev Period) (Summary, error) {
@@ -42,6 +46,20 @@ func (f *fakeRepo) ListRows(_ context.Context, q RowQuery) ([]Row, int64, error)
 	f.calls++
 	f.gotQuery = q
 	return f.rows, f.total, f.rowsErr
+}
+
+// EnrichRows 的替身刻意在出错时**同时**返回一个非空 map：真仓储不会这么干，
+// 但服务层如果靠「map 是否为空」而不是 error 判成败，这个替身会立刻把那件事抖出来。
+func (f *fakeRepo) EnrichRows(_ context.Context, q EnrichQuery) (map[string]RowEnrichment, error) {
+	f.enrichCalls++
+	f.gotEnrich = q
+	if f.enrichErr != nil {
+		return f.enriched, f.enrichErr
+	}
+	if f.enriched == nil {
+		return map[string]RowEnrichment{}, nil
+	}
+	return f.enriched, nil
 }
 
 // newTestService 用固定时钟构造 Service，聚合清理按**开着**算（生产默认就是开着）。

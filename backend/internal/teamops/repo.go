@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // queryTimeout 是本包每条聚合查询的自己的上限。看板的查询扫的是 usage_logs，
@@ -87,11 +89,40 @@ WITH k AS (
     FROM api_keys WHERE user_id = $1
 ),
 cur AS (
-    SELECT api_key_id, SUM(actual_cost) AS cost, COUNT(*) AS requests
+    SELECT api_key_id, SUM(actual_cost) AS cost, COUNT(*) AS requests,
+           -- 缓存指标跟着**同一次扫描**顺带出来。单独再开一条查询就是把 13GB 的表
+           -- 又扫一遍，而这几个 SUM 在已经聚好的行上几乎不要钱。
+           SUM(input_tokens)          AS input_tokens,
+           SUM(cache_creation_tokens) AS cache_creation_tokens,
+           SUM(cache_read_tokens)     AS cache_read_tokens,
+           -- 缓存节省（近似）：逐行按**同一行**的输入单价给缓存读 token 估价。
+           -- 单价必须逐行取，不能用「组内总 input_cost / 组内总 input_tokens」——
+           -- 一个分组里混着 haiku 与 opus 时，那种平均单价会把便宜模型的缓存读
+           -- 按贵模型的价估出来，估值能差一个数量级。
+           --
+           -- input_tokens = 0 的行跳过：没有输入 token 就推不出单价，
+           -- 而不跳过就是除零（PG 直接报 22012，整个看板 500）。
+           -- 结果可能为负（缓存读价高于输入价），刻意不 clamp，理由见 Summary.CacheSavedCost。
+           --
+           -- 已知偏差（照契约实现，不擅自修正）：迁移 179 之后，图文混合的行里
+           -- input_tokens **含**图片输入 token，而 input_cost **不含**图片输入费用
+           -- （billing_service.go 把它单记进 image_input_cost）。于是这类行推出的单价偏低，
+           -- 估出来的节省偏小。方向是保守的（只会少报节省，不会多报），
+           -- 而且这类请求（图片编辑、多模态 embedding）几乎不走 prompt 缓存，
+           -- cache_read_tokens > 0 这一条已经把绝大多数挡在外面。
+           -- 真要修就得改契约里那个公式（分母换成 input_tokens - image_input_tokens），
+           -- 那是两侧一起改的事，不在本次范围内。
+           SUM(CASE WHEN input_tokens > 0 AND cache_read_tokens > 0
+                    THEN (cache_read_tokens * (input_cost / input_tokens) - cache_read_cost)
+                         * rate_multiplier
+                    ELSE 0 END) AS cache_saved
     FROM usage_logs
     WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
     GROUP BY api_key_id
 ),
+-- prev 刻意**不**跟着加这些 SUM：命中率与缓存节省都只描述本期（契约里没有
+-- prev_cache_* 这种键），而 prev 扫的是另一段区间、不是同一次扫描，
+-- 多算这些 SUM 是纯开销。要加环比缓存指标时再一起加，别现在留个没人读的列。
 prev AS (
     SELECT api_key_id, SUM(actual_cost) AS cost, COUNT(*) AS requests
     FROM usage_logs
@@ -108,7 +139,11 @@ kr AS (
         COALESCE(cur.cost, 0)      AS cur_cost,
         COALESCE(prev.cost, 0)     AS prev_cost,
         COALESCE(cur.requests, 0)  AS cur_req,
-        COALESCE(prev.requests, 0) AS prev_req
+        COALESCE(prev.requests, 0) AS prev_req,
+        COALESCE(cur.input_tokens, 0)          AS cur_input_tokens,
+        COALESCE(cur.cache_creation_tokens, 0) AS cur_cache_creation_tokens,
+        COALESCE(cur.cache_read_tokens, 0)     AS cur_cache_read_tokens,
+        COALESCE(cur.cache_saved, 0)           AS cur_cache_saved
     FROM k
     LEFT JOIN cur  ON cur.api_key_id  = k.id
     LEFT JOIN prev ON prev.api_key_id = k.id
@@ -225,7 +260,17 @@ func (r *Repo) ListRows(ctx context.Context, q RowQuery) ([]Row, int64, error) {
     -- 与同一行其余「令牌属性」字段（key_count / single_key）统一按存续口径。
     -- 不带 FILTER 时，活令牌从没用过、只有软删令牌用过的组会同时显示
     -- 「活令牌的掩码」和「软删令牌的最后使用时间」——两个字段指的不是同一把令牌。
-    MAX(kr.last_used_at) FILTER (WHERE kr.deleted_at IS NULL) AS last_used_at`
+    MAX(kr.last_used_at) FILTER (WHERE kr.deleted_at IS NULL) AS last_used_at,
+    -- 软删口径：下面三个聚合一律**不带** deleted_at FILTER，与同一条 SELECT 里的
+    -- current_cost / prev_cost / requests 同一档。它们服务的是「这笔钱是怎么花的」：
+    -- token 是那笔钱的分母、key_ids 是补充查询要拿去查那笔钱的令牌集合。
+    -- 带上 FILTER 会让「令牌删了但账还在」的组算出一个与自己金额对不上的命中率，
+    -- 以及一条漏掉那部分消耗的趋势线。带 FILTER 的是 key_count / single_key /
+    -- last_used_at 那一档 ——「现在还有几把令牌」，与钱无关。
+    SUM(kr.cur_input_tokens)                                 AS input_tokens,
+    SUM(kr.cur_cache_creation_tokens)                        AS cache_creation_tokens,
+    SUM(kr.cur_cache_read_tokens)                            AS cache_read_tokens,
+    array_agg(kr.api_key_id)                                 AS key_ids`
 
 	body := baseCTE + `
 SELECT` + selectList + `
@@ -258,14 +303,17 @@ LIMIT %d OFFSET %d`, sortExpr(q.Sort), orderDir(q.Order), q.PageSize, offset)
 		var it Row
 		var singleKey sql.NullString
 		var lastUsed sql.NullTime
+		var keyIDs pq.Int64Array
 		if err := rows.Scan(
 			&it.GroupKey, &it.DisplayName, &it.ByOwner,
 			&it.KeyCount, &it.KeyCountAll, &it.AllDeleted,
 			&singleKey, &it.CurrentCost, &it.PrevCost,
 			&it.Requests, &it.PrevRequests, &lastUsed,
+			&it.InputTokens, &it.CacheCreationTokens, &it.CacheReadTokens, &keyIDs,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan team row: %w", err)
 		}
+		it.KeyIDs = keyIDs
 		if singleKey.Valid {
 			m := MaskKey(singleKey.String)
 			it.MaskedKey = &m
@@ -295,7 +343,13 @@ g AS (
            COUNT(*) FILTER (WHERE kr.deleted_at IS NULL) AS key_count,
            COUNT(*) FILTER (WHERE kr.deleted_at IS NOT NULL) AS deleted_key_count,
            COUNT(*) FILTER (WHERE kr.deleted_at IS NULL
-                              AND COALESCE(` + ownerNameExpr + `,'') <> '') AS owned_key_count
+                              AND COALESCE(` + ownerNameExpr + `,'') <> '') AS owned_key_count,
+           -- 软删口径同 ListRows：钱与 token 那一档不带 FILTER，
+           -- 「几把令牌」那一档（上面三个 COUNT）带。
+           SUM(kr.cur_input_tokens)          AS input_tokens,
+           SUM(kr.cur_cache_creation_tokens) AS cache_creation_tokens,
+           SUM(kr.cur_cache_read_tokens)     AS cache_read_tokens,
+           SUM(kr.cur_cache_saved)           AS cache_saved
     FROM kr
     ` + ownerJoin + `
     GROUP BY ` + groupKeyExpr + `
@@ -304,7 +358,14 @@ g AS (
 SELECT COALESCE(SUM(current_cost),0), COALESCE(SUM(prev_cost),0),
        COALESCE(MAX(current_cost),0), COUNT(*),
        COALESCE(SUM(key_count),0), COALESCE(SUM(deleted_key_count),0), COALESCE(SUM(owned_key_count),0),
-       COALESCE(SUM(requests),0), COALESCE(SUM(prev_requests),0)
+       COALESCE(SUM(requests),0), COALESCE(SUM(prev_requests),0),
+       -- 活跃分组数必须在 g **之后**数：g 已经过了 HAVING，
+       -- 直接在 kr 上数会把被 HAVING 滤掉的零消耗软删令牌也算进分母那一侧的世界里。
+       -- 判 > 0 而不是 <> 0：负金额（退款冲正）不算「活跃」。
+       COUNT(*) FILTER (WHERE current_cost > 0),
+       COALESCE(SUM(input_tokens),0), COALESCE(SUM(cache_creation_tokens),0),
+       COALESCE(SUM(cache_read_tokens),0),
+       COALESCE(SUM(cache_saved),0)
 FROM g`
 
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
@@ -314,6 +375,7 @@ FROM g`
 	err := r.db.QueryRowContext(ctx, q, userID, cur.Start, cur.End, prev.Start, prev.End).Scan(
 		&s.TotalCost, &s.PrevCost, &s.TopRowCost, &s.RowCount,
 		&s.KeyCount, &s.DeletedKeyCount, &s.OwnedKeyCount, &s.Requests, &s.PrevRequests,
+		&s.ActiveRowCount, &s.InputTokens, &s.CacheCreationTokens, &s.CacheReadTokens, &s.CacheSavedCost,
 	)
 	// 不要为 sql.ErrNoRows 开容错：这条 SELECT 没有 GROUP BY，聚合函数对空集也恒返回一行
 	// （COALESCE 把 NULL 兜成 0），ErrNoRows 结构性不可达。写了那个分支的害处在将来 ——
@@ -322,6 +384,109 @@ FROM g`
 		return Summary{}, fmt.Errorf("team summary: %w", err)
 	}
 	return s, nil
+}
+
+// enrichSQL 是当页补充查询。它**不是**主查询的一部分，理由见 rich-contract §架构约束：
+// usage_logs 已 1300 万行 / 13GB，按 (api_key_id, model) 与 (api_key_id, 日期) 全量分组
+// 会把主查询放大到 4 倍。这里靠 `api_key_id = ANY($4)` 把范围锁在当页的几十把令牌上。
+//
+// g 这个 CTE 的存在只有一个理由：**分组键必须与主查询逐字相同**。它复用了同一份
+// groupKeyExpr 与 ownerJoin 常量，所以归属名相同的多把令牌在这里也会合成同一个
+// group_key。少了这一层、直接按 api_key_id 返回的话，归属行（一行合并了 N 把令牌）
+// 拿到的会是其中随便一把令牌的主力模型和趋势线 —— 数字看着正常，但对不上那一行的金额。
+//
+// base 被引用两次，PostgreSQL 会把它物化：usage_logs 只扫一遍，模型维度与日期维度
+// 各在物化结果上聚一次。拆成两条 SQL 就是扫两遍。两个维度用 UNION ALL 拼在一起下发，
+// kind 列区分，省掉一次往返。
+//
+// 等价变异，别再重报：k 的 `user_id = $1` 与 base 的 `u.user_id = $1` **各自**删掉都杀不死
+// （已实跑变异确认）—— 两者是同一件事的两道闸，剩下任意一道都足以挡住跨用户读。
+// 两道**同时**删掉才会泄露，那一种由 TestEnrichRows_IgnoresKeysOwnedByAnotherUser 钉住。
+//
+// 保留冗余的那一道不是洁癖：调用方传进来的 api_key_id 集合是不可信的（它来自上一次查询
+// 的结果，handler 不校验），而这两道闸挡的东西并不相同 —— base 那道挡日志，k 那道挡
+// 令牌与归属名。哪天有人为了做管理员视图放宽其中一道，另一道就是仅剩的那堵墙。
+//
+// o.user_id = $1（在 ownerJoin 里）则**不是**冗余的：它挡的是别人给你的令牌挂归属名，
+// 与上面两道谁都挡不住，单独由 TestEnrichRows_IgnoresOwnerRowsBelongingToAnotherUser 钉住。
+const enrichSQL = `
+WITH k AS (
+    SELECT id FROM api_keys WHERE user_id = $1 AND id = ANY($4)
+),
+kr AS (
+    SELECT k.id AS api_key_id FROM k
+),
+g AS (
+    SELECT kr.api_key_id, ` + groupKeyExpr + ` AS group_key
+    FROM kr
+    ` + ownerJoin + `
+),
+base AS (
+    SELECT g.group_key,
+           u.model,
+           TO_CHAR(u.created_at AT TIME ZONE $5, 'YYYY-MM-DD') AS day,
+           u.actual_cost AS cost
+    FROM usage_logs u
+    JOIN g ON g.api_key_id = u.api_key_id
+    WHERE u.user_id = $1
+      AND u.api_key_id = ANY($4)
+      AND u.created_at >= $2 AND u.created_at < $3
+)
+SELECT 'm'::text AS kind, group_key, model AS label, SUM(cost) AS cost
+FROM base GROUP BY group_key, model
+UNION ALL
+SELECT 'd'::text AS kind, group_key, day AS label, SUM(cost) AS cost
+FROM base GROUP BY group_key, day`
+
+// EnrichRows 给当页各分组补上「逐模型消耗」与「逐日消耗」两个维度，返回值按 group_key
+// 索引，键与 ListRows 返回的 Row.GroupKey 逐字相同。
+//
+// 调用方**必须**把当页所有行的 Row.KeyIDs 并起来传进来：漏掉一把令牌，
+// 那把令牌的消耗就从它所在分组的主力模型与趋势线里凭空消失。
+//
+// 返回的 map 恒非 nil（哪怕零行），调用方靠 error 而不是 map 是否为 nil 来判成败：
+// 「本期一分钱没花」与「补充查询挂了」要走的是两条完全不同的降级路径。
+func (r *Repo) EnrichRows(ctx context.Context, q EnrichQuery) (map[string]RowEnrichment, error) {
+	out := map[string]RowEnrichment{}
+	if len(q.KeyIDs) == 0 {
+		// 空页不发查询：ANY('{}') 是合法 SQL，但那是一次确定返回零行的往返。
+		return out, nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
+	rows, err := r.db.QueryContext(ctx, enrichSQL,
+		q.UserID, q.Cur.Start, q.Cur.End, pq.Array(q.KeyIDs), q.Cur.Timezone)
+	if err != nil {
+		return nil, fmt.Errorf("enrich team rows: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var kind, groupKey, label string
+		var cost float64
+		if err := rows.Scan(&kind, &groupKey, &label, &cost); err != nil {
+			return nil, fmt.Errorf("scan team row enrichment: %w", err)
+		}
+		e, ok := out[groupKey]
+		if !ok {
+			e = RowEnrichment{Models: map[string]float64{}, Daily: map[string]float64{}}
+		}
+		// 累加而不是直接赋值：SQL 侧每个 (group_key, label) 只出一行，这里的 += 是
+		// 「同一个键不会被后来者顶掉」这条不变量的兜底，不是在补 SQL 的分组。
+		switch kind {
+		case "m":
+			e.Models[label] += cost
+		case "d":
+			e.Daily[label] += cost
+		}
+		out[groupKey] = e
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate team row enrichment: %w", err)
+	}
+	return out, nil
 }
 
 // MaskKey 与 frontend/src/utils/maskApiKey.ts 逐字等价：

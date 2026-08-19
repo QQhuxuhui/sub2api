@@ -1421,3 +1421,376 @@ func TestSummary_DeletedKeyCountCountsOnlyRowsThatSurviveHaving(t *testing.T) {
 	require.Equal(t, 2, s.RowCount)
 	require.InDelta(t, 14.0, s.TotalCost, 1e-9)
 }
+
+// ---------------------------------------------------------------------------
+// 加厚版：缓存维度（cur CTE 顺带聚合）、活跃分组数、当页补充查询。
+// 用户号段 40+ / 令牌号段 900+，与上面所有用例都不重叠。
+// ---------------------------------------------------------------------------
+
+// logSpec 是带完整 token / 费用列的日志。seedLog 只写 actual_cost，
+// 缓存那几条断言必须自己给 input_tokens / input_cost / cache_read_* 才有东西可算。
+//
+// total_cost 仍然留默认 0：缓存节省的单价必须取自 input_cost，
+// 取错成 total_cost 的实现会让下面那条断言算出 -0.56 而不是 0.14。
+type logSpec struct {
+	userID              int64
+	keyID               int64
+	at                  time.Time
+	model               string
+	cost                float64
+	inputTokens         int64
+	cacheCreationTokens int64
+	cacheReadTokens     int64
+	inputCost           float64
+	cacheReadCost       float64
+	rateMultiplier      float64
+}
+
+func seedLogSpec(t *testing.T, ctx context.Context, spec logSpec) {
+	t.Helper()
+	accountID := ensureAccount(t, ctx)
+	model := spec.model
+	if model == "" {
+		model = "test-model"
+	}
+	rateMultiplier := spec.rateMultiplier
+	if rateMultiplier == 0 {
+		rateMultiplier = 1
+	}
+	_, err := integrationDB.ExecContext(ctx, `
+			INSERT INTO usage_logs (user_id, api_key_id, account_id, request_id, model,
+			                        actual_cost, input_tokens, cache_creation_tokens, cache_read_tokens,
+			                        input_cost, cache_read_cost, rate_multiplier, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		`, spec.userID, spec.keyID, accountID,
+		fmt.Sprintf("req-%d-%d-%d", spec.userID, spec.keyID, spec.at.UnixNano()),
+		model, spec.cost, spec.inputTokens, spec.cacheCreationTokens, spec.cacheReadTokens,
+		spec.inputCost, spec.cacheReadCost, rateMultiplier, spec.at)
+	require.NoError(t, err)
+}
+
+func TestSummary_CacheHitRateIncludesCacheCreationTokens(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 50)
+	seedKey(t, ctx, 980, 50, "缓存写入口径")
+	seedLogSpec(t, ctx, logSpec{
+		userID: 50, keyID: 980, at: inPeriod, cost: 1,
+		inputTokens: 200, cacheCreationTokens: 300, cacheReadTokens: 500,
+	})
+
+	svc := teamops.NewService(teamops.NewRepo(integrationDB), 90, true)
+	dto, err := svc.Summary(ctx, 50, "2026-08-01", "2026-08-15", "UTC")
+	require.NoError(t, err)
+	require.NotNil(t, dto.CacheHitRate)
+	require.InDelta(t, 50.0, *dto.CacheHitRate, 1e-9,
+		"500 / (200 + 300 + 500)：缓存写入也是未命中的 prompt token，必须进入分母")
+}
+
+func TestSummary_CacheSavedCostUsesActualRateMultiplier(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 51)
+	seedKey(t, ctx, 981, 51, "倍率后的缓存节省")
+	seedLogSpec(t, ctx, logSpec{
+		userID: 51, keyID: 981, at: inPeriod, cost: 2,
+		inputTokens: 1000, inputCost: 0.30,
+		cacheReadTokens: 2000, cacheReadCost: 0.06,
+		rateMultiplier: 2,
+	})
+
+	cur, prev := newTestPeriods(t)
+	s, err := teamops.NewRepo(integrationDB).Summary(ctx, 51, cur, prev)
+	require.NoError(t, err)
+	require.InDelta(t, 1.08, s.CacheSavedCost, 1e-9,
+		"标准价节省 0.54，用户倍率 2x 后实际节省应为 1.08")
+}
+
+// 缓存命中率的三类 prompt token 与 key_ids 都走「钱」那一档软删口径：
+// **不带** deleted_at FILTER。
+//
+// 造型里 902 是软删的，且两把令牌的 token 数各不相同（300/100 与 200/700），
+// 所以给这三个聚合加上 FILTER 的变异会把 (500, 800) 打成 (300, 100)，KeyIDs 打成一个元素。
+// 反过来，KeyIDs 漏掉软删那把的直接后果是：EnrichRows 收不到 902，
+// 那把令牌花掉的 2 元在主力模型与趋势线里凭空消失，与本行 3 元的金额对不上。
+func TestListRows_CacheTokensAndKeyIDsIgnoreSoftDeleteFilter(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 40)
+	seedKey(t, ctx, 901, 40, "存续那把")
+	seedKey(t, ctx, 902, 40, "软删那把")
+	seedOwner(t, ctx, 901, 40, "Cache Wang")
+	seedOwner(t, ctx, 902, 40, "Cache Wang")
+	seedLogSpec(t, ctx, logSpec{userID: 40, keyID: 901, at: inPeriod, cost: 1.0,
+		inputTokens: 300, cacheReadTokens: 100})
+	seedLogSpec(t, ctx, logSpec{userID: 40, keyID: 902, at: inPeriod, cost: 2.0,
+		inputTokens: 200, cacheReadTokens: 700})
+	softDeleteKey(t, ctx, 902)
+
+	cur, prev := newTestPeriods(t)
+	rows, total := listRows(t, ctx, teamops.RowQuery{
+		UserID: 40, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.EqualValues(t, 1, total, "两把令牌归属同一个人，合成一行")
+	row := rowsByGroupKey(rows)["o:cache wang"]
+
+	require.InDelta(t, 3.0, row.CurrentCost, 1e-9)
+	require.EqualValues(t, 500, row.InputTokens, "300 + 200：软删那把的 token 照样算")
+	require.EqualValues(t, 800, row.CacheReadTokens, "100 + 700")
+	require.ElementsMatch(t, []int64{901, 902}, row.KeyIDs,
+		"补充查询要靠这个集合去查这一行的钱，漏掉软删那把就会漏掉它花的 2 元")
+	require.Equal(t, 1, row.KeyCount, "对照：「几把令牌」那一档仍然只数存续的")
+}
+
+// 缓存节省的三条口径一次钉住（rich-contract「缓存节省怎么算」）：
+//
+//	L1 input_tokens=1000 / input_cost=0.30 → 单价 0.0003；2000 * 0.0003 - 0.06 = +0.54
+//	L2 input_tokens=0                      → 推不出单价，跳过（不跳过就是除零，PG 报 22012）
+//	L3 input_tokens=500  / input_cost=0.05 → 单价 0.0001；1000 * 0.0001 - 0.50 = -0.40
+//	                                          合计 +0.14
+//
+// 三条各杀一种变异：
+//   - clamp 到 0 → 得 0.54；
+//   - 用组内平均单价（(0.30+0.05)/(1000+500)）而不是逐行单价 → 得 0.5233…；
+//   - 取错成 total_cost（seed 留 0）→ 得 -0.56。
+//
+// 两笔的单价刻意差 3 倍，正是为了让「平均单价」这一种变异算出不同的数。
+func TestSummary_CacheSavedCostUsesPerRowInputUnitPriceAndKeepsNegative(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 41)
+	seedKey(t, ctx, 910, 41, "缓存令牌")
+	seedLogSpec(t, ctx, logSpec{userID: 41, keyID: 910, at: inPeriod, cost: 1.0,
+		inputTokens: 1000, inputCost: 0.30, cacheReadTokens: 2000, cacheReadCost: 0.06})
+	seedLogSpec(t, ctx, logSpec{userID: 41, keyID: 910, at: inPeriod.Add(time.Minute), cost: 1.0,
+		inputTokens: 0, inputCost: 0, cacheReadTokens: 5000, cacheReadCost: 0.10})
+	seedLogSpec(t, ctx, logSpec{userID: 41, keyID: 910, at: inPeriod.Add(2 * time.Minute), cost: 1.0,
+		inputTokens: 500, inputCost: 0.05, cacheReadTokens: 1000, cacheReadCost: 0.50})
+
+	cur, prev := newTestPeriods(t)
+	s, err := teamops.NewRepo(integrationDB).Summary(ctx, 41, cur, prev)
+	require.NoError(t, err, "input_tokens=0 的那笔若没被跳过，这里会是 22012 division by zero")
+
+	require.InDelta(t, 0.14, s.CacheSavedCost, 1e-9,
+		"逐行单价、跳过无输入的行、负值不 clamp —— 三条缺一个数就不对")
+	require.EqualValues(t, 1500, s.InputTokens)
+	require.EqualValues(t, 8000, s.CacheReadTokens)
+}
+
+// 「钱与 token 那一档不带 deleted_at FILTER」这条判定在本包里写了**两遍**：
+// ListRows 的 selectList 一遍、Summary 的 g CTE 一遍。此前只有前者被钉住 ——
+// 复核实测：给 Summary 那三个 SUM 加上 FILTER，全部既有用例照样全绿。
+//
+// 后果是概览条与明细行**对不上账**：概览的 cache_hit_rate / cache_saved_cost 会
+// 静默排除软删令牌，而同一屏上的 total_cost、requests 与表格每行的 cache_hit_rate
+// 仍然含着它们。不报错，只是两个数互相矛盾。
+//
+// 造型：一把存续 + 一把软删（归属同人，所以合成一行），两把的 token 与节省额
+// **三个数都不同**，加 FILTER 会让汇总从 (1500, 8000, 0.14) 掉到只剩存续那把的值。
+func TestSummary_CacheAggregatesIncludeSoftDeletedKeys(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 49)
+	seedKey(t, ctx, 970, 49, "存续")
+	seedKey(t, ctx, 971, 49, "已删但花过钱")
+	seedOwner(t, ctx, 970, 49, "Sun Jiu")
+	seedOwner(t, ctx, 971, 49, "Sun Jiu")
+	// 存续：单价 0.0003，缓存读 2000 → 节省 0.6 - 0.06 = 0.54
+	seedLogSpec(t, ctx, logSpec{userID: 49, keyID: 970, at: inPeriod, cost: 1.0,
+		inputTokens: 1000, inputCost: 0.30, cacheReadTokens: 2000, cacheReadCost: 0.06})
+	// 软删：单价 0.0002，缓存读 3000 → 节省 0.6 - 0.20 = 0.40
+	seedLogSpec(t, ctx, logSpec{userID: 49, keyID: 971, at: inPeriod, cost: 2.0,
+		inputTokens: 4000, inputCost: 0.80, cacheReadTokens: 3000, cacheReadCost: 0.20})
+	softDeleteKey(t, ctx, 971)
+
+	cur, prev := newTestPeriods(t)
+	s, err := teamops.NewRepo(integrationDB).Summary(ctx, 49, cur, prev)
+	require.NoError(t, err)
+
+	// 三个数各自都能区分「带 FILTER」与「不带」：带了分别是 1000 / 2000 / 0.54
+	require.EqualValues(t, 5000, s.InputTokens,
+		"软删令牌的 token 必须计入 —— 钱花掉了，缓存也真的命中过")
+	require.EqualValues(t, 5000, s.CacheReadTokens)
+	require.InDelta(t, 0.94, s.CacheSavedCost, 1e-9,
+		"0.54 + 0.40。只剩 0.54 说明 Summary 的 g CTE 给这三个 SUM 加了 deleted_at FILTER，"+
+			"而 ListRows 那边没加 —— 概览条与明细行会互相对不上")
+
+	// 同一屏上的对照：金额侧本来就含软删，两者必须同档
+	require.InDelta(t, 3.0, s.TotalCost, 1e-9)
+	require.Equal(t, 1, s.KeyCount, "「几把令牌」那一档才带 FILTER，只数存续的")
+}
+
+// ActiveRowCount 是概览条「活跃成员 6/8」的分子，只数**本期**花过钱的分组。
+//
+// 造型里三个分组都能过 HAVING，但只有一个本期有消耗：
+// 「直接取 RowCount」得 3、「把上期也算上」得 2，正确答案 1，三者两两不同。
+func TestSummary_ActiveRowCountCountsOnlyGroupsWithCurrentSpend(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 42)
+	seedKey(t, ctx, 920, 42, "本期花了")
+	seedKey(t, ctx, 921, 42, "只有上期花过")
+	seedKey(t, ctx, 922, 42, "两期都没花过")
+	seedLog(t, ctx, 42, 920, 5.0, inPeriod)
+	seedLog(t, ctx, 42, 921, 3.0, inPrevOnly)
+
+	cur, prev := newTestPeriods(t)
+	s, err := teamops.NewRepo(integrationDB).Summary(ctx, 42, cur, prev)
+	require.NoError(t, err)
+	require.Equal(t, 3, s.RowCount, "三把令牌都是存续的，都成行")
+	require.Equal(t, 1, s.ActiveRowCount, "只有 920 本期花过钱")
+}
+
+func enrichRows(t *testing.T, ctx context.Context, q teamops.EnrichQuery) map[string]teamops.RowEnrichment {
+	t.Helper()
+	got, err := teamops.NewRepo(integrationDB).EnrichRows(ctx, q)
+	require.NoError(t, err)
+	return got
+}
+
+// 补充查询的分组键必须与主查询逐字相同：归属名相同的两把令牌要合成**一个** key。
+//
+// 断言选的是「恰好一个 key + 逐模型金额是两把令牌之和」，不是「key 存在」：
+// 按 api_key_id 分组的实现会给出两个 key（"k:930" / "k:931"），
+// 而且 model-a 的金额会是 3.0 或 5.0 而不是 8.0 —— 前端拿到的主力模型占比
+// 只反映其中一把令牌，数字看着正常却对不上那一行的金额。
+//
+// 顺带把 ListRows 的 GroupKey 拿来做键：两处一旦分叉，这条直接查无此键。
+func TestEnrichRows_GroupsByTheSameKeyAsListRows(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 43)
+	seedKey(t, ctx, 930, 43, "令牌甲")
+	seedKey(t, ctx, 931, 43, "令牌乙")
+	seedOwner(t, ctx, 930, 43, "Zhao Wu")
+	seedOwner(t, ctx, 931, 43, "Zhao Wu")
+	seedLogSpec(t, ctx, logSpec{userID: 43, keyID: 930, at: inPeriod, model: "model-a", cost: 3.0})
+	seedLogSpec(t, ctx, logSpec{userID: 43, keyID: 930, at: inPeriod2, model: "model-b", cost: 7.0})
+	seedLogSpec(t, ctx, logSpec{userID: 43, keyID: 931, at: inPeriod, model: "model-a", cost: 5.0})
+
+	cur, prev := newTestPeriods(t)
+	rows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 43, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.Len(t, rows, 1)
+
+	got := enrichRows(t, ctx, teamops.EnrichQuery{UserID: 43, KeyIDs: rows[0].KeyIDs, Cur: cur})
+	require.Len(t, got, 1, "归属名相同的两把令牌必须合成一个 group_key")
+
+	e, ok := got[rows[0].GroupKey]
+	require.True(t, ok, "补充查询的键必须与 ListRows 的 GroupKey 逐字相同，实得 %v", got)
+	require.InDelta(t, 8.0, e.Models["model-a"], 1e-9, "3.0 + 5.0：两把令牌合并后的逐模型金额")
+	require.InDelta(t, 7.0, e.Models["model-b"], 1e-9)
+}
+
+// Daily 的数组下标对应用户选择的自然日，因此 SQL 也必须按用户时区分桶。
+// 这两笔在 UTC 分属 08-10 / 08-11，在上海却同属 08-11；若按服务器时区分桶，
+// 服务层会得到两个与用户日期下标不一致的点。
+func TestEnrichRows_DailyBucketsUseUserPeriodTimezone(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 44)
+	seedKey(t, ctx, 940, 44, "跨零点令牌")
+	seedLogSpec(t, ctx, logSpec{userID: 44, keyID: 940,
+		at: time.Date(2026, 8, 10, 20, 0, 0, 0, time.UTC), model: "m", cost: 6.0}) // 上海 08-11 04:00
+	seedLogSpec(t, ctx, logSpec{userID: 44, keyID: 940,
+		at: time.Date(2026, 8, 11, 2, 0, 0, 0, time.UTC), model: "m", cost: 4.0}) // 上海 08-11 10:00
+
+	// 区间用上海时区：[08-10 00:00+08, 08-13 00:00+08) 稳稳框住那一笔。
+	cur, err := teamops.ParsePeriod("2026-08-10", "2026-08-12", "Asia/Shanghai", time.Now())
+	require.NoError(t, err)
+
+	got := enrichRows(t, ctx, teamops.EnrichQuery{UserID: 44, KeyIDs: []int64{940}, Cur: cur})
+	e := got["k:940"]
+	require.Equal(t, map[string]float64{"2026-08-11": 10.0}, e.Daily,
+		"同一个用户自然日必须只对应一个趋势点；实得 %v", e.Daily)
+}
+
+// 跨用户隔离：调用方传进来的 api_key_id 集合是不可信的 —— handler 不校验它，
+// 它来自上一条查询的结果。
+//
+// enrichSQL 里有两道 user_id 闸（k 子查询一道、base 的 WHERE 一道）。实跑变异确认：
+// 单独拆掉任意一道这条都不会红（另一道兜住了），**两道同时**拆掉才泄露，
+// 而那正是这条断言钉住的那一格。别因为「单删杀不死」就去掉其中一道，
+// 理由写在 enrichSQL 的注释里。
+func TestEnrichRows_IgnoresKeysOwnedByAnotherUser(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 45)
+	seedUser(t, ctx, 46)
+	seedKey(t, ctx, 950, 45, "自己的")
+	seedKey(t, ctx, 960, 46, "别人的")
+	seedLogSpec(t, ctx, logSpec{userID: 45, keyID: 950, at: inPeriod, model: "mine", cost: 2.0})
+	seedLogSpec(t, ctx, logSpec{userID: 46, keyID: 960, at: inPeriod, model: "theirs", cost: 99.0})
+
+	cur, _ := newTestPeriods(t)
+	got := enrichRows(t, ctx, teamops.EnrichQuery{
+		UserID: 45, KeyIDs: []int64{950, 960}, Cur: cur,
+	})
+	require.Len(t, got, 1, "别人的令牌不该成组，实得 %v", got)
+	require.Contains(t, got, "k:950")
+	require.NotContains(t, got, "k:960")
+	require.NotContains(t, got["k:950"].Models, "theirs")
+}
+
+// enrichSQL 自带一份 ownerJoin，所以 `AND o.user_id = $1` 要在这里单独钉一次：
+// team_key_owners 不挂外键、没有 CHECK，任何能往本表写行的人都能给别人的令牌
+// 挂上自己写的归属名。少了这个条件，受害者的分组键会从 "k:970" 变成攻击者写的字，
+// 于是补充查询的键与 ListRows 的键对不上，整行的主力模型与趋势线全部落空。
+func TestEnrichRows_IgnoresOwnerRowsBelongingToAnotherUser(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 47)
+	seedUser(t, ctx, 48)
+	seedKey(t, ctx, 970, 47, "受害者令牌")
+	seedOwner(t, ctx, 970, 48, "attacker") // 攻击者给别人的令牌挂归属
+	seedLogSpec(t, ctx, logSpec{userID: 47, keyID: 970, at: inPeriod, model: "m", cost: 4.0})
+
+	cur, _ := newTestPeriods(t)
+	got := enrichRows(t, ctx, teamops.EnrichQuery{UserID: 47, KeyIDs: []int64{970}, Cur: cur})
+	require.Contains(t, got, "k:970", "受害者的分组键必须仍是合成键，实得 %v", got)
+	require.NotContains(t, got, "o:attacker")
+}
+
+// 空页不发查询，且必须回一个非 nil 的空 map：服务层靠 error 而不是 map 是否为 nil
+// 来区分「本期一分没花」与「补充查询挂了」，回 nil 会让两条降级路径混成一条。
+func TestEnrichRows_EmptyKeySetReturnsEmptyMap(t *testing.T) {
+	ctx := context.Background()
+	cur, _ := newTestPeriods(t)
+	got, err := teamops.NewRepo(integrationDB).EnrichRows(ctx,
+		teamops.EnrichQuery{UserID: 49, KeyIDs: nil, Cur: cur})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Empty(t, got)
+}
+
+// enrichSQL 的本期区间过滤（u.created_at >= $2 AND < $3）是整条补充查询里最吃重的谓词，
+// 而复核实测：把它删掉，全部既有用例照样全绿 —— 因为其余 fixture 的日志恰好都在区间内。
+//
+// 删掉它的后果有三层：
+//  1. TopModel 变成「这几把令牌**有史以来**花得最多的模型」，不是契约要求的本期；
+//  2. 区间外的日桶会污染趋势数据，Σdaily 远大于本行金额；
+//  3. 丢掉 (api_key_id, created_at) 的范围条件，在 1321 万行的表上退化成全量扫描。
+//
+// 所以必须有一笔**区间外**的日志，且它的模型名与金额都与区间内的不同（避开不动点：
+// 同名同额时「算进来」与「没算进来」产出同一个结果，这条用例就成了空转）。
+func TestEnrichRows_ExcludesLogsOutsideCurrentPeriod(t *testing.T) {
+	ctx := context.Background()
+	seedUser(t, ctx, 48)
+	seedKey(t, ctx, 960, 48, "跨期令牌")
+	// 本期内：model-in 花 4.0
+	seedLogSpec(t, ctx, logSpec{userID: 48, keyID: 960, at: inPeriod, model: "model-in", cost: 4.0})
+	// 本期**之前**：model-out 花 99.0 —— 金额比本期大一个量级，漏进来一眼就看得出
+	seedLogSpec(t, ctx, logSpec{userID: 48, keyID: 960, at: inPrevOnly, model: "model-out", cost: 99.0})
+
+	cur, prev := newTestPeriods(t)
+	rows, _ := listRows(t, ctx, teamops.RowQuery{
+		UserID: 48, Cur: cur, Prev: prev, Sort: "cost", Order: "desc", Page: 1, PageSize: 50,
+	})
+	require.Len(t, rows, 1)
+	require.InDelta(t, 4.0, rows[0].CurrentCost, 1e-9, "前提：主查询本身只算本期")
+
+	e := enrichRows(t, ctx, teamops.EnrichQuery{UserID: 48, KeyIDs: rows[0].KeyIDs, Cur: cur})[rows[0].GroupKey]
+
+	require.NotContains(t, e.Models, "model-out",
+		"区间外的模型混进了 TopModel 候选，说明 enrichSQL 的 created_at 过滤失效；实得 %v", e.Models)
+	require.InDelta(t, 4.0, e.Models["model-in"], 1e-9)
+
+	var sum float64
+	for _, v := range e.Daily {
+		sum += v
+	}
+	require.InDelta(t, rows[0].CurrentCost, sum, 1e-9,
+		"Σdaily 必须恒等于本行本期消耗。区间外的日志若未过滤，"+
+			"这个和会变成 103.0 而不是 4.0 —— 页面上表现为趋势线异常高耸，且无从解释")
+}

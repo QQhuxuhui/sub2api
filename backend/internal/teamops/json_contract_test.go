@@ -28,6 +28,8 @@ func TestSummaryJSONKeysAreStable(t *testing.T) {
 		"delta_pct", "delta_abs",
 		"row_count", "key_count", "deleted_key_count", "owned_key_count",
 		"top_row_cost", "retention_warning", "conclusion",
+		"requests", "prev_requests", "active_row_count",
+		"cache_hit_rate", "cache_saved_cost",
 	}, jsonKeys(t, SummaryDTO{}),
 		"/summary 的 JSON 键集合变了。前端 features/team/types.ts 必须同步，"+
 			"否则页面上对应字段会静默变成 undefined。")
@@ -41,8 +43,28 @@ func TestRowJSONKeysAreStable(t *testing.T) {
 		"masked_key", "last_used_at",
 		"current_cost", "prev_cost", "delta_pct", "delta_abs",
 		"requests", "prev_requests", "is_anomaly",
+		"avg_cost", "top_model", "top_model_share", "cache_hit_rate", "daily",
 	}, jsonKeys(t, Row{}),
 		"/rows 每一行的 JSON 键集合变了，前端表格列会静默失效。")
+}
+
+// Row 上有四个 json:"-" 的内部管道字段
+// （InputTokens / CacheCreationTokens / CacheReadTokens / KeyIDs）。
+// 它们**必须**留在响应体外：KeyIDs 泄露的是令牌 id，而另外两个是前端用不上、
+// 却一旦下发就要跟着维护的契约键。
+//
+// 上面那条 ElementsMatch 已经能钉住「多出来的键」，但红出来的信息是「键集合变了」，
+// 看的人未必想到是某个字段忘了打 json:"-"。这条单独点名，读起来就是一句人话。
+func TestRowInternalFieldsAreNotSerialized(t *testing.T) {
+	t.Parallel()
+	keys := jsonKeys(t, Row{
+		InputTokens: 1, CacheCreationTokens: 2, CacheReadTokens: 3, KeyIDs: []int64{7},
+	})
+	require.NotContains(t, keys, "input_tokens")
+	require.NotContains(t, keys, "cache_creation_tokens")
+	require.NotContains(t, keys, "cache_read_tokens")
+	require.NotContains(t, keys, "key_ids")
+	require.NotContains(t, keys, "KeyIDs", "字段忘了打 json tag 时会以 Go 字段名原样下发")
 }
 
 // 嵌套对象各自也钉一遍：前端对它们做了解构，改名同样静默失效。
