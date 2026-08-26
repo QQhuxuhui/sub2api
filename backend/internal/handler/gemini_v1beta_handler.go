@@ -247,6 +247,13 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		googleError(c, http.StatusBadRequest, "Request body is empty")
 		return
 	}
+	// generationConfig.imageConfig 里带 outputMimeType 会让 Google 整个请求 400
+	// （该字段属于 Imagen 的 GenerateImagesConfig，generateContent 不认）。在会话哈希与
+	// 安全审计之前就剔除，后续所有环节看到的都是同一份规范化 body。
+	if sanitized, removed := service.SanitizeGeminiNativeImageConfig(body); len(removed) > 0 {
+		body = sanitized
+		reqLog.Info("gemini.image_config_unsupported_fields_stripped", zap.Strings("fields", removed))
+	}
 
 	setOpsRequestContext(c, modelName, stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(stream, false)))
