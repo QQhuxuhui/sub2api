@@ -100,7 +100,7 @@ func TestBillingService_GPTImage2UsesDistinctImageInputTokenPrice(t *testing.T) 
 		ImageOutputTokens: 196,
 	}, 1)
 	require.NoError(t, err)
-	require.InDelta(t, 0.00005, cost.InputCost, 1e-12)      // 文本 10×5e-6
+	require.InDelta(t, 0.00005, cost.InputCost, 1e-12)       // 文本 10×5e-6
 	require.InDelta(t, 0.012064, cost.ImageInputCost, 1e-12) // 图片 1508×8e-6，独立入 ImageInputCost
 	require.InDelta(t, 0.00588, cost.ImageOutputCost, 1e-12)
 	require.InDelta(t, 0.017994, cost.TotalCost, 1e-12)

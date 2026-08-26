@@ -27,17 +27,38 @@ func isSimulatableOpenAIImagesModel(model string) bool {
 }
 
 // openAIImagesRequestSimulatable rejects request shapes not covered by reference measurements.
+//
+// Masks are covered by the local input-image calculation. Other semantic
+// options remain excluded unless their model behavior and pricing are covered.
 func openAIImagesRequestSimulatable(parsed *OpenAIImagesRequest) bool {
-	if parsed == nil || parsed.Stream || parsed.PartialImages != nil || parsed.N != 1 || parsed.HasMask {
+	// n>1 is billed per returned image (see resolveOpenAIImageGeometriesFromDecoded);
+	// 10 is the official upper bound.
+	if parsed == nil || parsed.Stream || parsed.PartialImages != nil || parsed.N < 1 || parsed.N > 10 {
 		return false
 	}
-	if background := strings.ToLower(strings.TrimSpace(parsed.Background)); background != "" && background != "opaque" {
+	if parsed.HasBackground && strings.TrimSpace(parsed.Background) == "" {
 		return false
 	}
-	if format := strings.ToLower(strings.TrimSpace(parsed.OutputFormat)); format != "" && format != "png" {
+	switch strings.ToLower(strings.TrimSpace(parsed.Background)) {
+	case "", "opaque", "auto":
+	default:
 		return false
 	}
-	if parsed.OutputCompression != nil || strings.TrimSpace(parsed.InputFidelity) != "" {
+	// jpeg/webp: the official token formula depends only on size+quality, and
+	// new-api transcodes the final image without changing pixel dimensions, so
+	// these formats are billable. Whitelist must stay in lockstep with
+	// new-api's imageUpscaleEligible (middleware/distributor.go).
+	switch strings.ToLower(strings.TrimSpace(parsed.OutputFormat)) {
+	case "", "png", "jpeg", "webp":
+	default:
+		return false
+	}
+	// output_compression only tunes the transcode quality; 0-100 is the
+	// official range and does not affect token math.
+	if parsed.OutputCompression != nil && (*parsed.OutputCompression < 0 || *parsed.OutputCompression > 100) {
+		return false
+	}
+	if parsed.HasInputFidelity || strings.TrimSpace(parsed.InputFidelity) != "" {
 		return false
 	}
 	if format := strings.ToLower(strings.TrimSpace(parsed.ResponseFormat)); format != "" && format != "b64_json" {
@@ -297,11 +318,40 @@ func openAIUsageFromDecodedImagesResponse(root map[string]any) (OpenAIUsage, boo
 
 // resolveOpenAIImageGeometry trusts the actual first image; a declared size is only a consistency check.
 func resolveOpenAIImageGeometryFromDecoded(root map[string]any) (openAIImageGeometry, string, bool) {
+	return resolveOpenAIImageGeometryAt(root, 0)
+}
+
+// resolveOpenAIImageGeometriesFromDecoded decodes every returned image (n>1).
+// All images must decode and share one format so the echoed output_format
+// stays truthful; output tokens are summed per image by the caller.
+func resolveOpenAIImageGeometriesFromDecoded(root map[string]any) ([]openAIImageGeometry, string, bool) {
 	data, ok := root["data"].([]any)
 	if !ok || len(data) == 0 {
+		return nil, "", false
+	}
+	geometries := make([]openAIImageGeometry, 0, len(data))
+	format := ""
+	for i := range data {
+		geometry, itemFormat, ok := resolveOpenAIImageGeometryAt(root, i)
+		if !ok {
+			return nil, "", false
+		}
+		if format == "" {
+			format = itemFormat
+		} else if format != itemFormat {
+			return nil, "", false
+		}
+		geometries = append(geometries, geometry)
+	}
+	return geometries, format, true
+}
+
+func resolveOpenAIImageGeometryAt(root map[string]any, index int) (openAIImageGeometry, string, bool) {
+	data, ok := root["data"].([]any)
+	if !ok || index < 0 || index >= len(data) {
 		return openAIImageGeometry{}, "", false
 	}
-	first, ok := data[0].(map[string]any)
+	first, ok := data[index].(map[string]any)
 	if !ok {
 		return openAIImageGeometry{}, "", false
 	}
@@ -344,12 +394,23 @@ func resolveOpenAIImagesInputTokensFromDecoded(root map[string]any, parsed *Open
 	}
 	total := 0
 	unknown := false
+	// Remember the first decodable input image: the official API requires the
+	// mask to match the input image dimensions, so an http(s) mask that cannot
+	// be decoded locally is priced with those dimensions instead of falling
+	// back to upstream usage (which the web line never provides).
+	firstImageWidth, firstImageHeight := 0, 0
+	noteImage := func(width, height int) {
+		if firstImageWidth <= 0 && width > 0 && height > 0 {
+			firstImageWidth, firstImageHeight = width, height
+		}
+	}
 	for _, imageURL := range parsed.InputImageURLs {
 		width, height, _, ok := decodeImageMeta(imageURL)
 		if !ok {
 			unknown = true
 			continue
 		}
+		noteImage(width, height)
 		total += openAIImageInputTokens(width, height)
 	}
 	for _, upload := range parsed.Uploads {
@@ -362,7 +423,37 @@ func resolveOpenAIImagesInputTokensFromDecoded(root map[string]any, parsed *Open
 			}
 			width, height = config.Width, config.Height
 		}
+		noteImage(width, height)
 		total += openAIImageInputTokens(width, height)
+	}
+	// The mask travels with the request and is consumed by the model, so it is
+	// priced like one more input image via the same 32px patch formula.
+	if maskURL := strings.TrimSpace(parsed.MaskImageURL); maskURL != "" {
+		width, height, _, ok := decodeImageMeta(maskURL)
+		switch {
+		case ok:
+			total += openAIImageInputTokens(width, height)
+		case firstImageWidth > 0:
+			total += openAIImageInputTokens(firstImageWidth, firstImageHeight)
+		default:
+			unknown = true
+		}
+	}
+	if parsed.MaskUpload != nil {
+		width, height := parsed.MaskUpload.Width, parsed.MaskUpload.Height
+		if width <= 0 || height <= 0 {
+			config, _, err := image.DecodeConfig(bytes.NewReader(parsed.MaskUpload.Data))
+			if err == nil && config.Width > 0 && config.Height > 0 {
+				width, height = config.Width, config.Height
+			} else if firstImageWidth > 0 {
+				width, height = firstImageWidth, firstImageHeight
+			}
+		}
+		if width > 0 && height > 0 {
+			total += openAIImageInputTokens(width, height)
+		} else {
+			unknown = true
+		}
 	}
 	if !unknown {
 		return total, true
@@ -413,6 +504,33 @@ func synthesizeOpenAIImagesUsage(
 		ImageOutputTokens: imageOutputTokens,
 	}
 	usage.InputTokens = usage.TextInputTokens + usage.ImageInputTokens
+	usage.OutputTokens = usage.ImageOutputTokens
+	usage.TotalTokens = usage.InputTokens + usage.OutputTokens
+	return usage, true
+}
+
+// synthesizeOpenAIImagesUsageMulti sums image output tokens over every
+// returned image (n>1); input tokens are charged once per request.
+func synthesizeOpenAIImagesUsageMulti(
+	geometries []openAIImageGeometry,
+	quality string,
+	textInputTokens int,
+	imageInputTokens int,
+) (openAIImagesSynthUsage, bool) {
+	if len(geometries) == 0 {
+		return openAIImagesSynthUsage{}, false
+	}
+	usage, ok := synthesizeOpenAIImagesUsage(geometries[0], quality, textInputTokens, imageInputTokens)
+	if !ok {
+		return openAIImagesSynthUsage{}, false
+	}
+	for _, geometry := range geometries[1:] {
+		tokens, ok := officialOpenAIImageOutputTokens(geometry.Width, geometry.Height, quality)
+		if !ok {
+			return openAIImagesSynthUsage{}, false
+		}
+		usage.ImageOutputTokens += tokens
+	}
 	usage.OutputTokens = usage.ImageOutputTokens
 	usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 	return usage, true
@@ -517,18 +635,34 @@ func rewriteDecodedOpenAIImagesResponseBody(
 }
 
 func openAIImagesResponseSimulatableFromDecoded(root map[string]any, actualFormat, expectedQuality string) bool {
-	if !strings.EqualFold(strings.TrimSpace(actualFormat), "png") {
+	switch strings.ToLower(strings.TrimSpace(actualFormat)) {
+	case "png", "jpeg", "webp":
+	default:
 		return false
 	}
 	if backgroundValue, exists := root["background"]; exists {
 		background, ok := backgroundValue.(string)
-		if !ok || !strings.EqualFold(strings.TrimSpace(background), "opaque") {
+		if !ok {
+			return false
+		}
+		switch strings.ToLower(strings.TrimSpace(background)) {
+		// transparent here is a RESPONSE property: background=auto requests
+		// legitimately produce alpha output on the web line, and tokens are
+		// priced by decoded pixels regardless of transparency. Explicit transparent
+		// requests are valid but remain excluded from local usage simulation.
+		case "opaque", "auto", "transparent":
+		default:
 			return false
 		}
 	}
 	if outputFormatValue, exists := root["output_format"]; exists {
 		outputFormat, ok := outputFormatValue.(string)
-		if !ok || !strings.EqualFold(strings.TrimSpace(outputFormat), "png") {
+		if !ok {
+			return false
+		}
+		switch strings.ToLower(strings.TrimSpace(outputFormat)) {
+		case "png", "jpeg", "webp":
+		default:
 			return false
 		}
 	}
@@ -556,34 +690,36 @@ func openAIImagesResponseSimulatable(body []byte, actualFormat, expectedQuality 
 	return ok && openAIImagesResponseSimulatableFromDecoded(root, actualFormat, expectedQuality)
 }
 
-// applyOpenAIImagesUsageSimulation 返回改写后的响应体、合成 usage、真实出图尺寸（"WxH"）与是否生效。
+// applyOpenAIImagesUsageSimulation 返回改写后的响应体、合成 usage、每张图的真实出图尺寸（"WxH"）与是否生效。
 // 出图尺寸取自解码得到的真实像素，供计费档位归类与用量日志使用（响应体本身保持官方字段结构）。
 func applyOpenAIImagesUsageSimulation(
 	body []byte,
 	parsed *OpenAIImagesRequest,
-) ([]byte, OpenAIUsage, string, bool) {
+) ([]byte, OpenAIUsage, []string, bool) {
 	if len(body) == 0 || !openAIImagesRequestSimulatable(parsed) {
-		return body, OpenAIUsage{}, "", false
+		return body, OpenAIUsage{}, nil, false
 	}
 	quality, ok := normalizeOpenAIImageQuality(parsed.Quality)
 	if !ok {
-		return body, OpenAIUsage{}, "", false
+		return body, OpenAIUsage{}, nil, false
 	}
 	root, ok := parseOpenAIImagesSimulationResponse(body)
 	if !ok {
-		return body, OpenAIUsage{}, "", false
+		return body, OpenAIUsage{}, nil, false
 	}
-	geometry, format, ok := resolveOpenAIImageGeometryFromDecoded(root)
+	geometries, format, ok := resolveOpenAIImageGeometriesFromDecoded(root)
 	if !ok || !openAIImagesResponseSimulatableFromDecoded(root, format, quality) {
-		return body, OpenAIUsage{}, "", false
+		return body, OpenAIUsage{}, nil, false
 	}
-	data, ok := root["data"].([]any)
-	if !ok || len(data) != 1 {
-		return body, OpenAIUsage{}, "", false
+	// The response must carry exactly the requested number of images; a
+	// partial result would otherwise be billed as if complete.
+	if len(geometries) != parsed.N {
+		return body, OpenAIUsage{}, nil, false
 	}
+	geometry := geometries[0]
 	imageInputTokens, ok := resolveOpenAIImagesInputTokensFromDecoded(root, parsed)
 	if !ok {
-		return body, OpenAIUsage{}, "", false
+		return body, OpenAIUsage{}, nil, false
 	}
 
 	textInputTokens, exists := decodedJSONInt(root, "usage", "input_tokens_details", "text_tokens")
@@ -610,15 +746,28 @@ func applyOpenAIImagesUsageSimulation(
 		textInputTokens = estimateOpenAIImagePromptTokens(parsed.Prompt)
 	}
 
-	synthesized, ok := synthesizeOpenAIImagesUsage(geometry, quality, textInputTokens, imageInputTokens)
+	synthesized, ok := synthesizeOpenAIImagesUsageMulti(geometries, quality, textInputTokens, imageInputTokens)
 	if !ok {
-		return body, OpenAIUsage{}, "", false
+		return body, OpenAIUsage{}, nil, false
+	}
+	// Preserve an accepted requested background when the upstream omits it;
+	// otherwise the response rewriter defaults an auto request to opaque.
+	if _, exists := root["background"]; !exists {
+		if requested := strings.ToLower(strings.TrimSpace(parsed.Background)); requested != "" {
+			root["background"] = requested
+		}
 	}
 	rewritten, ok := rewriteDecodedOpenAIImagesResponseBody(body, root, quality, format, synthesized, geometry)
 	if !ok {
-		return body, OpenAIUsage{}, "", false
+		return body, OpenAIUsage{}, nil, false
 	}
-	return rewritten, synthesized.toOpenAIUsage(), openAIImageDimensionsKey(geometry.Width, geometry.Height), true
+	// One size per returned image so the usage log breakdown and per-image
+	// tier pricing see every image, not just data[0].
+	outputSizes := make([]string, 0, len(geometries))
+	for _, g := range geometries {
+		outputSizes = append(outputSizes, openAIImageDimensionsKey(g.Width, g.Height))
+	}
+	return rewritten, synthesized.toOpenAIUsage(), outputSizes, true
 }
 
 func maybeSimulateOpenAIImagesUsage(
@@ -626,10 +775,10 @@ func maybeSimulateOpenAIImagesUsage(
 	account *Account,
 	parsed *OpenAIImagesRequest,
 	effectiveUpstreamModel string,
-) ([]byte, OpenAIUsage, string, bool) {
+) ([]byte, OpenAIUsage, []string, bool) {
 	if !account.SupportsOpenAIImagesUsageSimulation() || parsed == nil ||
 		!isSimulatableOpenAIImagesModel(parsed.Model) || !isSimulatableOpenAIImagesModel(effectiveUpstreamModel) {
-		return body, OpenAIUsage{}, "", false
+		return body, OpenAIUsage{}, nil, false
 	}
 	return applyOpenAIImagesUsageSimulation(body, parsed)
 }

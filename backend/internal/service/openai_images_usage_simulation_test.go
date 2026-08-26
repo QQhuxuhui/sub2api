@@ -79,7 +79,8 @@ func TestIsSimulatableOpenAIImagesModel(t *testing.T) {
 
 func TestOpenAIImagesRequestSimulatable(t *testing.T) {
 	one := 1
-	compression := 80
+	overCompression := 101
+	negativeCompression := -1
 	clean := func() *OpenAIImagesRequest {
 		return &OpenAIImagesRequest{Model: "gpt-image-2", N: 1}
 	}
@@ -102,6 +103,52 @@ func TestOpenAIImagesRequestSimulatable(t *testing.T) {
 	if !openAIImagesRequestSimulatable(explicitDefaults) {
 		t.Fatal("explicit opaque/png/b64_json should be simulatable")
 	}
+	// Masks are covered by the local patch calculation and remain simulatable.
+	masked := clean()
+	masked.HasMask = true
+	if !openAIImagesRequestSimulatable(masked) {
+		t.Fatal("masked edit should be simulatable")
+	}
+	// gpt-image-2 does not accept input_fidelity and always processes image
+	// inputs at high fidelity, so explicit values must stay out of simulation.
+	for _, fidelity := range []string{"low", "high", " HIGH "} {
+		withFidelity := clean()
+		withFidelity.InputFidelity = fidelity
+		withFidelity.HasInputFidelity = true
+		if openAIImagesRequestSimulatable(withFidelity) {
+			t.Fatalf("input_fidelity %q must not be simulatable", fidelity)
+		}
+	}
+	explicitEmptyFidelity := clean()
+	explicitEmptyFidelity.HasInputFidelity = true
+	if openAIImagesRequestSimulatable(explicitEmptyFidelity) {
+		t.Fatal("explicit empty input_fidelity must not be simulatable")
+	}
+	for _, background := range []string{"opaque", "auto", " AUTO "} {
+		withBackground := clean()
+		withBackground.Background = background
+		if !openAIImagesRequestSimulatable(withBackground) {
+			t.Fatalf("background %q should be simulatable", background)
+		}
+	}
+	// jpeg/webp are billable: the official token formula only reads size and
+	// quality, and new-api's transcode does not change pixel dimensions.
+	for _, format := range []string{"png", "jpeg", "webp", " JPEG "} {
+		withFormat := clean()
+		withFormat.OutputFormat = format
+		if !openAIImagesRequestSimulatable(withFormat) {
+			t.Fatalf("output_format %q should be simulatable", format)
+		}
+	}
+	// output_compression 0-100 only tunes transcode quality.
+	for _, v := range []int{0, 80, 100} {
+		v := v
+		withCompression := clean()
+		withCompression.OutputCompression = &v
+		if !openAIImagesRequestSimulatable(withCompression) {
+			t.Fatalf("output_compression %d should be simulatable", v)
+		}
+	}
 
 	tests := []struct {
 		name   string
@@ -110,12 +157,13 @@ func TestOpenAIImagesRequestSimulatable(t *testing.T) {
 		{name: "stream", mutate: func(r *OpenAIImagesRequest) { r.Stream = true }},
 		{name: "partial images", mutate: func(r *OpenAIImagesRequest) { r.PartialImages = &one }},
 		{name: "zero images", mutate: func(r *OpenAIImagesRequest) { r.N = 0 }},
-		{name: "multiple images", mutate: func(r *OpenAIImagesRequest) { r.N = 2 }},
-		{name: "mask", mutate: func(r *OpenAIImagesRequest) { r.HasMask = true }},
-		{name: "transparent", mutate: func(r *OpenAIImagesRequest) { r.Background = "transparent" }},
-		{name: "jpeg", mutate: func(r *OpenAIImagesRequest) { r.OutputFormat = "jpeg" }},
-		{name: "compression", mutate: func(r *OpenAIImagesRequest) { r.OutputCompression = &compression }},
-		{name: "input fidelity", mutate: func(r *OpenAIImagesRequest) { r.InputFidelity = "high" }},
+		{name: "too many images", mutate: func(r *OpenAIImagesRequest) { r.N = 11 }},
+		{name: "transparent background", mutate: func(r *OpenAIImagesRequest) { r.Background = "transparent" }},
+		{name: "unknown background", mutate: func(r *OpenAIImagesRequest) { r.Background = "green" }},
+		{name: "gif output format", mutate: func(r *OpenAIImagesRequest) { r.OutputFormat = "gif" }},
+		{name: "compression above range", mutate: func(r *OpenAIImagesRequest) { r.OutputCompression = &overCompression }},
+		{name: "compression below range", mutate: func(r *OpenAIImagesRequest) { r.OutputCompression = &negativeCompression }},
+		{name: "unknown input fidelity", mutate: func(r *OpenAIImagesRequest) { r.InputFidelity = "ultra" }},
 		{name: "url response", mutate: func(r *OpenAIImagesRequest) { r.ResponseFormat = "url" }},
 	}
 
@@ -468,6 +516,28 @@ func TestResolveOpenAIImagesInputTokens(t *testing.T) {
 			ok:     true,
 		},
 		{
+			// The mask travels with the request and is billed like one more
+			// input image via the same patch formula. MaskImageURL is filled
+			// for both JSON shapes (mask.image_url object and plain string —
+			// see parseOpenAIImagesJSONRequest).
+			name: "mask data URL adds input tokens",
+			body: []byte(`{"usage":{}}`),
+			parsed: &OpenAIImagesRequest{N: 1,
+				InputImageURLs: []string{"data:image/png;base64," + testPNGBase64(t, 1024, 1024)},
+				MaskImageURL:   "data:image/png;base64," + testPNGBase64(t, 1024, 1024)},
+			want: 2048,
+			ok:   true,
+		},
+		{
+			name: "mask upload adds input tokens",
+			body: []byte(`{"usage":{}}`),
+			parsed: &OpenAIImagesRequest{N: 1,
+				Uploads:    []OpenAIImagesUpload{{Data: uploadBytes}},
+				MaskUpload: &OpenAIImagesUpload{Data: uploadBytes}},
+			want: 3042,
+			ok:   true,
+		},
+		{
 			name: "remote URL uses aggregate for every image",
 			body: []byte(`{"usage":{"input_tokens_details":{"image_tokens":2212}}}`),
 			parsed: &OpenAIImagesRequest{N: 1, InputImageURLs: []string{
@@ -680,9 +750,14 @@ func TestOpenAIImagesResponseSimulatable(t *testing.T) {
 	}{
 		{name: "missing metadata", body: []byte(`{"data":[]}`), format: "png", want: true},
 		{name: "supported metadata", body: []byte(`{"background":" OPAQUE ","output_format":"PNG"}`), format: "png", want: true},
-		{name: "transparent", body: []byte(`{"background":"transparent"}`), format: "png"},
-		{name: "webp field", body: []byte(`{"output_format":"webp"}`), format: "png"},
-		{name: "actual jpeg", body: []byte(`{}`), format: "jpeg"},
+		{name: "transparent response", body: []byte(`{"background":"transparent"}`), format: "png", want: true},
+		{name: "auto background", body: []byte(`{"background":"auto"}`), format: "png", want: true},
+		{name: "unknown background", body: []byte(`{"background":"green"}`), format: "png"},
+		{name: "webp field", body: []byte(`{"output_format":"webp"}`), format: "png", want: true},
+		{name: "actual jpeg", body: []byte(`{}`), format: "jpeg", want: true},
+		{name: "actual webp", body: []byte(`{}`), format: "webp", want: true},
+		{name: "gif field", body: []byte(`{"output_format":"gif"}`), format: "png"},
+		{name: "actual gif", body: []byte(`{}`), format: "gif"},
 		{name: "unknown actual format", body: []byte(`{}`), format: ""},
 		{name: "cached input", body: []byte(`{"usage":{"input_tokens_details":{"cached_tokens":100}}}`), format: "png"},
 	}
@@ -781,6 +856,21 @@ func TestApplyOpenAIImagesUsageSimulationTextFallbackKeepsScalesConsistent(t *te
 	})
 }
 
+func TestApplyOpenAIImagesUsageSimulationRejectsTransparent(t *testing.T) {
+	body := []byte(`{"background":"transparent","data":[{"b64_json":"` + testPNGBase64(t, 1024, 1024) + `"}],"usage":{}}`)
+	parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "sticker", N: 1, Background: "transparent"}
+	rewritten, _, _, applied := applyOpenAIImagesUsageSimulation(body, parsed)
+	if applied || !bytes.Equal(rewritten, body) {
+		t.Fatal("transparent response must pass through byte-for-byte")
+	}
+
+	body = []byte(`{"data":[{"b64_json":"` + testPNGBase64(t, 1024, 1024) + `"}],"usage":{}}`)
+	rewritten, _, _, applied = applyOpenAIImagesUsageSimulation(body, parsed)
+	if applied || !bytes.Equal(rewritten, body) {
+		t.Fatal("transparent request must pass through when upstream omits background")
+	}
+}
+
 func TestApplyOpenAIImagesUsageSimulationRejectsUnsupportedResponses(t *testing.T) {
 	pngFixture := testPNGBase64(t, 1024, 1024)
 	parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", N: 1}
@@ -788,9 +878,8 @@ func TestApplyOpenAIImagesUsageSimulationRejectsUnsupportedResponses(t *testing.
 		name string
 		body []byte
 	}{
-		{name: "transparent response", body: []byte(`{"background":"transparent","data":[{"b64_json":"` + pngFixture + `"}],"usage":{}}`)},
-		{name: "webp response field", body: []byte(`{"output_format":"webp","data":[{"b64_json":"` + pngFixture + `"}],"usage":{}}`)},
-		{name: "actual jpeg", body: []byte(`{"output_format":"png","data":[{"b64_json":"` + testJPEGBase64(t, 1024, 1024) + `"}],"usage":{}}`)},
+		{name: "unknown background response", body: []byte(`{"background":"green","data":[{"b64_json":"` + pngFixture + `"}],"usage":{}}`)},
+		{name: "gif response field", body: []byte(`{"output_format":"gif","data":[{"b64_json":"` + pngFixture + `"}],"usage":{}}`)},
 		{name: "quality mismatch", body: []byte(`{"quality":"high","data":[{"b64_json":"` + pngFixture + `"}],"usage":{}}`)},
 		{name: "response model mismatch", body: []byte(`{"model":"gpt-image-1","data":[{"b64_json":"` + pngFixture + `"}],"usage":{}}`)},
 		{name: "declared size mismatch", body: []byte(`{"size":"2048x2048","data":[{"b64_json":"` + pngFixture + `"}],"usage":{}}`)},
@@ -803,6 +892,21 @@ func TestApplyOpenAIImagesUsageSimulationRejectsUnsupportedResponses(t *testing.
 				t.Fatal("unsupported response must pass through byte-for-byte")
 			}
 		})
+	}
+}
+
+// jpeg/webp responses are billable now that new-api transcodes the final
+// image: the token formula reads only the decoded pixel dimensions.
+func TestApplyOpenAIImagesUsageSimulationAcceptsTranscodedFormats(t *testing.T) {
+	parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", N: 1}
+	bodies := map[string][]byte{
+		"webp field": []byte(`{"output_format":"webp","data":[{"b64_json":"` + testPNGBase64(t, 1024, 1024) + `"}],"usage":{}}`),
+		"jpeg bytes": []byte(`{"output_format":"jpeg","data":[{"b64_json":"` + testJPEGBase64(t, 1024, 1024) + `"}],"usage":{}}`),
+	}
+	for name, body := range bodies {
+		if _, _, _, applied := applyOpenAIImagesUsageSimulation(body, parsed); !applied {
+			t.Fatalf("%s response should be simulatable", name)
+		}
 	}
 }
 
@@ -834,5 +938,90 @@ func TestMaybeSimulateOpenAIImagesUsageGates(t *testing.T) {
 				t.Fatal("failed gate must pass through body byte-for-byte")
 			}
 		})
+	}
+}
+
+// Legacy dall-e quality values map onto gpt-image tiers instead of 400ing.
+func TestNormalizeOpenAIImagesOptionsMapsLegacyQuality(t *testing.T) {
+	cases := map[string]string{"hd": "high", " HD ": "high", "standard": "medium", "Standard": "medium", "high": "high"}
+	for in, want := range cases {
+		req := &OpenAIImagesRequest{Model: "gpt-image-2", Quality: in, HasQuality: true, N: 1}
+		got, err := normalizeOpenAIImagesOptions(req, "gpt-image-2")
+		if err != nil {
+			t.Fatalf("quality %q should normalize, got error: %v", in, err)
+		}
+		if got.Quality != want {
+			t.Fatalf("quality %q normalized to %q, want %q", in, got.Quality, want)
+		}
+	}
+	if _, err := normalizeOpenAIImagesOptions(&OpenAIImagesRequest{Model: "gpt-image-2", Quality: "ultra", HasQuality: true, N: 1}, "gpt-image-2"); err == nil {
+		t.Fatal("unknown quality must still be rejected")
+	}
+}
+
+// An http(s) mask cannot be decoded locally; the official API requires the
+// mask to match the input image, so it is priced with the input dimensions.
+func TestResolveOpenAIImagesInputTokensPricesHTTPMaskByInputImage(t *testing.T) {
+	img := "data:image/png;base64," + testPNGBase64(t, 1024, 1024)
+	one := openAIImageInputTokens(1024, 1024)
+
+	withMask := &OpenAIImagesRequest{InputImageURLs: []string{img}, MaskImageURL: "https://example.com/mask.png"}
+	got, ok := resolveOpenAIImagesInputTokensFromDecoded(map[string]any{}, withMask)
+	if !ok || got != 2*one {
+		t.Fatalf("http mask should be priced as one more input image: got %d ok=%v want %d", got, ok, 2*one)
+	}
+
+	// No decodable input image to borrow dimensions from: still unknown.
+	noImage := &OpenAIImagesRequest{MaskImageURL: "https://example.com/mask.png"}
+	if _, ok := resolveOpenAIImagesInputTokensFromDecoded(map[string]any{}, noImage); ok {
+		t.Fatal("http mask without a decodable input image must stay unknown")
+	}
+
+	// Upload-side mask without data borrows the upload image dimensions.
+	uploads := &OpenAIImagesRequest{
+		Uploads:    []OpenAIImagesUpload{{Width: 512, Height: 768}},
+		MaskUpload: &OpenAIImagesUpload{Data: []byte("not-an-image")},
+	}
+	got, ok = resolveOpenAIImagesInputTokensFromDecoded(map[string]any{}, uploads)
+	if !ok || got != 2*openAIImageInputTokens(512, 768) {
+		t.Fatalf("undecodable mask upload should borrow image dims: got %d ok=%v", got, ok)
+	}
+}
+
+// n>1: every returned image is billed; the count must match the request.
+func TestApplyOpenAIImagesUsageSimulationMultiImage(t *testing.T) {
+	for _, n := range []int{2, 10} {
+		req := &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", N: n}
+		if !openAIImagesRequestSimulatable(req) {
+			t.Fatalf("n=%d request should be simulatable", n)
+		}
+	}
+	img := testPNGBase64(t, 1024, 1024)
+	single := []byte(`{"data":[{"b64_json":"` + img + `"}],"usage":{}}`)
+	double := []byte(`{"data":[{"b64_json":"` + img + `"},{"b64_json":"` + img + `"}],"usage":{}}`)
+
+	_, oneUsage, _, ok := applyOpenAIImagesUsageSimulation(single, &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", N: 1})
+	if !ok {
+		t.Fatal("single image baseline should apply")
+	}
+	_, twoUsage, sizes, ok := applyOpenAIImagesUsageSimulation(double, &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", N: 2})
+	if !ok {
+		t.Fatal("n=2 with two images should apply")
+	}
+	if len(sizes) != 2 || sizes[0] != "1024x1024" || sizes[1] != "1024x1024" {
+		t.Fatalf("one size per image expected, got %v", sizes)
+	}
+	if twoUsage.ImageOutputTokens != 2*oneUsage.ImageOutputTokens {
+		t.Fatalf("output tokens should double: got %d want %d", twoUsage.ImageOutputTokens, 2*oneUsage.ImageOutputTokens)
+	}
+	if twoUsage.InputTokens != oneUsage.InputTokens {
+		t.Fatalf("input tokens are charged once: got %d want %d", twoUsage.InputTokens, oneUsage.InputTokens)
+	}
+	// Count mismatch in either direction must pass through unbilled-by-simulation.
+	if _, _, _, ok := applyOpenAIImagesUsageSimulation(single, &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", N: 2}); ok {
+		t.Fatal("n=2 with one image must not apply")
+	}
+	if _, _, _, ok := applyOpenAIImagesUsageSimulation(double, &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", N: 1}); ok {
+		t.Fatal("n=1 with two images must not apply")
 	}
 }

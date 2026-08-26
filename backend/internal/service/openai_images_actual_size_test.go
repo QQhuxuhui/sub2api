@@ -54,15 +54,22 @@ func TestOpenAIGatewayServiceForwardImages_OAuthUsesDecodedOutputDimensions(t *t
 	require.Equal(t, ImageSizeSourceOutput, run.result.ImageSizeSource)
 }
 
-func TestOpenAIGatewayServiceForwardImages_OAuthStreamingUsesDecodedOutputDimensions(t *testing.T) {
+// gpt-image-2 上游（逆向线）无法流式：stream=true 被【忽略】按非流式处理，
+// 客户端拿到普通 JSON 响应，计费与非流式请求完全一致（按解码像素），
+// 而不是旧行为的"走流式管线→不可模拟→透传空 usage→0 token 白送"。
+func TestOpenAIGatewayServiceForwardImages_GPTImage2IgnoresStreamAndBillsDecodedOutput(t *testing.T) {
 	run := runOpenAIOAuthImageActualSizeTest(t, true)
 
-	events := parseOpenAIImageTestSSEEvents(run.recorder.Body.String())
-	completed, ok := findOpenAIImageTestSSEEvent(events, "image_generation.completed")
-	require.True(t, ok)
-	require.Equal(t, "1672x941", gjson.Get(completed.Data, "size").String())
-	require.Equal(t, "auto", gjson.Get(completed.Data, "quality").String())
+	// 响应是普通 JSON（非 SSE），结构与非流式一致。
+	require.Equal(t, "1672x941", gjson.Get(run.recorder.Body.String(), "size").String())
+	require.Equal(t, "auto", gjson.Get(run.recorder.Body.String(), "quality").String())
 	require.Equal(t, []string{"1672x941"}, run.result.ImageOutputSizes)
+	require.False(t, run.result.Stream, "gpt-image-2 stream must be ignored")
+
+	ApplyOpenAIImageBillingResolution(run.result)
+	require.Equal(t, ImageBillingSize2K, run.result.ImageSize)
+	require.Equal(t, "1672x941", run.result.ImageOutputSize)
+	require.Equal(t, ImageSizeSourceOutput, run.result.ImageSizeSource)
 }
 
 type openAIOAuthImageActualSizeTestRun struct {

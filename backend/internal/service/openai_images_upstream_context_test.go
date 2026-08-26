@@ -94,7 +94,7 @@ func TestForwardOpenAIImagesAPIKey_NonStreamDetachesUpstreamContext(t *testing.T
 
 // 流式路径本来就脱钩，这条守卫防止对齐时把它改坏。
 func TestForwardOpenAIImagesAPIKey_StreamKeepsDetachedUpstreamContext(t *testing.T) {
-	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","stream":true,"response_format":"b64_json"}`)
+	body := []byte(`{"model":"gpt-image-1.5","prompt":"draw a cat","stream":true,"response_format":"b64_json"}`)
 	c, _ := newOpenAIImagesTestContext(t, body)
 
 	recorder := &httpUpstreamRecorder{resp: &http.Response{

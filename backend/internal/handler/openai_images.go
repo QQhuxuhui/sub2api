@@ -115,6 +115,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
 
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, routingModel)
+	if err := service.ValidateOpenAIImagesRequestForModel(parsed, channelMapping.MappedModel); err != nil {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return
+	}
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
@@ -152,6 +156,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastCompatibilityErr *service.OpenAIImagesAccountCompatibilityError
 	stopJSONKeepalive := func() {}
 	jsonKeepaliveStarted := false
 	defer func() { stopJSONKeepalive() }()
@@ -191,6 +196,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}
 			if lastFailoverErr != nil {
 				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
+			} else if lastCompatibilityErr != nil {
+				h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", lastCompatibilityErr.Error(), streamStarted)
 			} else {
 				h.handleFailoverExhaustedSimple(c, 502, streamStarted)
 			}
@@ -269,6 +276,24 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					zap.Error(err),
 				)
 			} else {
+				var compatibilityErr *service.OpenAIImagesAccountCompatibilityError
+				if errors.As(err, &compatibilityErr) {
+					failedAccountIDs[account.ID] = struct{}{}
+					lastCompatibilityErr = compatibilityErr
+					if switchCount >= maxAccountSwitches {
+						h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", compatibilityErr.Error(), streamStarted)
+						return
+					}
+					switchCount++
+					h.gatewayService.RecordOpenAIAccountSwitch()
+					reqLog.Warn("openai.images.account_mapping_incompatible_switching",
+						zap.Int64("account_id", account.ID),
+						zap.String("mapped_model", compatibilityErr.Model),
+						zap.Int("switch_count", switchCount),
+						zap.Error(compatibilityErr),
+					)
+					continue
+				}
 				var imageUpstreamErr *service.OpenAIImagesUpstreamError
 				if errors.As(err, &imageUpstreamErr) {
 					retryableServerError := service.IsOpenAIImagesRetryableUpstreamError(imageUpstreamErr)
