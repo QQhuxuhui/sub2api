@@ -231,17 +231,26 @@ func runOpenAIImagesAccountMappingCompatibilityTest(
 	t *testing.T,
 	incompatibleTarget string,
 	body []byte,
+	compatibleTarget ...string,
 ) (*httptest.ResponseRecorder, *openAIImagesMappedOptionsHTTPUpstream) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	groupID := int64(3131)
+	requestModel := gjson.GetBytes(body, "model").String()
+	if requestModel == "" {
+		requestModel = "grok-imagine"
+	}
+	secondTarget := requestModel
+	if len(compatibleTarget) > 0 {
+		secondTarget = compatibleTarget[0]
+	}
 	accounts := []service.Account{
 		{
 			ID: 11, Name: "incompatible-image-account", Platform: service.PlatformOpenAI,
 			Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Priority: 0,
 			Credentials: map[string]any{
 				"access_token":  "token-1",
-				"model_mapping": map[string]any{"grok-imagine": incompatibleTarget},
+				"model_mapping": map[string]any{requestModel: incompatibleTarget},
 			},
 		},
 		{
@@ -249,7 +258,7 @@ func runOpenAIImagesAccountMappingCompatibilityTest(
 			Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Priority: 1,
 			Credentials: map[string]any{
 				"access_token":  "token-2",
-				"model_mapping": map[string]any{"grok-imagine": "grok-imagine"},
+				"model_mapping": map[string]any{requestModel: secondTarget},
 			},
 		},
 	}
@@ -286,7 +295,7 @@ func runOpenAIImagesAccountMappingCompatibilityTest(
 }
 
 func TestOpenAIGatewayHandlerImages_AccountMappingOptionMismatchFailsOver(t *testing.T) {
-	body := []byte(`{"model":"grok-imagine","prompt":"draw a cat","quality":"hd"}`)
+	body := []byte(`{"model":"grok-imagine","prompt":"draw a cat","quality":"ultra"}`)
 	rec, upstream := runOpenAIImagesAccountMappingCompatibilityTest(t, "gpt-image-2", body)
 
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -301,6 +310,15 @@ func TestOpenAIGatewayHandlerImages_AccountMappingNonImageModelFailsOver(t *test
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, []int64{12}, upstream.calls())
 	require.Equal(t, "aGVsbG8=", gjson.GetBytes(rec.Body.Bytes(), "data.0.b64_json").String())
+}
+
+func TestOpenAIGatewayHandlerImages_ReverseModelMappingPreservesClientStream(t *testing.T) {
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw","stream":true}`)
+	rec, upstream := runOpenAIImagesAccountMappingCompatibilityTest(t, "gpt-image-1.5", body, "gpt-image-2")
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []int64{11}, upstream.calls())
+	require.Contains(t, rec.Body.String(), "event: image_generation.completed")
 }
 
 func TestOpenAIGatewayHandlerImages_ChannelMappingNonImageModelReturnsBadRequest(t *testing.T) {

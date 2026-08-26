@@ -202,7 +202,7 @@ func (h *AsyncImageHandler) validateRequest(c *gin.Context, platform string, bod
 	if err != nil {
 		return err
 	}
-	if parsed.Stream {
+	if parsed.ClientStream() {
 		return errors.New("streaming image requests cannot be submitted as asynchronous tasks")
 	}
 	return nil

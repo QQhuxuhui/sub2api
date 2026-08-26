@@ -88,7 +88,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	reqLog = reqLog.With(
 		zap.String("model", clientRequestModel),
 		zap.String("routing_model", routingModel),
-		zap.Bool("stream", parsed.Stream),
+		zap.Bool("stream", parsed.ClientStream()),
 		zap.Bool("multipart", parsed.Multipart),
 		zap.String("capability", string(parsed.RequiredCapability)),
 		zap.String("img_quality", parsed.Quality),
@@ -111,14 +111,14 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		defer imageReleaseFunc()
 	}
 
-	setOpsRequestContext(c, clientRequestModel, parsed.Stream)
-	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
-
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, routingModel)
-	if err := service.ValidateOpenAIImagesRequestForModel(parsed, channelMapping.MappedModel); err != nil {
+	parsed, err = service.NormalizeOpenAIImagesRequestForModel(parsed, channelMapping.MappedModel)
+	if err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	setOpsRequestContext(c, clientRequestModel, parsed.ClientStream())
+	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.ClientStream(), false)))
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
@@ -129,7 +129,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
 
-	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, parsed.Stream, &streamStarted, reqLog)
+	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, parsed.ClientStream(), &streamStarted, reqLog)
 	if !acquired {
 		return
 	}
@@ -230,7 +230,38 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		reqLog.Debug("openai.images.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, parsed.Stream, &streamStarted, reqLog)
+		attemptModel := strings.TrimSpace(channelMapping.MappedModel)
+		if attemptModel == "" {
+			attemptModel = routingModel
+		}
+		accountModel := account.GetMappedModel(attemptModel)
+		attemptParsed, normalizeErr := service.NormalizeOpenAIImagesRequestForModel(parsed, accountModel)
+		if normalizeErr != nil {
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+				selection.ReleaseFunc = nil
+			}
+			compatibilityErr := &service.OpenAIImagesAccountCompatibilityError{Model: accountModel, Err: normalizeErr}
+			failedAccountIDs[account.ID] = struct{}{}
+			lastCompatibilityErr = compatibilityErr
+			if switchCount >= maxAccountSwitches {
+				h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", compatibilityErr.Error(), streamStarted)
+				return
+			}
+			switchCount++
+			h.gatewayService.RecordOpenAIAccountSwitch()
+			reqLog.Warn("openai.images.account_mapping_incompatible_switching",
+				zap.Int64("account_id", account.ID),
+				zap.String("mapped_model", compatibilityErr.Model),
+				zap.Int("switch_count", switchCount),
+				zap.Error(compatibilityErr),
+			)
+			continue
+		}
+		setOpsRequestContext(c, clientRequestModel, attemptParsed.Stream)
+		setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(attemptParsed.Stream, false)))
+
+		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, attemptParsed.Stream, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// Images 调度不装利润门，此分支实际不可达；防御性排除重选并受同一否决上限约束。
 			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
@@ -244,7 +275,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		}
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
-		if !parsed.Stream && !jsonKeepaliveStarted {
+		if !attemptParsed.Stream && !jsonKeepaliveStarted {
 			stopJSONKeepalive = service.StartOpenAIImagesJSONKeepalive(c, h.openAIImagesJSONKeepaliveInterval())
 			jsonKeepaliveStarted = true
 		}
@@ -256,7 +287,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
+			return h.gatewayService.ForwardImages(requestCtx, c, account, body, attemptParsed, channelMapping.MappedModel)
 		}()
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)

@@ -44,7 +44,9 @@ func SanitizeGeminiNativeImageConfig(body []byte) ([]byte, []string) {
 			break
 		}
 	}
-	if !hit {
+	// Escaped JSON keys (for example "output\u004dimeType") do not match the
+	// literal scan. Only parse the uncommon escaped-body case before returning.
+	if !hit && !bytes.Contains(body, []byte(`\u`)) {
 		return body, nil
 	}
 
@@ -54,7 +56,10 @@ func SanitizeGeminiNativeImageConfig(body []byte) ([]byte, []string) {
 		for _, imgKey := range geminiImageConfigKeys {
 			for _, badKey := range geminiImageConfigUnsupportedKeys {
 				path := genKey + "." + imgKey + "." + badKey
-				if !gjson.GetBytes(result, path).Exists() {
+				value := gjson.GetBytes(result, path)
+				// Exists is false for an explicit JSON null, but null is still an
+				// unsupported field and must be removed.
+				if value.Raw == "" {
 					continue
 				}
 				next, err := sjson.DeleteBytes(result, path)

@@ -1698,7 +1698,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	if err := validateOpenAIImagesModel(upstreamModel); err != nil {
 		return nil, &OpenAIImagesAccountCompatibilityError{Model: upstreamModel, Err: err}
 	}
-	normalized, err := normalizeOpenAIImagesOptions(parsed, upstreamModel)
+	normalized, err := NormalizeOpenAIImagesRequestForModel(parsed, upstreamModel)
 	if err != nil {
 		return nil, &OpenAIImagesAccountCompatibilityError{Model: upstreamModel, Err: err}
 	}

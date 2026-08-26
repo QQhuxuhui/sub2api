@@ -92,6 +92,19 @@ type OpenAIImagesRequest struct {
 	MaskUpload         *OpenAIImagesUpload
 	Body               []byte
 	bodyHash           string
+	rawOptions         *OpenAIImagesRequest
+}
+
+// ClientStream reports the stream flag requested by the client, before any
+// model-specific normalizer may intentionally ignore it.
+func (r *OpenAIImagesRequest) ClientStream() bool {
+	if r == nil {
+		return false
+	}
+	if r.rawOptions != nil {
+		return r.rawOptions.Stream
+	}
+	return r.Stream
 }
 
 func (r *OpenAIImagesRequest) ModerationBody() []byte {
@@ -222,12 +235,12 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []b
 	if err := validateOpenAIImagesModel(req.Model); err != nil {
 		return nil, err
 	}
-	normalized, err := normalizeOpenAIImagesOptions(req, req.Model)
+	rawOptions := *req
+	req.rawOptions = &rawOptions
+	normalized, err := NormalizeOpenAIImagesRequestForModel(req, req.Model)
 	if err != nil {
 		return nil, err
 	}
-	normalized.SizeTier = normalizeOpenAIImageSizeTier(normalized.Size)
-	normalized.RequiredCapability = classifyOpenAIImagesCapability(normalized)
 	return normalized, nil
 }
 
@@ -530,17 +543,33 @@ func isGPTImage2Model(model string) bool {
 // ValidateOpenAIImagesOptions validates options against the model that will
 // receive the request without modifying the parsed request.
 func ValidateOpenAIImagesOptions(req *OpenAIImagesRequest, model string) error {
-	_, err := normalizeOpenAIImagesOptions(req, model)
+	_, err := NormalizeOpenAIImagesRequestForModel(req, model)
 	return err
 }
 
 // ValidateOpenAIImagesRequestForModel validates both the routed model and its
 // model-specific request options before account selection begins.
 func ValidateOpenAIImagesRequestForModel(req *OpenAIImagesRequest, model string) error {
+	_, err := NormalizeOpenAIImagesRequestForModel(req, model)
+	return err
+}
+
+// NormalizeOpenAIImagesRequestForModel validates and returns an attempt-local
+// copy normalized for the model that will actually receive the request.
+func NormalizeOpenAIImagesRequestForModel(req *OpenAIImagesRequest, model string) (*OpenAIImagesRequest, error) {
 	if err := validateOpenAIImagesModel(model); err != nil {
-		return err
+		return nil, err
 	}
-	return ValidateOpenAIImagesOptions(req, model)
+	normalized, err := normalizeOpenAIImagesOptions(req, model)
+	if err != nil {
+		return nil, err
+	}
+	if normalized == nil {
+		return nil, nil
+	}
+	normalized.SizeTier = normalizeOpenAIImageSizeTier(normalized.Size)
+	normalized.RequiredCapability = classifyOpenAIImagesCapability(normalized)
+	return normalized, nil
 }
 
 // normalizeOpenAIImagesOptions returns an attempt-local copy. Account failover
@@ -549,7 +578,12 @@ func normalizeOpenAIImagesOptions(req *OpenAIImagesRequest, model string) (*Open
 	if req == nil {
 		return nil, nil
 	}
-	normalized := *req
+	source := req
+	if req.rawOptions != nil {
+		source = req.rawOptions
+	}
+	normalized := *source
+	normalized.rawOptions = req.rawOptions
 	if IsGPTImageGenerationModel(model) {
 		// Official n range; without this the upstream 400 surfaces as a 502.
 		if normalized.N > 10 {
@@ -793,7 +827,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	if err := validateOpenAIImagesModel(upstreamModel); err != nil {
 		return nil, &OpenAIImagesAccountCompatibilityError{Model: upstreamModel, Err: err}
 	}
-	normalized, err := normalizeOpenAIImagesOptions(parsed, upstreamModel)
+	normalized, err := NormalizeOpenAIImagesRequestForModel(parsed, upstreamModel)
 	if err != nil {
 		return nil, &OpenAIImagesAccountCompatibilityError{Model: upstreamModel, Err: err}
 	}

@@ -333,6 +333,41 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_GPTImage2IgnoresInputFidel
 	}
 }
 
+func TestNormalizeOpenAIImagesOptions_RestoresOptionsForReverseModelMapping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"edit","images":[{"image_url":"https://example.com/source.png"}],"stream":true,"input_fidelity":"high","partial_images":2}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	parsed, err := (&OpenAIGatewayService{}).ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+	require.False(t, parsed.Stream, "entry-model normalization may ignore stream for gpt-image-2")
+	require.Empty(t, parsed.InputFidelity)
+
+	normalized, err := NormalizeOpenAIImagesRequestForModel(parsed, "gpt-image-1.5")
+	require.NoError(t, err)
+	require.True(t, normalized.Stream)
+	require.Equal(t, "high", normalized.InputFidelity)
+	require.True(t, normalized.HasInputFidelity)
+	require.NotNil(t, normalized.PartialImages)
+	require.Equal(t, 2, *normalized.PartialImages)
+
+	rewritten, _, err := rewriteOpenAIImagesRequest(body, "application/json", "gpt-image-1.5", normalized)
+	require.NoError(t, err)
+	require.True(t, gjson.GetBytes(rewritten, "stream").Bool())
+	require.Equal(t, "high", gjson.GetBytes(rewritten, "input_fidelity").String())
+	require.Equal(t, int64(2), gjson.GetBytes(rewritten, "partial_images").Int())
+}
+
+func TestNormalizeOpenAIImagesRequestForModel_NilRequest(t *testing.T) {
+	normalized, err := NormalizeOpenAIImagesRequestForModel(nil, "gpt-image-2")
+	require.NoError(t, err)
+	require.Nil(t, normalized)
+}
+
 // multipart 分支同理：字段必须整个删掉，而不是留一个空值 part。
 func TestRewriteOpenAIImagesRequest_GPTImage2DropsIgnoredMultipartFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -1793,6 +1828,45 @@ func TestOpenAIGatewayServiceForwardImages_RevalidatesOptionsAfterModelMapping(t
 			require.Equal(t, originalInputFidelity, parsed.InputFidelity)
 		})
 	}
+}
+
+func TestOpenAIGatewayServiceForwardImages_OAuthReverseMappingPreservesStreamAndInputFidelity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"edit","images":[{"image_url":"https://example.com/source.png"}],"stream":true,"input_fidelity":"high"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.completed\",\"response\":{\"created_at\":1710000000,\"usage\":{\"input_tokens\":5,\"output_tokens\":9,\"output_tokens_details\":{\"image_tokens\":4}},\"tool_usage\":{\"image_gen\":{\"images\":1}},\"output\":[{\"type\":\"image_generation_call\",\"result\":\"ZWRpdGVk\",\"output_format\":\"png\"}]}}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+	require.False(t, parsed.Stream)
+
+	account := &Account{
+		ID: 13, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":  "token-123",
+			"model_mapping": map[string]any{"gpt-image-2": "gpt-image-1.5"},
+		},
+	}
+	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Stream)
+	require.Equal(t, "gpt-image-1.5", result.UpstreamModel)
+	require.Equal(t, "gpt-image-1.5", gjson.GetBytes(upstream.lastBody, "tools.0.model").String())
+	require.Equal(t, "high", gjson.GetBytes(upstream.lastBody, "tools.0.input_fidelity").String())
+	require.Contains(t, rec.Body.String(), "event: image_edit.completed")
 }
 
 func TestOpenAIGatewayServiceForwardImages_APIKeyStreamJSONResponseBillsImage(t *testing.T) {

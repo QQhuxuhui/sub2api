@@ -76,3 +76,28 @@ func TestSanitizeGeminiNativeImageConfig_OnlyTouchesImageConfig(t *testing.T) {
 	require.Nil(t, removed)
 	require.Equal(t, string(body), string(sanitized))
 }
+
+func TestSanitizeGeminiNativeImageConfig_RemovesEscapedAndNullKeys(t *testing.T) {
+	t.Run("escaped key", func(t *testing.T) {
+		body := []byte(`{"generationConfig":{"imageConfig":{"output\u004dimeType":"image/png","aspectRatio":"1:1"}}}`)
+		sanitized, removed := SanitizeGeminiNativeImageConfig(body)
+		require.Equal(t, []string{"generationConfig.imageConfig.outputMimeType"}, removed)
+		require.False(t, gjson.GetBytes(sanitized, "generationConfig.imageConfig.outputMimeType").Exists())
+		require.Equal(t, "1:1", gjson.GetBytes(sanitized, "generationConfig.imageConfig.aspectRatio").String())
+	})
+
+	t.Run("null value", func(t *testing.T) {
+		body := []byte(`{"generationConfig":{"imageConfig":{"output_mime_type":null,"aspectRatio":"1:1"}}}`)
+		sanitized, removed := SanitizeGeminiNativeImageConfig(body)
+		require.Equal(t, []string{"generationConfig.imageConfig.output_mime_type"}, removed)
+		require.NotContains(t, string(sanitized), `"output_mime_type"`)
+		require.Equal(t, "1:1", gjson.GetBytes(sanitized, "generationConfig.imageConfig.aspectRatio").String())
+	})
+
+	t.Run("escaped container keys", func(t *testing.T) {
+		body := []byte(`{"generation\u0043onfig":{"image\u0043onfig":{"output\u004dimeType":"image/png"}}}`)
+		sanitized, removed := SanitizeGeminiNativeImageConfig(body)
+		require.Equal(t, []string{"generationConfig.imageConfig.outputMimeType"}, removed)
+		require.NotContains(t, string(sanitized), `output\u004dimeType`)
+	})
+}
