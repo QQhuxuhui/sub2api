@@ -271,6 +271,25 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 	}
 
+	// 用户级「空返回不扣费」：生图请求上游一张图都没回时整笔记 $0。
+	// 位置与 GatewayService 侧一致——response_model 改价之后、建用量行之前。
+	waiverModels := make([]string, 0, len(billingModels)+3)
+	waiverModels = append(waiverModels, billingModels...)
+	waiverModels = append(waiverModels, input.OriginalModel, result.UpstreamModel, result.Model)
+	waiver := s.resolveEmptyResponseWaiver(ctx, result, apiKey, user, waiverModels, cost)
+	if waiver.Applied {
+		logger.L().With(
+			zap.String("component", "service.openai_gateway"),
+			zap.Int64("user_id", user.ID),
+			zap.Int64("rule_id", waiver.RuleID),
+			zap.Any("group_id", apiKey.GroupID),
+			zap.Strings("billing_models", billingModels),
+			zap.String("request_id", result.RequestID),
+			zap.Float64("waived_cost", waiver.WaivedCost),
+		).Info("billing.empty_response_waived")
+		cost = waiveCostForEmptyResponse(cost)
+	}
+
 	// Determine billing type
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 	billingType := BillingTypeBalance
@@ -342,6 +361,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		ImageOutputSize:       optionalTrimmedStringPtr(result.ImageOutputSize),
 		ImageSizeSource:       optionalTrimmedStringPtr(result.ImageSizeSource),
 		ImageSizeBreakdown:    result.ImageSizeBreakdown,
+	}
+	if waiver.Applied {
+		usageLog.EmptyResponseBillingWaived = true
+		usageLog.EmptyResponseBillingRuleID = waiver.RuleID
+		usageLog.EmptyResponseWaivedCost = waiver.WaivedCost
 	}
 	isVideoUsage := isGrokVideoUsageResult(result, billingModels)
 	if isVideoUsage {
@@ -1096,4 +1120,32 @@ func (s *OpenAIGatewayService) UpdateCodexUsageSnapshotFromHeaders(ctx context.C
 	if snapshot := ParseCodexRateLimitHeaders(headers); snapshot != nil {
 		s.updateCodexUsageSnapshot(ctx, accountID, snapshot)
 	}
+}
+
+// resolveEmptyResponseWaiver 判定本次记账是否命中用户级「空返回不扣费」。
+// 语义与 GatewayService.resolveEmptyResponseWaiver 完全一致，见那边的注释。
+func (s *OpenAIGatewayService) resolveEmptyResponseWaiver(
+	ctx context.Context,
+	result *OpenAIForwardResult,
+	apiKey *APIKey,
+	user *User,
+	models []string,
+	cost *CostBreakdown,
+) emptyResponseBillingWaiver {
+	if s == nil || s.emptyResponseBillingResolver == nil || user == nil || apiKey == nil {
+		return emptyResponseBillingWaiver{}
+	}
+	if !result.IsEmptyImageResponse() {
+		return emptyResponseBillingWaiver{}
+	}
+	rules := s.emptyResponseBillingResolver.Resolve(ctx, user.ID)
+	return resolveEmptyResponseBillingWaiver(rules, true, apiKey.GroupID, models, cost)
+}
+
+// InvalidateEmptyResponseBillingRules 保留管理面失效钩子的接口兼容；规则读取不缓存。
+func (s *OpenAIGatewayService) InvalidateEmptyResponseBillingRules(userID int64) {
+	if s == nil {
+		return
+	}
+	s.emptyResponseBillingResolver.Invalidate(userID)
 }

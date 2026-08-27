@@ -165,6 +165,7 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 		nil,
 		nil,
 		nil,
+		nil, // emptyResponseBillingRepo
 	)
 	billingService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billingService.Stop)
@@ -268,6 +269,7 @@ func runOpenAIImagesAccountMappingCompatibilityTest(
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil,
 		upstream, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, // emptyResponseBillingRepo
 	)
 	billingService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billingService.Stop)

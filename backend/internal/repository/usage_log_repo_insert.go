@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -116,11 +117,14 @@ type usageLogBestEffortRequest struct {
 }
 
 type usageLogInsertPrepared struct {
-	createdAt      time.Time
-	requestID      string
-	rateMultiplier float64
-	requestType    int16
-	args           []any
+	createdAt                  time.Time
+	requestID                  string
+	rateMultiplier             float64
+	requestType                int16
+	emptyResponseBillingWaived bool
+	emptyResponseBillingRuleID int64
+	emptyResponseWaivedCost    float64
+	args                       []any
 }
 
 type usageLogBatchState struct {
@@ -280,14 +284,18 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			billing_mode,
 			account_stats_cost,
 			session_id,
-			created_at
+			created_at,
+			empty_response_billing_waived,
+			empty_response_billing_rule_id,
+			empty_response_waived_cost
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59,
+			` + emptyResponseBillingValuesSQL(prepared) + `
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -737,10 +745,13 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			billing_mode,
 			account_stats_cost,
 			session_id,
-			created_at
+			created_at,
+			empty_response_billing_waived,
+			empty_response_billing_rule_id,
+			empty_response_waived_cost
 		) AS (VALUES `)
 
-	// Each batch row prepends the synthetic input_index before the 59
+	// Each batch row prepends the synthetic input_index before the 59 bound
 	// usage-log column values.
 	args := make([]any, 0, len(keys)*60)
 	argPos := 1
@@ -764,6 +775,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			}
 			argPos++
 		}
+		_, _ = query.WriteString(",")
+		_, _ = query.WriteString(emptyResponseBillingValuesSQL(prepared))
 		_, _ = query.WriteString(")")
 		args = append(args, prepared.args...)
 	}
@@ -829,7 +842,10 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				billing_mode,
 				account_stats_cost,
 				session_id,
-				created_at
+				created_at,
+				empty_response_billing_waived,
+				empty_response_billing_rule_id,
+				empty_response_waived_cost
 			)
 			SELECT
 				user_id,
@@ -890,7 +906,10 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				billing_mode,
 				account_stats_cost,
 				session_id,
-				created_at
+				created_at,
+				empty_response_billing_waived,
+				empty_response_billing_rule_id,
+				empty_response_waived_cost
 			FROM input
 			ON CONFLICT (request_id, api_key_id) DO NOTHING
 			RETURNING request_id, api_key_id, id, created_at
@@ -991,7 +1010,10 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			billing_mode,
 			account_stats_cost,
 			session_id,
-			created_at
+			created_at,
+			empty_response_billing_waived,
+			empty_response_billing_rule_id,
+			empty_response_waived_cost
 		) AS (VALUES `)
 
 	args := make([]any, 0, len(preparedList)*59)
@@ -1013,6 +1035,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			}
 			argPos++
 		}
+		_, _ = query.WriteString(",")
+		_, _ = query.WriteString(emptyResponseBillingValuesSQL(prepared))
 		_, _ = query.WriteString(")")
 		args = append(args, prepared.args...)
 	}
@@ -1078,7 +1102,10 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			billing_mode,
 			account_stats_cost,
 			session_id,
-			created_at
+			created_at,
+			empty_response_billing_waived,
+			empty_response_billing_rule_id,
+			empty_response_waived_cost
 		)
 		SELECT
 			user_id,
@@ -1139,7 +1166,10 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			billing_mode,
 			account_stats_cost,
 			session_id,
-			created_at
+			created_at,
+			empty_response_billing_waived,
+			empty_response_billing_rule_id,
+			empty_response_waived_cost
 		FROM input
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`)
@@ -1208,14 +1238,18 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			billing_mode,
 			account_stats_cost,
 			session_id,
-			created_at
+			created_at,
+			empty_response_billing_waived,
+			empty_response_billing_rule_id,
+			empty_response_waived_cost
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59,
+			`+emptyResponseBillingValuesSQL(prepared)+`
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1336,7 +1370,22 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			sessionID,            // session_id
 			createdAt,
 		},
+		emptyResponseBillingWaived: log.EmptyResponseBillingWaived,
+		emptyResponseBillingRuleID: log.EmptyResponseBillingRuleID,
+		emptyResponseWaivedCost:    log.EmptyResponseWaivedCost,
 	}
+}
+
+func emptyResponseBillingValuesSQL(prepared usageLogInsertPrepared) string {
+	if !prepared.emptyResponseBillingWaived || prepared.emptyResponseBillingRuleID <= 0 {
+		return "FALSE, NULL::bigint, 0::numeric"
+	}
+	cost := prepared.emptyResponseWaivedCost
+	if math.IsNaN(cost) || math.IsInf(cost, 0) {
+		cost = 0
+	}
+	return "TRUE, " + strconv.FormatInt(prepared.emptyResponseBillingRuleID, 10) +
+		"::bigint, " + strconv.FormatFloat(cost, 'f', -1, 64) + "::numeric"
 }
 
 func usageLogBatchKey(requestID string, apiKeyID int64) string {

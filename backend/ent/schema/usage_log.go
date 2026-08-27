@@ -114,6 +114,16 @@ func (UsageLog) Fields() []ent.Field {
 		field.Bool("long_context_billing_applied").
 			Default(false).
 			Comment("Whether long-context pricing changed token prices for this request"),
+		field.Bool("empty_response_billing_waived").
+			Default(false).
+			Comment("Whether a user empty-response rule waived this request charge"),
+		field.Int64("empty_response_billing_rule_id").
+			Optional().
+			Nillable().
+			Comment("Matched empty-response billing rule snapshot"),
+		field.Float("empty_response_waived_cost").
+			Default(0).
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
 
 		// account_rate_multiplier: 账号计费倍率快照（NULL 表示按 1.0 处理）
 		field.Float("account_rate_multiplier").

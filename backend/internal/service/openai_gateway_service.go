@@ -269,14 +269,20 @@ type OpenAIForwardResult struct {
 	// from the GPT Image 2 token tables and must therefore use token billing.
 	ImageUsageSimulated bool
 	ImageCount          int
-	ImageSize           string
-	ImageInputSize      string
-	ImageOutputSize     string
-	ImageOutputSizes    []string
-	ImageSizeSource     string
-	ImageSizeBreakdown  map[string]int
-	VideoCount          int
-	VideoResolution     string
+	// ImageOutputsObserved 是上游响应里**真正**观测到的图片张数；语义与
+	// ForwardResult.ImageOutputsObserved 一致（nil = 无观测能力，0 = 确实没回图）。
+	//
+	// ImageCount 在这条链路上同样不诚实：它以 parsed.N（客户端请求的张数）起步，
+	// 只有上游真的回了图才被覆盖，所以「一张没回」会被计成请求的张数照收。
+	ImageOutputsObserved *int
+	ImageSize            string
+	ImageInputSize       string
+	ImageOutputSize      string
+	ImageOutputSizes     []string
+	ImageSizeSource      string
+	ImageSizeBreakdown   map[string]int
+	VideoCount           int
+	VideoResolution      string
 	// VideoDurationSeconds 是提交时请求的生成时长（xAI 按输出秒数计费），已归一化到 1-15 秒。
 	VideoDurationSeconds int
 	// WebSearchCalls 是 Codex alpha/search 网页搜索调用次数（每次成功请求为 1）。
@@ -294,6 +300,15 @@ type OpenAIForwardResult struct {
 // SucceededForScheduling reports whether this result is an upstream success
 // that may clear model-scoped transient state. The zero value remains a success
 // for existing non-WS callers.
+// IsEmptyImageResponse 报告本次转发是否为「按图计费但上游一张图都没回」。
+// 语义与 ForwardResult.IsEmptyImageResponse 一致：观测不到时返回 false，照常收费。
+func (r *OpenAIForwardResult) IsEmptyImageResponse() bool {
+	if r == nil || r.ImageCount <= 0 || r.ImageOutputsObserved == nil {
+		return false
+	}
+	return *r.ImageOutputsObserved == 0
+}
+
 func (r *OpenAIForwardResult) SucceededForScheduling() bool {
 	if r == nil || !r.OpenAIWSMode || r.UpstreamTerminalEvent == "" {
 		return true
@@ -421,19 +436,21 @@ type OpenAIGatewayService struct {
 	rateLimitService      *RateLimitService
 	billingCacheService   *BillingCacheService
 	userGroupRateResolver *userGroupRateResolver
-	httpUpstream          HTTPUpstream
-	deferredService       *DeferredService
-	openAITokenProvider   *OpenAITokenProvider
-	grokTokenProvider     *GrokTokenProvider
-	toolCorrector         *CodexToolCorrector
-	openaiWSResolver      OpenAIWSProtocolResolver
-	resolver              *ModelPricingResolver
-	channelService        *ChannelService
-	balanceNotifyService  *BalanceNotifyService
-	settingService        *SettingService
-	userPlatformQuotaRepo UserPlatformQuotaRepository
-	liveAttestation       liveattestation.Provider
-	liveAttestationCipher SecretEncryptor
+
+	emptyResponseBillingResolver *userEmptyResponseBillingResolver
+	httpUpstream                 HTTPUpstream
+	deferredService              *DeferredService
+	openAITokenProvider          *OpenAITokenProvider
+	grokTokenProvider            *GrokTokenProvider
+	toolCorrector                *CodexToolCorrector
+	openaiWSResolver             OpenAIWSProtocolResolver
+	resolver                     *ModelPricingResolver
+	channelService               *ChannelService
+	balanceNotifyService         *BalanceNotifyService
+	settingService               *SettingService
+	userPlatformQuotaRepo        UserPlatformQuotaRepository
+	liveAttestation              liveattestation.Provider
+	liveAttestationCipher        SecretEncryptor
 
 	openaiWSPoolOnce               sync.Once
 	openaiWSStateStoreOnce         sync.Once
@@ -497,6 +514,7 @@ func NewOpenAIGatewayService(
 	balanceNotifyService *BalanceNotifyService,
 	settingService *SettingService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	emptyResponseBillingRepo UserEmptyResponseBillingRepository,
 ) *OpenAIGatewayService {
 	// enforceCodexIdentityHeaders 是 HTTP / 透传 / WS / 探针 等出站路径共用的纯函数收口点，
 	// 拿不到配置，故在此发布进程级开关快照。配置取反义，零值即「强制统一出口开启」。
@@ -522,6 +540,10 @@ func NewOpenAIGatewayService(
 			nil,
 			resolveUserGroupRateCacheTTL(cfg),
 			nil,
+			"service.openai_gateway",
+		),
+		emptyResponseBillingResolver: newUserEmptyResponseBillingResolver(
+			emptyResponseBillingRepo,
 			"service.openai_gateway",
 		),
 		httpUpstream:          httpUpstream,

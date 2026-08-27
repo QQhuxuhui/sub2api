@@ -246,6 +246,7 @@ var ProviderSet = wire.NewSet(
 	// Admin handlers
 	admin.NewDashboardHandler,
 	admin.NewUserHandler,
+	ProvideEmptyResponseBillingRuleInvalidators,
 	admin.NewGroupHandler,
 	admin.ProvideAccountHandler,
 	admin.NewAnnouncementHandler,
@@ -282,3 +283,11 @@ var ProviderSet = wire.NewSet(
 	ProvideAdminHandlers,
 	ProvideHandlers,
 )
+
+// ProvideEmptyResponseBillingRuleInvalidators 聚合两个网关服务的规则失效钩子。
+func ProvideEmptyResponseBillingRuleInvalidators(
+	gatewayService *service.GatewayService,
+	openAIGatewayService *service.OpenAIGatewayService,
+) []service.EmptyResponseBillingRuleInvalidator {
+	return []service.EmptyResponseBillingRuleInvalidator{gatewayService, openAIGatewayService}
+}

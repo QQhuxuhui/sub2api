@@ -721,6 +721,15 @@
                 {{ t('admin.users.platformQuota.menuItem') }}
               </button>
 
+              <!-- Empty-Response Billing Waiver -->
+              <button
+                @click="handleEmptyResponseBilling(user); closeActionMenu()"
+                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+              >
+                <Icon name="shield" size="sm" class="text-gray-400" :stroke-width="2" />
+                {{ t('admin.users.emptyResponseBilling.menuItem') }}
+              </button>
+
               <!-- Balance History -->
               <button
                 @click="handleBalanceHistory(user); closeActionMenu()"
@@ -761,6 +770,12 @@
       :user="platformQuotaUser"
       @close="closePlatformQuotaModal"
       @success="loadUsers"
+    />
+    <UserEmptyResponseBillingModal
+      :show="showEmptyResponseBillingModal"
+      :user="emptyResponseBillingUser"
+      :all-groups="allGroups"
+      @close="showEmptyResponseBillingModal = false"
     />
     <UserApiKeysModal :show="showApiKeysModal" :user="viewingUser" @close="closeApiKeysModal" />
     <UserAllowedGroupsModal :show="showAllowedGroupsModal" :user="allowedGroupsUser" @close="closeAllowedGroupsModal" @success="loadUsers" />
@@ -805,6 +820,7 @@ import UserCreateModal from '@/components/admin/user/UserCreateModal.vue'
 import UserEditModal from '@/components/admin/user/UserEditModal.vue'
 import BulkEditUserModal from '@/components/admin/user/BulkEditUserModal.vue'
 import UserPlatformQuotaModal from '@/components/admin/user/UserPlatformQuotaModal.vue'
+import UserEmptyResponseBillingModal from '@/components/admin/user/UserEmptyResponseBillingModal.vue'
 import UserApiKeysModal from '@/components/admin/user/UserApiKeysModal.vue'
 import UserAllowedGroupsModal from '@/components/admin/user/UserAllowedGroupsModal.vue'
 import UserBalanceModal from '@/components/admin/user/UserBalanceModal.vue'
@@ -1325,6 +1341,12 @@ const showDeleteDialog = ref(false)
 const showApiKeysModal = ref(false)
 const showAttributesModal = ref(false)
 const showPlatformQuotaModal = ref(false)
+const showEmptyResponseBillingModal = ref(false)
+const emptyResponseBillingUser = ref<AdminUser | null>(null)
+const handleEmptyResponseBilling = (user: AdminUser) => {
+  emptyResponseBillingUser.value = user
+  showEmptyResponseBillingModal.value = true
+}
 const editingUser = ref<AdminUser | null>(null)
 const deletingUser = ref<AdminUser | null>(null)
 const viewingUser = ref<AdminUser | null>(null)

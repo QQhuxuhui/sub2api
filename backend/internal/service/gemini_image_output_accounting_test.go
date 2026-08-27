@@ -118,6 +118,12 @@ func TestObserveGeminiImageOutputs_KeepsLargestChunk(t *testing.T) {
 	require.Equal(t, 2, observedGeminiImageOutputs(c))
 }
 
+func TestCountGeminiImageOutputs_FileDataCountsAsReturnedImage(t *testing.T) {
+	payload := []byte(geminiImageResponse(`{"fileData":{"mimeType":"image/png","fileUri":"https://files.example/generated.png"}}`))
+
+	require.Equal(t, 1, countGeminiInlineImageOutputs(payload))
+}
+
 // failover 会拿同一个 gin.Context 重跑 Forward，计数器必须按次重置，
 // 否则失败账号已经回吐的图会被叠加到成功账号的账单上。
 func TestBeginGeminiImageOutputObservation_ResetsPerForward(t *testing.T) {

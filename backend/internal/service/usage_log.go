@@ -198,6 +198,11 @@ type UsageLog struct {
 	VideoResolution      *string
 	VideoDurationSeconds *int
 
+	// Empty-response billing waiver audit metadata.
+	EmptyResponseBillingWaived bool
+	EmptyResponseBillingRuleID int64
+	EmptyResponseWaivedCost    float64
+
 	CreatedAt time.Time
 
 	User         *User

@@ -68,6 +68,25 @@ func observedGeminiImageOutputs(c *gin.Context) int {
 	return counter.count
 }
 
+// observedGeminiImageOutputsForBilling 返回可用于计费判定的真实观测张数。
+//
+// 与 observedGeminiImageOutputs 的关键差别：区分「计数器没装」和「装了但数出 0」。
+// 前者返回 nil —— 这条链路压根没观测，不能拿来当「上游没回图」的证据；后者返回指向 0
+// 的指针，才是「确实一张都没回」。用户级空返回免费只认后者。
+//
+// billedImageCount<=0 时同样返回 nil：本次请求不按图计费，无所谓空不空。
+func observedGeminiImageOutputsForBilling(c *gin.Context, billedImageCount int) *int {
+	if billedImageCount <= 0 {
+		return nil
+	}
+	counter := geminiImageOutputCounterFromContext(c)
+	if counter == nil {
+		return nil
+	}
+	observed := counter.count
+	return &observed
+}
+
 // resolveGeminiImageCount 决定本次请求按几张图计费。
 //
 // 优先用上游真正返回的内联图片数：走 GeminiMessagesCompatService 的账号多是
@@ -90,9 +109,8 @@ func resolveGeminiImageCount(c *gin.Context, originalModel, mappedModel string) 
 	return 0
 }
 
-// countGeminiInlineImageOutputs 统计一段 Gemini 响应 JSON 里的内联图片 part。
-// Gemini REST 回 camelCase 的 inlineData，官方 SDK 与部分中转会回 snake_case
-// 的 inline_data，两种都要认。
+// countGeminiInlineImageOutputs 统计 Gemini 响应中的图片 part。兼容 inlineData/fileData
+// 及其 snake_case 变体；函数名保留以减少已有计费调用点的无关变更。
 func countGeminiInlineImageOutputs(payload []byte) int {
 	if len(payload) == 0 || !gjson.ValidBytes(payload) {
 		return 0
@@ -100,7 +118,7 @@ func countGeminiInlineImageOutputs(payload []byte) int {
 	count := 0
 	gjson.GetBytes(payload, "candidates").ForEach(func(_, candidate gjson.Result) bool {
 		candidate.Get("content.parts").ForEach(func(_, part gjson.Result) bool {
-			if geminiPartIsInlineImage(part) {
+			if geminiPartIsImageOutput(part) {
 				count++
 			}
 			return true
@@ -110,23 +128,37 @@ func countGeminiInlineImageOutputs(payload []byte) int {
 	return count
 }
 
-func geminiPartIsInlineImage(part gjson.Result) bool {
+func geminiPartIsImageOutput(part gjson.Result) bool {
 	inline := part.Get("inlineData")
 	if !inline.Exists() {
 		inline = part.Get("inline_data")
 	}
-	if !inline.Exists() {
-		return false
+	if inline.Exists() {
+		mimeType := inline.Get("mimeType")
+		if !mimeType.Exists() {
+			mimeType = inline.Get("mime_type")
+		}
+		if !isGeminiInlineImageMIMEType(strings.ToLower(strings.TrimSpace(mimeType.String()))) {
+			return false
+		}
+		// 只认真的带上了 base64 数据的 part，空壳 part 不计费。
+		return strings.TrimSpace(inline.Get("data").String()) != ""
 	}
 
-	mimeType := inline.Get("mimeType")
+	fileData := part.Get("fileData")
+	if !fileData.Exists() {
+		fileData = part.Get("file_data")
+	}
+	if !fileData.Exists() {
+		return false
+	}
+	mimeType := fileData.Get("mimeType")
 	if !mimeType.Exists() {
-		mimeType = inline.Get("mime_type")
+		mimeType = fileData.Get("mime_type")
 	}
 	if !isGeminiInlineImageMIMEType(strings.ToLower(strings.TrimSpace(mimeType.String()))) {
 		return false
 	}
-
-	// 只认真的带上了 base64 数据的 part，空壳 part 不计费。
-	return strings.TrimSpace(inline.Get("data").String()) != ""
+	return strings.TrimSpace(fileData.Get("fileUri").String()) != "" ||
+		strings.TrimSpace(fileData.Get("file_uri").String()) != ""
 }

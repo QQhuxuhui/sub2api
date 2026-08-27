@@ -2017,6 +2017,42 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyStreamMultilineSSEDataBillsImag
 	require.Equal(t, 8, result.Usage.ImageOutputTokens)
 }
 
+func TestOpenAIGatewayServiceForwardImages_APIKeyStreamingEmptyResponseKeepsBillingIntent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-1.5","prompt":"draw a cat","stream":true,"response_format":"b64_json","n":2}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{},
+		httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"text/event-stream"},
+				"X-Request-Id": []string{"req_img_stream_empty"},
+			},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"type\":\"image_generation.completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":3}}\n\n" +
+					"data: [DONE]\n\n",
+			)),
+		}},
+	}
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+	account := &Account{ID: 8, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-api-key"}}
+
+	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 2, result.ImageCount, "计费意图应保留请求张数")
+	require.NotNil(t, result.ImageOutputsObserved)
+	require.Zero(t, *result.ImageOutputsObserved)
+	require.True(t, result.IsEmptyImageResponse())
+}
+
 func TestOpenAIGatewayServiceForwardImages_APIKeyStreamingEditMergesImageInputTokens(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-image-1.5","prompt":"make it night","images":[{"image_url":"https://example.com/input.png"}],"stream":true}`)

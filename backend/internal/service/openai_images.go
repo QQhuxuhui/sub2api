@@ -927,39 +927,46 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		if err != nil {
 			if streamCount > 0 {
 				return &OpenAIForwardResult{
-					RequestID:        resp.Header.Get("x-request-id"),
-					Usage:            streamUsage,
-					Model:            requestModel,
-					UpstreamModel:    upstreamModel,
-					Stream:           parsed.Stream,
-					ResponseHeaders:  resp.Header.Clone(),
-					Duration:         time.Since(startTime),
-					FirstTokenMs:     ttft,
-					ImageCount:       streamCount,
-					ImageSize:        parsed.SizeTier,
-					ImageInputSize:   parsed.Size,
-					ImageOutputSizes: streamSizes,
+					RequestID:            resp.Header.Get("x-request-id"),
+					Usage:                streamUsage,
+					Model:                requestModel,
+					UpstreamModel:        upstreamModel,
+					Stream:               parsed.Stream,
+					ResponseHeaders:      resp.Header.Clone(),
+					Duration:             time.Since(startTime),
+					FirstTokenMs:         ttft,
+					ImageCount:           streamCount,
+					ImageOutputsObserved: &streamCount,
+					ImageSize:            parsed.SizeTier,
+					ImageInputSize:       parsed.Size,
+					ImageOutputSizes:     streamSizes,
 				}, err
 			}
 			return nil, err
 		}
 		usage = streamUsage
 		imageCount = streamCount
+		if imageCount <= 0 {
+			// streamCount is the observed output count; retain the request's image
+			// intent for billing when the upstream returned a successful empty body.
+			imageCount = parsed.N
+		}
 		imageOutputSizes := streamSizes
 		firstTokenMs = ttft
 		return &OpenAIForwardResult{
-			RequestID:        resp.Header.Get("x-request-id"),
-			Usage:            usage,
-			Model:            requestModel,
-			UpstreamModel:    upstreamModel,
-			Stream:           parsed.Stream,
-			ResponseHeaders:  resp.Header.Clone(),
-			Duration:         time.Since(startTime),
-			FirstTokenMs:     firstTokenMs,
-			ImageCount:       imageCount,
-			ImageSize:        parsed.SizeTier,
-			ImageInputSize:   parsed.Size,
-			ImageOutputSizes: imageOutputSizes,
+			RequestID:            resp.Header.Get("x-request-id"),
+			Usage:                usage,
+			Model:                requestModel,
+			UpstreamModel:        upstreamModel,
+			Stream:               parsed.Stream,
+			ResponseHeaders:      resp.Header.Clone(),
+			Duration:             time.Since(startTime),
+			FirstTokenMs:         firstTokenMs,
+			ImageCount:           imageCount,
+			ImageOutputsObserved: &streamCount,
+			ImageSize:            parsed.SizeTier,
+			ImageInputSize:       parsed.Size,
+			ImageOutputSizes:     imageOutputSizes,
 		}, nil
 	} else {
 		nonStreamUsage, nonStreamCount, nonStreamSizes, usageSimulated, err := s.handleOpenAIImagesNonStreamingResponse(resp, c, account, parsed, upstreamModel)
@@ -971,19 +978,20 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			imageCount = nonStreamCount
 		}
 		return &OpenAIForwardResult{
-			RequestID:           resp.Header.Get("x-request-id"),
-			Usage:               usage,
-			Model:               requestModel,
-			UpstreamModel:       upstreamModel,
-			Stream:              parsed.Stream,
-			ResponseHeaders:     resp.Header.Clone(),
-			Duration:            time.Since(startTime),
-			FirstTokenMs:        firstTokenMs,
-			ImageUsageSimulated: usageSimulated,
-			ImageCount:          imageCount,
-			ImageSize:           parsed.SizeTier,
-			ImageInputSize:      parsed.Size,
-			ImageOutputSizes:    nonStreamSizes,
+			RequestID:            resp.Header.Get("x-request-id"),
+			Usage:                usage,
+			Model:                requestModel,
+			UpstreamModel:        upstreamModel,
+			Stream:               parsed.Stream,
+			ResponseHeaders:      resp.Header.Clone(),
+			Duration:             time.Since(startTime),
+			FirstTokenMs:         firstTokenMs,
+			ImageUsageSimulated:  usageSimulated,
+			ImageCount:           imageCount,
+			ImageOutputsObserved: &nonStreamCount,
+			ImageSize:            parsed.SizeTier,
+			ImageInputSize:       parsed.Size,
+			ImageOutputSizes:     nonStreamSizes,
 		}, nil
 	}
 }

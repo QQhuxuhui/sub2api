@@ -200,6 +200,21 @@ func LongContextBillingApplied(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldLongContextBillingApplied, v))
 }
 
+// EmptyResponseBillingWaived applies equality check predicate on the "empty_response_billing_waived" field. It's identical to EmptyResponseBillingWaivedEQ.
+func EmptyResponseBillingWaived(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldEmptyResponseBillingWaived, v))
+}
+
+// EmptyResponseBillingRuleID applies equality check predicate on the "empty_response_billing_rule_id" field. It's identical to EmptyResponseBillingRuleIDEQ.
+func EmptyResponseBillingRuleID(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldEmptyResponseBillingRuleID, v))
+}
+
+// EmptyResponseWaivedCost applies equality check predicate on the "empty_response_waived_cost" field. It's identical to EmptyResponseWaivedCostEQ.
+func EmptyResponseWaivedCost(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldEmptyResponseWaivedCost, v))
+}
+
 // AccountRateMultiplier applies equality check predicate on the "account_rate_multiplier" field. It's identical to AccountRateMultiplierEQ.
 func AccountRateMultiplier(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldAccountRateMultiplier, v))
@@ -1583,6 +1598,106 @@ func LongContextBillingAppliedEQ(v bool) predicate.UsageLog {
 // LongContextBillingAppliedNEQ applies the NEQ predicate on the "long_context_billing_applied" field.
 func LongContextBillingAppliedNEQ(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNEQ(FieldLongContextBillingApplied, v))
+}
+
+// EmptyResponseBillingWaivedEQ applies the EQ predicate on the "empty_response_billing_waived" field.
+func EmptyResponseBillingWaivedEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldEmptyResponseBillingWaived, v))
+}
+
+// EmptyResponseBillingWaivedNEQ applies the NEQ predicate on the "empty_response_billing_waived" field.
+func EmptyResponseBillingWaivedNEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldEmptyResponseBillingWaived, v))
+}
+
+// EmptyResponseBillingRuleIDEQ applies the EQ predicate on the "empty_response_billing_rule_id" field.
+func EmptyResponseBillingRuleIDEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldEmptyResponseBillingRuleID, v))
+}
+
+// EmptyResponseBillingRuleIDNEQ applies the NEQ predicate on the "empty_response_billing_rule_id" field.
+func EmptyResponseBillingRuleIDNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldEmptyResponseBillingRuleID, v))
+}
+
+// EmptyResponseBillingRuleIDIn applies the In predicate on the "empty_response_billing_rule_id" field.
+func EmptyResponseBillingRuleIDIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldEmptyResponseBillingRuleID, vs...))
+}
+
+// EmptyResponseBillingRuleIDNotIn applies the NotIn predicate on the "empty_response_billing_rule_id" field.
+func EmptyResponseBillingRuleIDNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldEmptyResponseBillingRuleID, vs...))
+}
+
+// EmptyResponseBillingRuleIDGT applies the GT predicate on the "empty_response_billing_rule_id" field.
+func EmptyResponseBillingRuleIDGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldEmptyResponseBillingRuleID, v))
+}
+
+// EmptyResponseBillingRuleIDGTE applies the GTE predicate on the "empty_response_billing_rule_id" field.
+func EmptyResponseBillingRuleIDGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldEmptyResponseBillingRuleID, v))
+}
+
+// EmptyResponseBillingRuleIDLT applies the LT predicate on the "empty_response_billing_rule_id" field.
+func EmptyResponseBillingRuleIDLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldEmptyResponseBillingRuleID, v))
+}
+
+// EmptyResponseBillingRuleIDLTE applies the LTE predicate on the "empty_response_billing_rule_id" field.
+func EmptyResponseBillingRuleIDLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldEmptyResponseBillingRuleID, v))
+}
+
+// EmptyResponseBillingRuleIDIsNil applies the IsNil predicate on the "empty_response_billing_rule_id" field.
+func EmptyResponseBillingRuleIDIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldEmptyResponseBillingRuleID))
+}
+
+// EmptyResponseBillingRuleIDNotNil applies the NotNil predicate on the "empty_response_billing_rule_id" field.
+func EmptyResponseBillingRuleIDNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldEmptyResponseBillingRuleID))
+}
+
+// EmptyResponseWaivedCostEQ applies the EQ predicate on the "empty_response_waived_cost" field.
+func EmptyResponseWaivedCostEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldEmptyResponseWaivedCost, v))
+}
+
+// EmptyResponseWaivedCostNEQ applies the NEQ predicate on the "empty_response_waived_cost" field.
+func EmptyResponseWaivedCostNEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldEmptyResponseWaivedCost, v))
+}
+
+// EmptyResponseWaivedCostIn applies the In predicate on the "empty_response_waived_cost" field.
+func EmptyResponseWaivedCostIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldEmptyResponseWaivedCost, vs...))
+}
+
+// EmptyResponseWaivedCostNotIn applies the NotIn predicate on the "empty_response_waived_cost" field.
+func EmptyResponseWaivedCostNotIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldEmptyResponseWaivedCost, vs...))
+}
+
+// EmptyResponseWaivedCostGT applies the GT predicate on the "empty_response_waived_cost" field.
+func EmptyResponseWaivedCostGT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldEmptyResponseWaivedCost, v))
+}
+
+// EmptyResponseWaivedCostGTE applies the GTE predicate on the "empty_response_waived_cost" field.
+func EmptyResponseWaivedCostGTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldEmptyResponseWaivedCost, v))
+}
+
+// EmptyResponseWaivedCostLT applies the LT predicate on the "empty_response_waived_cost" field.
+func EmptyResponseWaivedCostLT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldEmptyResponseWaivedCost, v))
+}
+
+// EmptyResponseWaivedCostLTE applies the LTE predicate on the "empty_response_waived_cost" field.
+func EmptyResponseWaivedCostLTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldEmptyResponseWaivedCost, v))
 }
 
 // AccountRateMultiplierEQ applies the EQ predicate on the "account_rate_multiplier" field.

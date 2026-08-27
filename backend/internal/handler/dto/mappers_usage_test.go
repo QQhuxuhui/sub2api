@@ -179,6 +179,23 @@ func TestUsageLogFromService_KeepsUserBillingAndIPWithoutAdminCostFields(t *test
 	require.NotContains(t, string(userJSON), "account_cost")
 }
 
+func TestUsageLogFromServiceAdmin_IncludesEmptyResponseBillingAudit(t *testing.T) {
+	log := &service.UsageLog{
+		EmptyResponseBillingWaived: true,
+		EmptyResponseBillingRuleID: 77,
+		EmptyResponseWaivedCost:    0.25,
+	}
+
+	adminDTO := UsageLogFromServiceAdmin(log)
+	require.True(t, adminDTO.EmptyResponseBillingWaived)
+	require.Equal(t, int64(77), adminDTO.EmptyResponseBillingRuleID)
+	require.Equal(t, 0.25, adminDTO.EmptyResponseWaivedCost)
+
+	userJSON, err := json.Marshal(UsageLogFromService(log))
+	require.NoError(t, err)
+	require.NotContains(t, string(userJSON), "empty_response_billing")
+}
+
 func TestUsageLogFromService_FallsBackToLegacyModelWhenRequestedModelMissing(t *testing.T) {
 	t.Parallel()
 

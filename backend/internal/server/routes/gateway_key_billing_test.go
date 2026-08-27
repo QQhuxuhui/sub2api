@@ -97,10 +97,12 @@ func newKeyBillingRouteTestRouterWithTimeouts(runMode string, globalTimeoutSecon
 	gatewayService := service.NewGatewayService(
 		nil, nil, nil, nil, nil, nil, rateRepo, nil, cfg, nil, nil, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, // emptyResponseBillingRepo
 	)
 	openAIGatewayService := service.NewOpenAIGatewayService(
 		nil, nil, nil, nil, nil, rateRepo, nil, cfg, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, // emptyResponseBillingRepo
 	)
 	gatewayHandler := handler.NewGatewayHandler(
 		gatewayService, openAIGatewayService, nil, nil, nil, nil, nil, nil,

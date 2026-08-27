@@ -596,6 +596,68 @@ func (_u *UsageLogUpdate) SetNillableLongContextBillingApplied(v *bool) *UsageLo
 	return _u
 }
 
+// SetEmptyResponseBillingWaived sets the "empty_response_billing_waived" field.
+func (_u *UsageLogUpdate) SetEmptyResponseBillingWaived(v bool) *UsageLogUpdate {
+	_u.mutation.SetEmptyResponseBillingWaived(v)
+	return _u
+}
+
+// SetNillableEmptyResponseBillingWaived sets the "empty_response_billing_waived" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableEmptyResponseBillingWaived(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetEmptyResponseBillingWaived(*v)
+	}
+	return _u
+}
+
+// SetEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field.
+func (_u *UsageLogUpdate) SetEmptyResponseBillingRuleID(v int64) *UsageLogUpdate {
+	_u.mutation.ResetEmptyResponseBillingRuleID()
+	_u.mutation.SetEmptyResponseBillingRuleID(v)
+	return _u
+}
+
+// SetNillableEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableEmptyResponseBillingRuleID(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetEmptyResponseBillingRuleID(*v)
+	}
+	return _u
+}
+
+// AddEmptyResponseBillingRuleID adds value to the "empty_response_billing_rule_id" field.
+func (_u *UsageLogUpdate) AddEmptyResponseBillingRuleID(v int64) *UsageLogUpdate {
+	_u.mutation.AddEmptyResponseBillingRuleID(v)
+	return _u
+}
+
+// ClearEmptyResponseBillingRuleID clears the value of the "empty_response_billing_rule_id" field.
+func (_u *UsageLogUpdate) ClearEmptyResponseBillingRuleID() *UsageLogUpdate {
+	_u.mutation.ClearEmptyResponseBillingRuleID()
+	return _u
+}
+
+// SetEmptyResponseWaivedCost sets the "empty_response_waived_cost" field.
+func (_u *UsageLogUpdate) SetEmptyResponseWaivedCost(v float64) *UsageLogUpdate {
+	_u.mutation.ResetEmptyResponseWaivedCost()
+	_u.mutation.SetEmptyResponseWaivedCost(v)
+	return _u
+}
+
+// SetNillableEmptyResponseWaivedCost sets the "empty_response_waived_cost" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableEmptyResponseWaivedCost(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetEmptyResponseWaivedCost(*v)
+	}
+	return _u
+}
+
+// AddEmptyResponseWaivedCost adds value to the "empty_response_waived_cost" field.
+func (_u *UsageLogUpdate) AddEmptyResponseWaivedCost(v float64) *UsageLogUpdate {
+	_u.mutation.AddEmptyResponseWaivedCost(v)
+	return _u
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (_u *UsageLogUpdate) SetAccountRateMultiplier(v float64) *UsageLogUpdate {
 	_u.mutation.ResetAccountRateMultiplier()
@@ -1272,6 +1334,24 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.LongContextBillingApplied(); ok {
 		_spec.SetField(usagelog.FieldLongContextBillingApplied, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.EmptyResponseBillingWaived(); ok {
+		_spec.SetField(usagelog.FieldEmptyResponseBillingWaived, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.EmptyResponseBillingRuleID(); ok {
+		_spec.SetField(usagelog.FieldEmptyResponseBillingRuleID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedEmptyResponseBillingRuleID(); ok {
+		_spec.AddField(usagelog.FieldEmptyResponseBillingRuleID, field.TypeInt64, value)
+	}
+	if _u.mutation.EmptyResponseBillingRuleIDCleared() {
+		_spec.ClearField(usagelog.FieldEmptyResponseBillingRuleID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.EmptyResponseWaivedCost(); ok {
+		_spec.SetField(usagelog.FieldEmptyResponseWaivedCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedEmptyResponseWaivedCost(); ok {
+		_spec.AddField(usagelog.FieldEmptyResponseWaivedCost, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.AccountRateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64, value)
@@ -2110,6 +2190,68 @@ func (_u *UsageLogUpdateOne) SetNillableLongContextBillingApplied(v *bool) *Usag
 	return _u
 }
 
+// SetEmptyResponseBillingWaived sets the "empty_response_billing_waived" field.
+func (_u *UsageLogUpdateOne) SetEmptyResponseBillingWaived(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetEmptyResponseBillingWaived(v)
+	return _u
+}
+
+// SetNillableEmptyResponseBillingWaived sets the "empty_response_billing_waived" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableEmptyResponseBillingWaived(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetEmptyResponseBillingWaived(*v)
+	}
+	return _u
+}
+
+// SetEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field.
+func (_u *UsageLogUpdateOne) SetEmptyResponseBillingRuleID(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetEmptyResponseBillingRuleID()
+	_u.mutation.SetEmptyResponseBillingRuleID(v)
+	return _u
+}
+
+// SetNillableEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableEmptyResponseBillingRuleID(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetEmptyResponseBillingRuleID(*v)
+	}
+	return _u
+}
+
+// AddEmptyResponseBillingRuleID adds value to the "empty_response_billing_rule_id" field.
+func (_u *UsageLogUpdateOne) AddEmptyResponseBillingRuleID(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddEmptyResponseBillingRuleID(v)
+	return _u
+}
+
+// ClearEmptyResponseBillingRuleID clears the value of the "empty_response_billing_rule_id" field.
+func (_u *UsageLogUpdateOne) ClearEmptyResponseBillingRuleID() *UsageLogUpdateOne {
+	_u.mutation.ClearEmptyResponseBillingRuleID()
+	return _u
+}
+
+// SetEmptyResponseWaivedCost sets the "empty_response_waived_cost" field.
+func (_u *UsageLogUpdateOne) SetEmptyResponseWaivedCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetEmptyResponseWaivedCost()
+	_u.mutation.SetEmptyResponseWaivedCost(v)
+	return _u
+}
+
+// SetNillableEmptyResponseWaivedCost sets the "empty_response_waived_cost" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableEmptyResponseWaivedCost(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetEmptyResponseWaivedCost(*v)
+	}
+	return _u
+}
+
+// AddEmptyResponseWaivedCost adds value to the "empty_response_waived_cost" field.
+func (_u *UsageLogUpdateOne) AddEmptyResponseWaivedCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddEmptyResponseWaivedCost(v)
+	return _u
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (_u *UsageLogUpdateOne) SetAccountRateMultiplier(v float64) *UsageLogUpdateOne {
 	_u.mutation.ResetAccountRateMultiplier()
@@ -2816,6 +2958,24 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.LongContextBillingApplied(); ok {
 		_spec.SetField(usagelog.FieldLongContextBillingApplied, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.EmptyResponseBillingWaived(); ok {
+		_spec.SetField(usagelog.FieldEmptyResponseBillingWaived, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.EmptyResponseBillingRuleID(); ok {
+		_spec.SetField(usagelog.FieldEmptyResponseBillingRuleID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedEmptyResponseBillingRuleID(); ok {
+		_spec.AddField(usagelog.FieldEmptyResponseBillingRuleID, field.TypeInt64, value)
+	}
+	if _u.mutation.EmptyResponseBillingRuleIDCleared() {
+		_spec.ClearField(usagelog.FieldEmptyResponseBillingRuleID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.EmptyResponseWaivedCost(); ok {
+		_spec.SetField(usagelog.FieldEmptyResponseWaivedCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedEmptyResponseWaivedCost(); ok {
+		_spec.AddField(usagelog.FieldEmptyResponseWaivedCost, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.AccountRateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64, value)

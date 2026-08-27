@@ -44102,86 +44102,91 @@ func (m *UsageCleanupTaskMutation) ResetEdge(name string) error {
 // UsageLogMutation represents an operation that mutates the UsageLog nodes in the graph.
 type UsageLogMutation struct {
 	config
-	op                           Op
-	typ                          string
-	id                           *int64
-	request_id                   *string
-	model                        *string
-	requested_model              *string
-	upstream_model               *string
-	upstream_response_model      *string
-	upstream_model_mismatch      *bool
-	channel_id                   *int64
-	addchannel_id                *int64
-	model_mapping_chain          *string
-	billing_tier                 *string
-	billing_mode                 *string
-	input_tokens                 *int
-	addinput_tokens              *int
-	output_tokens                *int
-	addoutput_tokens             *int
-	cache_creation_tokens        *int
-	addcache_creation_tokens     *int
-	cache_read_tokens            *int
-	addcache_read_tokens         *int
-	cache_creation_5m_tokens     *int
-	addcache_creation_5m_tokens  *int
-	cache_creation_1h_tokens     *int
-	addcache_creation_1h_tokens  *int
-	input_cost                   *float64
-	addinput_cost                *float64
-	output_cost                  *float64
-	addoutput_cost               *float64
-	cache_creation_cost          *float64
-	addcache_creation_cost       *float64
-	cache_read_cost              *float64
-	addcache_read_cost           *float64
-	total_cost                   *float64
-	addtotal_cost                *float64
-	actual_cost                  *float64
-	addactual_cost               *float64
-	rate_multiplier              *float64
-	addrate_multiplier           *float64
-	long_context_billing_applied *bool
-	account_rate_multiplier      *float64
-	addaccount_rate_multiplier   *float64
-	billing_type                 *int8
-	addbilling_type              *int8
-	stream                       *bool
-	duration_ms                  *int
-	addduration_ms               *int
-	first_token_ms               *int
-	addfirst_token_ms            *int
-	user_agent                   *string
-	ip_address                   *string
-	image_count                  *int
-	addimage_count               *int
-	image_size                   *string
-	image_input_size             *string
-	image_output_size            *string
-	image_size_source            *string
-	image_size_breakdown         *map[string]int
-	video_count                  *int
-	addvideo_count               *int
-	video_resolution             *string
-	video_duration_seconds       *int
-	addvideo_duration_seconds    *int
-	cache_ttl_overridden         *bool
-	created_at                   *time.Time
-	clearedFields                map[string]struct{}
-	user                         *int64
-	cleareduser                  bool
-	api_key                      *int64
-	clearedapi_key               bool
-	account                      *int64
-	clearedaccount               bool
-	group                        *int64
-	clearedgroup                 bool
-	subscription                 *int64
-	clearedsubscription          bool
-	done                         bool
-	oldValue                     func(context.Context) (*UsageLog, error)
-	predicates                   []predicate.UsageLog
+	op                                Op
+	typ                               string
+	id                                *int64
+	request_id                        *string
+	model                             *string
+	requested_model                   *string
+	upstream_model                    *string
+	upstream_response_model           *string
+	upstream_model_mismatch           *bool
+	channel_id                        *int64
+	addchannel_id                     *int64
+	model_mapping_chain               *string
+	billing_tier                      *string
+	billing_mode                      *string
+	input_tokens                      *int
+	addinput_tokens                   *int
+	output_tokens                     *int
+	addoutput_tokens                  *int
+	cache_creation_tokens             *int
+	addcache_creation_tokens          *int
+	cache_read_tokens                 *int
+	addcache_read_tokens              *int
+	cache_creation_5m_tokens          *int
+	addcache_creation_5m_tokens       *int
+	cache_creation_1h_tokens          *int
+	addcache_creation_1h_tokens       *int
+	input_cost                        *float64
+	addinput_cost                     *float64
+	output_cost                       *float64
+	addoutput_cost                    *float64
+	cache_creation_cost               *float64
+	addcache_creation_cost            *float64
+	cache_read_cost                   *float64
+	addcache_read_cost                *float64
+	total_cost                        *float64
+	addtotal_cost                     *float64
+	actual_cost                       *float64
+	addactual_cost                    *float64
+	rate_multiplier                   *float64
+	addrate_multiplier                *float64
+	long_context_billing_applied      *bool
+	empty_response_billing_waived     *bool
+	empty_response_billing_rule_id    *int64
+	addempty_response_billing_rule_id *int64
+	empty_response_waived_cost        *float64
+	addempty_response_waived_cost     *float64
+	account_rate_multiplier           *float64
+	addaccount_rate_multiplier        *float64
+	billing_type                      *int8
+	addbilling_type                   *int8
+	stream                            *bool
+	duration_ms                       *int
+	addduration_ms                    *int
+	first_token_ms                    *int
+	addfirst_token_ms                 *int
+	user_agent                        *string
+	ip_address                        *string
+	image_count                       *int
+	addimage_count                    *int
+	image_size                        *string
+	image_input_size                  *string
+	image_output_size                 *string
+	image_size_source                 *string
+	image_size_breakdown              *map[string]int
+	video_count                       *int
+	addvideo_count                    *int
+	video_resolution                  *string
+	video_duration_seconds            *int
+	addvideo_duration_seconds         *int
+	cache_ttl_overridden              *bool
+	created_at                        *time.Time
+	clearedFields                     map[string]struct{}
+	user                              *int64
+	cleareduser                       bool
+	api_key                           *int64
+	clearedapi_key                    bool
+	account                           *int64
+	clearedaccount                    bool
+	group                             *int64
+	clearedgroup                      bool
+	subscription                      *int64
+	clearedsubscription               bool
+	done                              bool
+	oldValue                          func(context.Context) (*UsageLog, error)
+	predicates                        []predicate.UsageLog
 }
 
 var _ ent.Mutation = (*UsageLogMutation)(nil)
@@ -45737,6 +45742,168 @@ func (m *UsageLogMutation) ResetLongContextBillingApplied() {
 	m.long_context_billing_applied = nil
 }
 
+// SetEmptyResponseBillingWaived sets the "empty_response_billing_waived" field.
+func (m *UsageLogMutation) SetEmptyResponseBillingWaived(b bool) {
+	m.empty_response_billing_waived = &b
+}
+
+// EmptyResponseBillingWaived returns the value of the "empty_response_billing_waived" field in the mutation.
+func (m *UsageLogMutation) EmptyResponseBillingWaived() (r bool, exists bool) {
+	v := m.empty_response_billing_waived
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEmptyResponseBillingWaived returns the old "empty_response_billing_waived" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldEmptyResponseBillingWaived(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEmptyResponseBillingWaived is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEmptyResponseBillingWaived requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEmptyResponseBillingWaived: %w", err)
+	}
+	return oldValue.EmptyResponseBillingWaived, nil
+}
+
+// ResetEmptyResponseBillingWaived resets all changes to the "empty_response_billing_waived" field.
+func (m *UsageLogMutation) ResetEmptyResponseBillingWaived() {
+	m.empty_response_billing_waived = nil
+}
+
+// SetEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field.
+func (m *UsageLogMutation) SetEmptyResponseBillingRuleID(i int64) {
+	m.empty_response_billing_rule_id = &i
+	m.addempty_response_billing_rule_id = nil
+}
+
+// EmptyResponseBillingRuleID returns the value of the "empty_response_billing_rule_id" field in the mutation.
+func (m *UsageLogMutation) EmptyResponseBillingRuleID() (r int64, exists bool) {
+	v := m.empty_response_billing_rule_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEmptyResponseBillingRuleID returns the old "empty_response_billing_rule_id" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldEmptyResponseBillingRuleID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEmptyResponseBillingRuleID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEmptyResponseBillingRuleID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEmptyResponseBillingRuleID: %w", err)
+	}
+	return oldValue.EmptyResponseBillingRuleID, nil
+}
+
+// AddEmptyResponseBillingRuleID adds i to the "empty_response_billing_rule_id" field.
+func (m *UsageLogMutation) AddEmptyResponseBillingRuleID(i int64) {
+	if m.addempty_response_billing_rule_id != nil {
+		*m.addempty_response_billing_rule_id += i
+	} else {
+		m.addempty_response_billing_rule_id = &i
+	}
+}
+
+// AddedEmptyResponseBillingRuleID returns the value that was added to the "empty_response_billing_rule_id" field in this mutation.
+func (m *UsageLogMutation) AddedEmptyResponseBillingRuleID() (r int64, exists bool) {
+	v := m.addempty_response_billing_rule_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearEmptyResponseBillingRuleID clears the value of the "empty_response_billing_rule_id" field.
+func (m *UsageLogMutation) ClearEmptyResponseBillingRuleID() {
+	m.empty_response_billing_rule_id = nil
+	m.addempty_response_billing_rule_id = nil
+	m.clearedFields[usagelog.FieldEmptyResponseBillingRuleID] = struct{}{}
+}
+
+// EmptyResponseBillingRuleIDCleared returns if the "empty_response_billing_rule_id" field was cleared in this mutation.
+func (m *UsageLogMutation) EmptyResponseBillingRuleIDCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldEmptyResponseBillingRuleID]
+	return ok
+}
+
+// ResetEmptyResponseBillingRuleID resets all changes to the "empty_response_billing_rule_id" field.
+func (m *UsageLogMutation) ResetEmptyResponseBillingRuleID() {
+	m.empty_response_billing_rule_id = nil
+	m.addempty_response_billing_rule_id = nil
+	delete(m.clearedFields, usagelog.FieldEmptyResponseBillingRuleID)
+}
+
+// SetEmptyResponseWaivedCost sets the "empty_response_waived_cost" field.
+func (m *UsageLogMutation) SetEmptyResponseWaivedCost(f float64) {
+	m.empty_response_waived_cost = &f
+	m.addempty_response_waived_cost = nil
+}
+
+// EmptyResponseWaivedCost returns the value of the "empty_response_waived_cost" field in the mutation.
+func (m *UsageLogMutation) EmptyResponseWaivedCost() (r float64, exists bool) {
+	v := m.empty_response_waived_cost
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEmptyResponseWaivedCost returns the old "empty_response_waived_cost" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldEmptyResponseWaivedCost(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEmptyResponseWaivedCost is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEmptyResponseWaivedCost requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEmptyResponseWaivedCost: %w", err)
+	}
+	return oldValue.EmptyResponseWaivedCost, nil
+}
+
+// AddEmptyResponseWaivedCost adds f to the "empty_response_waived_cost" field.
+func (m *UsageLogMutation) AddEmptyResponseWaivedCost(f float64) {
+	if m.addempty_response_waived_cost != nil {
+		*m.addempty_response_waived_cost += f
+	} else {
+		m.addempty_response_waived_cost = &f
+	}
+}
+
+// AddedEmptyResponseWaivedCost returns the value that was added to the "empty_response_waived_cost" field in this mutation.
+func (m *UsageLogMutation) AddedEmptyResponseWaivedCost() (r float64, exists bool) {
+	v := m.addempty_response_waived_cost
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetEmptyResponseWaivedCost resets all changes to the "empty_response_waived_cost" field.
+func (m *UsageLogMutation) ResetEmptyResponseWaivedCost() {
+	m.empty_response_waived_cost = nil
+	m.addempty_response_waived_cost = nil
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (m *UsageLogMutation) SetAccountRateMultiplier(f float64) {
 	m.account_rate_multiplier = &f
@@ -46854,7 +47021,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 47)
+	fields := make([]string, 0, 50)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -46941,6 +47108,15 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.long_context_billing_applied != nil {
 		fields = append(fields, usagelog.FieldLongContextBillingApplied)
+	}
+	if m.empty_response_billing_waived != nil {
+		fields = append(fields, usagelog.FieldEmptyResponseBillingWaived)
+	}
+	if m.empty_response_billing_rule_id != nil {
+		fields = append(fields, usagelog.FieldEmptyResponseBillingRuleID)
+	}
+	if m.empty_response_waived_cost != nil {
+		fields = append(fields, usagelog.FieldEmptyResponseWaivedCost)
 	}
 	if m.account_rate_multiplier != nil {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
@@ -47062,6 +47238,12 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.RateMultiplier()
 	case usagelog.FieldLongContextBillingApplied:
 		return m.LongContextBillingApplied()
+	case usagelog.FieldEmptyResponseBillingWaived:
+		return m.EmptyResponseBillingWaived()
+	case usagelog.FieldEmptyResponseBillingRuleID:
+		return m.EmptyResponseBillingRuleID()
+	case usagelog.FieldEmptyResponseWaivedCost:
+		return m.EmptyResponseWaivedCost()
 	case usagelog.FieldAccountRateMultiplier:
 		return m.AccountRateMultiplier()
 	case usagelog.FieldBillingType:
@@ -47165,6 +47347,12 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldRateMultiplier(ctx)
 	case usagelog.FieldLongContextBillingApplied:
 		return m.OldLongContextBillingApplied(ctx)
+	case usagelog.FieldEmptyResponseBillingWaived:
+		return m.OldEmptyResponseBillingWaived(ctx)
+	case usagelog.FieldEmptyResponseBillingRuleID:
+		return m.OldEmptyResponseBillingRuleID(ctx)
+	case usagelog.FieldEmptyResponseWaivedCost:
+		return m.OldEmptyResponseWaivedCost(ctx)
 	case usagelog.FieldAccountRateMultiplier:
 		return m.OldAccountRateMultiplier(ctx)
 	case usagelog.FieldBillingType:
@@ -47413,6 +47601,27 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetLongContextBillingApplied(v)
 		return nil
+	case usagelog.FieldEmptyResponseBillingWaived:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEmptyResponseBillingWaived(v)
+		return nil
+	case usagelog.FieldEmptyResponseBillingRuleID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEmptyResponseBillingRuleID(v)
+		return nil
+	case usagelog.FieldEmptyResponseWaivedCost:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEmptyResponseWaivedCost(v)
+		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		v, ok := value.(float64)
 		if !ok {
@@ -47589,6 +47798,12 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addrate_multiplier != nil {
 		fields = append(fields, usagelog.FieldRateMultiplier)
 	}
+	if m.addempty_response_billing_rule_id != nil {
+		fields = append(fields, usagelog.FieldEmptyResponseBillingRuleID)
+	}
+	if m.addempty_response_waived_cost != nil {
+		fields = append(fields, usagelog.FieldEmptyResponseWaivedCost)
+	}
 	if m.addaccount_rate_multiplier != nil {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
 	}
@@ -47646,6 +47861,10 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedActualCost()
 	case usagelog.FieldRateMultiplier:
 		return m.AddedRateMultiplier()
+	case usagelog.FieldEmptyResponseBillingRuleID:
+		return m.AddedEmptyResponseBillingRuleID()
+	case usagelog.FieldEmptyResponseWaivedCost:
+		return m.AddedEmptyResponseWaivedCost()
 	case usagelog.FieldAccountRateMultiplier:
 		return m.AddedAccountRateMultiplier()
 	case usagelog.FieldBillingType:
@@ -47767,6 +47986,20 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddRateMultiplier(v)
 		return nil
+	case usagelog.FieldEmptyResponseBillingRuleID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddEmptyResponseBillingRuleID(v)
+		return nil
+	case usagelog.FieldEmptyResponseWaivedCost:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddEmptyResponseWaivedCost(v)
+		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		v, ok := value.(float64)
 		if !ok {
@@ -47854,6 +48087,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldSubscriptionID) {
 		fields = append(fields, usagelog.FieldSubscriptionID)
 	}
+	if m.FieldCleared(usagelog.FieldEmptyResponseBillingRuleID) {
+		fields = append(fields, usagelog.FieldEmptyResponseBillingRuleID)
+	}
 	if m.FieldCleared(usagelog.FieldAccountRateMultiplier) {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
 	}
@@ -47933,6 +48169,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldSubscriptionID:
 		m.ClearSubscriptionID()
+		return nil
+	case usagelog.FieldEmptyResponseBillingRuleID:
+		m.ClearEmptyResponseBillingRuleID()
 		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		m.ClearAccountRateMultiplier()
@@ -48064,6 +48303,15 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldLongContextBillingApplied:
 		m.ResetLongContextBillingApplied()
+		return nil
+	case usagelog.FieldEmptyResponseBillingWaived:
+		m.ResetEmptyResponseBillingWaived()
+		return nil
+	case usagelog.FieldEmptyResponseBillingRuleID:
+		m.ResetEmptyResponseBillingRuleID()
+		return nil
+	case usagelog.FieldEmptyResponseWaivedCost:
+		m.ResetEmptyResponseWaivedCost()
 		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		m.ResetAccountRateMultiplier()

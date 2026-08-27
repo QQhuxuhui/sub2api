@@ -584,6 +584,10 @@ type AdminUsageLog struct {
 	AccountRateMultiplier *float64 `json:"account_rate_multiplier"`
 	// AccountStatsCost 自定义定价规则计算的账号统计费用（nil 表示使用默认公式）
 	AccountStatsCost *float64 `json:"account_stats_cost,omitempty"`
+	// Empty-response waiver reconciliation fields (admin-only).
+	EmptyResponseBillingWaived bool    `json:"empty_response_billing_waived"`
+	EmptyResponseBillingRuleID int64   `json:"empty_response_billing_rule_id,omitempty"`
+	EmptyResponseWaivedCost    float64 `json:"empty_response_waived_cost"`
 
 	// IPAddress 用户请求 IP
 	IPAddress *string `json:"ip_address,omitempty"`

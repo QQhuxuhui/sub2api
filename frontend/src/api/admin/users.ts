@@ -385,6 +385,55 @@ export async function updatePlatformQuotas(
   return data
 }
 
+// ---- Empty-response billing waiver (空返回不扣费) ----
+
+export interface EmptyResponseBillingRule {
+  id: number
+  group_id: number | null
+  model: string
+  enabled: boolean
+  note: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EmptyResponseBillingRuleInput {
+  group_id: number | null
+  model: string
+  enabled: boolean
+  note: string
+}
+
+export interface EmptyResponseBillingRulesResponse {
+  rules: EmptyResponseBillingRule[]
+}
+
+/**
+ * Get user's empty-response billing waiver rules
+ */
+export async function getEmptyResponseBillingRules(
+  id: number
+): Promise<EmptyResponseBillingRulesResponse> {
+  const { data } = await apiClient.get<EmptyResponseBillingRulesResponse>(
+    `/admin/users/${id}/empty-response-billing-rules`
+  )
+  return data
+}
+
+/**
+ * Replace user's empty-response billing waiver rules (全量替换)
+ */
+export async function updateEmptyResponseBillingRules(
+  id: number,
+  rules: EmptyResponseBillingRuleInput[]
+): Promise<EmptyResponseBillingRulesResponse> {
+  const { data } = await apiClient.put<EmptyResponseBillingRulesResponse>(
+    `/admin/users/${id}/empty-response-billing-rules`,
+    { rules }
+  )
+  return data
+}
+
 /**
  * Reset a single (platform, window) usage immediately
  */
@@ -418,6 +467,8 @@ export const usersAPI = {
   getPlatformQuotas,
   updatePlatformQuotas,
   resetPlatformQuotaWindow,
+  getEmptyResponseBillingRules,
+  updateEmptyResponseBillingRules,
 }
 
 export default usersAPI

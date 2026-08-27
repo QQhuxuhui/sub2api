@@ -69,6 +69,35 @@ func TestOpenAIGatewayServiceRecordUsage_RejectsNilInput(t *testing.T) {
 	require.Error(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{}))
 }
 
+func TestOpenAIGatewayServiceRecordUsage_PersistsEmptyResponseWaiverAudit(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+	rulesRepo := &stubEmptyResponseBillingRepo{rules: []EmptyResponseBillingRule{{ID: 77, Enabled: true}}}
+	svc.emptyResponseBillingResolver = newUserEmptyResponseBillingResolver(rulesRepo, "test")
+	observed := 0
+	expected := svc.billingService.CalculateImageCost("gpt-image-1", ImageBillingSize1K, 1, nil, 1.1).ActualCost
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID:            "empty-response-waiver-audit",
+			Model:                "gpt-image-1",
+			ImageCount:           1,
+			ImageOutputsObserved: &observed,
+			ImageSize:            ImageBillingSize1K,
+		},
+		APIKey:  &APIKey{ID: 10},
+		User:    &User{ID: 20},
+		Account: &Account{ID: 30},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Zero(t, usageRepo.lastLog.ActualCost)
+	require.Equal(t, 0, userRepo.deductCalls)
+	requireEmptyResponseWaiverAudit(t, usageRepo.lastLog, 77, expected)
+}
+
 func TestRecordCyberPolicyUsageLog_BillsRealUpstreamTokens(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
@@ -245,6 +274,7 @@ func newOpenAIRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo U
 		nil,
 		nil,
 		nil, // userPlatformQuotaRepo
+		nil, // emptyResponseBillingRepo
 	)
 	svc.userGroupRateResolver = newUserGroupRateResolver(
 		rateRepo,

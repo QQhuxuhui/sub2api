@@ -10,6 +10,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"go.uber.org/zap"
 )
 
 func (s *GatewayService) getUserGroupRateMultiplier(ctx context.Context, userID, groupID int64, groupDefaultMultiplier float64) float64 {
@@ -861,6 +862,24 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		}
 	}
 
+	// 用户级「空返回不扣费」：生图请求上游一张图都没回时整笔记 $0。
+	// 放在 response_model 改价之后、建用量行之前——此处的 cost 才是最终价，
+	// 免掉的金额也才对得上账。
+	waiver := s.resolveEmptyResponseWaiver(ctx, result, apiKey, user,
+		[]string{requestedModel, billingModel, result.UpstreamModel, result.Model}, cost)
+	if waiver.Applied {
+		logger.L().With(
+			zap.String("component", "service.gateway"),
+			zap.Int64("user_id", user.ID),
+			zap.Int64("rule_id", waiver.RuleID),
+			zap.Any("group_id", apiKey.GroupID),
+			zap.String("model", billingModel),
+			zap.String("request_id", result.RequestID),
+			zap.Float64("waived_cost", waiver.WaivedCost),
+		).Info("billing.empty_response_waived")
+		cost = waiveCostForEmptyResponse(cost)
+	}
+
 	// 判断计费方式：订阅模式 vs 余额模式
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 	billingType := BillingTypeBalance
@@ -872,6 +891,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	accountRateMultiplier := account.BillingRateMultiplier()
 	usageLog := s.buildRecordUsageLog(ctx, input, result, apiKey, user, account, subscription,
 		requestedModel, multiplier, imageMultiplier, accountRateMultiplier, billingType, cacheTTLOverridden, cost, opts)
+	if waiver.Applied {
+		usageLog.EmptyResponseBillingWaived = true
+		usageLog.EmptyResponseBillingRuleID = waiver.RuleID
+		usageLog.EmptyResponseWaivedCost = waiver.WaivedCost
+	}
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
 	if apiKey.GroupID != nil {
@@ -1285,4 +1309,34 @@ func optionalSubscriptionID(subscription *UserSubscription) *int64 {
 		return &subscription.ID
 	}
 	return nil
+}
+
+// resolveEmptyResponseWaiver 判定本次记账是否命中用户级「空返回不扣费」。
+//
+// 先判空返回再查规则：空返回是纯内存判断，正常请求在第一步就返回，不会为一个绝大多数
+// 用户没开的功能给每笔请求加一次规则查询。
+func (s *GatewayService) resolveEmptyResponseWaiver(
+	ctx context.Context,
+	result *ForwardResult,
+	apiKey *APIKey,
+	user *User,
+	models []string,
+	cost *CostBreakdown,
+) emptyResponseBillingWaiver {
+	if s == nil || s.emptyResponseBillingResolver == nil || user == nil || apiKey == nil {
+		return emptyResponseBillingWaiver{}
+	}
+	if !result.IsEmptyImageResponse() {
+		return emptyResponseBillingWaiver{}
+	}
+	rules := s.emptyResponseBillingResolver.Resolve(ctx, user.ID)
+	return resolveEmptyResponseBillingWaiver(rules, true, apiKey.GroupID, models, cost)
+}
+
+// InvalidateEmptyResponseBillingRules 保留管理面失效钩子的接口兼容；规则读取不缓存。
+func (s *GatewayService) InvalidateEmptyResponseBillingRules(userID int64) {
+	if s == nil {
+		return
+	}
+	s.emptyResponseBillingResolver.Invalidate(userID)
 }

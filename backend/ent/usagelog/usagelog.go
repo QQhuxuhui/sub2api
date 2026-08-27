@@ -72,6 +72,12 @@ const (
 	FieldRateMultiplier = "rate_multiplier"
 	// FieldLongContextBillingApplied holds the string denoting the long_context_billing_applied field in the database.
 	FieldLongContextBillingApplied = "long_context_billing_applied"
+	// FieldEmptyResponseBillingWaived holds the string denoting the empty_response_billing_waived field in the database.
+	FieldEmptyResponseBillingWaived = "empty_response_billing_waived"
+	// FieldEmptyResponseBillingRuleID holds the string denoting the empty_response_billing_rule_id field in the database.
+	FieldEmptyResponseBillingRuleID = "empty_response_billing_rule_id"
+	// FieldEmptyResponseWaivedCost holds the string denoting the empty_response_waived_cost field in the database.
+	FieldEmptyResponseWaivedCost = "empty_response_waived_cost"
 	// FieldAccountRateMultiplier holds the string denoting the account_rate_multiplier field in the database.
 	FieldAccountRateMultiplier = "account_rate_multiplier"
 	// FieldBillingType holds the string denoting the billing_type field in the database.
@@ -189,6 +195,9 @@ var Columns = []string{
 	FieldActualCost,
 	FieldRateMultiplier,
 	FieldLongContextBillingApplied,
+	FieldEmptyResponseBillingWaived,
+	FieldEmptyResponseBillingRuleID,
+	FieldEmptyResponseWaivedCost,
 	FieldAccountRateMultiplier,
 	FieldBillingType,
 	FieldStream,
@@ -264,6 +273,10 @@ var (
 	DefaultRateMultiplier float64
 	// DefaultLongContextBillingApplied holds the default value on creation for the "long_context_billing_applied" field.
 	DefaultLongContextBillingApplied bool
+	// DefaultEmptyResponseBillingWaived holds the default value on creation for the "empty_response_billing_waived" field.
+	DefaultEmptyResponseBillingWaived bool
+	// DefaultEmptyResponseWaivedCost holds the default value on creation for the "empty_response_waived_cost" field.
+	DefaultEmptyResponseWaivedCost float64
 	// DefaultBillingType holds the default value on creation for the "billing_type" field.
 	DefaultBillingType int8
 	// DefaultStream holds the default value on creation for the "stream" field.
@@ -443,6 +456,21 @@ func ByRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 // ByLongContextBillingApplied orders the results by the long_context_billing_applied field.
 func ByLongContextBillingApplied(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldLongContextBillingApplied, opts...).ToFunc()
+}
+
+// ByEmptyResponseBillingWaived orders the results by the empty_response_billing_waived field.
+func ByEmptyResponseBillingWaived(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldEmptyResponseBillingWaived, opts...).ToFunc()
+}
+
+// ByEmptyResponseBillingRuleID orders the results by the empty_response_billing_rule_id field.
+func ByEmptyResponseBillingRuleID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldEmptyResponseBillingRuleID, opts...).ToFunc()
+}
+
+// ByEmptyResponseWaivedCost orders the results by the empty_response_waived_cost field.
+func ByEmptyResponseWaivedCost(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldEmptyResponseWaivedCost, opts...).ToFunc()
 }
 
 // ByAccountRateMultiplier orders the results by the account_rate_multiplier field.

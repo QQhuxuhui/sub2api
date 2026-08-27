@@ -256,6 +256,23 @@ func TestPrepareUsageLogInsert_ArgCountMatchesTypes(t *testing.T) {
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 }
 
+func TestPrepareUsageLogInsert_PersistsEmptyResponseBillingAudit(t *testing.T) {
+	prepared := prepareUsageLogInsert(&service.UsageLog{
+		UserID:                     1,
+		APIKeyID:                   2,
+		AccountID:                  3,
+		RequestID:                  "req-empty-audit-inline",
+		Model:                      "gpt-image-1",
+		EmptyResponseBillingWaived: true,
+		EmptyResponseBillingRuleID: 77,
+		EmptyResponseWaivedCost:    0.25,
+		CreatedAt:                  time.Date(2025, 1, 8, 12, 0, 0, 0, time.UTC),
+	})
+
+	require.Contains(t, emptyResponseBillingValuesSQL(prepared), "TRUE, 77::bigint, 0.25::numeric")
+	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
+}
+
 func TestPrepareUsageLogInsert_PersistsImageSizeMetadata(t *testing.T) {
 	imageSize := "4K"
 	inputSize := "1024x1024"
@@ -852,6 +869,9 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			sql.NullFloat64{},
 			sql.NullString{},
+			true,
+			sql.NullInt64{Valid: true, Int64: 77},
+			0.25,
 			now,
 		}})
 		require.NoError(t, err)
@@ -865,6 +885,9 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 		require.NotNil(t, log.ImageSizeSource)
 		require.Equal(t, "output", *log.ImageSizeSource)
 		require.Equal(t, map[string]int{"4K": 2}, log.ImageSizeBreakdown)
+		require.True(t, log.EmptyResponseBillingWaived)
+		require.Equal(t, int64(77), log.EmptyResponseBillingRuleID)
+		require.Equal(t, 0.25, log.EmptyResponseWaivedCost)
 	})
 
 	t.Run("request_type_ws_v2_overrides_legacy", func(t *testing.T) {
@@ -929,6 +952,9 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
 			sql.NullString{},  // session_id
+			false,             // empty_response_billing_waived
+			sql.NullInt64{},   // empty_response_billing_rule_id
+			0.0,               // empty_response_waived_cost
 			now,
 		}})
 		require.NoError(t, err)
@@ -989,6 +1015,9 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
 			sql.NullString{},  // session_id
+			false,             // empty_response_billing_waived
+			sql.NullInt64{},   // empty_response_billing_rule_id
+			0.0,               // empty_response_waived_cost
 			now,
 		}})
 		require.NoError(t, err)
@@ -1049,6 +1078,9 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
 			sql.NullString{},  // session_id
+			false,             // empty_response_billing_waived
+			sql.NullInt64{},   // empty_response_billing_rule_id
+			0.0,               // empty_response_waived_cost
 			now,
 		}})
 		require.NoError(t, err)

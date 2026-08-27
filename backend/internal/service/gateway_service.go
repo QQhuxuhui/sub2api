@@ -612,15 +612,37 @@ type ForwardResult struct {
 	ReasoningEffort               *string
 
 	// 图片生成计费字段（图片生成模型使用）
-	ImageCount         int    // 生成的图片数量
-	ImageSize          string // 最终计费尺寸 "1K", "2K", "4K"
-	ImageInputSize     string // 请求中的原始图片尺寸
-	ImageOutputSize    string // 上游响应中的图片尺寸
-	ImageOutputSizes   []string
-	ImageSizeSource    string
-	ImageSizeBreakdown map[string]int
-	SearchCount        int
-	AudioUsage         *AudioUsage
+	ImageCount int // 计费张数
+	// ImageOutputsObserved 是上游响应里**真正**观测到的图片张数，与 ImageCount 分开存在。
+	//
+	// ImageCount 不是诚实的观测值：Gemini 侧数不出图时会按模型名兜底成 1
+	// （resolveGeminiImageCount），pro 生图伪装还会把合成 usage 的张数抬到最小 1
+	// （synthesizeGeminiProImageUsage）。这两个兜底各有其存在理由，但都让「上游一张
+	// 图都没回」这件事在计费层不可见。本字段专门承载那个事实：
+	//   nil = 该链路没有观测能力（非生图请求，或转发路径未接入观测）
+	//   0   = 确实一张都没回
+	// 只有明确为 0 时才允许触发用户级「空返回不扣费」，nil 一律照常收费。
+	ImageOutputsObserved *int
+	ImageSize            string // 最终计费尺寸 "1K", "2K", "4K"
+	ImageInputSize       string // 请求中的原始图片尺寸
+	ImageOutputSize      string // 上游响应中的图片尺寸
+	ImageOutputSizes     []string
+	ImageSizeSource      string
+	ImageSizeBreakdown   map[string]int
+	SearchCount          int
+	AudioUsage           *AudioUsage
+}
+
+// IsEmptyImageResponse 报告本次转发是否为「按图计费但上游一张图都没回」。
+//
+// 三个条件缺一不可：本来就是要出图的请求（ImageCount > 0）、该链路具备观测能力
+// （ImageOutputsObserved 非 nil）、观测结果确实为 0。观测不到时返回 false —— 计费上
+// 宁可多收也不能凭猜测免单。
+func (r *ForwardResult) IsEmptyImageResponse() bool {
+	if r == nil || r.ImageCount <= 0 || r.ImageOutputsObserved == nil {
+		return false
+	}
+	return *r.ImageOutputsObserved == 0
 }
 
 // GatewayFailureStage identifies which request stage failed. The zero value is
@@ -768,6 +790,9 @@ type GatewayService struct {
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+
+	emptyResponseBillingRepo     UserEmptyResponseBillingRepository
+	emptyResponseBillingResolver *userEmptyResponseBillingResolver
 }
 
 // NewGatewayService creates a new GatewayService
@@ -800,6 +825,7 @@ func NewGatewayService(
 	compositeResolver *CompositeRouteResolver,
 	balanceNotifyService *BalanceNotifyService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	emptyResponseBillingRepo UserEmptyResponseBillingRepository,
 ) *GatewayService {
 	userGroupRateTTL := resolveUserGroupRateCacheTTL(cfg)
 	modelsListTTL := resolveModelsListCacheTTL(cfg)
@@ -837,7 +863,13 @@ func NewGatewayService(
 		compositeResolver:     compositeResolver,
 		balanceNotifyService:  balanceNotifyService,
 		userPlatformQuotaRepo: userPlatformQuotaRepo,
+
+		emptyResponseBillingRepo: emptyResponseBillingRepo,
 	}
+	svc.emptyResponseBillingResolver = newUserEmptyResponseBillingResolver(
+		emptyResponseBillingRepo,
+		"service.gateway",
+	)
 	svc.userGroupRateResolver = newUserGroupRateResolver(
 		userGroupRateRepo,
 		svc.userGroupRateCache,

@@ -393,6 +393,48 @@ func (_c *UsageLogCreate) SetNillableLongContextBillingApplied(v *bool) *UsageLo
 	return _c
 }
 
+// SetEmptyResponseBillingWaived sets the "empty_response_billing_waived" field.
+func (_c *UsageLogCreate) SetEmptyResponseBillingWaived(v bool) *UsageLogCreate {
+	_c.mutation.SetEmptyResponseBillingWaived(v)
+	return _c
+}
+
+// SetNillableEmptyResponseBillingWaived sets the "empty_response_billing_waived" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableEmptyResponseBillingWaived(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetEmptyResponseBillingWaived(*v)
+	}
+	return _c
+}
+
+// SetEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field.
+func (_c *UsageLogCreate) SetEmptyResponseBillingRuleID(v int64) *UsageLogCreate {
+	_c.mutation.SetEmptyResponseBillingRuleID(v)
+	return _c
+}
+
+// SetNillableEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableEmptyResponseBillingRuleID(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetEmptyResponseBillingRuleID(*v)
+	}
+	return _c
+}
+
+// SetEmptyResponseWaivedCost sets the "empty_response_waived_cost" field.
+func (_c *UsageLogCreate) SetEmptyResponseWaivedCost(v float64) *UsageLogCreate {
+	_c.mutation.SetEmptyResponseWaivedCost(v)
+	return _c
+}
+
+// SetNillableEmptyResponseWaivedCost sets the "empty_response_waived_cost" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableEmptyResponseWaivedCost(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetEmptyResponseWaivedCost(*v)
+	}
+	return _c
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (_c *UsageLogCreate) SetAccountRateMultiplier(v float64) *UsageLogCreate {
 	_c.mutation.SetAccountRateMultiplier(v)
@@ -753,6 +795,14 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultLongContextBillingApplied
 		_c.mutation.SetLongContextBillingApplied(v)
 	}
+	if _, ok := _c.mutation.EmptyResponseBillingWaived(); !ok {
+		v := usagelog.DefaultEmptyResponseBillingWaived
+		_c.mutation.SetEmptyResponseBillingWaived(v)
+	}
+	if _, ok := _c.mutation.EmptyResponseWaivedCost(); !ok {
+		v := usagelog.DefaultEmptyResponseWaivedCost
+		_c.mutation.SetEmptyResponseWaivedCost(v)
+	}
 	if _, ok := _c.mutation.BillingType(); !ok {
 		v := usagelog.DefaultBillingType
 		_c.mutation.SetBillingType(v)
@@ -877,6 +927,12 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.LongContextBillingApplied(); !ok {
 		return &ValidationError{Name: "long_context_billing_applied", err: errors.New(`ent: missing required field "UsageLog.long_context_billing_applied"`)}
+	}
+	if _, ok := _c.mutation.EmptyResponseBillingWaived(); !ok {
+		return &ValidationError{Name: "empty_response_billing_waived", err: errors.New(`ent: missing required field "UsageLog.empty_response_billing_waived"`)}
+	}
+	if _, ok := _c.mutation.EmptyResponseWaivedCost(); !ok {
+		return &ValidationError{Name: "empty_response_waived_cost", err: errors.New(`ent: missing required field "UsageLog.empty_response_waived_cost"`)}
 	}
 	if _, ok := _c.mutation.BillingType(); !ok {
 		return &ValidationError{Name: "billing_type", err: errors.New(`ent: missing required field "UsageLog.billing_type"`)}
@@ -1062,6 +1118,18 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.LongContextBillingApplied(); ok {
 		_spec.SetField(usagelog.FieldLongContextBillingApplied, field.TypeBool, value)
 		_node.LongContextBillingApplied = value
+	}
+	if value, ok := _c.mutation.EmptyResponseBillingWaived(); ok {
+		_spec.SetField(usagelog.FieldEmptyResponseBillingWaived, field.TypeBool, value)
+		_node.EmptyResponseBillingWaived = value
+	}
+	if value, ok := _c.mutation.EmptyResponseBillingRuleID(); ok {
+		_spec.SetField(usagelog.FieldEmptyResponseBillingRuleID, field.TypeInt64, value)
+		_node.EmptyResponseBillingRuleID = &value
+	}
+	if value, ok := _c.mutation.EmptyResponseWaivedCost(); ok {
+		_spec.SetField(usagelog.FieldEmptyResponseWaivedCost, field.TypeFloat64, value)
+		_node.EmptyResponseWaivedCost = value
 	}
 	if value, ok := _c.mutation.AccountRateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64, value)
@@ -1761,6 +1829,60 @@ func (u *UsageLogUpsert) SetLongContextBillingApplied(v bool) *UsageLogUpsert {
 // UpdateLongContextBillingApplied sets the "long_context_billing_applied" field to the value that was provided on create.
 func (u *UsageLogUpsert) UpdateLongContextBillingApplied() *UsageLogUpsert {
 	u.SetExcluded(usagelog.FieldLongContextBillingApplied)
+	return u
+}
+
+// SetEmptyResponseBillingWaived sets the "empty_response_billing_waived" field.
+func (u *UsageLogUpsert) SetEmptyResponseBillingWaived(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldEmptyResponseBillingWaived, v)
+	return u
+}
+
+// UpdateEmptyResponseBillingWaived sets the "empty_response_billing_waived" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateEmptyResponseBillingWaived() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldEmptyResponseBillingWaived)
+	return u
+}
+
+// SetEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field.
+func (u *UsageLogUpsert) SetEmptyResponseBillingRuleID(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldEmptyResponseBillingRuleID, v)
+	return u
+}
+
+// UpdateEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateEmptyResponseBillingRuleID() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldEmptyResponseBillingRuleID)
+	return u
+}
+
+// AddEmptyResponseBillingRuleID adds v to the "empty_response_billing_rule_id" field.
+func (u *UsageLogUpsert) AddEmptyResponseBillingRuleID(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldEmptyResponseBillingRuleID, v)
+	return u
+}
+
+// ClearEmptyResponseBillingRuleID clears the value of the "empty_response_billing_rule_id" field.
+func (u *UsageLogUpsert) ClearEmptyResponseBillingRuleID() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldEmptyResponseBillingRuleID)
+	return u
+}
+
+// SetEmptyResponseWaivedCost sets the "empty_response_waived_cost" field.
+func (u *UsageLogUpsert) SetEmptyResponseWaivedCost(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldEmptyResponseWaivedCost, v)
+	return u
+}
+
+// UpdateEmptyResponseWaivedCost sets the "empty_response_waived_cost" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateEmptyResponseWaivedCost() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldEmptyResponseWaivedCost)
+	return u
+}
+
+// AddEmptyResponseWaivedCost adds v to the "empty_response_waived_cost" field.
+func (u *UsageLogUpsert) AddEmptyResponseWaivedCost(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldEmptyResponseWaivedCost, v)
 	return u
 }
 
@@ -2698,6 +2820,69 @@ func (u *UsageLogUpsertOne) SetLongContextBillingApplied(v bool) *UsageLogUpsert
 func (u *UsageLogUpsertOne) UpdateLongContextBillingApplied() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateLongContextBillingApplied()
+	})
+}
+
+// SetEmptyResponseBillingWaived sets the "empty_response_billing_waived" field.
+func (u *UsageLogUpsertOne) SetEmptyResponseBillingWaived(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetEmptyResponseBillingWaived(v)
+	})
+}
+
+// UpdateEmptyResponseBillingWaived sets the "empty_response_billing_waived" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateEmptyResponseBillingWaived() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateEmptyResponseBillingWaived()
+	})
+}
+
+// SetEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field.
+func (u *UsageLogUpsertOne) SetEmptyResponseBillingRuleID(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetEmptyResponseBillingRuleID(v)
+	})
+}
+
+// AddEmptyResponseBillingRuleID adds v to the "empty_response_billing_rule_id" field.
+func (u *UsageLogUpsertOne) AddEmptyResponseBillingRuleID(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddEmptyResponseBillingRuleID(v)
+	})
+}
+
+// UpdateEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateEmptyResponseBillingRuleID() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateEmptyResponseBillingRuleID()
+	})
+}
+
+// ClearEmptyResponseBillingRuleID clears the value of the "empty_response_billing_rule_id" field.
+func (u *UsageLogUpsertOne) ClearEmptyResponseBillingRuleID() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearEmptyResponseBillingRuleID()
+	})
+}
+
+// SetEmptyResponseWaivedCost sets the "empty_response_waived_cost" field.
+func (u *UsageLogUpsertOne) SetEmptyResponseWaivedCost(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetEmptyResponseWaivedCost(v)
+	})
+}
+
+// AddEmptyResponseWaivedCost adds v to the "empty_response_waived_cost" field.
+func (u *UsageLogUpsertOne) AddEmptyResponseWaivedCost(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddEmptyResponseWaivedCost(v)
+	})
+}
+
+// UpdateEmptyResponseWaivedCost sets the "empty_response_waived_cost" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateEmptyResponseWaivedCost() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateEmptyResponseWaivedCost()
 	})
 }
 
@@ -3854,6 +4039,69 @@ func (u *UsageLogUpsertBulk) SetLongContextBillingApplied(v bool) *UsageLogUpser
 func (u *UsageLogUpsertBulk) UpdateLongContextBillingApplied() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateLongContextBillingApplied()
+	})
+}
+
+// SetEmptyResponseBillingWaived sets the "empty_response_billing_waived" field.
+func (u *UsageLogUpsertBulk) SetEmptyResponseBillingWaived(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetEmptyResponseBillingWaived(v)
+	})
+}
+
+// UpdateEmptyResponseBillingWaived sets the "empty_response_billing_waived" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateEmptyResponseBillingWaived() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateEmptyResponseBillingWaived()
+	})
+}
+
+// SetEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field.
+func (u *UsageLogUpsertBulk) SetEmptyResponseBillingRuleID(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetEmptyResponseBillingRuleID(v)
+	})
+}
+
+// AddEmptyResponseBillingRuleID adds v to the "empty_response_billing_rule_id" field.
+func (u *UsageLogUpsertBulk) AddEmptyResponseBillingRuleID(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddEmptyResponseBillingRuleID(v)
+	})
+}
+
+// UpdateEmptyResponseBillingRuleID sets the "empty_response_billing_rule_id" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateEmptyResponseBillingRuleID() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateEmptyResponseBillingRuleID()
+	})
+}
+
+// ClearEmptyResponseBillingRuleID clears the value of the "empty_response_billing_rule_id" field.
+func (u *UsageLogUpsertBulk) ClearEmptyResponseBillingRuleID() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearEmptyResponseBillingRuleID()
+	})
+}
+
+// SetEmptyResponseWaivedCost sets the "empty_response_waived_cost" field.
+func (u *UsageLogUpsertBulk) SetEmptyResponseWaivedCost(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetEmptyResponseWaivedCost(v)
+	})
+}
+
+// AddEmptyResponseWaivedCost adds v to the "empty_response_waived_cost" field.
+func (u *UsageLogUpsertBulk) AddEmptyResponseWaivedCost(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddEmptyResponseWaivedCost(v)
+	})
+}
+
+// UpdateEmptyResponseWaivedCost sets the "empty_response_waived_cost" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateEmptyResponseWaivedCost() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateEmptyResponseWaivedCost()
 	})
 }
 

@@ -1819,10 +1819,11 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 					ResponseHeaders:  resp.Header.Clone(),
 					Duration:         time.Since(startTime),
 					FirstTokenMs:     firstTokenMs,
-					ImageCount:       imageCount,
-					ImageSize:        parsed.SizeTier,
-					ImageInputSize:   parsed.Size,
-					ImageOutputSizes: imageOutputSizes,
+					ImageCount:           imageCount,
+					ImageOutputsObserved: &imageCount,
+					ImageSize:            parsed.SizeTier,
+					ImageInputSize:       parsed.Size,
+					ImageOutputSizes:     imageOutputSizes,
 				}, err
 			}
 			return nil, s.handleOpenAIImagesOAuthResponseError(
@@ -1851,22 +1852,26 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			)
 		}
 	}
+	// 观测值要在兜底之前留存：下面这个 floor 会把「上游一张没回」抹成客户端请求的
+	// 张数，用户级「空返回不扣费」正是靠这个差值来判定的。
+	observedImageOutputs := imageCount
 	if imageCount <= 0 {
 		imageCount = parsed.N
 	}
 	return &OpenAIForwardResult{
-		RequestID:        resp.Header.Get("x-request-id"),
-		Usage:            usage,
-		Model:            requestModel,
-		UpstreamModel:    upstreamModel,
-		Stream:           parsed.Stream,
-		ResponseHeaders:  resp.Header.Clone(),
-		Duration:         time.Since(startTime),
-		FirstTokenMs:     firstTokenMs,
-		ImageCount:       imageCount,
-		ImageSize:        parsed.SizeTier,
-		ImageInputSize:   parsed.Size,
-		ImageOutputSizes: imageOutputSizes,
+		RequestID:            resp.Header.Get("x-request-id"),
+		Usage:                usage,
+		Model:                requestModel,
+		UpstreamModel:        upstreamModel,
+		Stream:               parsed.Stream,
+		ResponseHeaders:      resp.Header.Clone(),
+		Duration:             time.Since(startTime),
+		FirstTokenMs:         firstTokenMs,
+		ImageCount:           imageCount,
+		ImageOutputsObserved: &observedImageOutputs,
+		ImageSize:            parsed.SizeTier,
+		ImageInputSize:       parsed.Size,
+		ImageOutputSizes:     imageOutputSizes,
 	}, nil
 }
 
