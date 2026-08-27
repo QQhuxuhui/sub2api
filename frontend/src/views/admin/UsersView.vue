@@ -1344,6 +1344,9 @@ const showPlatformQuotaModal = ref(false)
 const showEmptyResponseBillingModal = ref(false)
 const emptyResponseBillingUser = ref<AdminUser | null>(null)
 const handleEmptyResponseBilling = (user: AdminUser) => {
+  // allGroups 是懒加载的（仅分组列可见/分组筛选开启时才加载）；
+  // 弹窗的分组下拉依赖它，打开前先确保加载。
+  loadAllGroups()
   emptyResponseBillingUser.value = user
   showEmptyResponseBillingModal.value = true
 }

@@ -30,7 +30,7 @@
                 <td class="px-3 py-2">
                   <select v-model="row.group_id" class="input w-44">
                     <option :value="null">{{ t('admin.users.emptyResponseBilling.allGroups') }}</option>
-                    <option v-for="g in allGroups" :key="g.id" :value="g.id">{{ g.name }}</option>
+                    <option v-for="g in selectableGroups" :key="g.id" :value="g.id">{{ g.name }}</option>
                   </select>
                 </td>
                 <td class="px-3 py-2">
@@ -86,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -103,6 +103,38 @@ const appStore = useAppStore()
 const loading = ref(false)
 const submitting = ref(false)
 const rules = ref<EmptyResponseBillingRuleInput[]>([])
+
+// 父组件的 allGroups 是懒加载的（分组列隐藏时为空）；这里兜底自取一份，
+// 保证下拉在任何挂载点下都有数据。
+const localGroups = ref<AdminGroup[]>([])
+const groupsSource = computed(() =>
+  props.allGroups.length > 0 ? props.allGroups : localGroups.value
+)
+
+// 只列「该用户能获得的分组」：非专属的 active 分组人人可用；专属分组要求出现在
+// 用户的 allowed_groups 里（与用户列表分组列 getUserGroups 同口径）。
+// 已有规则引用的分组无条件保留——即使后来被取消授权，也不能一打开弹窗就把
+// 该行的 group_id 显示成空白/丢配置。
+const selectableGroups = computed(() => {
+  const referenced = new Set(
+    rules.value.map((r) => r.group_id).filter((v): v is number => v != null)
+  )
+  return groupsSource.value.filter(
+    (g) =>
+      referenced.has(g.id) ||
+      (g.status === 'active' &&
+        (!g.is_exclusive || (props.user?.allowed_groups?.includes(g.id) ?? false)))
+  )
+})
+
+async function ensureGroups() {
+  if (props.allGroups.length > 0 || localGroups.value.length > 0) return
+  try {
+    localGroups.value = await adminAPI.groups.getAll()
+  } catch {
+    // 拉不到就只剩「全部分组」选项，不阻塞规则编辑
+  }
+}
 
 function addRule() {
   rules.value.push({ group_id: null, model: '', enabled: true, note: '' })
@@ -129,7 +161,12 @@ async function load() {
 
 watch(
   () => props.show,
-  (s) => { if (s && props.user) load() },
+  (s) => {
+    if (s && props.user) {
+      ensureGroups()
+      load()
+    }
+  },
 )
 
 async function onSave() {
