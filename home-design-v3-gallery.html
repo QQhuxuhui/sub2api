@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sub2API 首页设计稿 V3 白厅</title>
+<style>
+  :root{
+    --paper:#f5f6f8; --paper-2:#eceef2;
+    --ink:#16181d; --dim:#5f6570; --faint:#9aa0ab;
+    --line:rgba(22,24,29,.14);
+    --cobalt:#2149dd; --cobalt-ink:#f2f4ff;
+    --ease:cubic-bezier(.16,1,.3,1);
+    color-scheme:light;
+  }
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:var(--paper); color:var(--ink);
+    font-family:"PingFang SC","HarmonyOS Sans SC","MiSans","Noto Sans SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  ::selection{background:var(--cobalt); color:#fff}
+  .mono{font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace}
+  a{color:inherit; text-decoration:none}
+  [data-reveal]{opacity:0; transform:translateY(26px); transition:opacity .9s var(--ease), transform .9s var(--ease)}
+  [data-reveal].on{opacity:1; transform:none}
+  .wrap{max-width:1320px; margin:0 auto; padding-left:clamp(20px,4vw,52px); padding-right:clamp(20px,4vw,52px)}
+
+  nav{
+    position:sticky; top:0; z-index:50; background:rgba(245,246,248,.86); backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav-in{height:66px; display:flex; align-items:center; justify-content:space-between}
+  .logo{font-weight:800; font-size:17px; letter-spacing:-.01em}
+  .logo b{color:var(--cobalt)}
+  .nav-r{display:flex; align-items:center; gap:clamp(16px,2.4vw,34px); font-size:14px; color:var(--dim)}
+  .nav-r a{position:relative; transition:color .3s}
+  .nav-r a:hover{color:var(--ink)}
+  .nav-r a:not(.nav-cta)::after{
+    content:""; position:absolute; left:0; bottom:-4px; height:1.5px; width:0; background:var(--cobalt);
+    transition:width .35s var(--ease);
+  }
+  .nav-r a:not(.nav-cta):hover::after{width:100%}
+  .nav-cta{background:var(--ink); color:var(--paper); padding:10px 22px; font-weight:700; transition:background .3s}
+  .nav-cta:hover{background:var(--cobalt)}
+  @media (max-width:720px){.nav-r a:not(.nav-cta){display:none}}
+
+  /* hero */
+  .hero{padding-top:clamp(60px,10vh,110px); padding-bottom:clamp(60px,10vh,110px)}
+  .hero-grid{display:grid; grid-template-columns:minmax(0,7fr) minmax(0,3fr); gap:clamp(30px,5vw,90px); align-items:end}
+  .eyebrow{
+    font-size:12.5px; letter-spacing:.22em; color:var(--dim); margin-bottom:34px; font-weight:600;
+  }
+  h1{
+    font-size:clamp(52px,8.4vw,124px); line-height:1.02; font-weight:800; letter-spacing:-.035em; margin:0 0 34px;
+    text-wrap:balance;
+  }
+  h1 .cob{color:var(--cobalt)}
+  .hero-sub{font-size:clamp(15.5px,1.6vw,18px); line-height:2; color:var(--dim); max-width:30em; margin:0 0 40px}
+  .ctas{display:flex; gap:14px; flex-wrap:wrap}
+  .btn{display:inline-block; padding:16px 36px; font-size:15px; font-weight:700; transition:background .3s,color .3s,border-color .3s,transform .15s}
+  .btn:active{transform:scale(.98)}
+  .btn-ink{background:var(--ink); color:var(--paper)}
+  .btn-ink:hover{background:var(--cobalt)}
+  .btn-line{border:1px solid var(--line); color:var(--ink)}
+  .btn-line:hover{border-color:var(--ink)}
+  .hero-side{border-left:1px solid var(--line); padding-left:clamp(20px,2.5vw,40px); padding-bottom:6px}
+  .hero-side .cap{font-size:12px; letter-spacing:.2em; color:var(--faint); margin-bottom:24px; font-weight:600}
+  .pv{display:flex; align-items:center; gap:14px; padding:13px 0; color:var(--ink)}
+  .pv + .pv{border-top:1px solid var(--line)}
+  .pv svg{width:22px; height:22px; flex:none; color:var(--ink)}
+  .pv span{font-size:14.5px; font-weight:600}
+  .pv i{font-style:normal; font-size:12px; color:var(--faint); margin-left:auto}
+  @media (max-width:880px){.hero-grid{grid-template-columns:1fr}.hero-side{border-left:0; border-top:1px solid var(--line); padding-left:0; padding-top:26px}}
+
+  /* giant statement */
+  .statement{border-top:1px solid var(--line); background:var(--paper-2)}
+  .statement .in{padding-top:clamp(70px,11vh,130px); padding-bottom:clamp(70px,11vh,130px)}
+  .statement p{
+    font-size:clamp(26px,4.2vw,54px); font-weight:800; letter-spacing:-.025em; line-height:1.3; margin:0;
+    max-width:22em; text-wrap:balance;
+  }
+  .statement p b{color:var(--faint); font-weight:800}
+
+  /* value rows editorial */
+  .vals{padding-top:clamp(80px,12vh,150px); padding-bottom:clamp(80px,12vh,150px)}
+  .vrow{
+    display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:clamp(20px,4vw,70px);
+    padding:clamp(34px,5vh,54px) 0; align-items:baseline;
+  }
+  .vrow + .vrow{border-top:1px solid var(--line)}
+  .vrow h3{font-size:clamp(26px,3.4vw,44px); font-weight:800; letter-spacing:-.02em; margin:0}
+  .vrow p{font-size:15.5px; line-height:2.05; color:var(--dim); margin:0; max-width:34em}
+  .vrow p code{font-size:.9em; background:var(--paper-2); border:1px solid var(--line); padding:2px 8px}
+  @media (max-width:760px){.vrow{grid-template-columns:1fr; gap:14px}}
+
+  /* ledger comparison */
+  .ledger-sec{background:var(--ink); color:#eef0f4}
+  .ledger-sec .in{padding-top:clamp(80px,12vh,140px); padding-bottom:clamp(80px,12vh,140px)}
+  .ledger-sec h2{font-size:clamp(30px,4.4vw,54px); font-weight:800; letter-spacing:-.02em; margin:0 0 clamp(40px,7vh,70px); color:#fff}
+  .ledger{display:grid; grid-template-columns:1fr 1fr; gap:clamp(24px,4vw,60px)}
+  .led h3{
+    font-size:13px; letter-spacing:.2em; font-weight:700; margin:0 0 26px;
+    color:rgba(238,240,244,.45);
+  }
+  .led.us h3{color:#8fa3ff}
+  .led ul{margin:0; padding:0}
+  .led li{font-size:clamp(15px,1.7vw,19px); line-height:1.75; padding:16px 0; color:rgba(238,240,244,.55)}
+  .led.us li{color:#fff; font-weight:600}
+  .led li + li{border-top:1px solid rgba(238,240,244,.12)}
+  @media (max-width:720px){.ledger{grid-template-columns:1fr}}
+
+  /* steps strip */
+  .steps-sec{border-bottom:1px solid var(--line)}
+  .steps-sec .in{padding-top:clamp(70px,10vh,120px); padding-bottom:clamp(70px,10vh,120px)}
+  .steps-sec h2{font-size:clamp(28px,3.8vw,46px); font-weight:800; letter-spacing:-.02em; margin:0 0 clamp(36px,6vh,60px)}
+  .steps{display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line); border:1px solid var(--line)}
+  .st{background:var(--paper); padding:clamp(24px,3vw,42px)}
+  .st .n{font-size:13px; color:var(--cobalt); font-weight:700; letter-spacing:.12em; margin-bottom:44px}
+  .st h3{font-size:19px; font-weight:800; margin:0 0 10px}
+  .st p{font-size:14px; color:var(--dim); line-height:1.9; margin:0}
+  @media (max-width:760px){.steps{grid-template-columns:1fr}}
+
+  /* cta */
+  .cta-sec .in{padding-top:clamp(80px,13vh,150px); padding-bottom:clamp(80px,13vh,150px); text-align:center}
+  .cta-sec h2{font-size:clamp(38px,6.4vw,84px); font-weight:800; letter-spacing:-.03em; margin:0 0 22px; text-wrap:balance}
+  .cta-sec p{color:var(--dim); font-size:16px; margin:0 0 40px}
+
+  footer{border-top:1px solid var(--line)}
+  .foot-in{
+    padding-top:34px; padding-bottom:34px;
+    display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;
+    font-size:13.5px; color:var(--faint);
+  }
+  footer .links{display:flex; gap:26px}
+  footer a:hover{color:var(--ink)}
+
+  @media (prefers-reduced-motion:reduce){
+    [data-reveal]{opacity:1; transform:none; transition:none}
+    html{scroll-behavior:auto}
+  }
+</style>
+
+<nav>
+  <div class="wrap nav-in">
+    <a class="logo" href="#">Sub<b>2</b>API</a>
+    <div class="nav-r">
+      <a href="#vals">能力</a>
+      <a href="#cmp">对比</a>
+      <a href="#">文档</a>
+      <a href="#">用量查询</a>
+      <a href="#">登录</a>
+      <a class="nav-cta" href="#">免费注册</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero wrap">
+  <div class="hero-grid">
+    <div>
+      <div class="eyebrow">开源 · 订阅转 API 网关</div>
+      <h1 data-reveal>一个密钥，<br><span class="cob">畅用所有模型</span>。</h1>
+      <p class="hero-sub" data-reveal>把订阅账号变成稳定的生产级 API。统一接入主流模型，SDK 零改动，用多少付多少。</p>
+      <div class="ctas" data-reveal>
+        <a class="btn btn-ink" href="#">免费注册</a>
+        <a class="btn btn-line" href="#vals">了解能力</a>
+      </div>
+    </div>
+    <aside class="hero-side" data-reveal>
+      <div class="cap">已支持</div>
+      <div class="pv">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"/></svg>
+        <span>Claude</span><i>Anthropic</i>
+      </div>
+      <div class="pv">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.55 10.004a5.416 5.416 0 00-.478-4.501c-1.217-2.09-3.662-3.166-6.05-2.66A5.59 5.59 0 0010.831 1C8.39.995 6.224 2.546 5.473 4.838A5.553 5.553 0 001.76 7.496a5.487 5.487 0 00.691 6.5 5.416 5.416 0 00.477 4.502c1.217 2.09 3.662 3.165 6.05 2.66A5.586 5.586 0 0013.168 23c2.443.006 4.61-1.546 5.361-3.84a5.553 5.553 0 003.715-2.66 5.488 5.488 0 00-.693-6.497v.001zm-8.381 11.558a4.199 4.199 0 01-2.675-.954c.034-.018.093-.05.132-.074l4.44-2.53a.71.71 0 00.364-.623v-6.176l1.877 1.069c.02.01.033.029.036.05v5.115c-.003 2.274-1.87 4.118-4.174 4.123zM4.192 17.78a4.059 4.059 0 01-.498-2.763c.032.02.09.055.131.078l4.44 2.53c.225.13.504.13.73 0l5.42-3.088v2.138a.068.068 0 01-.027.057L9.9 19.288c-1.999 1.136-4.552.46-5.707-1.51h-.001zM3.023 8.216A4.15 4.15 0 015.198 6.41l-.002.151v5.06a.711.711 0 00.364.624l5.42 3.087-1.876 1.07a.067.067 0 01-.063.005l-4.489-2.559c-1.995-1.14-2.679-3.658-1.53-5.63h.001zm15.417 3.54l-5.42-3.088L14.896 7.6a.067.067 0 01.063-.006l4.489 2.557c1.998 1.14 2.683 3.662 1.529 5.633a4.163 4.163 0 01-2.174 1.807V12.38a.71.71 0 00-.363-.623zm1.867-2.773a6.04 6.04 0 00-.132-.078l-4.44-2.53a.731.731 0 00-.729 0l-5.42 3.088V7.325a.068.068 0 01.027-.057L14.1 4.713c2-1.137 4.555-.46 5.707 1.513.487.833.664 1.809.499 2.757h.001zm-11.741 3.81l-1.877-1.068a.065.065 0 01-.036-.051V6.559c.001-2.277 1.873-4.122 4.181-4.12.976 0 1.92.338 2.671.954-.034.018-.092.05-.131.073l-4.44 2.53a.71.71 0 00-.365.623l-.003 6.173v.002zm1.02-2.168L12 9.25l2.414 1.375v2.75L12 14.75l-2.415-1.375v-2.75z"/></svg>
+        <span>GPT</span><i>OpenAI</i>
+      </div>
+      <div class="pv">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z"/></svg>
+        <span>Gemini</span><i>Google</i>
+      </div>
+      <div class="pv">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"/></svg>
+        <span>Grok</span><i>xAI</i>
+      </div>
+      <div class="pv"><span style="color:var(--faint)">更多模型</span><i>即将推出</i></div>
+    </aside>
+  </div>
+</header>
+
+<div class="statement">
+  <div class="wrap in">
+    <p data-reveal>每个 AI 服务都要单独订阅、单独管理，<b>费用越来越多、账号越来越乱。</b>Sub2API 把它们收敛成一条稳定的 API。</p>
+  </div>
+</div>
+
+<section class="vals wrap" id="vals">
+  <div class="vrow" data-reveal>
+    <h3>统一入口</h3>
+    <p>一个 API Key 调用全部已接入模型，兼容官方 SDK 与 Claude Code、Codex 等工具。接入只需把 <code class="mono">base_url</code> 指向网关，其余代码零改动。</p>
+  </div>
+  <div class="vrow" data-reveal>
+    <h3>智能调度</h3>
+    <p>多账号池按健康度与负载选择上游，支持粘性会话。触发限流自动切换与负载均衡，单账号的不稳定不会传导到业务。</p>
+  </div>
+  <div class="vrow" data-reveal>
+    <h3>精确计费</h3>
+    <p>Token 级用量追踪与成本计算，输入、输出、缓存分别计量。支持配额上限、限速与按 Key 明细查询，团队用量一目了然。</p>
+  </div>
+  <div class="vrow" data-reveal>
+    <h3>自助充值</h3>
+    <p>内置支付系统，支持易支付、支付宝、微信与 Stripe。用户自助充值到账，无需独立部署支付服务。</p>
+  </div>
+</section>
+
+<div class="ledger-sec" id="cmp">
+  <div class="wrap in">
+    <h2 data-reveal>为什么不直接用官方订阅？</h2>
+    <div class="ledger" data-reveal>
+      <div class="led">
+        <h3>官方订阅</h3>
+        <ul>
+          <li>固定月费，用不完也照付</li>
+          <li>每个服务商单独订阅、单独管理</li>
+          <li>单账号容易触发限制</li>
+          <li>无法限制团队成员用量</li>
+        </ul>
+      </div>
+      <div class="led us">
+        <h3>SUB2API</h3>
+        <ul>
+          <li>按量付费，用多少付多少</li>
+          <li>一个密钥，多模型随意切换</li>
+          <li>账号池自动切换，稳定不掉线</li>
+          <li>配额、明细、限速全都可控</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="steps-sec">
+  <div class="wrap in">
+    <h2 data-reveal>三步接入</h2>
+    <div class="steps" data-reveal>
+      <div class="st">
+        <div class="n mono">STEP 1</div>
+        <h3>注册账号</h3>
+        <p>创建账号并登录控制台，注册即得免费试用额度。</p>
+      </div>
+      <div class="st">
+        <div class="n mono">STEP 2</div>
+        <h3>创建 API Key</h3>
+        <p>控制台一键生成专属密钥，配额与限速按需设置。</p>
+      </div>
+      <div class="st">
+        <div class="n mono">STEP 3</div>
+        <h3>替换 Base URL</h3>
+        <p>请求地址指向网关，SDK 与工具链其余部分零改动。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="cta-sec">
+  <div class="wrap in">
+    <h2 data-reveal>准备好开始了吗？</h2>
+    <p data-reveal>注册即可获得免费试用额度，体验一站式 AI 服务。</p>
+    <div data-reveal><a class="btn btn-ink" href="#">免费注册</a></div>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap foot-in">
+    <span>Sub2API · 开源项目</span>
+    <div class="links">
+      <a href="https://github.com/Wei-Shaw/sub2api">GitHub</a>
+      <a href="#">文档</a>
+      <a href="#">用量查询</a>
+    </div>
+    <span>© 2026 Sub2API</span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('on'); io.unobserve(e.target);} });
+  },{threshold:.18});
+  document.querySelectorAll('[data-reveal]').forEach(function(el){ io.observe(el); });
+})();
+</script>

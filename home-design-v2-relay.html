@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sub2API 首页设计稿 V2 中继站</title>
+<style>
+  :root{
+    --bg:#0a0e13; --panel:#0f151c; --panel-2:#121a23;
+    --fg:#e6edf3; --dim:#8b98a5; --faint:#55606b;
+    --line:rgba(230,237,243,.09);
+    --green:#4ddb9a; --green-dim:rgba(77,219,154,.14);
+    --ease:cubic-bezier(.16,1,.3,1);
+    color-scheme:dark;
+  }
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:var(--bg); color:var(--fg);
+    font-family:"PingFang SC","HarmonyOS Sans SC","MiSans","Noto Sans SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  ::selection{background:var(--green); color:#04140c}
+  .mono{font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace}
+  a{color:inherit; text-decoration:none}
+  [data-reveal]{opacity:0; transform:translateY(28px); transition:opacity .8s var(--ease), transform .8s var(--ease)}
+  [data-reveal].on{opacity:1; transform:none}
+
+  nav{
+    position:sticky; top:0; z-index:50; height:62px;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 clamp(20px,4vw,52px);
+    background:rgba(10,14,19,.82); backdrop-filter:blur(14px);
+    border-bottom:1px solid var(--line);
+  }
+  .logo{font-weight:800; font-size:16.5px}
+  .logo b{color:var(--green); font-weight:800}
+  .nav-r{display:flex; align-items:center; gap:clamp(14px,2.2vw,32px); font-size:13.5px; color:var(--dim)}
+  .nav-r a{transition:color .3s}
+  .nav-r a:hover{color:var(--fg)}
+  .nav-cta{
+    color:#06130c; background:var(--green); padding:8px 18px; border-radius:8px; font-weight:700;
+    transition:filter .3s, transform .15s;
+  }
+  .nav-cta:hover{filter:brightness(1.1)}
+  .nav-cta:active{transform:scale(.97)}
+  @media (max-width:720px){.nav-r a:not(.nav-cta){display:none}}
+
+  /* hero */
+  .hero{
+    display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);
+    gap:clamp(30px,4vw,64px); align-items:center;
+    padding:clamp(56px,9vh,110px) clamp(20px,4vw,52px);
+    max-width:1360px; margin:0 auto; min-height:calc(100dvh - 62px);
+  }
+  .kicker{
+    display:inline-flex; align-items:center; gap:8px;
+    font-size:12.5px; letter-spacing:.14em; color:var(--green);
+    background:var(--green-dim); border:1px solid rgba(77,219,154,.25);
+    padding:6px 13px; border-radius:999px; margin-bottom:26px;
+  }
+  h1{
+    font-size:clamp(36px,4.6vw,62px); line-height:1.18; font-weight:800; letter-spacing:-.02em; margin:0 0 22px;
+  }
+  h1 em{font-style:normal; color:var(--green)}
+  .sub{font-size:clamp(15px,1.5vw,17.5px); line-height:1.95; color:var(--dim); max-width:30em; margin:0 0 36px}
+  .ctas{display:flex; gap:14px; flex-wrap:wrap}
+  .btn{
+    display:inline-block; padding:14px 30px; border-radius:10px; font-size:15px; font-weight:700;
+    transition:filter .3s, border-color .3s, transform .15s;
+  }
+  .btn:active{transform:scale(.97)}
+  .btn-p{background:var(--green); color:#06130c}
+  .btn-p:hover{filter:brightness(1.1)}
+  .btn-s{border:1px solid var(--line); color:var(--fg)}
+  .btn-s:hover{border-color:var(--dim)}
+
+  /* terminal */
+  .term{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden;
+    box-shadow:0 30px 80px rgba(0,0,0,.45);
+  }
+  .term-bar{
+    display:flex; align-items:center; gap:8px; padding:12px 16px; border-bottom:1px solid var(--line);
+    background:var(--panel-2);
+  }
+  .term-bar i{width:11px; height:11px; border-radius:50%; background:var(--faint); opacity:.5}
+  .term-bar span{margin-left:8px; font-size:12px; color:var(--faint); letter-spacing:.06em}
+  .term-body{padding:22px 24px; font-size:13.5px; line-height:2.05; min-height:290px; overflow-x:auto; white-space:pre}
+  .term-body .c{color:var(--faint)}
+  .term-body .del{color:#c97a86}
+  .term-body .add{color:var(--green)}
+  .term-body .k{color:#7db3e8}
+  .caret{display:inline-block; width:8px; height:16px; background:var(--green); vertical-align:-3px; animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  @media (max-width:900px){.hero{grid-template-columns:1fr; min-height:0}.term{margin-top:8px}}
+
+  /* log stream */
+  .logs{border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:var(--panel)}
+  .logs-head{
+    display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:10px;
+    padding:26px clamp(20px,4vw,52px) 0; max-width:1360px; margin:0 auto;
+  }
+  .logs-head h2{font-size:clamp(21px,2.4vw,28px); font-weight:800; margin:0}
+  .logs-head span{font-size:12.5px; color:var(--faint)}
+  #logwin{
+    max-width:1360px; margin:0 auto; padding:16px clamp(20px,4vw,52px) 30px;
+    font-size:12.8px; line-height:2.1; height:216px; overflow:hidden; position:relative;
+  }
+  #logwin::after{content:""; position:absolute; inset:auto 0 0 0; height:70px; background:linear-gradient(to top,var(--panel),transparent)}
+  .log-line{display:flex; gap:18px; white-space:nowrap; opacity:0; transform:translateY(-4px); animation:login .5s var(--ease) forwards}
+  @keyframes login{to{opacity:1; transform:none}}
+  .log-line .ts{color:var(--faint)}
+  .log-line .ok{color:var(--green)}
+  .log-line .warn{color:#e8c468}
+  .log-line .path{color:#7db3e8}
+
+  /* capability bento */
+  section{padding:clamp(80px,12vh,140px) clamp(20px,4vw,52px); max-width:1360px; margin:0 auto}
+  .sec-h{font-size:clamp(28px,3.6vw,44px); font-weight:800; letter-spacing:-.015em; margin:0 0 14px}
+  .sec-p{color:var(--dim); font-size:15.5px; margin:0 0 clamp(36px,6vh,60px); max-width:38em; line-height:1.9}
+  .bento{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px}
+  .cell{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:26px 26px 24px; transition:border-color .35s, background .35s;
+    /* grid item 的 min-width 默认是 auto（不是 0），会被里面 .routes 那段
+       white-space:nowrap 的日志按内容撑开：轨道先变宽，overflow-x:auto 永远不触发，
+       整页跟着横向溢出（390px 设备实测页面宽 674px）。滚动必须关在 .routes 内部。 */
+    min-width:0;
+  }
+  .cell:hover{border-color:rgba(77,219,154,.4)}
+  .cell h3{font-size:17px; font-weight:700; margin:0 0 10px}
+  .cell p{font-size:13.8px; color:var(--dim); line-height:1.9; margin:0}
+  .cell.wide{grid-column:span 2}
+  .cell.hl{background:linear-gradient(145deg, rgba(77,219,154,.12), var(--panel) 55%)}
+  .cell.blue{background:linear-gradient(145deg, rgba(125,179,232,.10), var(--panel) 55%)}
+  .cell .meter{margin-top:20px; display:flex; gap:5px; align-items:flex-end; height:44px}
+  .cell .meter i{flex:1; background:rgba(77,219,154,.35); border-radius:2px 2px 0 0; animation:pulse 2.4s ease-in-out infinite}
+  .cell .meter i:nth-child(2n){animation-delay:.4s}
+  .cell .meter i:nth-child(3n){animation-delay:.9s}
+  @keyframes pulse{0%,100%{transform:scaleY(.55)}50%{transform:scaleY(1)}}
+  .cell .meter i{transform-origin:bottom}
+  .routes{margin-top:18px; font-size:12.3px; line-height:2.2; color:var(--dim); overflow-x:auto; white-space:nowrap}
+  .routes .ok{color:var(--green)}
+  .routes .dim{color:var(--faint)}
+  @media (max-width:960px){.bento{grid-template-columns:repeat(2,minmax(0,1fr))}.cell.wide{grid-column:span 2}}
+  @media (max-width:640px){.bento{grid-template-columns:minmax(0,1fr)}.cell.wide{grid-column:span 1}}
+
+  /* steps horizontal */
+  .steps{display:grid; grid-template-columns:repeat(3,1fr); gap:clamp(18px,3vw,40px)}
+  .sstep{border-top:2px solid var(--line); padding-top:22px; position:relative}
+  .sstep::before{
+    content:""; position:absolute; top:-2px; left:0; height:2px; width:0; background:var(--green);
+    transition:width 1s var(--ease) .2s;
+  }
+  .sstep.on::before{width:100%}
+  .sstep .n{font-size:13px; color:var(--green); margin-bottom:14px; letter-spacing:.1em}
+  .sstep h3{font-size:18.5px; font-weight:700; margin:0 0 10px}
+  .sstep p{font-size:13.8px; color:var(--dim); line-height:1.9; margin:0}
+  @media (max-width:760px){.steps{grid-template-columns:1fr}}
+
+  /* cta */
+  .cta-band{
+    border-top:1px solid var(--line);
+    background:radial-gradient(70% 120% at 50% 0%, rgba(77,219,154,.10), transparent 60%);
+  }
+  .cta-in{max-width:1360px; margin:0 auto; padding:clamp(80px,12vh,130px) clamp(20px,4vw,52px); text-align:center}
+  .cta-in h2{font-size:clamp(32px,4.6vw,56px); font-weight:800; letter-spacing:-.02em; margin:0 0 18px}
+  .cta-in p{color:var(--dim); margin:0 0 36px; font-size:15.5px}
+
+  footer{
+    border-top:1px solid var(--line); padding:34px clamp(20px,4vw,52px);
+    display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;
+    font-size:13px; color:var(--faint); max-width:1360px; margin:0 auto;
+  }
+  footer .links{display:flex; gap:24px}
+  footer a:hover{color:var(--fg)}
+
+  @media (prefers-reduced-motion:reduce){
+    [data-reveal]{opacity:1; transform:none; transition:none}
+    .caret,.cell .meter i{animation:none}
+    .sstep::before{transition:none}
+    html{scroll-behavior:auto}
+  }
+</style>
+
+<nav>
+  <a class="logo" href="#">SUB<b>2</b>API</a>
+  <div class="nav-r">
+    <a href="#caps">能力</a>
+    <a href="#steps">接入</a>
+    <a href="#">文档</a>
+    <a href="#">用量查询</a>
+    <a href="#">登录</a>
+    <a class="nav-cta" href="#">免费注册</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div>
+    <div class="kicker mono">OPEN SOURCE GATEWAY</div>
+    <h1>把订阅账号，<br>变成<em>生产级 API</em>。</h1>
+    <p class="sub">Sub2API 是开源的订阅转 API 网关。一个密钥统一接入 Claude、GPT、Gemini 与 Grok，多账号池智能调度，Token 级精确计费。</p>
+    <div class="ctas">
+      <a class="btn btn-p" href="#">免费注册</a>
+      <a class="btn btn-s" href="#steps">查看接入方式</a>
+    </div>
+  </div>
+  <div class="term" data-reveal>
+    <div class="term-bar"><i></i><i></i><i></i><span class="mono">app.py</span></div>
+    <div class="term-body mono" id="term"></div>
+  </div>
+</header>
+
+<div class="logs">
+  <div class="logs-head">
+    <h2>网关正在做的事</h2>
+    <span class="mono">调度过程示意</span>
+  </div>
+  <div id="logwin" class="mono" aria-hidden="true"></div>
+</div>
+
+<section id="caps">
+  <h2 class="sec-h">一层网关，替你扛下所有杂事</h2>
+  <p class="sec-p">上游账号的申请、轮换、限流、计费，全部收敛到网关内部。业务侧只看到一个稳定的 OpenAI 兼容接口。</p>
+  <div class="bento">
+    <div class="cell wide hl" data-reveal>
+      <h3>智能调度</h3>
+      <p>按健康度与负载在账号池中选择上游，支持粘性会话。某个账号触发限流时自动切换，请求不中断。</p>
+      <div class="routes mono">
+        req_a41 <span class="dim">→</span> pool/claude <span class="dim">→</span> account-07 <span class="ok">200 · 1.2s</span><br>
+        req_a42 <span class="dim">→</span> pool/claude <span class="dim">→</span> account-03 <span class="dim">(rate-limited, 已切换)</span> <span class="dim">→</span> account-11 <span class="ok">200 · 1.4s</span>
+      </div>
+    </div>
+    <div class="cell" data-reveal>
+      <h3>Token 级计费</h3>
+      <p>输入、输出、缓存分别计量，成本精确到每一次请求，支持按用户与按 Key 查明细。</p>
+      <div class="meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+    <div class="cell" data-reveal>
+      <h3>并发与限速</h3>
+      <p>用户级、账号级并发限制，请求与 Token 速率均可配置，防止单个成员打爆额度。</p>
+    </div>
+    <div class="cell blue" data-reveal>
+      <h3>配额控制</h3>
+      <p>为每个 Key 设置总额与周期限额，到期自动重置，团队用量不再失控。</p>
+    </div>
+    <div class="cell" data-reveal>
+      <h3>内置支付</h3>
+      <p>支持易支付、支付宝、微信与 Stripe，用户自助充值，无需独立部署支付服务。</p>
+    </div>
+  </div>
+</section>
+
+<section id="steps">
+  <h2 class="sec-h">三步接入</h2>
+  <p class="sec-p">不改代码结构，只换一行地址。</p>
+  <div class="steps">
+    <div class="sstep" data-reveal>
+      <div class="n mono">STEP 1</div>
+      <h3>注册账号</h3>
+      <p>创建账号并登录控制台，注册即得免费试用额度。</p>
+    </div>
+    <div class="sstep" data-reveal>
+      <div class="n mono">STEP 2</div>
+      <h3>创建 API Key</h3>
+      <p>控制台一键生成专属密钥，配额与限速按需设置。</p>
+    </div>
+    <div class="sstep" data-reveal>
+      <div class="n mono">STEP 3</div>
+      <h3>替换 Base URL</h3>
+      <p>请求地址指向网关，SDK 与工具链其余部分零改动。</p>
+    </div>
+  </div>
+</section>
+
+<div class="cta-band">
+  <div class="cta-in">
+    <h2 data-reveal>准备好开始了吗？</h2>
+    <p data-reveal>注册即可获得免费试用额度，体验一站式 AI 服务。</p>
+    <div data-reveal><a class="btn btn-p" href="#">免费注册</a></div>
+  </div>
+</div>
+
+<footer>
+  <span>Sub2API · 开源项目</span>
+  <div class="links">
+    <a href="https://github.com/Wei-Shaw/sub2api">GitHub</a>
+    <a href="#">文档</a>
+    <a href="#">用量查询</a>
+  </div>
+  <span>© 2026 Sub2API</span>
+</footer>
+
+<script>
+(function(){
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* reveals */
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('on'); io.unobserve(e.target);} });
+  },{threshold:.2});
+  document.querySelectorAll('[data-reveal],.sstep').forEach(function(el){ io.observe(el); });
+
+  /* terminal typewriter */
+  var lines=[
+    {h:'<span class="c"># 只改一行，其余零改动</span>'},
+    {h:'<span class="k">from</span> openai <span class="k">import</span> OpenAI'},
+    {h:''},
+    {h:'client = OpenAI('},
+    {h:'    api_key=<span class="add">"sk-sub2api-****"</span>,'},
+    {h:'    <span class="del">base_url="https://api.openai.com/v1"</span>'},
+    {h:'    <span class="add">base_url="https://your-gateway.host/v1"</span>'},
+    {h:')'},
+    {h:''},
+    {h:'<span class="c"># claude-sonnet · gpt · gemini · grok 随意切换</span>'},
+    {h:'resp = client.chat.completions.create('},
+    {h:'    model=<span class="add">"claude-sonnet-4-5"</span>, ...)'},
+  ];
+  var term=document.getElementById('term');
+  if (reduce){
+    term.innerHTML = lines.map(function(l){return l.h;}).join('\n');
+  } else {
+    var li=0;
+    function typeLine(){
+      if(li>=lines.length){ term.innerHTML=term.innerHTML.replace(/<span class="caret"><\/span>/,''); term.insertAdjacentHTML('beforeend','<span class="caret"></span>'); return; }
+      var cur=term.innerHTML.replace(/<span class="caret"><\/span>/,'');
+      term.innerHTML = cur + lines[li].h + '\n' + '<span class="caret"></span>';
+      li++;
+      setTimeout(typeLine, lines[li-1].h===''?110:190);
+    }
+    setTimeout(typeLine,400);
+  }
+
+  /* log stream */
+  var win=document.getElementById('logwin');
+  var pools=['claude','gpt','gemini','grok'];
+  var t0=Date.now();
+  function pad(n,w){ n=String(n); while(n.length<w) n='0'+n; return n; }
+  function stamp(){ var d=new Date(); return pad(d.getHours(),2)+':'+pad(d.getMinutes(),2)+':'+pad(d.getSeconds(),2); }
+  var seq=4100;
+  function addLog(){
+    var pool=pools[Math.floor(Math.random()*pools.length)];
+    var acc='account-'+pad(1+Math.floor(Math.random()*16),2);
+    var lat=(0.4+Math.random()*1.8).toFixed(1);
+    var limited=Math.random()<0.16;
+    var html;
+    if(limited){
+      var acc2='account-'+pad(1+Math.floor(Math.random()*16),2);
+      html='<span class="ts">'+stamp()+'</span><span>req_'+(seq++)+'</span><span class="path">pool/'+pool+'</span>'
+          +'<span class="warn">'+acc+' 限流</span><span>已切换 → '+acc2+'</span><span class="ok">200 · '+lat+'s</span>';
+    } else {
+      html='<span class="ts">'+stamp()+'</span><span>req_'+(seq++)+'</span><span class="path">pool/'+pool+'</span>'
+          +'<span>'+acc+'</span><span class="ok">200 · '+lat+'s</span>';
+    }
+    var div=document.createElement('div'); div.className='log-line'; div.innerHTML=html;
+    win.insertBefore(div, win.firstChild);
+    while(win.children.length>10) win.removeChild(win.lastChild);
+  }
+  if(!reduce){
+    for(var i=0;i<6;i++) addLog();
+    var logTimer=setInterval(addLog, 1400);
+    var lio=new IntersectionObserver(function(es){
+      if(es[0].isIntersecting){ if(!logTimer) logTimer=setInterval(addLog,1400); }
+      else { clearInterval(logTimer); logTimer=null; }
+    });
+    lio.observe(win);
+  } else {
+    for(var j=0;j<8;j++) addLog();
+  }
+})();
+</script>

@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sub2API 首页设计稿 V1 黑域</title>
+<style>
+  :root{
+    --bg:#060607; --bg-2:#0b0b0d;
+    --fg:#f4f4f2; --dim:#94949c; --faint:#5a5a62;
+    --line:rgba(255,255,255,.09);
+    --accent:#5b7cfa;
+    --ease:cubic-bezier(.16,1,.3,1);
+    color-scheme:dark;
+  }
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:var(--bg); color:var(--fg);
+    font-family:"PingFang SC","HarmonyOS Sans SC","MiSans","Noto Sans SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  ::selection{background:var(--accent); color:#fff}
+  .mono{font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace}
+  a{color:inherit; text-decoration:none}
+
+  /* ---------- loading overlay ---------- */
+  #loading{
+    position:fixed; inset:0; z-index:90; background:var(--bg);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:28px;
+    transition:transform .9s var(--ease), visibility .9s;
+  }
+  #loading.done{transform:translateY(-101%); visibility:hidden}
+  .load-line{
+    font-size:clamp(20px,3.2vw,34px); font-weight:600; letter-spacing:.08em; color:var(--fg);
+    overflow:hidden;
+  }
+  .load-line span{display:inline-block; transform:translateY(110%); animation:rise .8s var(--ease) forwards}
+  .load-line span:nth-child(2){animation-delay:.05s}.load-line span:nth-child(3){animation-delay:.1s}
+  .load-line span:nth-child(4){animation-delay:.15s}.load-line span:nth-child(5){animation-delay:.2s}
+  .load-line span:nth-child(6){animation-delay:.25s}.load-line span:nth-child(7){animation-delay:.3s}
+  .load-line span:nth-child(8){animation-delay:.35s}.load-line span:nth-child(9){animation-delay:.4s}
+  .load-line span:nth-child(10){animation-delay:.45s}.load-line span:nth-child(11){animation-delay:.5s}
+  @keyframes rise{to{transform:translateY(0)}}
+  #load-num{font-size:13px; color:var(--faint); letter-spacing:.2em}
+
+  /* ---------- nav ---------- */
+  nav{
+    position:fixed; top:0; left:0; right:0; z-index:50; height:64px;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 clamp(20px,4vw,56px);
+    background:linear-gradient(to bottom, rgba(6,6,7,.85), rgba(6,6,7,0));
+  }
+  .nav-logo{font-weight:800; font-size:17px; letter-spacing:.02em}
+  .nav-logo em{font-style:normal; color:var(--accent)}
+  .nav-links{display:flex; align-items:center; gap:clamp(16px,2.5vw,36px); font-size:13.5px; color:var(--dim)}
+  .nav-links a{transition:color .3s}
+  .nav-links a:hover{color:var(--fg)}
+  .nav-cta{
+    color:var(--fg); border:1px solid var(--line); padding:9px 20px;
+    transition:background .3s,color .3s,border-color .3s;
+  }
+  .nav-cta:hover{background:var(--fg); color:var(--bg); border-color:var(--fg)}
+  @media (max-width:700px){.nav-links a:not(.nav-cta){display:none}}
+
+  /* ---------- hero ---------- */
+  .hero{position:relative; min-height:100dvh; display:flex; align-items:flex-end; overflow:hidden}
+  #wave{position:absolute; inset:0; width:100%; height:100%}
+  .hero-inner{
+    position:relative; z-index:2; width:100%;
+    padding:0 clamp(20px,4vw,56px) clamp(48px,9vh,96px);
+  }
+  .hero-badge{
+    display:inline-block; font-size:12px; letter-spacing:.18em; color:var(--dim);
+    border:1px solid var(--line); padding:7px 14px; margin-bottom:30px;
+  }
+  h1{
+    font-size:clamp(46px,9.5vw,132px); line-height:1.04; font-weight:800;
+    letter-spacing:-.02em; margin:0 0 28px;
+  }
+  h1 .row{display:block; overflow:hidden}
+  h1 .ch{display:inline-block; transform:translateY(112%); transition:transform 1s var(--ease)}
+  .in h1 .ch{transform:translateY(0)}
+  h1 .thin{font-weight:300; color:var(--dim)}
+  .hero-sub{
+    max-width:34em; font-size:clamp(15px,1.6vw,18px); line-height:1.9; color:var(--dim);
+    margin-bottom:40px; opacity:0; transform:translateY(18px); transition:opacity .9s var(--ease) .55s, transform .9s var(--ease) .55s;
+  }
+  .in .hero-sub{opacity:1; transform:none}
+  .hero-ctas{display:flex; gap:14px; flex-wrap:wrap; opacity:0; transform:translateY(18px); transition:opacity .9s var(--ease) .7s, transform .9s var(--ease) .7s}
+  .in .hero-ctas{opacity:1; transform:none}
+  .btn{
+    position:relative; display:inline-block; overflow:hidden;
+    padding:15px 34px; font-size:15px; font-weight:600; letter-spacing:.04em;
+  }
+  .btn-solid{background:var(--fg); color:var(--bg)}
+  .btn-solid::after{
+    content:""; position:absolute; inset:0; background:var(--accent);
+    transform:translateY(101%); transition:transform .4s var(--ease);
+  }
+  .btn-solid:hover::after{transform:translateY(0)}
+  .btn-solid .t{position:relative; z-index:1; transition:color .3s}
+  .btn-solid:hover .t{color:#fff}
+  .btn-ghost{border:1px solid var(--line); color:var(--fg); transition:border-color .3s, background .3s}
+  .btn-ghost:hover{border-color:var(--fg)}
+  .btn:active{transform:scale(.98)}
+
+  /* ---------- provider band ---------- */
+  .providers{
+    border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+    padding:34px clamp(20px,4vw,56px);
+    display:flex; align-items:center; gap:clamp(28px,5vw,72px); flex-wrap:wrap;
+  }
+  .providers .cap{font-size:12px; letter-spacing:.2em; color:var(--faint)}
+  .brand{display:flex; align-items:center; gap:12px; color:var(--dim); transition:color .35s}
+  .brand:hover{color:var(--fg)}
+  .brand svg{width:26px; height:26px}
+  .brand span{font-size:14px; font-weight:600; letter-spacing:.03em}
+  .brand.soon{color:var(--faint)}
+  .brand.soon i{font-style:normal; font-size:11px; border:1px solid var(--line); padding:2px 7px; margin-left:2px}
+
+  /* ---------- sections ---------- */
+  section{padding:clamp(90px,14vh,170px) clamp(20px,4vw,56px)}
+  .sec-title{
+    font-size:clamp(30px,5vw,58px); font-weight:800; letter-spacing:-.015em; line-height:1.15;
+    margin:0 0 clamp(40px,7vh,80px); max-width:16em;
+  }
+  .sec-title .thin{font-weight:300; color:var(--dim)}
+  [data-reveal]{opacity:0; transform:translateY(34px); transition:opacity .9s var(--ease), transform .9s var(--ease)}
+  [data-reveal].on{opacity:1; transform:none}
+
+  /* value grid: asymmetric */
+  .vals{display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:1px; background:var(--line); border:1px solid var(--line)}
+  .val{background:var(--bg); padding:clamp(28px,3.5vw,52px)}
+  .val .num{font-size:13px; color:var(--accent); letter-spacing:.15em; margin-bottom:60px}
+  .val h3{font-size:clamp(20px,2.2vw,27px); font-weight:700; margin:0 0 16px}
+  .val p{font-size:14.5px; line-height:1.95; color:var(--dim); margin:0; max-width:26em}
+  .val:first-child{background:var(--bg-2)}
+  .val:first-child .num{color:var(--fg)}
+  .val:first-child{position:relative; overflow:hidden}
+  .val:first-child::before{
+    content:""; position:absolute; right:-70px; top:-70px; width:220px; height:220px; border-radius:50%;
+    background:radial-gradient(circle, rgba(91,124,250,.28), transparent 65%);
+  }
+  @media (max-width:900px){.vals{grid-template-columns:1fr}}
+
+  /* marquee */
+  .marquee{border-top:1px solid var(--line); border-bottom:1px solid var(--line); overflow:hidden; padding:26px 0; white-space:nowrap}
+  .marquee-track{display:inline-block; animation:slide 26s linear infinite}
+  .marquee span{
+    font-size:clamp(40px,6vw,84px); font-weight:800; letter-spacing:-.01em;
+    color:transparent; -webkit-text-stroke:1px rgba(255,255,255,.22); padding:0 .35em;
+  }
+  .marquee b{font-weight:300; color:var(--faint); font-size:clamp(24px,3vw,44px); vertical-align:middle}
+  @keyframes slide{to{transform:translateX(-50%)}}
+
+  /* steps */
+  .steps{max-width:1100px}
+  .step{
+    display:grid; grid-template-columns:110px 1fr auto; gap:clamp(18px,3vw,48px); align-items:baseline;
+    padding:clamp(30px,4.5vh,46px) 0; border-top:1px solid var(--line);
+  }
+  .step:last-of-type{border-bottom:1px solid var(--line)}
+  .step .idx{font-size:clamp(28px,3.4vw,44px); font-weight:300; color:var(--faint)}
+  .step h3{font-size:clamp(20px,2.4vw,30px); font-weight:700; margin:0 0 10px}
+  .step p{font-size:14.5px; color:var(--dim); margin:0; line-height:1.9}
+  .step .tag{font-size:12px; letter-spacing:.14em; color:var(--faint)}
+  .code-note{
+    margin-top:34px; padding:22px 26px; background:var(--bg-2); border:1px solid var(--line);
+    font-size:13.5px; line-height:2; color:var(--dim); overflow-x:auto;
+  }
+  .code-note .del{color:#8a5a62; text-decoration:line-through}
+  .code-note .add{color:#9db8ff}
+  @media (max-width:700px){.step{grid-template-columns:1fr}.step .tag{display:none}}
+
+  /* comparison */
+  .cmp{display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line); border:1px solid var(--line); max-width:1100px}
+  .cmp-col{background:var(--bg); padding:clamp(28px,3.5vw,48px)}
+  .cmp-col.us{background:var(--bg-2)}
+  .cmp-col h3{font-size:15px; letter-spacing:.12em; margin:0 0 34px; color:var(--faint); font-weight:600}
+  .cmp-col.us h3{color:var(--accent)}
+  .cmp-col ul{margin:0; padding:0}
+  .cmp-col li{font-size:clamp(15px,1.6vw,17.5px); line-height:1.8; padding:15px 0; color:var(--dim)}
+  .cmp-col.us li{color:var(--fg)}
+  .cmp-col li + li{border-top:1px solid var(--line)}
+  @media (max-width:760px){.cmp{grid-template-columns:1fr}}
+
+  /* cta */
+  .cta{text-align:left; border-top:1px solid var(--line)}
+  .cta h2{
+    font-size:clamp(44px,8vw,110px); font-weight:800; letter-spacing:-.02em; line-height:1.08; margin:0 0 30px;
+  }
+  .cta h2 .thin{font-weight:300; color:var(--dim)}
+  .cta p{color:var(--dim); font-size:15.5px; margin:0 0 42px}
+
+  footer{
+    border-top:1px solid var(--line); padding:38px clamp(20px,4vw,56px);
+    display:flex; align-items:center; justify-content:space-between; gap:18px; flex-wrap:wrap;
+    font-size:13px; color:var(--faint);
+  }
+  footer .links{display:flex; gap:26px}
+  footer a{transition:color .3s}
+  footer a:hover{color:var(--fg)}
+
+  @media (prefers-reduced-motion:reduce){
+    #loading{display:none}
+    h1 .ch,.hero-sub,.hero-ctas{transform:none!important; opacity:1!important; transition:none}
+    [data-reveal]{opacity:1; transform:none; transition:none}
+    .marquee-track{animation:none}
+    html{scroll-behavior:auto}
+  }
+</style>
+
+<div id="loading" aria-hidden="true">
+  <div class="load-line" id="load-line"></div>
+  <div class="load-num mono" id="load-num">00</div>
+</div>
+
+<nav>
+  <a class="nav-logo" href="#">Sub<em>2</em>API</a>
+  <div class="nav-links">
+    <a href="#steps">接入</a>
+    <a href="#cmp">对比</a>
+    <a href="#">文档</a>
+    <a href="#">用量查询</a>
+    <a href="#">登录</a>
+    <a class="nav-cta" href="#">进入控制台</a>
+  </div>
+</nav>
+
+<header class="hero" id="hero">
+  <canvas id="wave" aria-hidden="true"></canvas>
+  <div class="hero-inner">
+    <div class="hero-badge">开源 · 订阅转 API 网关</div>
+    <h1 id="h1">
+      <span class="row" data-text="一个密钥，"></span>
+      <span class="row thin" data-text="畅用所有模型。"></span>
+    </h1>
+    <p class="hero-sub">把手里的订阅账号，变成一条稳定的生产级 API。统一接入 Claude、GPT、Gemini 与 Grok，SDK 零改动。</p>
+    <div class="hero-ctas">
+      <a class="btn btn-solid" href="#"><span class="t">免费注册</span></a>
+      <a class="btn btn-ghost" href="#steps">三步接入</a>
+    </div>
+  </div>
+</header>
+
+<div class="providers">
+  <span class="cap">已支持</span>
+  <div class="brand" title="Claude">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"/></svg>
+    <span>Claude</span>
+  </div>
+  <div class="brand" title="GPT">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.55 10.004a5.416 5.416 0 00-.478-4.501c-1.217-2.09-3.662-3.166-6.05-2.66A5.59 5.59 0 0010.831 1C8.39.995 6.224 2.546 5.473 4.838A5.553 5.553 0 001.76 7.496a5.487 5.487 0 00.691 6.5 5.416 5.416 0 00.477 4.502c1.217 2.09 3.662 3.165 6.05 2.66A5.586 5.586 0 0013.168 23c2.443.006 4.61-1.546 5.361-3.84a5.553 5.553 0 003.715-2.66 5.488 5.488 0 00-.693-6.497v.001zm-8.381 11.558a4.199 4.199 0 01-2.675-.954c.034-.018.093-.05.132-.074l4.44-2.53a.71.71 0 00.364-.623v-6.176l1.877 1.069c.02.01.033.029.036.05v5.115c-.003 2.274-1.87 4.118-4.174 4.123zM4.192 17.78a4.059 4.059 0 01-.498-2.763c.032.02.09.055.131.078l4.44 2.53c.225.13.504.13.73 0l5.42-3.088v2.138a.068.068 0 01-.027.057L9.9 19.288c-1.999 1.136-4.552.46-5.707-1.51h-.001zM3.023 8.216A4.15 4.15 0 015.198 6.41l-.002.151v5.06a.711.711 0 00.364.624l5.42 3.087-1.876 1.07a.067.067 0 01-.063.005l-4.489-2.559c-1.995-1.14-2.679-3.658-1.53-5.63h.001zm15.417 3.54l-5.42-3.088L14.896 7.6a.067.067 0 01.063-.006l4.489 2.557c1.998 1.14 2.683 3.662 1.529 5.633a4.163 4.163 0 01-2.174 1.807V12.38a.71.71 0 00-.363-.623zm1.867-2.773a6.04 6.04 0 00-.132-.078l-4.44-2.53a.731.731 0 00-.729 0l-5.42 3.088V7.325a.068.068 0 01.027-.057L14.1 4.713c2-1.137 4.555-.46 5.707 1.513.487.833.664 1.809.499 2.757h.001zm-11.741 3.81l-1.877-1.068a.065.065 0 01-.036-.051V6.559c.001-2.277 1.873-4.122 4.181-4.12.976 0 1.92.338 2.671.954-.034.018-.092.05-.131.073l-4.44 2.53a.71.71 0 00-.365.623l-.003 6.173v.002zm1.02-2.168L12 9.25l2.414 1.375v2.75L12 14.75l-2.415-1.375v-2.75z"/></svg>
+    <span>GPT</span>
+  </div>
+  <div class="brand" title="Gemini">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z"/></svg>
+    <span>Gemini</span>
+  </div>
+  <div class="brand" title="Grok">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"/></svg>
+    <span>Grok</span>
+  </div>
+  <div class="brand soon"><span>更多模型</span><i>即将推出</i></div>
+</div>
+
+<section>
+  <h2 class="sec-title" data-reveal>为什么需要<br><span class="thin">一层网关。</span></h2>
+  <div class="vals">
+    <div class="val" data-reveal>
+      <div class="num mono">UNIFIED</div>
+      <h3>统一入口</h3>
+      <p>一个 API Key 调用全部已接入模型，兼容官方 SDK 与 Claude Code、Codex 等工具，代码零改动。</p>
+    </div>
+    <div class="val" data-reveal>
+      <div class="num mono">STABLE</div>
+      <h3>稳定可靠</h3>
+      <p>多账号池智能调度，触发限流自动切换与负载均衡，单账号的脆弱不再传导给业务。</p>
+    </div>
+    <div class="val" data-reveal>
+      <div class="num mono">METERED</div>
+      <h3>成本可控</h3>
+      <p>Token 级用量追踪与成本计算，支持配额上限与明细查询，团队用量一目了然。</p>
+    </div>
+  </div>
+</section>
+
+<div class="marquee" aria-hidden="true">
+  <div class="marquee-track">
+    <span>CLAUDE</span><b>/</b><span>GPT</span><b>/</b><span>GEMINI</span><b>/</b><span>GROK</span><b>/</b><span>ONE KEY</span><b>/</b>
+    <span>CLAUDE</span><b>/</b><span>GPT</span><b>/</b><span>GEMINI</span><b>/</b><span>GROK</span><b>/</b><span>ONE KEY</span><b>/</b>
+  </div>
+</div>
+
+<section id="steps">
+  <h2 class="sec-title" data-reveal>三步，<span class="thin">开始使用。</span></h2>
+  <div class="steps">
+    <div class="step" data-reveal>
+      <div class="idx mono">01</div>
+      <div><h3>注册账号</h3><p>创建账号并登录控制台，注册即得免费试用额度。</p></div>
+      <div class="tag">1 分钟</div>
+    </div>
+    <div class="step" data-reveal>
+      <div class="idx mono">02</div>
+      <div><h3>创建 API Key</h3><p>在控制台一键生成专属密钥，可为每个 Key 单独设置配额与限速。</p></div>
+      <div class="tag">10 秒</div>
+    </div>
+    <div class="step" data-reveal>
+      <div class="idx mono">03</div>
+      <div>
+        <h3>替换 Base URL</h3>
+        <p>把请求地址指向本平台，其余代码零改动。</p>
+        <div class="code-note mono">
+          <span class="del">base_url = "https://api.openai.com/v1"</span><br>
+          <span class="add">base_url = "https://your-sub2api.host/v1"</span>
+        </div>
+      </div>
+      <div class="tag">1 行代码</div>
+    </div>
+  </div>
+</section>
+
+<section id="cmp">
+  <h2 class="sec-title" data-reveal>官方订阅，<span class="thin">还是网关。</span></h2>
+  <div class="cmp" data-reveal>
+    <div class="cmp-col">
+      <h3>官方订阅</h3>
+      <ul>
+        <li>固定月费，用不完也照付</li>
+        <li>每个服务商单独订阅、单独管理</li>
+        <li>单账号容易触发限制</li>
+        <li>无法限制团队成员用量</li>
+      </ul>
+    </div>
+    <div class="cmp-col us">
+      <h3>SUB2API</h3>
+      <ul>
+        <li>按量付费，用多少付多少</li>
+        <li>一个密钥，多模型随意切换</li>
+        <li>账号池自动切换，稳定不掉线</li>
+        <li>配额、明细、限速全都可控</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="cta">
+  <h2 data-reveal>准备好<br><span class="thin">开始了吗。</span></h2>
+  <p data-reveal>注册即可获得免费试用额度，体验一站式 AI 服务。</p>
+  <div data-reveal><a class="btn btn-solid" href="#"><span class="t">免费注册</span></a></div>
+</section>
+
+<footer>
+  <span>Sub2API · 开源项目</span>
+  <div class="links">
+    <a href="https://github.com/Wei-Shaw/sub2api">GitHub</a>
+    <a href="#">文档</a>
+    <a href="#">用量查询</a>
+  </div>
+  <span>© 2026 Sub2API</span>
+</footer>
+
+<script>
+(function(){
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* split headline into chars */
+  document.querySelectorAll('#h1 .row').forEach(function(row){
+    var txt = row.getAttribute('data-text');
+    for (var i=0;i<txt.length;i++){
+      var s=document.createElement('span'); s.className='ch'; s.textContent=txt[i];
+      s.style.transitionDelay=(0.05*i)+'s';
+      row.appendChild(s);
+    }
+  });
+  var hero=document.getElementById('hero');
+  function enterHero(){ hero.classList.add('in'); }
+
+  /* loading overlay */
+  var loading=document.getElementById('loading');
+  if (reduce){ enterHero(); }
+  else{
+    var line=document.getElementById('load-line');
+    '把订阅，变成 API。'.split('').forEach(function(c){
+      var s=document.createElement('span'); s.textContent=c===' '?' ':c; line.appendChild(s);
+    });
+    var num=document.getElementById('load-num'), t0=null, DUR=1300;
+    function tick(ts){
+      if(!t0) t0=ts;
+      var p=Math.min(1,(ts-t0)/DUR), e=1-Math.pow(1-p,3);
+      num.textContent=String(Math.round(e*100)).padStart(2,'0');
+      if(p<1) requestAnimationFrame(tick);
+      else{ loading.classList.add('done'); setTimeout(enterHero,250); }
+    }
+    requestAnimationFrame(tick);
+    loading.addEventListener('click',function(){ loading.classList.add('done'); enterHero(); });
+  }
+
+  /* scroll reveals */
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('on'); io.unobserve(e.target);} });
+  },{threshold:.18});
+  document.querySelectorAll('[data-reveal]').forEach(function(el){ io.observe(el); });
+
+  /* wave field canvas */
+  var cv=document.getElementById('wave');
+  if(!reduce && cv.getContext){
+    var ctx=cv.getContext('2d'), W,H,DPR=Math.min(2,devicePixelRatio||1);
+    var mx=.5,my=.5, running=true;
+    function size(){ W=cv.clientWidth; H=cv.clientHeight; cv.width=W*DPR; cv.height=H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0); }
+    size(); addEventListener('resize',size);
+    addEventListener('pointermove',function(e){ mx=e.clientX/innerWidth; my=e.clientY/innerHeight; });
+    /* rafId 是「当前有没有一条循环在跑」的唯一凭据。
+       原来这里有两个启动点：IntersectionObserver 回调（observe 时立即触发一次）
+       和文件末尾那句 requestAnimationFrame(draw)，两条自我调度的循环同时在跑，
+       实测 500ms 内调度 60 次 draw，约是单循环的两倍。更糟的是它不是固定两倍：
+       画布每滚出再滚回一次，回调就再起一条，循环数随滚动次数累加。 */
+    var rafId=0;
+    function loop(){ rafId=0; if(!running) return; draw(); rafId=requestAnimationFrame(loop); }
+    function start(){ if(!rafId && running) rafId=requestAnimationFrame(loop); }
+    function stop(){ if(rafId){ cancelAnimationFrame(rafId); rafId=0; } }
+
+    var vio=new IntersectionObserver(function(es){
+      running=es[0].isIntersecting;
+      if(running) start(); else stop();
+    });
+    vio.observe(cv);
+    var t=0;
+    function draw(){
+      t+=.008;
+      ctx.clearRect(0,0,W,H);
+      var gap=30, rows=Math.ceil(H/gap)+2, cols=Math.ceil(W/gap)+2;
+      for(var r=0;r<rows;r++){
+        var depth=r/rows;
+        for(var c=0;c<cols;c++){
+          var x=c*gap, base=r*gap;
+          var y=base
+            + Math.sin(c*.24 + t*2 + r*.28)*10*(0.4+depth)
+            + Math.cos(c*.07 - t)*16*depth
+            + (my-.5)*30*depth;
+          var a=.05 + depth*.16 + Math.max(0,Math.sin(c*.24+t*2+r*.28))*.10;
+          ctx.fillStyle='rgba(220,224,255,'+a.toFixed(3)+')';
+          var rad=.8+depth*1.3;
+          ctx.fillRect(x+(mx-.5)*14*depth, y, rad, rad);
+        }
+      }
+    }
+    /* 不在这里再起一条：observe() 会同步触发一次回调，由 start() 统一负责启动。 */
+  }
+})();
+</script>

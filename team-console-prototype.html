@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>团队消耗看板</title>
+<style>
+/* ============================================================
+   设计令牌 —— 从 sub2api 现有前端提取（tailwind.config.js + style.css）
+   主色 teal；亮色中性用 gray、暗色用 slate（原系统的既有事实，不统一）
+   ============================================================ */
+:root{
+  --bg:#f9fafb; --surface:#ffffff; --surface-2:#f9fafb; --surface-3:#f3f4f6;
+  --border:#e5e7eb; --border-soft:#f3f4f6; --border-strong:#d1d5db;
+  --text:#111827; --text-strong:#111827; --text-2:#374151; --text-3:#6b7280; --text-4:#9ca3af;
+
+  --p-50:#f0fdfa; --p-100:#ccfbf1; --p-400:#2dd4bf; --p-500:#14b8a6; --p-600:#0d9488; --p-700:#0f766e;
+  --primary:var(--p-500); --primary-text:var(--p-600); --primary-soft:var(--p-50);
+
+  --success:#10b981; --success-soft:#d1fae5; --success-text:#047857;
+  --warning:#f59e0b; --warning-soft:#fef3c7; --warning-text:#b45309;
+  --danger:#ef4444;  --danger-soft:#fee2e2;  --danger-text:#b91c1c;
+  --info:#3b82f6;    --info-soft:#dbeafe;    --info-text:#1d4ed8;
+
+  --shadow-card:0 1px 3px rgba(0,0,0,.04),0 1px 2px rgba(0,0,0,.06);
+  --shadow-lg:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -4px rgba(0,0,0,.1);
+  --shadow-2xl:0 25px 50px -12px rgba(0,0,0,.25);
+
+  --font-sans:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+
+  --c1:#3b82f6;--c2:#10b981;--c3:#f59e0b;--c4:#ef4444;--c5:#8b5cf6;--c6:#ec4899;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#020617; --surface:#1e293b; --surface-2:#0f172a; --surface-3:#334155;
+    --border:#334155; --border-soft:#1e293b; --border-strong:#475569;
+    --text:#f3f4f6; --text-strong:#ffffff; --text-2:#d1d5db; --text-3:#94a3b8; --text-4:#64748b;
+    --primary-text:var(--p-400); --primary-soft:rgba(19,78,74,.20);
+    --success-soft:rgba(6,78,59,.30);  --success-text:#34d399;
+    --warning-soft:rgba(120,53,15,.30);--warning-text:#fbbf24;
+    --danger-soft:rgba(127,29,29,.30); --danger-text:#f87171;
+    --info-soft:rgba(30,58,138,.30);   --info-text:#60a5fa;
+    --shadow-card:0 1px 3px rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.2);
+    --shadow-lg:0 10px 15px -3px rgba(0,0,0,.4);
+    --shadow-2xl:0 25px 50px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#020617; --surface:#1e293b; --surface-2:#0f172a; --surface-3:#334155;
+  --border:#334155; --border-soft:#1e293b; --border-strong:#475569;
+  --text:#f3f4f6; --text-strong:#ffffff; --text-2:#d1d5db; --text-3:#94a3b8; --text-4:#64748b;
+  --primary-text:var(--p-400); --primary-soft:rgba(19,78,74,.20);
+  --success-soft:rgba(6,78,59,.30);  --success-text:#34d399;
+  --warning-soft:rgba(120,53,15,.30);--warning-text:#fbbf24;
+  --danger-soft:rgba(127,29,29,.30); --danger-text:#f87171;
+  --info-soft:rgba(30,58,138,.30);   --info-text:#60a5fa;
+  --shadow-card:0 1px 3px rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.2);
+  --shadow-lg:0 10px 15px -3px rgba(0,0,0,.4);
+  --shadow-2xl:0 25px 50px -12px rgba(0,0,0,.6);
+}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--font-mono)}
+button{font-family:inherit;font-size:inherit;cursor:pointer;border:none;background:none;color:inherit}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* ===== App shell ===== */
+.app{display:grid;grid-template-columns:236px 1fr;min-height:100vh}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:16px 12px;display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brand{display:flex;align-items:center;gap:9px;padding:6px 10px 18px;font-weight:700;font-size:15px;color:var(--text-strong)}
+.brand-mark{width:26px;height:26px;border-radius:8px;flex:none;background:linear-gradient(135deg,var(--p-400),var(--p-600));display:grid;place-items:center;color:#fff;font-size:13px;font-weight:800}
+.nav-group{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-4);padding:14px 10px 6px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:12px;color:var(--text-2);font-size:13.5px;transition:background .15s,color .15s;width:100%;text-align:left}
+.nav-item:hover{background:var(--surface-3);color:var(--text-strong)}
+.nav-item.active{background:var(--primary-soft);color:var(--primary-text);font-weight:600}
+.nav-item svg{flex:none;width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7}
+.nav-new{margin-left:auto;font-size:10px;font-weight:700;letter-spacing:.03em;background:var(--primary);color:#fff;padding:1px 6px;border-radius:999px}
+
+.main{display:flex;flex-direction:column;min-width:0}
+.topbar{height:60px;flex:none;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--surface) 82%,transparent);backdrop-filter:blur(14px);display:flex;align-items:center;gap:14px;padding:0 24px;position:sticky;top:0;z-index:40}
+.topbar h2{margin:0;font-size:17px;font-weight:600;color:var(--text-strong)}
+.topbar-spacer{flex:1}
+.icon-btn{width:34px;height:34px;border-radius:12px;display:grid;place-items:center;color:var(--text-3);transition:background .15s,color .15s}
+.icon-btn:hover{background:var(--surface-3);color:var(--text-strong)}
+.icon-btn svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7}
+.avatar{width:30px;height:30px;border-radius:999px;background:var(--surface-3);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--text-2)}
+.content{padding:22px 24px 86px;display:flex;flex-direction:column;gap:14px;min-width:0}
+
+/* ===== 通用件 ===== */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-card)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border-radius:12px;padding:9px 15px;font-size:13.5px;font-weight:500;transition:all .18s ease-out;white-space:nowrap}
+.btn:active{transform:scale(.98)}
+.btn-primary{background:linear-gradient(to right,var(--p-500),var(--p-600));color:#fff;box-shadow:0 4px 6px -1px rgba(20,184,166,.25)}
+.btn-primary:hover{background:linear-gradient(to right,var(--p-600),var(--p-700))}
+.btn-secondary{background:var(--surface);color:var(--text-2);border:1px solid var(--border)}
+.btn-secondary:hover{border-color:var(--border-strong);background:var(--surface-2)}
+.btn-ghost{color:var(--text-2);padding:6px 10px}
+.btn-ghost:hover{background:var(--surface-3);color:var(--text-strong)}
+.btn-sm{border-radius:9px;padding:5px 11px;font-size:12.5px}
+.btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2}
+.badge{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:500}
+.badge-gray{background:var(--surface-3);color:var(--text-2)}
+.badge-success{background:var(--success-soft);color:var(--success-text)}
+.dot{width:6px;height:6px;border-radius:999px;flex:none}
+.input{width:100%;border-radius:12px;padding:9px 13px;font-size:13.5px;font-family:inherit;background:var(--surface);border:1px solid var(--border);color:var(--text);transition:border-color .18s,box-shadow .18s}
+.input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(20,184,166,.18)}
+.input-label{display:block;font-size:13px;font-weight:500;color:var(--text-2);margin-bottom:6px}
+.input-hint{font-size:12px;color:var(--text-3);margin:6px 0 0}
+select.input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;background-size:15px;padding-right:32px}
+.link-btn{color:var(--primary-text);font-weight:500;font-size:12.5px;padding:0}
+.link-btn:hover{text-decoration:underline}
+
+/* ===== 标题行 ===== */
+.page-head{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.page-title{margin:0;font-size:22px;font-weight:700;color:var(--text-strong);letter-spacing:-.01em}
+.page-desc{margin:3px 0 0;font-size:13px;color:var(--text-3)}
+.page-head-actions{margin-left:auto;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.search{position:relative}
+.search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:15px;height:15px;stroke:var(--text-4);fill:none;stroke-width:2;pointer-events:none}
+.search .input{padding-left:33px;width:236px}
+
+/* ===== 概览条（高度恒定）===== */
+.overview{padding:14px 18px;display:flex;flex-direction:column;gap:11px}
+.ov-row1{display:flex;align-items:center;gap:26px;flex-wrap:wrap}
+.ov-metric{display:flex;flex-direction:column;gap:2px;min-height:40px;justify-content:center}
+.ov-label{font-size:11.5px;font-weight:500;color:var(--text-3)}
+.ov-value{font-size:20px;font-weight:700;color:var(--text-strong);letter-spacing:-.02em}
+.ov-sub{font-size:11.5px;color:var(--text-3)}
+.ov-delta{color:var(--text-2);font-weight:600}
+.ov-sep{width:1px;align-self:stretch;background:var(--border);margin:2px 0}
+.ov-owner{margin-left:auto;text-align:right}
+.ov-owner .ov-value{font-size:14px;font-weight:600;color:var(--text-2)}
+.ov-owner.done .ov-value{color:var(--success-text);display:flex;align-items:center;gap:6px;justify-content:flex-end}
+.conclusion{display:flex;align-items:flex-start;gap:9px;padding-top:11px;border-top:1px solid var(--border-soft);font-size:13px;color:var(--text-2);min-height:38px}
+.conclusion .tag{font-weight:600;color:var(--text-3);flex:none}
+.conclusion.quiet{color:var(--text-3)}
+.conclusion b{color:var(--text-strong);font-weight:600}
+.conclusion .up{color:var(--danger-text);font-weight:600}
+.notice{display:flex;align-items:center;gap:10px;padding:11px 16px;border-radius:14px;background:var(--info-soft);border-left:4px solid var(--info);font-size:12.8px;color:var(--text-2)}
+.notice svg{width:16px;height:16px;stroke:var(--info-text);fill:none;stroke-width:1.8;flex:none}
+
+/* ===== 表格 ===== */
+.table-shell{background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-card);display:flex;flex-direction:column;overflow:hidden}
+.table-scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:760px}
+thead th{position:sticky;top:0;z-index:3;background:var(--surface-2);text-align:left;padding:11px 18px;font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);border-bottom:1px solid var(--border);white-space:nowrap;user-select:none}
+th.sortable{cursor:pointer}
+th.sortable:hover{background:var(--surface-3);color:var(--text-2)}
+th.num-col,td.num-col{text-align:right}
+.sort-caret{display:inline-block;margin-left:5px;opacity:.35;font-size:9px;letter-spacing:-1px}
+th.sorted .sort-caret{opacity:1;color:var(--primary-text)}
+tbody td{padding:12px 18px;border-bottom:1px solid var(--border-soft);vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr.row:hover{background:var(--surface-2)}
+tbody tr.row{cursor:pointer}
+.cell-1{font-size:13.5px;font-weight:500;color:var(--text-strong);display:flex;align-items:center;gap:6px}
+.cell-2{font-size:11.5px;color:var(--text-3);margin-top:2px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.owner-tag{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:500;color:var(--primary-text);background:var(--primary-soft);border-radius:5px;padding:1px 6px}
+.raw-tag{font-size:10.5px;color:var(--text-4)}
+.money{font-size:14px;font-weight:600;color:var(--text-strong)}
+.money-empty{color:var(--text-4);font-weight:400}
+.share-bar{margin-top:5px;height:5px;border-radius:999px;background:var(--surface-3);overflow:hidden;width:100%;max-width:112px;margin-left:auto}
+.share-bar>i{display:block;height:100%;border-radius:999px;background:var(--p-500)}
+.delta{font-size:13px;color:var(--text-3)}
+.delta.alert{color:var(--danger-text);font-weight:600}
+.delta-abs{font-size:11.5px;color:var(--text-4);margin-top:2px}
+.keycell{display:flex;align-items:center;gap:7px;font-size:12.5px}
+.keycell .mono{color:var(--text-2)}
+.copy-btn{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;color:var(--text-4)}
+.copy-btn:hover{background:var(--surface-3);color:var(--text-2)}
+.copy-btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.8}
+.copy-btn.done{color:var(--success)}
+.anomaly-mark{width:16px;height:16px;border-radius:999px;background:var(--danger-soft);color:var(--danger-text);font-size:10px;font-weight:800;display:grid;place-items:center;flex:none}
+.fold-row td{padding:9px 18px;background:var(--surface-2);border-top:1px solid var(--border-soft)}
+.fold-btn{font-size:12.5px;color:var(--text-3);display:flex;align-items:center;gap:6px}
+.fold-btn:hover{color:var(--text-strong)}
+tr.deleted-row td{opacity:.6}
+
+/* ===== 对账条 ===== */
+.recon{padding:12px 18px;border-top:1px solid var(--border);background:var(--surface-2);display:flex;flex-direction:column;gap:3px}
+.recon-eq{font-size:13px;color:var(--text-strong);font-weight:600}
+.recon-eq .part{font-weight:500;color:var(--text-2)}
+.recon-note{font-size:11.5px;color:var(--text-4);line-height:1.6}
+.recon-filter{font-size:12px;color:var(--primary-text);font-weight:500}
+
+.sk{background:var(--surface-3);border-radius:5px;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.empty{padding:64px 24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px}
+.empty-icon{width:76px;height:76px;border-radius:18px;background:var(--surface-3);display:grid;place-items:center;margin-bottom:14px}
+.empty-icon svg{width:36px;height:36px;stroke:var(--text-4);fill:none;stroke-width:1.4}
+.empty h3{margin:0;font-size:17px;font-weight:600;color:var(--text-strong)}
+.empty p{margin:0;max-width:420px;font-size:13px;color:var(--text-3);line-height:1.65}
+.empty .btn{margin-top:16px}
+
+/* ===== 模态 ===== */
+.overlay{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.5);backdrop-filter:blur(3px);display:grid;grid-template-columns:minmax(0,1fr);align-content:center;justify-items:center;padding:16px;overflow-y:auto;animation:fade .2s ease-out}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-2xl);width:100%;min-width:0;max-height:90vh;display:flex;flex-direction:column;animation:pop .2s ease-out}
+@keyframes pop{from{transform:scale(.96);opacity:0}to{transform:scale(1);opacity:1}}
+.modal.wide{max-width:min(800px,100%)} .modal.xwide{max-width:min(880px,100%)}
+.modal-head{display:flex;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border);min-width:0}
+.modal-head>div:first-child{min-width:0}
+.modal-title{margin:0;font-size:16px;font-weight:600;color:var(--text-strong);overflow-wrap:anywhere}
+.modal-sub{margin:3px 0 0;font-size:12.5px;color:var(--text-3);overflow-wrap:anywhere}
+.modal-x{margin-left:auto;width:32px;height:32px;border-radius:10px;display:grid;place-items:center;color:var(--text-4);flex:none}
+.modal-x:hover{background:var(--surface-3);color:var(--text-2)}
+.modal-x svg{width:16px;height:16px;stroke:currentColor;stroke-width:2;fill:none}
+.modal-body{padding:18px 20px;overflow-y:auto;overflow-x:hidden;flex:1;min-width:0}
+.modal-foot{padding:13px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:9px;align-items:center;flex-wrap:wrap;min-width:0}
+.modal-foot .spread{margin-right:auto;font-size:12.5px;color:var(--text-3)}
+.hscroll{overflow-x:auto;min-width:0;max-width:100%}
+
+.detail-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:11px;margin-bottom:20px}
+.stat{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:12px;padding:11px 13px}
+.stat-l{font-size:11px;color:var(--text-3);font-weight:500}
+.stat-v{font-size:17px;font-weight:700;color:var(--text-strong);margin-top:3px;letter-spacing:-.02em}
+.stat-p{font-size:11px;color:var(--text-4);margin-top:2px}
+.stat.hot .stat-v{color:var(--danger-text)}
+.sec{margin-bottom:20px}.sec:last-child{margin-bottom:0}
+.sec-title{font-size:12.5px;font-weight:600;color:var(--text-strong);margin:0 0 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sec-title .hint{font-weight:400;color:var(--text-4);font-size:11.5px}
+.daily{display:flex;align-items:flex-end;gap:3px;height:96px;padding:0 1px;min-width:300px}
+.daily .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
+.daily .bar{width:100%;border-radius:3px 3px 0 0;background:var(--p-500);min-height:2px}
+.daily .col.peak .bar{background:var(--danger)}
+.daily .lbl{font-size:9px;color:var(--text-4);white-space:nowrap}
+.mdl-row{display:flex;align-items:center;gap:11px;padding:6px 0;min-width:0;flex-wrap:wrap}
+.mdl-name{font-size:12.5px;color:var(--text-2);flex:1 1 130px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mdl-track{flex:2 1 120px;height:7px;border-radius:999px;background:var(--surface-3);overflow:hidden;min-width:0}
+.mdl-track>i{display:block;height:100%;border-radius:999px}
+.mdl-val{font-size:12.5px;color:var(--text-strong);font-weight:600;width:78px;text-align:right;flex:none}
+.mdl-pct{font-size:11.5px;color:var(--text-4);width:44px;text-align:right;flex:none}
+.keylist{display:flex;flex-direction:column;gap:8px}
+.keyrow{display:flex;align-items:center;gap:11px;padding:11px 13px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);flex-wrap:wrap;min-width:0}
+.keyrow.dim{opacity:.6}
+.keyrow .kname{font-size:13px;font-weight:500;color:var(--text-strong);overflow-wrap:anywhere}
+.keyrow .kmeta{font-size:11.5px;color:var(--text-3);margin-top:2px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.keyrow .kmoney{margin-left:auto;text-align:right;font-size:13.5px;font-weight:600;color:var(--text-strong)}
+
+/* 归属设置表 */
+.own-tbl{width:100%;border-collapse:collapse;min-width:620px}
+.own-tbl th{position:static;background:transparent;padding:8px 10px;font-size:11px;border-bottom:1px solid var(--border)}
+.own-tbl td{padding:9px 10px;border-bottom:1px solid var(--border-soft);vertical-align:middle}
+.own-tbl tr.filled td{background:color-mix(in srgb,var(--primary-soft) 55%,transparent)}
+.own-tbl .input{min-width:150px}
+.own-preview{font-size:12.5px;color:var(--text-3);line-height:1.6;flex:1 1 260px;min-width:0}
+.own-preview b{color:var(--text-strong)}
+
+.toasts{position:fixed;right:16px;top:16px;z-index:200;display:flex;flex-direction:column;gap:10px}
+.toast{min-width:260px;max-width:360px;background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--success);border-radius:10px;box-shadow:var(--shadow-lg);padding:12px 14px;font-size:13px;color:var(--text-2);animation:slidein .25s ease-out}
+.toast b{display:block;color:var(--text-strong);font-weight:600;margin-bottom:2px}
+@keyframes slidein{from{transform:translateX(110%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* ===== 原型控制条（不是产品的一部分）===== */
+.proto{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:150;display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:center;background:var(--surface);border:1px solid var(--border-strong);border-radius:999px;box-shadow:var(--shadow-2xl);padding:7px 9px 7px 15px;max-width:calc(100vw - 24px)}
+.proto .tag{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text-4)}
+.proto .chip{font-size:12px;padding:5px 11px;border-radius:999px;color:var(--text-2);border:1px solid var(--border);background:var(--surface-2);transition:all .15s;white-space:nowrap}
+.proto .chip:hover{border-color:var(--border-strong);color:var(--text-strong)}
+.proto .chip.on{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600}
+
+/* ===== 响应式 ===== */
+@media (max-width:1080px){ .app{grid-template-columns:1fr} .sidebar{display:none} }
+@media (max-width:760px){
+  .content{padding:16px 14px 92px}
+  .topbar{padding:0 14px}
+  .page-head{gap:10px}
+  .page-head>div:first-child{min-width:0;flex:1 1 100%}
+  .page-head-actions{width:100%;margin-left:0;gap:8px}
+  .search{flex:1 1 100%;min-width:0}
+  .search .input{width:100%}
+  .page-head-actions .btn{flex:1 1 0;min-width:0}
+  .notice{flex-wrap:wrap;row-gap:8px}
+  .notice .link-btn{margin-left:0!important}
+  .ov-row1{gap:16px}
+  .ov-metric{min-width:0;max-width:100%}
+  .ov-sep{display:none}
+  .ov-owner{margin-left:0;text-align:left;width:100%}
+  .ov-owner.done .ov-value{justify-content:flex-start}
+  .conclusion{flex-wrap:wrap;row-gap:8px}
+  .conclusion .link-btn{margin-left:0!important}
+  .table-scroll{overflow-x:visible}
+  table,thead,tbody,tr,td{display:block;width:auto}
+  thead{display:none}
+  table{min-width:0}
+  tbody tr.row{border:1px solid var(--border);border-radius:13px;margin:10px 12px;padding:12px 14px;background:var(--surface)}
+  tbody td{border:none;padding:4px 0;display:flex;align-items:baseline;justify-content:flex-end;gap:4px 9px;text-align:right;flex-wrap:wrap;min-width:0}
+  tbody td>*{min-width:0;overflow-wrap:anywhere}
+  tbody td::before{content:attr(data-l);margin-right:auto;flex:none;text-align:left;white-space:nowrap;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3)}
+  td.m-lead{display:block;padding-bottom:8px;text-align:left}
+  td.m-lead::before{display:none}
+  .share-bar,.delta-abs{display:none}
+  .fold-row td,.fold-row{background:transparent;padding:2px 12px 8px}
+  .fold-row td::before{display:none}
+  tbody td[colspan]{display:block;text-align:left}
+  tbody td[colspan]::before{display:none}
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">S</span>sub2api</div>
+    <div class="nav-group">概览</div>
+    <button class="nav-item"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>仪表盘</button>
+    <div class="nav-group">我的账户</div>
+    <button class="nav-item"><svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.2"/><path d="M11.2 12H21l-2 2.4-1.8-1.4-1.8 1.4-1.8-1.4L12 14.4Z"/></svg>我的令牌</button>
+    <button class="nav-item"><svg viewBox="0 0 24 24"><path d="M3 20h18"/><path d="M6 20V11"/><path d="M11 20V5"/><path d="M16 20v-6"/><path d="M21 20v-9"/></svg>用量统计</button>
+    <button class="nav-item active"><svg viewBox="0 0 24 24"><path d="M8.5 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M2.5 20v-1.5A4.5 4.5 0 0 1 7 14h3a4.5 4.5 0 0 1 4.5 4.5V20"/><path d="M16.5 11.5a2.5 2.5 0 1 0 0-5"/><path d="M21.5 20v-1.2a4 4 0 0 0-3-3.87"/></svg>团队<span class="nav-new">新</span></button>
+    <button class="nav-item"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 11h20"/></svg>充值</button>
+    <button class="nav-item"><svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M17 7H9.5a2.5 2.5 0 0 0 0 5h5a2.5 2.5 0 0 1 0 5H6"/></svg>邀请返利</button>
+    <div class="nav-group">系统</div>
+    <button class="nav-item"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .33 1.77l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.6 1.6 0 0 0-1.77-.33 1.6 1.6 0 0 0-1 1.47V21a2 2 0 1 1-4 0v-.11a1.6 1.6 0 0 0-1.05-1.46 1.6 1.6 0 0 0-1.77.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.6 1.6 0 0 0 4.6 15a1.6 1.6 0 0 0-1.47-1H3a2 2 0 1 1 0-4h.11A1.6 1.6 0 0 0 4.6 8.9a1.6 1.6 0 0 0-.33-1.77l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.6 1.6 0 0 0 9 4.6a1.6 1.6 0 0 0 1-1.47V3a2 2 0 1 1 4 0v.11a1.6 1.6 0 0 0 1 1.47 1.6 1.6 0 0 0 1.77-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.6 1.6 0 0 0-.33 1.77V9a1.6 1.6 0 0 0 1.47 1H21a2 2 0 1 1 0 4h-.11a1.6 1.6 0 0 0-1.49 1Z"/></svg>设置</button>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <h2>团队</h2><div class="topbar-spacer"></div>
+      <button class="icon-btn" id="themeBtn" title="切换主题" aria-label="切换主题"><svg id="themeIcon" viewBox="0 0 24 24"></svg></button>
+      <div class="avatar">王</div>
+    </header>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+<div id="modalRoot"></div>
+
+<div class="proto">
+  <span class="tag">原型状态</span>
+  <button class="chip on" data-state="normal">日常</button>
+  <button class="chip" data-state="raw">全都没设归属</button>
+  <button class="chip" data-state="zero">本期零消耗</button>
+  <button class="chip" data-state="empty">全新账号</button>
+  <button class="chip" data-state="loading">加载中</button>
+  <button class="chip" data-state="range90">跨 90 天</button>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   数据模型 —— 一行 = 一把令牌。统计时的分组键：
+     归属（owner）有值 → 按 owner 合并
+     归属为空          → 按令牌自身，显示令牌名
+   这意味着永远不存在"未归属"兜底桶：api_keys.name 是 NOT NULL 必填，
+   每把令牌天生就有身份，归属只是把同一个人的多把令牌并成一行。
+   ============================================================ */
+const DAYS = ["01","02","03","04","05","06","07","08","09","10","11","12","13","14","15"];
+
+// 日消耗形态（权重，长度 15；周末凹陷）
+const SHAPE = {
+  weekday : [.20,.15,1,1.05,1.10,1,1.05,.22,.18,1,1.10,1.05,1,1,.20],
+  spike   : [.01,.01,.02,.02,.03,.02,.02,.005,.01,.04,.60,1.40,1.10,.90,.80],
+  decline : [0,0,1.20,1.05,.85,.60,.42,0,0,.37,.50,.28,.33,.36,0],
+  fresh   : [0,0,0,0,0,0,0,0,0,0,.90,1.30,1.55,1.45,1.00],
+  steady  : [0,0,1,1.1,.9,1.05,.95,0,0,1.05,1.1,.9,1.05,1,0],
+  none    : [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+};
+function mkDaily(total, shape){
+  const w = SHAPE[shape], s = w.reduce((a,b)=>a+b,0);
+  if (!s || !total) return new Array(15).fill(0);
+  const out = w.map(x => Math.round(total * x / s * 100) / 100);
+  const diff = Math.round((total - out.reduce((a,b)=>a+b,0)) * 100) / 100;
+  const last = out.reduce((bi, v, i, arr) => v > arr[bi] ? i : bi, 0);
+  out[last] = Math.round((out[last] + diff) * 100) / 100;
+  return out;
+}
+
+// owner 为 null = 还没设归属，统计时用 name
+const TOKENS = [
+  {id:10241,name:"王磊",         mask:"sk-7Qm...f3a2",group:"Claude 主力池",status:"active",owner:"王磊",cost:1102.30,prev:934.10,req:9820,prevReq:8610,last:"8 分钟前",  shape:"weekday",models:[["claude-sonnet-4.5",668.40],["claude-opus-4.1",371.20],["gemini-3-pro",62.70]]},
+  {id:10318,name:"王磊-批处理",   mask:"sk-4Hx...7b19",group:"Claude 主力池",status:"active",owner:"王磊",cost:168.40, prev:143.20,req:2380,prevReq:2010,last:"今天 09:20",shape:"weekday",models:[["claude-sonnet-4.5",73.70],["claude-opus-4.1",60.40],["gemini-3-pro",25.50],["gpt-4o",8.80]]},
+  {id:10402,name:"王磊-测试",     mask:"sk-9Rt...c4d0",group:"混合池",      status:"active",owner:"王磊",cost:13.80,  prev:11.30, req:280, prevReq:300, last:"8/13 16:41",shape:"steady", models:[["gpt-4o",13.80]]},
+
+  {id:10395,name:"陈欣-批跑",     mask:"sk-2Kd...88fa",group:"Claude 主力池",status:"active",owner:"陈欣",cost:643.80, prev:172.60,req:3840,prevReq:250, last:"2 分钟前",  shape:"spike",  models:[["claude-opus-4.1",603.10],["claude-sonnet-4.5",40.70]]},
+  {id:10276,name:"陈欣-设计站",   mask:"sk-6Wp...4d10",group:"混合池",      status:"active",owner:"陈欣",cost:58.30,  prev:52.43, req:342, prevReq:136, last:"今天 10:05",shape:"weekday",models:[["claude-opus-4.1",21.70],["claude-sonnet-4.5",20.60],["gpt-4o",16.00]]},
+
+  {id:10209,name:"吴桐-cursor",  mask:"sk-3Nv...10ab",group:"Claude 主力池",status:"active",  owner:"吴桐",cost:61.20,prev:224.18,req:402,prevReq:1540,last:"昨天 15:03",shape:"decline",models:[["claude-sonnet-4.5",61.20]]},
+  {id:10210,name:"吴桐-脚本",     mask:"sk-8Ly...3f77",group:"Claude 主力池",status:"inactive",owner:"吴桐",cost:0,    prev:11.20, req:0,  prevReq:80,  last:"7/29 09:14",shape:"none",   models:[]},
+
+  // 以下都还没设归属 —— 统计时直接用令牌名，页面照样可用
+  {id:10188,name:"李然",          mask:"sk-5Bq...9c11",group:"Claude 主力池",status:"active",owner:null,cost:540.00,prev:574.47,req:6210,prevReq:6480,last:"50 分钟前", shape:"weekday",models:[["claude-sonnet-4.5",402.30],["gpt-4o",96.40],["gemini-3-pro",41.30]]},
+  {id:10233,name:"周敏-出图",     mask:"sk-1Zc...b7e0",group:"OpenAI 图像池",status:"active",owner:null,cost:233.75,prev:226.94,req:1845,prevReq:1790,last:"昨天 18:22", shape:"steady", models:[["gpt-image-2",186.20],["claude-sonnet-4.5",47.55]]},
+  {id:10120,name:"我的令牌",      mask:"sk-0Fj...9f2c",group:"Claude 主力池",status:"active",owner:null,cost:486.30,prev:470.20,req:5620,prevReq:5410,last:"1 分钟前",  shape:"weekday",models:[["claude-sonnet-4.5",312.40],["claude-opus-4.1",121.50],["gpt-4o",52.40]]},
+  {id:10155,name:"tuan-lina-dev",mask:"sk-7Gs...1a7e",group:"Claude 主力池",status:"active",owner:null,cost:318.50,prev:302.10,req:3120,prevReq:2980,last:"今天 09:41", shape:"weekday",models:[["claude-sonnet-4.5",208.00],["claude-opus-4.1",93.30],["gemini-3-pro",17.20]]},
+  {id:10287,name:"test-key-2",   mask:"sk-4Ea...6b04",group:"混合池",      status:"active",owner:null,cost:37.30, prev:37.41, req:610, prevReq:620, last:"8/9 14:12",  shape:"steady", models:[["gpt-4o",37.30]]},
+  {id:10501,name:"韩雪",          mask:"sk-2Uh...a903",group:"Claude 主力池",status:"active",owner:null,cost:12.40, prev:null,  req:96,  prevReq:0,   last:"1 小时前",  shape:"fresh",  models:[["claude-sonnet-4.5",12.40]]},
+  {id:10444,name:"赵一",          mask:"sk-6Mk...5e21",group:"Claude 主力池",status:"active",owner:null,cost:0,     prev:0,     req:0,   prevReq:0,   last:"从未使用",  shape:"none",   models:[]},
+
+  {id:9902, name:"陈昊-主力",     mask:null,      group:null,          status:null,    owner:null,cost:0,     prev:118.40,req:0,   prevReq:1240,last:"7/14 17:35",shape:"none",   models:[],deleted:true}
+];
+TOKENS.forEach(t => { t.daily = mkDaily(t.cost, t.shape); });
+
+const CHART_COLORS = ["var(--c1)","var(--c2)","var(--c3)","var(--c4)","var(--c5)","var(--c6)"];
+const ANOMALY = { growthPct:100, minShare:0.05, minAbs:10 };
+
+/* ============================================================ */
+const S = {
+  view:"normal",
+  tokens: JSON.parse(JSON.stringify(TOKENS)),
+  sort:{ key:"cost", dir:"desc" },
+  q:"", showDeleted:false, period:"本月 08/01–08/15"
+};
+
+const $ = (s,r) => (r||document).querySelector(s);
+const money = n => "$" + Number(n||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const sum = (a,f) => a.reduce((t,x)=>t+(f?f(x):x),0);
+const r2 = n => Math.round(n*100)/100;
+
+function toast(title, body){
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.innerHTML = "<b>"+esc(title)+"</b>"+(body?esc(body):"");
+  $("#toasts").appendChild(el);
+  setTimeout(()=>{ el.style.opacity="0"; el.style.transition="opacity .25s"; setTimeout(()=>el.remove(),260); },3200);
+}
+
+/* ownerOf 是「这把令牌当前算不算有归属」的**唯一**判定点。
+   「全都没设归属」这个原型状态必须在这里生效，不能只在 buildRows 里就地忽略：
+   之前概览算的是 0 / 14 已设，而归属弹窗直接读 t.owner，照样预填 7 项，
+   同一屏上两个数字互相打脸。凡是要问「谁的令牌」的地方都得走这个函数。 */
+function ownerOf(t){ return S.view === "raw" ? null : (t.owner || null); }
+
+/* ---- 分组：owner ?? 令牌自身 ---- */
+function buildRows(){
+  const zero = S.view === "zero";
+  const map = new Map();
+  S.tokens.forEach(t => {
+    const owner = ownerOf(t);
+    const key = owner ? ("owner:"+owner) : ("key:"+t.id);
+    if (!map.has(key)) map.set(key, {
+      key, name: owner || t.name, byOwner: !!owner, tokens: [],
+      cost:0, prev:0, req:0, prevReq:0, prevKnown:false,
+      daily:new Array(15).fill(0), models:new Map(), last:"", lastRank:-1, deleted:false
+    });
+    const g = map.get(key);
+    g.tokens.push(t);
+    g.cost += zero ? 0 : t.cost;
+    g.req  += zero ? 0 : t.req;
+    if (t.prev != null){ g.prev += t.prev; g.prevKnown = true; }
+    g.prevReq += t.prevReq;
+    t.daily.forEach((v,i)=> g.daily[i] += zero ? 0 : v);
+    t.models.forEach(([m,c]) => g.models.set(m, (g.models.get(m)||0) + (zero?0:c)));
+    const rank = lastRank(t.last);
+    if (rank > g.lastRank){ g.lastRank = rank; g.last = t.last; }
+    if (t.deleted && g.tokens.every(x=>x.deleted)) g.deleted = true;
+  });
+  const rows = [...map.values()];
+  rows.forEach(g => {
+    g.cost = r2(g.cost); g.prev = r2(g.prev);
+    g.deleted = g.tokens.every(t=>t.deleted);
+    g.models = [...g.models.entries()].filter(([,c])=>c>0).sort((a,b)=>b[1]-a[1]);
+    const mt = sum(g.models, m=>m[1]) || 1;
+    g.models = g.models.map(([m,c])=>[m,r2(c),r2(c/mt*100)]);
+    if (!g.prevKnown || g.prev === 0){ g.deltaPct = null; g.deltaAbs = null; g.isNew = !g.prevKnown; }
+    else { g.deltaPct = r2((g.cost-g.prev)/g.prev*100); g.deltaAbs = r2(g.cost-g.prev); }
+  });
+  const total = r2(sum(rows.filter(g=>!g.deleted || g.cost>0), g=>g.cost));
+  rows.forEach(g => {
+    g.share = total ? g.cost/total*100 : 0;
+    g.anomaly = g.deltaPct != null && g.deltaPct >= ANOMALY.growthPct
+             && g.cost >= Math.max(total*ANOMALY.minShare, ANOMALY.minAbs);
+  });
+  const prevTotal = r2(sum(rows, g=>g.prev));
+  return { rows, total, prevTotal,
+           maxCost: Math.max(1, ...rows.map(g=>g.cost)),
+           unowned: S.tokens.filter(t=>!t.deleted && !ownerOf(t)).length,
+           tokenCount: S.tokens.filter(t=>!t.deleted).length };
+}
+// 「最后使用」只用于展示，用一个粗排序键挑出最新的那把
+function lastRank(s){
+  if (!s || s === "从未使用") return -1;
+  if (s.includes("分钟前")) return 1000 - parseInt(s,10);
+  if (s.includes("小时前")) return 900 - parseInt(s,10);
+  if (s.startsWith("今天")) return 800;
+  if (s.startsWith("昨天")) return 700;
+  const m = s.match(/(\d+)\/(\d+)/);
+  return m ? 100 + (+m[1])*31 + (+m[2]) : 0;
+}
+
+/* ============================================================
+   渲染
+   ============================================================ */
+function render(){
+  const c = $("#content");
+  if (S.view === "loading"){ c.innerHTML = head() + skeleton(); bind(); return; }
+  if (S.view === "empty"){ c.innerHTML = head(true) + emptyState(); bind(); return; }
+  const d = buildRows();
+  c.innerHTML = head() + overview(d) + rangeNotice() + table(d);
+  bind();
+}
+
+function head(minimal){
+  return `
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">团队</h1>
+      <p class="page-desc">按人看这段时间的 API 消耗。没设归属的令牌，直接用令牌名统计。</p>
+    </div>
+    <div class="page-head-actions">
+      ${minimal ? "" : `
+      <div class="search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input class="input" id="q" placeholder="搜人名 / 令牌名 / 尾号" value="${esc(S.q)}">
+      </div>
+      <button class="btn btn-secondary" id="exportBtn">
+        <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg>导出
+      </button>`}
+      <button class="btn btn-primary" data-act="own">
+        <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>设置归属
+      </button>
+    </div>
+  </div>`;
+}
+
+function overview(d){
+  const deltaPct = d.prevTotal ? (d.total - d.prevTotal)/d.prevTotal*100 : 0;
+  const deltaAbs = d.total - d.prevTotal;
+  const cmp = S.view === "range90" ? "" : "，对比 07/01–07/15";
+
+  const deltaBlock = S.view === "range90"
+    ? `<div class="ov-metric"><span class="ov-label">环比</span>
+         <span class="ov-value" style="color:var(--text-4)">—</span>
+         <span class="ov-sub">上期已超出 90 天保留范围</span></div>`
+    : `<div class="ov-metric"><span class="ov-label">环比</span>
+         <span class="ov-value ov-delta">${deltaPct>=0?"+":""}${deltaPct.toFixed(1)}%</span>
+         <span class="ov-sub num">${deltaAbs>=0?"+":"−"}${money(Math.abs(deltaAbs)).slice(1)}${cmp}</span></div>`;
+
+  const set = d.tokenCount - d.unowned;
+  const ownBlock = d.unowned === 0
+    ? `<div class="ov-metric ov-owner done"><span class="ov-label">归属</span>
+         <span class="ov-value">✓ ${d.tokenCount} 把令牌都设了</span>
+         <span class="ov-sub"><button class="link-btn" data-act="own">调整归属</button></span></div>`
+    : `<div class="ov-metric ov-owner"><span class="ov-label">归属</span>
+         <span class="ov-value num">${set} / ${d.tokenCount} 已设</span>
+         <span class="ov-sub">其余按令牌名统计 · <button class="link-btn" data-act="own">设置归属</button></span></div>`;
+
+  return `
+  <section class="card overview">
+    <div class="ov-row1">
+      <div class="ov-metric"><span class="ov-label">周期</span>
+        <select class="input" id="period" style="width:auto;padding:6px 30px 6px 11px;font-size:13px;font-weight:600">
+          ${["本月 08/01–08/15","上月 07/01–07/31","近 30 天","今天"]
+              .map(o=>`<option${S.view!=="range90"&&S.period===o?" selected":""}>${o}</option>`).join("")}
+          <option${S.view==="range90"?" selected":""}>自定义…</option>
+        </select></div>
+      <div class="ov-sep"></div>
+      <div class="ov-metric"><span class="ov-label">团队消耗</span>
+        <span class="ov-value num">${money(d.total)}</span>
+        <span class="ov-sub">${d.rows.filter(g=>!g.deleted).length} 行 · ${d.tokenCount} 把令牌</span></div>
+      ${deltaBlock}
+      ${ownBlock}
+    </div>
+    ${conclusion(d)}
+  </section>`;
+}
+
+function conclusion(d){
+  if (S.view === "zero")
+    return `<div class="conclusion quiet"><span class="tag">结论</span><span>本期还没有消耗。上期同一时段是 <b>${money(d.prevTotal)}</b>。</span></div>`;
+
+  const a = d.rows.find(g => g.anomaly);
+  if (!a){
+    const top = d.rows.slice().sort((x,y)=>y.cost-x.cost)[0];
+    const tip = d.unowned > 0
+      ? `　设了归属之后，同一个人的多把令牌会并成一行。`
+      : "";
+    return `<div class="conclusion quiet"><span class="tag">结论</span>
+      <span>本期没有环比异常。消耗最集中的是 ${top?esc(top.name):"—"}，占 ${top?top.share.toFixed(1):"0"}%。${tip}</span></div>`;
+  }
+  const top = a.models[0];
+  return `<div class="conclusion"><span class="tag">结论</span>
+    <span><b>${esc(a.name)}</b> 本月 <b class="num">${money(a.cost)}</b>，环比 <span class="up num">+${a.deltaPct.toFixed(1)}%</span>；调用从 ${a.prevReq.toLocaleString()} 次涨到 ${a.req.toLocaleString()} 次${top?`，${top[2].toFixed(0)}% 花在 ${esc(top[0])} 上`:""}</span>
+    <button class="link-btn" style="margin-left:auto;flex:none" data-row="${esc(a.key)}">查看 →</button></div>`;
+}
+
+function rangeNotice(){
+  if (S.view !== "range90") return "";
+  return `<div class="notice">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.01"/></svg>
+    <span>用量明细仅保留最近 90 天。所选区间的 <b>05/01–05/17</b> 部分已不可查，本页数字只统计 05/18 起的数据。</span>
+    <button class="link-btn" style="margin-left:auto" data-act="reset-range">跳到近 30 天</button></div>`;
+}
+
+const COLS = [
+  {k:"name", t:"归属 / 令牌", sortable:true},
+  {k:"keys", t:"令牌"},
+  {k:"cost", t:"本期消耗", sortable:true, num:true},
+  {k:"delta",t:"环比",    sortable:true, num:true},
+  {k:"last", t:"最后使用"}
+];
+function thead(){
+  return "<thead><tr>" + COLS.map(c=>{
+    const on = S.sort.key === c.k;
+    const ariaSort = on ? (S.sort.dir === "desc" ? "descending" : "ascending") : "none";
+    return `<th class="${c.sortable?"sortable":""} ${c.num?"num-col":""} ${on?"sorted":""}" ${c.sortable?`data-sort="${c.k}" tabindex="0" aria-sort="${ariaSort}"`:""}>${esc(c.t)}${c.sortable?`<span class="sort-caret" aria-hidden="true">${on?(S.sort.dir==="desc"?"▼":"▲"):"▼"}</span>`:""}</th>`;
+  }).join("") + "</tr></thead>";
+}
+
+function sortRows(list){
+  const {key,dir}=S.sort, s = dir==="desc" ? -1 : 1;
+  return list.slice().sort((a,b)=>{
+    if (key==="name")  return s * a.name.localeCompare(b.name,"zh");
+    if (key==="delta") return s * ((a.deltaPct==null?-Infinity:a.deltaPct)-(b.deltaPct==null?-Infinity:b.deltaPct));
+    return s * (a.cost-b.cost);
+  });
+}
+function matches(g){
+  if (!S.q) return true;
+  const q = S.q.toLowerCase();
+  return g.name.toLowerCase().includes(q)
+      || g.tokens.some(t => (t.name||"").toLowerCase().includes(q) || (t.mask||"").toLowerCase().includes(q));
+}
+
+function table(d){
+  const live = d.rows.filter(g => !g.deleted);
+  const gone = d.rows.filter(g => g.deleted);
+  const shown = sortRows(live).filter(matches);
+  const hidden = live.length - shown.length;
+
+  const foldRow = gone.length ? `<tr class="fold-row"><td colspan="5">
+      <button class="fold-btn" data-act="fold">${S.showDeleted?"▾":"▸"} ${S.showDeleted?"收起":"显示"} ${gone.length} 把已删除的令牌（历史消耗仍计入合计）</button>
+    </td></tr>` + (S.showDeleted ? gone.map(g=>row(g,d)).join("") : "") : "";
+
+  const body = shown.length
+    ? shown.map(g=>row(g,d)).join("") + foldRow
+    : `<tr><td colspan="5"><div class="empty" style="padding:44px 20px"><h3 style="font-size:15px">没有匹配「${esc(S.q)}」的人或令牌</h3><p>试试人名、令牌名，或者密钥后 4 位。</p></div></td></tr>` + foldRow;
+
+  return `
+  <div class="table-shell">
+    <div class="table-scroll"><table>${thead()}<tbody>${body}</tbody></table></div>
+    <div class="recon">
+      <div class="recon-eq"><span class="part">${live.length} 行 · ${d.tokenCount} 把令牌合计</span> <span class="num">${money(d.total)}</span>
+        <span class="part" style="font-weight:400">　＝　该账号本期全部 API 消耗</span></div>
+      ${S.q && hidden>0 ? `<div class="recon-filter">当前筛选 ${money(sum(shown,g=>g.cost))} / 全部 ${money(d.total)}（${hidden} 行被筛掉，合计仍为全量）</div>` : ""}
+      <div class="recon-note">
+        口径：actual_cost（已含用户/分组倍率的实收金额）· 仅统计 API 调用消耗，不含订阅费与充值<br>
+        明细仅保留最近 90 天，本页不提供「累计」口径
+      </div>
+    </div>
+  </div>`;
+}
+
+function row(g,d){
+  const zero = g.cost === 0;
+  const barW = d.maxCost ? Math.max(1.5, g.cost/d.maxCost*100) : 0;
+
+  let delta;
+  if (g.isNew)                 delta = `<div class="delta" style="color:var(--text-4)">—</div><div class="delta-abs">新令牌</div>`;
+  else if (g.deltaPct == null) delta = `<div class="delta" style="color:var(--text-4)">—</div>`;
+  else delta = `<div class="delta ${g.anomaly?"alert":""} num">${g.anomaly?"▲ ":""}${g.deltaPct>0?"+":""}${g.deltaPct.toFixed(1)}%</div>
+                <div class="delta-abs num">${g.deltaAbs>=0?"+":"−"}${money(Math.abs(g.deltaAbs)).slice(1)}</div>`;
+
+  const alive = g.tokens.filter(t=>!t.deleted);
+  let keyCell;
+  if (g.tokens.length === 1 && !g.tokens[0].deleted){
+    /* 这里刻意**没有**复制按钮：本页是只读看板，后端只下发 masked_key，
+       明文密钥从来不经过这个接口。给一个「复制密钥」按钮却把 sk-7Qm...f3a2 这个
+       掩码塞进剪贴板，用户拿到的是不可用的内容 —— 承诺了一个数据链路上不存在的能力。
+       要拿明文只能去「我的令牌」页，那里才有创建时留下的原文。 */
+    keyCell = `<div class="keycell"><span class="mono" title="只读掩码 · 明文请去「我的令牌」">${esc(g.tokens[0].mask)}</span></div>`;
+  } else if (g.deleted){
+    keyCell = `<span class="raw-tag">${g.tokens.length} 把已删除</span>`;
+  } else {
+    keyCell = `<span class="raw-tag num">${alive.length} 把</span>`;
+  }
+
+  const sub = g.byOwner
+    ? `<span class="owner-tag">归属</span><span>${alive.length} 把令牌</span>`
+    : (g.deleted ? `<span class="badge badge-gray">已删除</span>` : `<span class="raw-tag">令牌名 · 未设归属</span>`);
+
+  return `
+  <tr class="row ${g.deleted?"deleted-row":""}" data-row="${esc(g.key)}" tabindex="0" aria-label="查看 ${esc(g.name)} 详情">
+    <td class="m-lead">
+      <div class="cell-1">${esc(g.name)}${g.anomaly?'<span class="anomaly-mark">!</span>':""}</div>
+      <div class="cell-2">${sub}</div>
+    </td>
+    <td data-l="令牌">${keyCell}</td>
+    <td class="num-col" data-l="本期消耗">
+      <div class="money ${zero?"money-empty":""} num">${zero?"—":money(g.cost)}</div>
+      ${zero?"":`<div class="cell-2 num" style="justify-content:flex-end">占 ${g.share.toFixed(1)}%</div><div class="share-bar"><i style="width:${barW}%"></i></div>`}
+    </td>
+    <td class="num-col" data-l="环比">${delta}</td>
+    <td data-l="最后使用"><span style="font-size:12.5px;color:var(--text-3)">${esc(g.last)}</span></td>
+  </tr>`;
+}
+
+function skeleton(){
+  const r = `<tr class="row">
+    <td><div class="sk" style="height:14px;width:70px"></div><div class="sk" style="height:11px;width:52px;margin-top:6px"></div></td>
+    <td><div class="sk" style="height:14px;width:86px"></div></td>
+    <td class="num-col"><div class="sk" style="height:14px;width:72px;margin-left:auto"></div><div class="sk" style="height:5px;width:100px;margin-top:7px;margin-left:auto"></div></td>
+    <td class="num-col"><div class="sk" style="height:14px;width:52px;margin-left:auto"></div></td>
+    <td><div class="sk" style="height:14px;width:64px"></div></td></tr>`;
+  return `
+  <section class="card overview">
+    <div class="ov-row1">
+      <div class="ov-metric"><span class="ov-label">周期</span><div class="sk" style="height:24px;width:150px"></div></div>
+      <div class="ov-sep"></div>
+      <div class="ov-metric"><span class="ov-label">团队消耗</span><div class="sk" style="height:24px;width:120px"></div><div class="sk" style="height:11px;width:92px;margin-top:5px"></div></div>
+      <div class="ov-metric"><span class="ov-label">环比</span><div class="sk" style="height:24px;width:70px"></div></div>
+    </div>
+    <div class="conclusion"><span class="tag">结论</span><div class="sk" style="height:13px;width:min(430px,60%)"></div></div>
+  </section>
+  <div class="table-shell"><div class="table-scroll"><table>${thead()}<tbody>${r.repeat(5)}</tbody></table></div>
+  <div class="recon"><div class="recon-eq" style="color:var(--text-3);font-weight:500">正在结算…</div>
+  <div class="recon-note">口径：actual_cost（已含用户/分组倍率的实收金额）· 仅统计 API 调用消耗，不含订阅费与充值</div></div></div>`;
+}
+
+function emptyState(){
+  return `<div class="table-shell"><div class="empty">
+    <div class="empty-icon"><svg viewBox="0 0 24 24"><path d="M8.5 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M2.5 20v-1.5A4.5 4.5 0 0 1 7 14h3a4.5 4.5 0 0 1 4.5 4.5V20"/><path d="M16.5 11.5a2.5 2.5 0 1 0 0-5"/><path d="M21.5 20v-1.2a4 4 0 0 0-3-3.87"/></svg></div>
+    <h3>这个账号还没有令牌</h3>
+    <p>去「我的令牌」创建几把发给团队成员，这里就会按人显示每个人花了多少钱。<br>不用先做任何配置——有令牌就有统计。</p>
+    <button class="btn btn-secondary" id="gotoKeys">去我的令牌 →</button>
+  </div></div>`;
+}
+
+/* ============================================================
+   模态
+   ============================================================ */
+let modalReturnFocus = null;
+let modalTitleSeq = 0;
+
+function openModal(size, html){
+  const root = $("#modalRoot");
+  if (document.activeElement instanceof HTMLElement) modalReturnFocus = document.activeElement;
+  root.innerHTML = `<div class="overlay"><div class="modal ${size}" role="dialog" aria-modal="true" tabindex="-1">${html}</div></div>`;
+  document.body.style.overflow = "hidden";
+  const modal = root.querySelector('[role="dialog"]');
+  const title = modal.querySelector(".modal-title");
+  if (title){
+    title.id = `modal-title-${++modalTitleSeq}`;
+    modal.setAttribute("aria-labelledby", title.id);
+  }
+  root.querySelectorAll("[data-close]").forEach(b=>b.onclick=closeModal);
+  const f = root.querySelector("input,button.btn-primary,[data-close]");
+  (f || modal).focus();
+}
+function closeModal(){
+  const root = $("#modalRoot");
+  if (!root.querySelector('[role="dialog"]')) return;
+  const returnFocus = modalReturnFocus;
+  modalReturnFocus = null;
+  root.innerHTML = "";
+  document.body.style.overflow = "";
+  if (returnFocus?.isConnected) returnFocus.focus();
+}
+document.addEventListener("keydown", e => {
+  const modal = $("#modalRoot").querySelector('[role="dialog"]');
+  if (!modal) return;
+  if (e.key === "Escape"){
+    e.preventDefault();
+    closeModal();
+    return;
+  }
+  if (e.key !== "Tab") return;
+  const focusable = [...modal.querySelectorAll(
+    'button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+  )].filter(el => el.getClientRects().length && el.getAttribute("aria-hidden") !== "true");
+  if (!focusable.length){
+    e.preventDefault();
+    modal.focus();
+    return;
+  }
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  if (e.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))){
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))){
+    e.preventDefault();
+    first.focus();
+  }
+});
+
+/* ---- 只读详情 ---- */
+function openDetail(key){
+  const d = buildRows();
+  const g = d.rows.find(x => x.key === key);
+  if (!g) return;
+  const peak = Math.max(...g.daily), maxD = peak || 1;
+
+  const bars = g.daily.map((v,i)=>`
+    <div class="col ${v===peak&&peak>0&&g.anomaly?"peak":""}" title="08/${DAYS[i]} ${money(v)}">
+      <div class="bar" style="height:${v/maxD*78}px"></div><span class="lbl">${DAYS[i]}</span></div>`).join("");
+
+  const models = g.models.length ? g.models.map(([n,c,p],i)=>`
+    <div class="mdl-row"><span class="mdl-name" title="${esc(n)}">${esc(n)}</span>
+      <span class="mdl-track"><i style="width:${p}%;background:${CHART_COLORS[i%6]}"></i></span>
+      <span class="mdl-val num">${money(c)}</span><span class="mdl-pct num">${p.toFixed(1)}%</span></div>`).join("")
+    : `<p class="input-hint" style="margin:0">本期没有调用记录。</p>`;
+
+  const keys = g.tokens.map(t=>{
+    const st = t.deleted ? `<span class="badge badge-gray">已删除</span>`
+      : t.status==="inactive" ? `<span class="badge badge-gray"><span class="dot" style="background:var(--text-4)"></span>已停用</span>`
+      : `<span class="badge badge-success"><span class="dot" style="background:var(--success)"></span>可用</span>`;
+    return `<div class="keyrow ${t.deleted||t.status==="inactive"?"dim":""}">
+      <div style="min-width:0"><div class="kname">${esc(t.name)}</div>
+        <div class="kmeta">${st}${t.group?"<span>"+esc(t.group)+"</span>":""}
+          ${t.mask&&!t.deleted?`<span class="mono">${esc(t.mask)}</span>`:""}
+          <span>最后使用 ${esc(t.last)}</span></div></div>
+      <div class="kmoney num">${t.cost?money(t.cost):"—"}</div></div>`;
+  }).join("");
+
+  const avg = g.req ? g.cost/g.req : null, prevAvg = g.prevReq ? g.prev/g.prevReq : null;
+  const hot = g.anomaly;
+
+  openModal("wide", `
+    <div class="modal-head">
+      <div><h3 class="modal-title">${esc(g.name)}</h3>
+      <p class="modal-sub">${g.byOwner?`归属 · ${g.tokens.filter(t=>!t.deleted).length} 把令牌`:"按令牌名统计 · 未设归属"} · ${esc(S.period)} · 口径 actual_cost</p></div>
+      <button class="modal-x" data-close aria-label="关闭"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="detail-stats">
+        <div class="stat"><div class="stat-l">本期消耗</div><div class="stat-v num">${g.cost?money(g.cost):"—"}</div>
+          <div class="stat-p num">${g.prevKnown?"上期 "+money(g.prev):"上期无数据"}</div></div>
+        <div class="stat ${hot?"hot":""}"><div class="stat-l">环比</div>
+          <div class="stat-v num">${g.deltaPct==null?"—":(g.deltaPct>0?"+":"")+g.deltaPct.toFixed(1)+"%"}</div>
+          <div class="stat-p num">${g.deltaAbs==null?(g.isNew?"新令牌":""):(g.deltaAbs>=0?"+":"−")+money(Math.abs(g.deltaAbs))}</div></div>
+        <div class="stat ${hot?"hot":""}"><div class="stat-l">调用次数</div><div class="stat-v num">${g.req.toLocaleString()}</div>
+          <div class="stat-p num">上期 ${g.prevReq.toLocaleString()}</div></div>
+        <div class="stat"><div class="stat-l">单次均价</div><div class="stat-v num">${avg!=null?"$"+avg.toFixed(4):"—"}</div>
+          <div class="stat-p num">${prevAvg!=null?"上期 $"+prevAvg.toFixed(4):"上期无数据"}</div></div>
+      </div>
+      ${hot?`<div class="notice" style="margin-bottom:20px">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.01"/></svg>
+        <span><b>调用次数涨了 ${(g.req/Math.max(1,g.prevReq)).toFixed(1)} 倍，单次均价反而降了。</b>这不像「换了更贵的模型」，更像有脚本在轮询——大量小请求。</span></div>`:""}
+      <div class="sec"><h4 class="sec-title">每日消耗 <span class="hint">${esc(S.period)}${hot?" · 红色为峰值日":""}</span></h4>
+        <div class="hscroll"><div class="daily">${bars}</div></div></div>
+      <div class="sec"><h4 class="sec-title">模型分布 <span class="hint">按消耗金额</span></h4>${models}</div>
+      <div class="sec"><h4 class="sec-title">令牌 <span class="hint">${g.tokens.length} 把 · 只读，配置请去「我的令牌」</span></h4>
+        <div class="keylist">${keys}</div></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost spread" data-act="goto-usage">看调用明细 →</button>
+      <button class="btn btn-secondary" data-close>关闭</button>
+      <button class="btn btn-primary" data-act="own">设置归属</button>
+    </div>`);
+  bindModal();
+}
+
+/* ---- 唯一的写操作：设置归属 ---- */
+function openOwner(){
+  const live = S.tokens.filter(t=>!t.deleted).slice().sort((a,b)=>b.cost-a.cost);
+  const names = [...new Set(S.tokens.map(ownerOf).filter(Boolean))];
+  const dl = `<datalist id="ownerlist">${names.map(n=>`<option value="${esc(n)}"></option>`).join("")}</datalist>`;
+
+  const rows = live.map(t=>`
+    <tr data-id="${t.id}" class="${ownerOf(t)?"filled":""}">
+      <td><div class="cell-1" style="font-size:13px">${esc(t.name)}</div>
+        <div class="cell-2">${esc(t.group)} · <span class="mono">${esc(t.mask)}</span></div></td>
+      <td class="num-col num" style="font-weight:600">${t.cost?money(t.cost):"—"}</td>
+      <td style="color:var(--text-3);font-size:12.5px">${esc(t.last)}</td>
+      <td><input class="input own-input" data-id="${t.id}" list="ownerlist"
+            value="${esc(ownerOf(t)||"")}" placeholder="留空 = 用令牌名"></td>
+    </tr>`).join("");
+
+  openModal("xwide", `${dl}
+    <div class="modal-head">
+      <div><h3 class="modal-title">设置归属</h3>
+      <p class="modal-sub">写上这把令牌是谁的。<b>留空也没关系</b>——留空就按令牌名统计，页面照样能用。<br>
+      <b>同名即同一个人</b>：几把令牌都写「王磊」，统计时就并成一行。只改标签，不动任何金额。</p></div>
+      <button class="modal-x" data-close aria-label="关闭"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="hscroll"><table class="own-tbl">
+        <thead><tr><th>令牌</th><th class="num-col">本期消耗</th><th>最后使用</th><th style="width:200px">归属到</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+    </div>
+    <div class="modal-foot">
+      <span class="spread own-preview" id="ownPreview"></span>
+      <button class="btn btn-secondary" data-close>取消</button>
+      <button class="btn btn-primary" id="ownSave">保存</button>
+    </div>`);
+  bindOwner();
+}
+
+function bindOwner(){
+  const root = $("#modalRoot");
+  const inputs = [...root.querySelectorAll(".own-input")];
+  const preview = () => {
+    const map = new Map(); let unset = 0;
+    inputs.forEach(inp=>{
+      const v = inp.value.trim();
+      inp.closest("tr").classList.toggle("filled", !!v);
+      if (v) map.set(v, (map.get(v)||0)+1); else unset++;
+    });
+    const merged = [...map.entries()].filter(([,n])=>n>1);
+    const rows = map.size + unset;
+    $("#ownPreview").innerHTML =
+      `${inputs.length - unset} / ${inputs.length} 把已设归属　·　保存后 <b>${inputs.length} 把令牌 → ${rows} 行</b>` +
+      (merged.length ? `　合并 ${merged.map(([n,c])=>`<b>${esc(n)}</b>×${c}`).join("、")}` : "");
+  };
+  inputs.forEach(inp=>{ inp.oninput = preview; inp.onchange = preview; });
+  preview();
+  $("#ownSave").onclick = () => {
+    const wasRaw = S.view === "raw";
+    if (wasRaw) S.tokens.filter(t=>!t.deleted).forEach(t=>{ t.owner = null; });
+    inputs.forEach(inp=>{
+      const t = S.tokens.find(x=>x.id === +inp.getAttribute("data-id"));
+      if (!t) return;
+      t.owner = inp.value.trim() || null;
+    });
+    if (wasRaw){ S.view = "normal"; syncChips(); }
+    closeModal(); render();
+    toast("归属已保存", "统计已按新的归属重新分组");
+  };
+}
+
+/* ============================================================
+   事件
+   ============================================================ */
+function copyText(t){
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t).catch(()=>{});
+  else { const a=document.createElement("textarea"); a.value=t; a.style.position="fixed"; a.style.opacity="0";
+         document.body.appendChild(a); a.select(); try{document.execCommand("copy")}catch(e){} a.remove(); }
+}
+function bindCopy(scope){
+  scope.querySelectorAll("[data-copy]").forEach(b=>b.onclick=ev=>{
+    ev.stopPropagation();
+    copyText(b.getAttribute("data-copy"));
+    const old = b.innerHTML;
+    b.classList.add("done");
+    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7"/></svg>';
+    setTimeout(()=>{ b.classList.remove("done"); b.innerHTML = old; },1600);
+  });
+}
+function bindModal(){
+  const root = $("#modalRoot");
+  bindCopy(root);
+  root.querySelectorAll('[data-act="goto-usage"]').forEach(b=>b.onclick=()=>toast("跳转到用量统计","带上这些令牌和时间区间，看逐条调用明细"));
+  root.querySelectorAll('[data-act="own"]').forEach(b=>b.onclick=()=>{ closeModal(); openOwner(); });
+}
+
+function bind(){
+  const c = $("#content");
+  bindCopy(c);
+
+  const q = $("#q");
+  if (q) q.oninput = () => {
+    S.q = q.value; const pos = q.selectionStart; render();
+    const n = $("#q"); if (n){ n.focus(); try{ n.setSelectionRange(pos,pos) }catch(e){} }
+  };
+  c.querySelectorAll("th[data-sort]").forEach(th=>{
+    const sort = restoreFocus => {
+      const k = th.getAttribute("data-sort");
+      if (S.sort.key === k) S.sort.dir = S.sort.dir==="desc"?"asc":"desc";
+      else S.sort = {key:k, dir:"desc"};
+      render();
+      if (restoreFocus) document.querySelector(`th[data-sort="${k}"]`)?.focus();
+    };
+    th.onclick = () => sort(false);
+    th.onkeydown = e => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      sort(true);
+    };
+  });
+  c.querySelectorAll("[data-row]").forEach(el=>{
+    const open = () => openDetail(el.getAttribute("data-row"));
+    el.onclick = e => {
+      if (e.target.closest("[data-copy]")) return;
+      open();
+    };
+    el.onkeydown = e => {
+      if (e.target !== el || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      open();
+    };
+  });
+  c.querySelectorAll('[data-act="own"]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); openOwner(); });
+  c.querySelectorAll('[data-act="fold"]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); S.showDeleted=!S.showDeleted; render(); });
+  c.querySelectorAll('[data-act="reset-range"]').forEach(b=>b.onclick=()=>{
+    S.view="normal";
+    S.period="近 30 天";
+    syncChips();
+    render();
+  });
+
+  const ex = $("#exportBtn");
+  if (ex) ex.onclick = () => toast("已导出","团队消耗_2026-08-01_2026-08-15.xlsx · 按人汇总 + 令牌明细 两张表");
+  const gk = $("#gotoKeys");
+  if (gk) gk.onclick = () => toast("跳转到我的令牌","在那里创建令牌、配额度、设限速");
+  const pe = $("#period");
+  if (pe) pe.onchange = () => {
+    if (pe.value.startsWith("自定义")){ S.view="range90"; S.period="05/01–08/15"; }
+    else { S.view="normal"; S.period=pe.value; }
+    syncChips(); render();
+  };
+}
+
+function syncChips(){
+  document.querySelectorAll(".proto .chip").forEach(b=>b.classList.toggle("on", b.getAttribute("data-state")===S.view));
+}
+document.querySelectorAll(".proto .chip").forEach(b=>b.onclick=()=>{
+  S.view = b.getAttribute("data-state");
+  S.q=""; S.showDeleted=false;
+  S.tokens = JSON.parse(JSON.stringify(TOKENS));
+  S.tokens.forEach(t=>{ t.daily = mkDaily(t.cost, t.shape); });
+  S.period = S.view==="range90" ? "05/01–08/15" : "本月 08/01–08/15";
+  syncChips(); closeModal(); render();
+});
+
+const SUN = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
+const MOON = '<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5Z"/>';
+function currentDark(){
+  const t = document.documentElement.getAttribute("data-theme");
+  return t ? t === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+function syncThemeIcon(){ $("#themeIcon").innerHTML = currentDark() ? MOON : SUN; }
+$("#themeBtn").onclick = () => { document.documentElement.setAttribute("data-theme", currentDark()?"light":"dark"); syncThemeIcon(); };
+
+syncThemeIcon();
+render();
+</script>
+
+</body>
+</html>
