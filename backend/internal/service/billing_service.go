@@ -1365,13 +1365,10 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input CostInput) (*CostBreakdown, error) {
 	totalContext := input.Tokens.InputTokens + input.Tokens.CacheCreationTokens + input.Tokens.CacheReadTokens
 
-	// 分组开关是统一入口；本仓约定（与上游 5b2a386ed 的「或」语义不同）：OpenAI 账号级开关
-	// openai_long_context_billing_enabled 默认关，且账号显式 false 会否决分组配置——
-	// 两者同时允许才走长上下文阶梯。用户已决策长上下文加价默认不开，改成「或」会让
-	// 分组默认开启（迁移 221 DEFAULT TRUE）静默恢复加价。nil 表示账号无意见，仅看分组。
+	// 分组开关是统一入口；账号 API 开关保留为额外开启能力，但 false 不否决分组配置。
 	contextTierPricingEnabled := resolved.longContextPricingEnabled
-	if input.LongContextBillingEnabled != nil {
-		contextTierPricingEnabled = contextTierPricingEnabled && *input.LongContextBillingEnabled
+	if input.LongContextBillingEnabled != nil && *input.LongContextBillingEnabled {
+		contextTierPricingEnabled = true
 	}
 
 	pricingContext := totalContext
