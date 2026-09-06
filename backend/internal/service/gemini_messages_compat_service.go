@@ -952,8 +952,8 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					return nil, failoverErr
 				}
 				if account.IsCustomErrorCodesEnabled() {
-					return nil, s.writeGeminiCustomCodeSkippedError(c, account, resp.StatusCode, upstreamReqID, respBody, func() {
-						_ = s.writeClaudeError(c, http.StatusInternalServerError, "api_error", geminiCustomCodeSkippedClientMessage)
+					return nil, s.writeGeminiCustomCodeSkippedError(c, account, resp.StatusCode, upstreamReqID, respBody, func(status int, message string) {
+						_ = s.writeClaudeError(c, status, "api_error", message)
 					})
 				}
 				// 池模式：客户端写出与 ErrorPolicyNone 相同（按上游真实状态码映射），仅跳过账号状态标记。
@@ -1472,8 +1472,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					return nil, failoverErr
 				}
 				if account.IsCustomErrorCodesEnabled() {
-					return nil, s.writeGeminiCustomCodeSkippedError(c, account, resp.StatusCode, requestID, respBody, func() {
-						_ = s.writeGoogleError(c, http.StatusInternalServerError, geminiCustomCodeSkippedClientMessage)
+					respBody = unwrapIfNeeded(isOAuth, respBody)
+					return nil, s.writeGeminiCustomCodeSkippedError(c, account, resp.StatusCode, requestID, respBody, func(status int, message string) {
+						_ = s.writeGoogleError(c, status, message)
 					})
 				}
 				// 池模式：客户端写出与 ErrorPolicyNone 相同（状态码/响应体保真），仅跳过账号状态标记。
@@ -1731,7 +1732,7 @@ func (s *GeminiMessagesCompatService) upstreamErrorDetail(body []byte) string {
 // writeGeminiCustomCodeSkippedError 处理自定义错误码未命中且不可 failover 的上游错误：
 // 客户端统一收到 500 + 固定文案（由 write 按端点格式写出），不透传上游细节；
 // 上游真实状态码与错误信息仅记录到 ops 错误日志。
-func (s *GeminiMessagesCompatService) writeGeminiCustomCodeSkippedError(c *gin.Context, account *Account, upstreamStatus int, upstreamRequestID string, body []byte, write func()) error {
+func (s *GeminiMessagesCompatService) writeGeminiCustomCodeSkippedError(c *gin.Context, account *Account, upstreamStatus int, upstreamRequestID string, body []byte, write func(status int, message string)) error {
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	upstreamDetail := s.upstreamErrorDetail(body)
 	setOpsUpstreamError(c, upstreamStatus, upstreamMsg, upstreamDetail)
@@ -1745,7 +1746,16 @@ func (s *GeminiMessagesCompatService) writeGeminiCustomCodeSkippedError(c *gin.C
 		Message:            upstreamMsg,
 		Detail:             upstreamDetail,
 	})
-	write()
+	// 本仓定制：未列入自定义错误码的上游错误也过一遍错误透传规则（按上游真实状态码匹配），
+	// 命中则按规则给的状态码/文案写出（内容审核拦截等可操作错误不再被压成 500）；
+	// 未命中维持上游约定：500 + 固定文案，不透传上游细节。
+	if status, _, ruleMsg, matched := applyErrorPassthroughRule(
+		c, PlatformGemini, upstreamStatus, body, http.StatusInternalServerError, "upstream_error", geminiCustomCodeSkippedClientMessage,
+	); matched {
+		write(status, ruleMsg)
+		return fmt.Errorf("gemini upstream error: %d (not in custom error codes; passthrough rule matched)", upstreamStatus)
+	}
+	write(http.StatusInternalServerError, geminiCustomCodeSkippedClientMessage)
 	if upstreamMsg == "" {
 		return fmt.Errorf("gemini upstream error: %d (not in custom error codes)", upstreamStatus)
 	}

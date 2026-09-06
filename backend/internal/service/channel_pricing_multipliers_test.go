@@ -244,19 +244,18 @@ func TestCalculateTokenCostContextTierEnablement(t *testing.T) {
 		require.InDelta(t, 200e-6, cost.TotalCost, 1e-12)
 	})
 
-	t.Run("group enabled uses interval", func(t *testing.T) {
+	// 本仓语义（与上游「或」不同）：分组开关与账号开关须同时允许；账号 nil 表示无意见。
+	t.Run("group enabled and no account opinion uses interval", func(t *testing.T) {
 		resolved.longContextPricingEnabled = true
-		accountDisabled := false
 		cost, err := service.calculateTokenCost(resolved, CostInput{
 			Model: "custom", Tokens: tokens, RateMultiplier: 1, Resolver: resolver,
-			LongContextBillingEnabled: &accountDisabled,
 		})
 		require.NoError(t, err)
 		require.InDelta(t, 400e-6, cost.TotalCost, 1e-12)
 	})
 
-	t.Run("account enabled overrides disabled group", func(t *testing.T) {
-		resolved.longContextPricingEnabled = false
+	t.Run("group enabled and account enabled uses interval", func(t *testing.T) {
+		resolved.longContextPricingEnabled = true
 		accountEnabled := true
 		cost, err := service.calculateTokenCost(resolved, CostInput{
 			Model: "custom", Tokens: tokens, RateMultiplier: 1, Resolver: resolver,
@@ -264,6 +263,28 @@ func TestCalculateTokenCostContextTierEnablement(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.InDelta(t, 400e-6, cost.TotalCost, 1e-12)
+	})
+
+	t.Run("group enabled but account disabled uses base tier", func(t *testing.T) {
+		resolved.longContextPricingEnabled = true
+		accountDisabled := false
+		cost, err := service.calculateTokenCost(resolved, CostInput{
+			Model: "custom", Tokens: tokens, RateMultiplier: 1, Resolver: resolver,
+			LongContextBillingEnabled: &accountDisabled,
+		})
+		require.NoError(t, err)
+		require.InDelta(t, 200e-6, cost.TotalCost, 1e-12)
+	})
+
+	t.Run("account enabled cannot override disabled group", func(t *testing.T) {
+		resolved.longContextPricingEnabled = false
+		accountEnabled := true
+		cost, err := service.calculateTokenCost(resolved, CostInput{
+			Model: "custom", Tokens: tokens, RateMultiplier: 1, Resolver: resolver,
+			LongContextBillingEnabled: &accountEnabled,
+		})
+		require.NoError(t, err)
+		require.InDelta(t, 200e-6, cost.TotalCost, 1e-12)
 	})
 }
 

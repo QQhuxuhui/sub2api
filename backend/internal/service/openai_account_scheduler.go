@@ -2270,9 +2270,11 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 				RequiredTransport:       requiredTransport,
 				RequiredCapability:      requiredCapability,
 				RequiredImageCapability: requiredImageCapability,
-				RequireCompact:          requireCompact,
-				ExcludedIDs:             excludedIDs,
-				RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
+				// 本仓 2K/4K 定向路由：守护父账号粘性分支同样要带上高清标记，否则显式 2K/4K 会落到未标记账号。
+				RequireImagesHighRes: requireImagesHighRes,
+				RequireCompact:       requireCompact,
+				ExcludedIDs:          excludedIDs,
+				RequirePrivacySet:    s.openAIGroupRequiresPrivacySet(ctx, groupID),
 			})
 			if err != nil {
 				return nil, decision, err

@@ -307,3 +307,38 @@ func TestGeminiCompatSkipped_UnmatchedDoesNotDoubleRecord(t *testing.T) {
 
 	assert.Len(t, opsEvents(t, c), 1)
 }
+
+// --- 自定义错误码未命中分支 ---
+
+func TestGeminiCustomCodeSkipped_NoRuleHidesUpstreamAs500(t *testing.T) {
+	rec, c := newGeminiSkippedContext()
+
+	svc := &GeminiMessagesCompatService{}
+	err := svc.writeGeminiCustomCodeSkippedError(c, geminiSkippedAccount(), http.StatusBadRequest, "req-custom", geminiSafetyBlockBody(), func(status int, message string) {
+		_ = svc.writeGoogleError(c, status, message)
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code, "未命中规则维持上游约定：500 + 固定文案")
+	assert.Contains(t, rec.Body.String(), geminiCustomCodeSkippedClientMessage)
+	assert.NotContains(t, rec.Body.String(), "upstream safety system", "不透传上游细节")
+	assert.Len(t, opsEvents(t, c), 1)
+}
+
+func TestGeminiCustomCodeSkipped_RuleMatchesOnTheRealUpstreamCode(t *testing.T) {
+	rec, c := newGeminiSkippedContext()
+	bindGeminiSkippedRules(c, geminiKeywordPassthroughRule("upstream safety system"))
+
+	svc := &GeminiMessagesCompatService{}
+	err := svc.writeGeminiCustomCodeSkippedError(c, geminiSkippedAccount(), http.StatusBadRequest, "req-custom", geminiSafetyBlockBody(), func(status int, message string) {
+		_ = svc.writeGoogleError(c, status, message)
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "命中规则时按上游真实状态码写出，不再压成 500")
+	assert.Contains(t, rec.Body.String(), "upstream safety system")
+
+	events := opsEvents(t, c)
+	require.Len(t, events, 1)
+	assert.Equal(t, http.StatusBadRequest, events[0].UpstreamStatusCode)
+}
