@@ -132,6 +132,24 @@ func openAIUsagePricingAt(input *OpenAIRecordUsageInput) time.Time {
 	return timezone.Now()
 }
 
+func groupBillsOpenAIFastAtStandard(apiKey *APIKey, account *Account, serviceTier string) bool {
+	if apiKey == nil || apiKey.Group == nil || !apiKey.Group.FreeOpenAIFast {
+		return false
+	}
+	if account == nil || !account.IsOpenAI() {
+		return false
+	}
+	if !groupSupportsOpenAIFast(apiKey.Group.Platform) {
+		return false
+	}
+	switch normalizeBillingServiceTier(serviceTier) {
+	case "priority", "fast":
+		return true
+	default:
+		return false
+	}
+}
+
 // RecordUsage records usage and deducts balance
 func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRecordUsageInput) error {
 	if input == nil {
@@ -277,8 +295,35 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 	}
 
+	// Free Fast changes only the customer charge. Keep priority TotalCost and
+	// service_tier for upstream accounting, but evaluate ActualCost once more at
+	// the Standard tier using the same channel, peak, and long-context policy.
+	if groupBillsOpenAIFastAtStandard(apiKey, billingAccount, serviceTier) {
+		standardCost, standardErr := s.calculateOpenAIRecordUsageCost(
+			ctx,
+			result,
+			apiKey,
+			billingModels,
+			multiplier,
+			imageMultiplier,
+			videoMultiplier,
+			baseMultiplier,
+			tokens,
+			"",
+			longContextBillingGate,
+			pricingAt,
+		)
+		if standardErr != nil {
+			return standardErr
+		}
+		if cost != nil && standardCost != nil {
+			cost.ActualCost = standardCost.ActualCost
+		}
+	}
+
 	// 用户级「空返回不扣费」：生图请求上游一张图都没回时整笔记 $0。
-	// 位置与 GatewayService 侧一致——response_model 改价之后、建用量行之前。
+	// 位置与 GatewayService 侧一致——response_model 改价、免费 Fast 标准价重算之后、建用量行之前，
+	// 保证免单是最终价（否则会被上游的 ActualCost 重算覆盖）。
 	waiverModels := make([]string, 0, len(billingModels)+3)
 	waiverModels = append(waiverModels, billingModels...)
 	waiverModels = append(waiverModels, input.OriginalModel, result.UpstreamModel, result.Model)
@@ -346,6 +391,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		APIKeyID:                 apiKey.ID,
 		AccountID:                account.ID,
 		RequestID:                requestID,
+		UpstreamRequestID:        usageUpstreamRequestIDPtr(account, result.UpstreamHeaders, result.OpenAIWSMode),
 		Model:                    result.Model,
 		RequestedModel:           requestedModel,
 		UpstreamModel:            optionalTrimmedStringPtr(result.UpstreamModel),
@@ -602,6 +648,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 				pricingAt,
 				tokens,
 				serviceTier,
+				optionalStringValue(result.ReasoningEffort),
 				result != nil && result.ImageUsageSimulated,
 				longContextBillingGate,
 			)
@@ -696,6 +743,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 	pricingAt time.Time,
 	tokens UsageTokens,
 	serviceTier string,
+	reasoningEffort string,
 	// forceTokenMode 来自本仓的 gpt-image-2 用量模拟（ImageUsageSimulated）。
 	// longContextBillingGate 用上游的 *bool 三态：nil = 未显式设置，
 	// 底部回退路径靠 `gate == nil || *gate` 区分「没设」和「显式关」——
@@ -715,6 +763,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 			RateMultiplier:            multiplier,
 			PricingAt:                 pricingAt,
 			ServiceTier:               serviceTier,
+			ReasoningEffort:           reasoningEffort,
 			Resolver:                  s.resolver,
 			LongContextBillingEnabled: longContextBillingGate,
 		}
@@ -750,6 +799,9 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 	)
 	if err == nil && cost != nil && cost.BillingMode == "" {
 		cost.BillingMode = string(BillingModeToken)
+	}
+	if err == nil {
+		applyCostBreakdownMultiplier(cost, maxReasoningEffortBillingMultiplier(billingModel, reasoningEffort, nil))
 	}
 	return cost, err
 }

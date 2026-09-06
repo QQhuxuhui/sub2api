@@ -14,25 +14,11 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-// v19: merged snapshot — dev fields (user request_timeout_seconds, group normalize_anthropic_envelope)
-// + upstream group profit control fields (ProfitControlEnabled/ProfitMinMargin/ProfitSafetyBuffer).
-// Both dev and upstream independently bumped to v18 for divergent field sets; the merged snapshot is a
-// superset of both, so bump to v19 to force refresh of any pre-merge v18 snapshot that lacks the other
-// line's fields.
-// v20: group normalize_response_model（响应模型名归一化开关）加入快照投影；
-// 不 bump 则存量 v19 快照会被继续复用，网关侧读到的开关恒为 false。
-// v21: 同步上游 v0.1.177。dev 与上游**又一次各自把版本号推到 19**（dev 走的是
-// normalize_anthropic_envelope 那条线，上游走的是 group search/audio/video_model_prices 计费字段），
-// 于是「版本号相同、字段集不同」的快照会在两边互相复用。合并后的快照是两者的超集，
-// 必须再 bump 一次强制刷新 —— 不 bump 的话，升级前写入的 v19/v20 快照会被当成有效，
-// 网关侧读到的 search/audio/video_model_prices 恒为零值（漏计费），
-// 或 normalize_response_model 恒为 false（开关失效）。
-// v22: 补投影 group 的 LongContextPricingEnabled 与 ModelPricing（上游 v0.1.177 新增
-// 却没进快照）。不 bump 则存量 v21 快照被继续复用，两个字段在网关侧恒为零值：
-// 分组逐模型价读不到、区间定价被压平到最低档。
-// v23: 同步上游 v0.1.185。上游自己把版本推到 20（补长上下文/逐模型定价字段，即本仓 v22 的内容）
-// 并新增 user restrict_public_groups 等字段；合并后的快照是两边超集，再 bump 一次强制刷新。
-const apiKeyAuthSnapshotVersion = 23
+// v19..v22: 见 git 历史（dev 与上游多次各自推版本号，合并后取超集再 bump）。
+// v23: 同步上游 v0.1.185（上游快照 v20 + restrict_public_groups 等字段）。
+// v24: 同步上游 v0.2.1。上游自己也推到 23（group codex_models_manifest_config 等字段），
+// 与本仓 v23 字段集不同，合并后的快照是两边超集，再 bump 一次强制刷新。
+const apiKeyAuthSnapshotVersion = 24
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -439,11 +425,15 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			SupportedModelScopes:            apiKey.Group.SupportedModelScopes,
 			AllowMessagesDispatch:           apiKey.Group.AllowMessagesDispatch,
 			AllowLive:                       apiKey.Group.AllowLive,
+			ForceOpenAIFast:                 apiKey.Group.ForceOpenAIFast,
+			FreeOpenAIFast:                  apiKey.Group.FreeOpenAIFast,
 			DefaultMappedModel:              apiKey.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                apiKey.Group.ModelsListConfig,
+			CodexModelsManifestConfig:       apiKey.Group.CodexModelsManifestConfig,
 			RPMLimit:                        apiKey.Group.RPMLimit,
 			MaxReasoningEffort:              apiKey.Group.MaxReasoningEffort,
+			MaxReasoningEffortOverLimit:     apiKey.Group.MaxReasoningEffortOverLimit,
 			ReasoningEffortMappings:         apiKey.Group.ReasoningEffortMappings,
 			PeakRateEnabled:                 apiKey.Group.PeakRateEnabled,
 			PeakStart:                       apiKey.Group.PeakStart,
@@ -540,11 +530,15 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			SupportedModelScopes:            snapshot.Group.SupportedModelScopes,
 			AllowMessagesDispatch:           snapshot.Group.AllowMessagesDispatch,
 			AllowLive:                       snapshot.Group.AllowLive,
+			ForceOpenAIFast:                 snapshot.Group.ForceOpenAIFast,
+			FreeOpenAIFast:                  snapshot.Group.FreeOpenAIFast,
 			DefaultMappedModel:              snapshot.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                snapshot.Group.ModelsListConfig,
+			CodexModelsManifestConfig:       snapshot.Group.CodexModelsManifestConfig,
 			RPMLimit:                        snapshot.Group.RPMLimit,
 			MaxReasoningEffort:              snapshot.Group.MaxReasoningEffort,
+			MaxReasoningEffortOverLimit:     snapshot.Group.MaxReasoningEffortOverLimit,
 			ReasoningEffortMappings:         snapshot.Group.ReasoningEffortMappings,
 			PeakRateEnabled:                 snapshot.Group.PeakRateEnabled,
 			PeakStart:                       snapshot.Group.PeakStart,

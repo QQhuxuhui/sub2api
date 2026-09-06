@@ -87,17 +87,19 @@ type AccountStatsPricingRule struct {
 
 // ChannelModelPricing 渠道模型定价条目
 type ChannelModelPricing struct {
-	ID              int64       `json:"id,omitempty"`
-	ChannelID       int64       `json:"channel_id,omitempty"`
-	Platform        string      `json:"platform"` // 所属平台（anthropic/openai/gemini/...）
-	Models          []string    `json:"models"`
-	BillingMode     BillingMode `json:"billing_mode"`
-	InputPrice      *float64    `json:"input_price"`
-	OutputPrice     *float64    `json:"output_price"`
-	CacheWritePrice *float64    `json:"cache_write_price"`
-	CacheReadPrice  *float64    `json:"cache_read_price"`
-	FastMultiplier  *float64    `json:"fast_multiplier"`
-	FlexMultiplier  *float64    `json:"flex_multiplier"`
+	ID                           int64       `json:"id,omitempty"`
+	ChannelID                    int64       `json:"channel_id,omitempty"`
+	Platform                     string      `json:"platform"` // 所属平台（anthropic/openai/gemini/...）
+	Models                       []string    `json:"models"`
+	BillingMode                  BillingMode `json:"billing_mode"`
+	InputPrice                   *float64    `json:"input_price"`
+	OutputPrice                  *float64    `json:"output_price"`
+	CacheWritePrice              *float64    `json:"cache_write_price"`
+	CacheWrite1hPrice            *float64    `json:"cache_write_1h_price"`
+	CacheReadPrice               *float64    `json:"cache_read_price"`
+	FastMultiplier               *float64    `json:"fast_multiplier"`
+	FlexMultiplier               *float64    `json:"flex_multiplier"`
+	MaxReasoningEffortMultiplier *float64    `json:"max_reasoning_effort_multiplier"`
 	// 图片输入价格（每 token）；nil = 回退 InputPrice，显式 0 = 免费。
 	// 这个三态语义是本仓自研的，上游同名字段没有「显式 0」这一档 —— 合并时保留 dev 侧语义，
 	// 不要简化成「零值即未配置」，否则把图片输入配成免费的渠道会退回按文本价计费。
@@ -134,6 +136,7 @@ type PricingInterval struct {
 	InputPrice           *float64  `json:"input_price"`
 	OutputPrice          *float64  `json:"output_price"`
 	CacheWritePrice      *float64  `json:"cache_write_price"`
+	CacheWrite1hPrice    *float64  `json:"cache_write_1h_price"`
 	CacheReadPrice       *float64  `json:"cache_read_price"`
 	InputMultiplier      *float64  `json:"input_multiplier"`
 	OutputMultiplier     *float64  `json:"output_multiplier"`
@@ -380,6 +383,7 @@ func validateIntervalPrices(iv *PricingInterval, idx int) error {
 		{"input_price", iv.InputPrice},
 		{"output_price", iv.OutputPrice},
 		{"cache_write_price", iv.CacheWritePrice},
+		{"cache_write_1h_price", iv.CacheWrite1hPrice},
 		{"cache_read_price", iv.CacheReadPrice},
 		{"per_request_price", iv.PerRequestPrice},
 	}

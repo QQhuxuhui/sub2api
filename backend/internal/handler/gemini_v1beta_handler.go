@@ -54,7 +54,10 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 			platform = forcePlatform
 		}
 		groupID := apiKey.Group.ID
-		availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), &groupID, platform)
+		var availableModels []string
+		if h.gatewayService != nil {
+			availableModels = h.gatewayService.GetAvailableModels(c.Request.Context(), &groupID, platform)
+		}
 		if resp, ok := geminiCustomModelsListResponse(platform, availableModels, apiKey.Group); ok {
 			c.JSON(http.StatusOK, resp)
 			return
