@@ -54,7 +54,7 @@ func TestDoImageUpstreamWithRateLimitRetry_RetriesShort429ThenSucceeds(t *testin
 	}}
 	s := &OpenAIGatewayService{httpUpstream: fake}
 
-	resp, err := s.doImageUpstreamWithRateLimitRetry(context.Background(), buildTestImageReq(), "", 1, 1, false)
+	resp, err := s.doImageUpstreamWithRateLimitRetry(context.Background(), buildTestImageReq(), "", &Account{ID: 1, Concurrency: 1}, false)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -69,7 +69,7 @@ func TestDoImageUpstreamWithRateLimitRetry_NoRetryOnLongReset(t *testing.T) {
 	}}
 	s := &OpenAIGatewayService{httpUpstream: fake}
 
-	resp, err := s.doImageUpstreamWithRateLimitRetry(context.Background(), buildTestImageReq(), "", 1, 1, false)
+	resp, err := s.doImageUpstreamWithRateLimitRetry(context.Background(), buildTestImageReq(), "", &Account{ID: 1, Concurrency: 1}, false)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
 	assert.Equal(t, 1, fake.calls, "long reset should not be retried in place")
@@ -86,7 +86,7 @@ func TestDoImageUpstreamWithRateLimitRetry_StopsAtMaxRetries(t *testing.T) {
 	fake := &scriptedUpstream{responses: resps}
 	s := &OpenAIGatewayService{httpUpstream: fake}
 
-	resp, err := s.doImageUpstreamWithRateLimitRetry(context.Background(), buildTestImageReq(), "", 1, 1, false)
+	resp, err := s.doImageUpstreamWithRateLimitRetry(context.Background(), buildTestImageReq(), "", &Account{ID: 1, Concurrency: 1}, false)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
 	// attempt 0,1,2 retry；attempt 3 命中 attempt>=max 直接返回 => 共 4 次调用
@@ -99,7 +99,7 @@ func TestDoImageUpstreamWithRateLimitRetry_Non429PassesThrough(t *testing.T) {
 	}}
 	s := &OpenAIGatewayService{httpUpstream: fake}
 
-	resp, err := s.doImageUpstreamWithRateLimitRetry(context.Background(), buildTestImageReq(), "", 1, 1, false)
+	resp, err := s.doImageUpstreamWithRateLimitRetry(context.Background(), buildTestImageReq(), "", &Account{ID: 1, Concurrency: 1}, false)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	assert.Equal(t, 1, fake.calls)
@@ -112,7 +112,7 @@ func TestDoImageUpstreamWithRateLimitRetry_ImpersonateFallsBackWhenUnsupported(t
 	}}
 	s := &OpenAIGatewayService{httpUpstream: fake}
 
-	resp, err := s.doImageUpstreamWithRateLimitRetry(context.Background(), buildTestImageReq(), "", 1, 1, true)
+	resp, err := s.doImageUpstreamWithRateLimitRetry(context.Background(), buildTestImageReq(), "", &Account{ID: 1, Concurrency: 1}, true)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, 1, fake.calls)

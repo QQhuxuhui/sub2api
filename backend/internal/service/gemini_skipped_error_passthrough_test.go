@@ -12,13 +12,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ErrorPolicySkipped 分支（池模式账号、或开了自定义错误码但没列上这个码）原来
-// 先把上游状态码换成 500 再往下走，错误透传规则引擎要么根本没被调用（原生链路），
-// 要么只看得到 500（compat 链路）。结果：上游一个可操作的 400——内容审核拦截
-// 「Your request was rejected by the upstream safety system」——到客户端变成 500，
-// 客户端按服务端故障重试，同一个必然失败的提示词被反复打上来。
+// ErrorPolicySkipped 分支（池模式账号、或开了自定义错误码但没列上这个码）历史上先把上游
+// 状态码换成 500 再往下走，错误透传规则引擎要么根本没被调用（原生链路），要么只看得到
+// 500（compat 链路）。结果：上游一个可操作的 400——内容审核拦截「Your request was
+// rejected by the upstream safety system」——到客户端变成 500，客户端按服务端故障重试，
+// 同一个必然失败的提示词被反复打上来。
 //
-// 这里的用例把「未命中规则仍然 500」和「命中规则按规则出」两条同时钉住。
+// 同步上游 v0.1.185 后，这条分支改为「状态码保真」：未命中规则时原样透传上游状态码与
+// 响应体（compat 链路走 writeGeminiMappedError 的兜底映射）。本仓在此之上保留定制：
+// 原生链路同样过一遍错误透传规则，且规则按上游真实状态码匹配。
+// 这里的用例把「未命中规则保真透传」和「命中规则按规则出」两条同时钉住。
 
 func geminiSafetyBlockBody() []byte {
 	return []byte(`{"error":{"code":400,"message":"Your request was rejected by the upstream safety system. Please modify your prompt or input images and try again.","status":"INVALID_ARGUMENT"}}`)
@@ -64,29 +67,44 @@ func newGeminiSkippedContext() (*httptest.ResponseRecorder, *gin.Context) {
 	return rec, c
 }
 
+func writeNativeSkipped(svc *GeminiMessagesCompatService, c *gin.Context, status, contentType string, body []byte) error {
+	return svc.writeGeminiNativeUpstreamError(c, geminiSkippedAccount(), geminiSkippedUpstreamResp(mustAtoi(status), contentType), body, "req-native", false)
+}
+
+func mustAtoi(s string) int {
+	switch s {
+	case "400":
+		return http.StatusBadRequest
+	case "503":
+		return http.StatusServiceUnavailable
+	default:
+		panic("unexpected status " + s)
+	}
+}
+
 // --- 原生 Gemini 链路 ---
 
-func TestGeminiNativeSkipped_NoRuleKeepsThe500Convention(t *testing.T) {
+func TestGeminiNativeSkipped_NoRulePassesThroughTheUpstreamStatus(t *testing.T) {
 	rec, c := newGeminiSkippedContext()
 
 	svc := &GeminiMessagesCompatService{}
-	err := svc.writeGeminiNativeSkippedError(c, geminiSkippedAccount(), geminiSkippedUpstreamResp(http.StatusBadRequest, "application/json"), "req-native", geminiSafetyBlockBody())
+	err := writeNativeSkipped(svc, c, "400", "application/json", geminiSafetyBlockBody())
 
 	require.Error(t, err)
-	assert.Equal(t, http.StatusInternalServerError, rec.Code, "未命中规则时必须保持既有的 500 约定")
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "未命中规则时按上游真实状态码保真透传（上游 v0.1.185 语义）")
 	assert.JSONEq(t, string(geminiSafetyBlockBody()), rec.Body.String(), "未命中规则时上游响应体原样透传")
 	assert.True(t, IsResponseCommitted(c))
 }
 
-func TestGeminiNativeSkipped_PassthroughRuleRestoresTheUpstreamStatus(t *testing.T) {
+func TestGeminiNativeSkipped_PassthroughRuleKeepsTheUpstreamStatus(t *testing.T) {
 	rec, c := newGeminiSkippedContext()
 	bindGeminiSkippedRules(c, geminiKeywordPassthroughRule("upstream safety system"))
 
 	svc := &GeminiMessagesCompatService{}
-	err := svc.writeGeminiNativeSkippedError(c, geminiSkippedAccount(), geminiSkippedUpstreamResp(http.StatusBadRequest, "application/json"), "req-native", geminiSafetyBlockBody())
+	err := writeNativeSkipped(svc, c, "400", "application/json", geminiSafetyBlockBody())
 
 	require.Error(t, err)
-	assert.Equal(t, http.StatusBadRequest, rec.Code, "这就是客户诉求：审核拦截要返回 400 而不是 500")
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "审核拦截要返回 400 而不是 500")
 
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
@@ -98,7 +116,7 @@ func TestGeminiNativeSkipped_PassthroughRuleRestoresTheUpstreamStatus(t *testing
 }
 
 func TestGeminiNativeSkipped_RuleMatchesOnTheRealUpstreamCodeNot500(t *testing.T) {
-	// 规则只挂 400。如果实现仍然拿 500 去匹配，这条就命中不了。
+	// 规则只挂 400。如果实现拿 500 去匹配，这条就命中不了。
 	rec, c := newGeminiSkippedContext()
 	teapot := http.StatusTeapot
 	custom := "内容被拦截"
@@ -111,7 +129,7 @@ func TestGeminiNativeSkipped_RuleMatchesOnTheRealUpstreamCodeNot500(t *testing.T
 	})
 
 	svc := &GeminiMessagesCompatService{}
-	err := svc.writeGeminiNativeSkippedError(c, geminiSkippedAccount(), geminiSkippedUpstreamResp(http.StatusBadRequest, "application/json"), "req-native", geminiSafetyBlockBody())
+	err := writeNativeSkipped(svc, c, "400", "application/json", geminiSafetyBlockBody())
 
 	require.Error(t, err)
 	assert.Equal(t, http.StatusTeapot, rec.Code)
@@ -129,7 +147,7 @@ func TestGeminiNativeSkipped_SkipMonitoringIsHonoured(t *testing.T) {
 	bindGeminiSkippedRules(c, rule)
 
 	svc := &GeminiMessagesCompatService{}
-	_ = svc.writeGeminiNativeSkippedError(c, geminiSkippedAccount(), geminiSkippedUpstreamResp(http.StatusBadRequest, "application/json"), "req-native", geminiSafetyBlockBody())
+	_ = writeNativeSkipped(svc, c, "400", "application/json", geminiSafetyBlockBody())
 
 	// 审核拦截是客户自己的提示词问题，不该计进上游故障监控。
 	v, exists := c.Get(OpsSkipPassthroughKey)
@@ -137,23 +155,24 @@ func TestGeminiNativeSkipped_SkipMonitoringIsHonoured(t *testing.T) {
 	assert.Equal(t, true, v)
 }
 
-func TestGeminiNativeSkipped_UnrelatedErrorsStillReport500(t *testing.T) {
+func TestGeminiNativeSkipped_UnrelatedErrorsKeepTheUpstreamStatus(t *testing.T) {
 	rec, c := newGeminiSkippedContext()
 	bindGeminiSkippedRules(c, geminiKeywordPassthroughRule("upstream safety system"))
 
 	svc := &GeminiMessagesCompatService{}
 	body := []byte(`{"error":{"code":400,"message":"invalid thoughtSignature"}}`)
-	err := svc.writeGeminiNativeSkippedError(c, geminiSkippedAccount(), geminiSkippedUpstreamResp(http.StatusBadRequest, "application/json"), "req-native", body)
+	err := writeNativeSkipped(svc, c, "400", "application/json", body)
 
 	require.Error(t, err)
-	assert.Equal(t, http.StatusInternalServerError, rec.Code, "没配规则的错误不能被顺带改掉")
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "没配规则的错误按上游真实状态码原样透传")
+	assert.JSONEq(t, string(body), rec.Body.String())
 }
 
 func TestGeminiNativeSkipped_EmptyContentTypeFallsBackToJSON(t *testing.T) {
 	rec, c := newGeminiSkippedContext()
 
 	svc := &GeminiMessagesCompatService{}
-	_ = svc.writeGeminiNativeSkippedError(c, geminiSkippedAccount(), geminiSkippedUpstreamResp(http.StatusBadRequest, ""), "req-native", geminiSafetyBlockBody())
+	_ = writeNativeSkipped(svc, c, "400", "", geminiSafetyBlockBody())
 
 	assert.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 }
@@ -165,25 +184,23 @@ func TestGeminiCompatSkipped_NoRuleKeepsTheBodyDerivedStatus(t *testing.T) {
 
 	svc := &GeminiMessagesCompatService{}
 	account := &Account{ID: 7, Platform: PlatformGemini, Type: AccountTypeAPIKey}
-	err := svc.writeGeminiSkippedError(c, account, geminiSkippedUpstreamResp(http.StatusBadRequest, "application/json"), "req-1", geminiSafetyBlockBody())
+	err := svc.writeGeminiMappedError(c, account, http.StatusBadRequest, "req-1", geminiSafetyBlockBody())
 
 	require.Error(t, err)
-	// 既有行为：兜底映射优先采信响应体里的 error.code，带 code 的 body 本来就出 400。
-	// 这次改动不许动它。
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestGeminiCompatSkipped_NoRuleNoBodyCodeStillFallsBackTo502(t *testing.T) {
+func TestGeminiCompatSkipped_NoRuleNoBodyCodeStillUsesTheUpstreamStatus(t *testing.T) {
 	rec, c := newGeminiSkippedContext()
 
 	svc := &GeminiMessagesCompatService{}
 	account := &Account{ID: 9, Platform: PlatformGemini, Type: AccountTypeAPIKey}
-	// 响应体里没有 error.code → 只能按「一律 500」的约定映射成 502。
+	// 响应体里没有 error.code → 按上游真实状态码 400 映射（不再是「一律 500 → 502」）。
 	body := []byte(`{"error":{"message":"something went wrong"}}`)
-	err := svc.writeGeminiSkippedError(c, account, geminiSkippedUpstreamResp(http.StatusBadRequest, "application/json"), "req-3", body)
+	err := svc.writeGeminiMappedError(c, account, http.StatusBadRequest, "req-3", body)
 
 	require.Error(t, err)
-	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestGeminiCompatSkipped_RuleSeesTheRealUpstreamCode(t *testing.T) {
@@ -192,11 +209,11 @@ func TestGeminiCompatSkipped_RuleSeesTheRealUpstreamCode(t *testing.T) {
 
 	svc := &GeminiMessagesCompatService{}
 	account := &Account{ID: 8, Platform: PlatformGemini, Type: AccountTypeAPIKey}
-	err := svc.writeGeminiSkippedError(c, account, geminiSkippedUpstreamResp(http.StatusBadRequest, "application/json"), "req-2", geminiSafetyBlockBody())
+	err := svc.writeGeminiMappedError(c, account, http.StatusBadRequest, "req-2", geminiSafetyBlockBody())
 
 	require.Error(t, err)
 	assert.Equal(t, http.StatusBadRequest, rec.Code,
-		"passthrough_code 透出来的必须是上游真实的 400，而不是这条分支自己换上的 500")
+		"passthrough_code 透出来的必须是上游真实的 400")
 
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
@@ -234,8 +251,7 @@ func TestGeminiNativeSkipped_RecordsTheRealUpstreamStatusEvenWhenRewritten(t *te
 	bindGeminiSkippedRules(c, teapotRule())
 
 	svc := &GeminiMessagesCompatService{}
-	err := svc.writeGeminiNativeSkippedError(c, geminiSkippedAccount(),
-		geminiSkippedUpstreamResp(http.StatusBadRequest, "application/json"), "req-native", geminiSafetyBlockBody())
+	err := writeNativeSkipped(svc, c, "400", "application/json", geminiSafetyBlockBody())
 
 	require.Error(t, err)
 	require.Equal(t, http.StatusTeapot, rec.Code)
@@ -254,13 +270,11 @@ func TestGeminiNativeSkipped_RecordsTheRealUpstreamStatusEvenWhenRewritten(t *te
 	assert.Contains(t, events[0].Message, "upstream safety system")
 }
 
-func TestGeminiNativeSkipped_RecordsDiagnosticsOnTheUnmatched500Too(t *testing.T) {
-	// 这条分支原来一个 ops 事件都不记，原生链路的这类错误在监控里完全不可见。
+func TestGeminiNativeSkipped_RecordsDiagnosticsOnTheUnmatchedPassthroughToo(t *testing.T) {
 	_, c := newGeminiSkippedContext()
 
 	svc := &GeminiMessagesCompatService{}
-	_ = svc.writeGeminiNativeSkippedError(c, geminiSkippedAccount(),
-		geminiSkippedUpstreamResp(http.StatusBadRequest, "application/json"), "req-native", geminiSafetyBlockBody())
+	_ = writeNativeSkipped(svc, c, "400", "application/json", geminiSafetyBlockBody())
 
 	events := opsEvents(t, c)
 	require.Len(t, events, 1)
@@ -268,31 +282,28 @@ func TestGeminiNativeSkipped_RecordsDiagnosticsOnTheUnmatched500Too(t *testing.T
 	assert.Equal(t, "req-native", events[0].UpstreamRequestID)
 }
 
-func TestGeminiCompatSkipped_PassthroughShortcutStillRecordsDiagnostics(t *testing.T) {
+func TestGeminiCompatSkipped_PassthroughRuleStillRecordsDiagnostics(t *testing.T) {
 	rec, c := newGeminiSkippedContext()
 	bindGeminiSkippedRules(c, teapotRule())
 
 	svc := &GeminiMessagesCompatService{}
-	err := svc.writeGeminiSkippedError(c, geminiSkippedAccount(),
-		geminiSkippedUpstreamResp(http.StatusBadRequest, "application/json"), "req-compat", geminiSafetyBlockBody())
+	err := svc.writeGeminiMappedError(c, geminiSkippedAccount(), http.StatusBadRequest, "req-compat", geminiSafetyBlockBody())
 
 	require.Error(t, err)
 	require.Equal(t, http.StatusTeapot, rec.Code)
 
 	events := opsEvents(t, c)
-	require.Len(t, events, 1, "命中规则走捷径时也只应记一条，不能重复")
+	require.Len(t, events, 1, "命中规则时也只应记一条，不能重复")
 	assert.Equal(t, http.StatusBadRequest, events[0].UpstreamStatusCode)
 	assert.Equal(t, int64(42), events[0].AccountID)
 	assert.Equal(t, "req-compat", events[0].UpstreamRequestID)
 }
 
 func TestGeminiCompatSkipped_UnmatchedDoesNotDoubleRecord(t *testing.T) {
-	// 未命中时由 writeGeminiMappedError 自己记，这里不能再补一条。
 	_, c := newGeminiSkippedContext()
 
 	svc := &GeminiMessagesCompatService{}
-	_ = svc.writeGeminiSkippedError(c, geminiSkippedAccount(),
-		geminiSkippedUpstreamResp(http.StatusBadRequest, "application/json"), "req-compat", geminiSafetyBlockBody())
+	_ = svc.writeGeminiMappedError(c, geminiSkippedAccount(), http.StatusBadRequest, "req-compat", geminiSafetyBlockBody())
 
 	assert.Len(t, opsEvents(t, c), 1)
 }

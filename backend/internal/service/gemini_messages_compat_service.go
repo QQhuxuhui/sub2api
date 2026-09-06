@@ -948,10 +948,16 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
 				}
-				if failoverErr := s.poolModeSkippedFailoverError(c, account, resp.StatusCode, respBody, upstreamReqID); failoverErr != nil {
+				if failoverErr := s.skippedErrorPolicyFailoverError(c, account, resp.StatusCode, respBody, upstreamReqID); failoverErr != nil {
 					return nil, failoverErr
 				}
-				return nil, s.writeGeminiSkippedError(c, account, resp, upstreamReqID, respBody)
+				if account.IsCustomErrorCodesEnabled() {
+					return nil, s.writeGeminiCustomCodeSkippedError(c, account, resp.StatusCode, upstreamReqID, respBody, func() {
+						_ = s.writeClaudeError(c, http.StatusInternalServerError, "api_error", geminiCustomCodeSkippedClientMessage)
+					})
+				}
+				// 池模式：客户端写出与 ErrorPolicyNone 相同（按上游真实状态码映射），仅跳过账号状态标记。
+				return nil, s.writeGeminiMappedError(c, account, resp.StatusCode, upstreamReqID, respBody)
 			case ErrorPolicyMatched, ErrorPolicyTempUnscheduled:
 				if policy == ErrorPolicyMatched {
 					s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
@@ -1462,11 +1468,16 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			policy := s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, mappedModel)
 			switch policy {
 			case ErrorPolicySkipped:
-				if failoverErr := s.poolModeSkippedFailoverError(c, account, resp.StatusCode, respBody, requestID); failoverErr != nil {
+				if failoverErr := s.skippedErrorPolicyFailoverError(c, account, resp.StatusCode, respBody, requestID); failoverErr != nil {
 					return nil, failoverErr
 				}
-				respBody = unwrapIfNeeded(isOAuth, respBody)
-				return nil, s.writeGeminiNativeSkippedError(c, account, resp, requestID, respBody)
+				if account.IsCustomErrorCodesEnabled() {
+					return nil, s.writeGeminiCustomCodeSkippedError(c, account, resp.StatusCode, requestID, respBody, func() {
+						_ = s.writeGoogleError(c, http.StatusInternalServerError, geminiCustomCodeSkippedClientMessage)
+					})
+				}
+				// 池模式：客户端写出与 ErrorPolicyNone 相同（状态码/响应体保真），仅跳过账号状态标记。
+				return nil, s.writeGeminiNativeUpstreamError(c, account, resp, respBody, requestID, isOAuth)
 			case ErrorPolicyMatched, ErrorPolicyTempUnscheduled:
 				if policy == ErrorPolicyMatched {
 					s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
@@ -1551,40 +1562,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody}
 		}
 
-		respBody = unwrapIfNeeded(isOAuth, respBody)
-		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
-		upstreamDetail := ""
-		if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-			maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
-			if maxBytes <= 0 {
-				maxBytes = 2048
-			}
-			upstreamDetail = truncateString(string(respBody), maxBytes)
-			logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini] native upstream error %d: %s", resp.StatusCode, truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes))
-		}
-		setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			Platform:           account.Platform,
-			AccountID:          account.ID,
-			AccountName:        account.Name,
-			UpstreamStatusCode: resp.StatusCode,
-			UpstreamRequestID:  requestID,
-			Kind:               "http_error",
-			Message:            upstreamMsg,
-			Detail:             upstreamDetail,
-		})
-
-		contentType := resp.Header.Get("Content-Type")
-		if contentType == "" {
-			contentType = "application/json"
-		}
-		MarkResponseCommitted(c)
-		c.Data(resp.StatusCode, contentType, respBody)
-		if upstreamMsg == "" {
-			return nil, fmt.Errorf("gemini upstream error: %d", resp.StatusCode)
-		}
-		return nil, fmt.Errorf("gemini upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
+		return nil, s.writeGeminiNativeUpstreamError(c, account, resp, respBody, requestID, isOAuth)
 	}
 
 	var usage *ClaudeUsage
@@ -1706,22 +1684,16 @@ func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCo
 	}
 }
 
-// poolModeSkippedFailoverError 池模式账号命中 ErrorPolicySkipped 时构造 failover 错误：
-// 可 failover 的状态码返回 UpstreamFailoverError，交给 handler 层按 pool_mode_retry_count
-// 同账号重试后换号；返回 nil 表示不适用（非池模式或状态码不可 failover），由调用方透传。
-func (s *GeminiMessagesCompatService) poolModeSkippedFailoverError(c *gin.Context, account *Account, statusCode int, respBody []byte, upstreamRequestID string) *UpstreamFailoverError {
-	if !account.IsPoolMode() || !s.shouldFailoverGeminiUpstreamError(statusCode) {
+// skippedErrorPolicyFailoverError 命中 ErrorPolicySkipped（池模式、或自定义错误码未命中）
+// 时构造 failover 错误：可 failover 的状态码返回 UpstreamFailoverError，交给 handler 层换号
+// （池模式账号按 pool_mode_retry_count 先同账号重试）；返回 nil 表示状态码不可 failover，
+// 由调用方决定客户端写出。Skipped 只豁免账号状态标记，不豁免换号，与 OpenAI 网关路径一致。
+func (s *GeminiMessagesCompatService) skippedErrorPolicyFailoverError(c *gin.Context, account *Account, statusCode int, respBody []byte, upstreamRequestID string) *UpstreamFailoverError {
+	if !s.shouldFailoverGeminiUpstreamError(statusCode) {
 		return nil
 	}
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-	upstreamDetail := ""
-	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
-		if maxBytes <= 0 {
-			maxBytes = 2048
-		}
-		upstreamDetail = truncateString(string(respBody), maxBytes)
-	}
+	upstreamDetail := s.upstreamErrorDetail(respBody)
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform:           account.Platform,
 		AccountID:          account.ID,
@@ -1735,52 +1707,33 @@ func (s *GeminiMessagesCompatService) poolModeSkippedFailoverError(c *gin.Contex
 	return &UpstreamFailoverError{
 		StatusCode:             statusCode,
 		ResponseBody:           respBody,
-		RetryableOnSameAccount: account.IsPoolModeRetryableStatus(statusCode),
+		RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode),
 	}
 }
 
-// geminiSkippedPassthrough 让 ErrorPolicySkipped 分支也过一遍错误透传规则。
-//
-// 这条分支的既有约定是「未命中账号错误策略的错误一律 500」（见
-// antigravity_gateway_service.go 同名约定），但它是先把状态码换成 500 再往下走的：
-// 原生链路根本没调规则引擎，compat 链路调了却只让它看见 500——error_codes 匹配不到
-// 上游真实的 400，passthrough_code 透出来的也是 500。上游一个可操作的 400
-// （内容审核拦截）到客户端就成了服务端故障，客户端会拿同一个必然失败的提示词重试。
-//
-// 命中返回 (status, message, true)；未命中返回 (0, "", false)，由调用方维持 500 约定。
-func geminiSkippedPassthrough(c *gin.Context, upstreamStatus int, respBody []byte) (int, string, bool) {
-	status, _, errMsg, matched := applyErrorPassthroughRule(
-		c,
-		PlatformGemini,
-		upstreamStatus,
-		respBody,
-		http.StatusInternalServerError,
-		"upstream_error",
-		"",
-	)
-	if !matched {
-		return 0, "", false
+// geminiCustomCodeSkippedClientMessage 自定义错误码未命中时对客户端隐藏上游细节的固定文案，
+// 与 OpenAI 网关路径同场景的文案一致。
+const geminiCustomCodeSkippedClientMessage = "Upstream gateway error"
+
+// upstreamErrorDetail 按配置截断上游错误响应体，用于 ops 错误日志的 Detail 字段；
+// 未开启 LogUpstreamErrorBody 时返回空。
+func (s *GeminiMessagesCompatService) upstreamErrorDetail(body []byte) string {
+	if s.cfg == nil || !s.cfg.Gateway.LogUpstreamErrorBody {
+		return ""
 	}
-	return status, errMsg, true
+	maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
+	if maxBytes <= 0 {
+		maxBytes = 2048
+	}
+	return truncateString(string(body), maxBytes)
 }
 
-// recordGeminiSkippedOpsError 记录 ErrorPolicySkipped 分支的上游错误诊断信息，
-// 字段与 writeGeminiMappedError 里的那份保持一致。
-//
-// 命中透传规则时会直接写响应返回、绕过 writeGeminiMappedError，诊断信息必须在这里补：
-// 规则可以把上游 400 改写成任意状态码（比如 418），响应本身就不再携带真实上游状态，
-// 监控端只能靠这条事件还原「上游到底返回了什么、哪个账号、哪个 request id」。
-// skip_monitoring 的抑制发生在下游中间件（读 OpsSkipPassthroughKey），不受这里影响。
-func (s *GeminiMessagesCompatService) recordGeminiSkippedOpsError(c *gin.Context, account *Account, upstreamStatus int, upstreamRequestID string, respBody []byte) {
-	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-	upstreamDetail := ""
-	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
-		if maxBytes <= 0 {
-			maxBytes = 2048
-		}
-		upstreamDetail = truncateString(string(respBody), maxBytes)
-	}
+// writeGeminiCustomCodeSkippedError 处理自定义错误码未命中且不可 failover 的上游错误：
+// 客户端统一收到 500 + 固定文案（由 write 按端点格式写出），不透传上游细节；
+// 上游真实状态码与错误信息仅记录到 ops 错误日志。
+func (s *GeminiMessagesCompatService) writeGeminiCustomCodeSkippedError(c *gin.Context, account *Account, upstreamStatus int, upstreamRequestID string, body []byte, write func()) error {
+	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	upstreamDetail := s.upstreamErrorDetail(body)
 	setOpsUpstreamError(c, upstreamStatus, upstreamMsg, upstreamDetail)
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform:           account.Platform,
@@ -1792,50 +1745,55 @@ func (s *GeminiMessagesCompatService) recordGeminiSkippedOpsError(c *gin.Context
 		Message:            upstreamMsg,
 		Detail:             upstreamDetail,
 	})
+	write()
+	if upstreamMsg == "" {
+		return fmt.Errorf("gemini upstream error: %d (not in custom error codes)", upstreamStatus)
+	}
+	return fmt.Errorf("gemini upstream error: %d (not in custom error codes) message=%s", upstreamStatus, upstreamMsg)
 }
 
-// writeGeminiNativeSkippedError 渲染原生 Gemini 链路上 ErrorPolicySkipped 的上游错误。
-// 命中透传规则时按 Google 错误结构出规则给的状态码与文案，与 failover 耗尽路径
-// （handler.handleGeminiFailoverExhausted）保持一致；未命中仍原样透传响应体 + 500。
-//
-// 状态码与 Content-Type 一律从 resp 上取，不接受调用方传入——这个 bug 的成因就是
-// 调用方在这里把真实状态码换成了 500，签名上就不给这个机会。respBody 单独传是因为
-// 它可能已经过 unwrapIfNeeded，和 resp.Body 不是一份东西。
-//
-// 这条分支原来两种走向都不记 ops 事件（compat 那边至少还经 writeGeminiMappedError 记一次），
-// 原生链路的这类错误在监控里是完全不可见的，一并补上。
-func (s *GeminiMessagesCompatService) writeGeminiNativeSkippedError(c *gin.Context, account *Account, resp *http.Response, upstreamRequestID string, respBody []byte) error {
-	upstreamStatus := resp.StatusCode
-	s.recordGeminiSkippedOpsError(c, account, upstreamStatus, upstreamRequestID, respBody)
-	if status, msg, matched := geminiSkippedPassthrough(c, upstreamStatus, respBody); matched {
-		_ = s.writeGoogleError(c, status, msg)
-		return fmt.Errorf("gemini upstream error: %d (passthrough rule matched)", upstreamStatus)
+// writeGeminiNativeUpstreamError 将不可 failover 的上游错误按原始状态码与响应体透传给客户端，
+// 并记录 ops 错误事件。状态码保真：下游据此区分请求级错误与可重试的链路故障。
+func (s *GeminiMessagesCompatService) writeGeminiNativeUpstreamError(c *gin.Context, account *Account, resp *http.Response, respBody []byte, requestID string, isOAuth bool) error {
+	respBody = unwrapIfNeeded(isOAuth, respBody)
+	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+	upstreamDetail := s.upstreamErrorDetail(respBody)
+	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+		logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini] native upstream error %d: %s", resp.StatusCode, truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes))
 	}
+	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:           account.Platform,
+		AccountID:          account.ID,
+		AccountName:        account.Name,
+		UpstreamStatusCode: resp.StatusCode,
+		UpstreamRequestID:  requestID,
+		Kind:               "http_error",
+		Message:            upstreamMsg,
+		Detail:             upstreamDetail,
+	})
+
+	// 本仓定制：原生链路也过一遍错误透传规则（按上游真实状态码匹配）。命中则按规则给的
+	// 状态码/文案以 Google 错误结构写出（内容审核拦截等可操作错误可改写为定制码）；
+	// 未命中保持上游状态码与响应体原样透传。skip_monitoring 由规则引擎写入上下文。
+	if status, _, errMsg, matched := applyErrorPassthroughRule(
+		c, PlatformGemini, resp.StatusCode, respBody, http.StatusBadGateway, "upstream_error", "",
+	); matched {
+		_ = s.writeGoogleError(c, status, errMsg)
+		return fmt.Errorf("gemini upstream error: %d (passthrough rule matched)", resp.StatusCode)
+	}
+
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/json"
 	}
 	MarkResponseCommitted(c)
-	c.Data(http.StatusInternalServerError, contentType, respBody)
-	return fmt.Errorf("gemini upstream error: %d (skipped by error policy)", upstreamStatus)
-}
-
-// writeGeminiSkippedError 是 compat（Claude 结构）链路上的同一件事，
-// 同样只从 resp 上取真实状态码。
-// 未命中时仍按 500 走既有的兜底映射：真实状态码只用于规则匹配，不改变兜底行为。
-func (s *GeminiMessagesCompatService) writeGeminiSkippedError(c *gin.Context, account *Account, resp *http.Response, upstreamRequestID string, respBody []byte) error {
-	upstreamStatus := resp.StatusCode
-	if status, msg, matched := geminiSkippedPassthrough(c, upstreamStatus, respBody); matched {
-		// 未命中时下面的 writeGeminiMappedError 会自己记一次，只有这条捷径需要补。
-		s.recordGeminiSkippedOpsError(c, account, upstreamStatus, upstreamRequestID, respBody)
-		MarkResponseCommitted(c)
-		c.JSON(status, gin.H{
-			"type":  "error",
-			"error": gin.H{"type": "upstream_error", "message": msg},
-		})
-		return fmt.Errorf("upstream error: %d (passthrough rule matched)", upstreamStatus)
+	c.Data(resp.StatusCode, contentType, respBody)
+	if upstreamMsg == "" {
+		return fmt.Errorf("gemini upstream error: %d", resp.StatusCode)
 	}
-	return s.writeGeminiMappedError(c, account, http.StatusInternalServerError, upstreamRequestID, respBody)
+	return fmt.Errorf("gemini upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
 }
 
 func sleepGeminiBackoff(attempt int) {
@@ -1936,6 +1894,10 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 		}
 		if errType == "" {
 			errType = "invalid_request_error"
+		}
+		// 400 是确定性的请求错误：回传上游 message（已脱敏），客户端据此定位非法字段。
+		if errMsg == "" {
+			errMsg = upstreamMsg
 		}
 		if errMsg == "" {
 			errMsg = "Invalid request"
@@ -3881,11 +3843,19 @@ func cleanToolSchema(schema any) any {
 			if key == "$schema" || key == "$id" || key == "$ref" ||
 				key == "$defs" || key == "definitions" ||
 				key == "additionalProperties" || key == "patternProperties" || key == "minLength" ||
-				key == "maxLength" || key == "minItems" || key == "maxItems" || key == "exclusiveMinimum" {
+				key == "maxLength" || key == "minItems" || key == "maxItems" || key == "exclusiveMinimum" ||
+				key == "deprecated" {
 				continue
 			}
 			// 递归清理嵌套对象
 			cleaned[key] = cleanToolSchema(value)
+		}
+		if enum, ok := cleaned["enum"].([]any); ok {
+			if normalized, ok := normalizeGeminiEnum(enum); ok {
+				cleaned["enum"] = normalized
+			} else {
+				delete(cleaned, "enum")
+			}
 		}
 		// 规范化 type 字段为大写
 		if typeVal, ok := cleaned["type"].(string); ok {
@@ -3919,6 +3889,28 @@ func cleanToolSchema(schema any) any {
 	default:
 		return v
 	}
+}
+
+func normalizeGeminiEnum(values []any) ([]any, bool) {
+	normalized := make([]any, len(values))
+	for i, value := range values {
+		if stringValue, ok := value.(string); ok {
+			normalized[i] = stringValue
+			continue
+		}
+
+		switch value.(type) {
+		case nil, bool, float32, float64, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, json.Number:
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				return nil, false
+			}
+			normalized[i] = string(encoded)
+		default:
+			return nil, false
+		}
+	}
+	return normalized, true
 }
 
 func incrementIntegralSchemaBound(value any) (any, bool) {

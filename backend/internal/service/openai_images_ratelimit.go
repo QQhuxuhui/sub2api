@@ -234,13 +234,14 @@ type chromeImpersonatingUpstream interface {
 }
 
 // sendImageUpstream 执行一次生图上游请求；useImpersonate=true 且底层支持时走 Chrome 指纹伪装，否则普通 Do。
-func (s *OpenAIGatewayService) sendImageUpstream(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, useImpersonate bool) (*http.Response, error) {
+func (s *OpenAIGatewayService) sendImageUpstream(req *http.Request, proxyURL string, account *Account, useImpersonate bool) (*http.Response, error) {
 	if useImpersonate {
 		if imp, ok := s.httpUpstream.(chromeImpersonatingUpstream); ok {
-			return imp.DoImpersonateChrome(req, proxyURL, accountID, accountConcurrency)
+			return imp.DoImpersonateChrome(req, proxyURL, account.ID, account.Concurrency)
 		}
 	}
-	return s.httpUpstream.Do(req, proxyURL, accountID, accountConcurrency)
+	// 非伪装路径走上游统一出口：OAuth 出站传输插件（上游 v0.1.180）可接管请求，否则回落到 httpUpstream.Do。
+	return s.doOpenAIUpstream(req, proxyURL, account)
 }
 
 // doImageUpstreamWithRateLimitRetry 执行生图上游请求，并在遇到「重置窗口很短」的 429 时原地重试。
@@ -251,8 +252,7 @@ func (s *OpenAIGatewayService) doImageUpstreamWithRateLimitRetry(
 	ctx context.Context,
 	buildReq func() (*http.Request, error),
 	proxyURL string,
-	accountID int64,
-	accountConcurrency int,
+	account *Account,
 	useImpersonate bool,
 ) (*http.Response, error) {
 	for attempt := 0; ; attempt++ {
@@ -260,7 +260,7 @@ func (s *OpenAIGatewayService) doImageUpstreamWithRateLimitRetry(
 		if err != nil {
 			return nil, err
 		}
-		resp, err := s.sendImageUpstream(req, proxyURL, accountID, accountConcurrency, useImpersonate)
+		resp, err := s.sendImageUpstream(req, proxyURL, account, useImpersonate)
 		if err != nil {
 			return nil, err
 		}

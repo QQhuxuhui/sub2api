@@ -926,17 +926,28 @@ func TestSetAntigravityModelRateLimits_GeminiWritesFamilyScope(t *testing.T) {
 	require.Equal(t, antigravityGeminiModelRateLimitKey, repo.modelRateLimitCalls[1].modelKey)
 }
 
-func TestSetAntigravityModelRateLimits_ClaudeDoesNotWriteGeminiScope(t *testing.T) {
+func TestSetAntigravityModelRateLimits_DoesNotDoubleMapCustomChain(t *testing.T) {
 	repo := &stubAntigravityAccountRepo{}
 	svc := &AntigravityGatewayService{}
-	account := &Account{ID: 790, Platform: PlatformAntigravity}
+	account := &Account{
+		ID:       790,
+		Platform: PlatformAntigravity,
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{
+				"custom-sonnet":     "claude-sonnet-4-5",
+				"claude-sonnet-4-5": "claude-sonnet-4-6",
+			},
+		},
+	}
 	resetAt := time.Now().Add(30 * time.Second)
+	canonicalModel := resolveFinalAntigravityModelKey(context.Background(), account, "custom-sonnet")
+	require.Equal(t, "claude-sonnet-4-5", canonicalModel)
 
 	success := svc.setAntigravityModelRateLimits(
 		context.Background(),
 		repo,
 		account,
-		"claude-sonnet-4-5",
+		canonicalModel,
 		"[test]",
 		429,
 		resetAt,
@@ -970,6 +981,33 @@ func TestSetAntigravityModelRateLimits_ImageModelDoesNotWriteGeminiScope(t *test
 	require.True(t, success)
 	require.Len(t, repo.modelRateLimitCalls, 1, "image model must not also write the shared gemini bucket")
 	require.Equal(t, "gemini-3.1-flash-image", repo.modelRateLimitCalls[0].modelKey)
+}
+
+func TestSetModelRateLimitAndClearSession_UsesUpstreamReportedModelMetadata(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	svc := &AntigravityGatewayService{accountRepo: repo}
+	account := &Account{
+		ID:       791,
+		Platform: PlatformAntigravity,
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{
+				"claude-sonnet-4-5": "claude-sonnet-4-6",
+			},
+		},
+	}
+
+	svc.setModelRateLimitAndClearSession(&handleModelRateLimitParams{
+		ctx:        context.Background(),
+		prefix:     "[test]",
+		account:    account,
+		statusCode: 429,
+	}, &antigravitySmartRetryInfo{
+		RetryDelay: 30 * time.Second,
+		ModelName:  "claude-sonnet-4-5",
+	})
+
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, "claude-sonnet-4-5", repo.modelRateLimitCalls[0].modelKey)
 }
 
 func TestAntigravityRetryLoop_PreCheck_SwitchesWhenRateLimited(t *testing.T) {
@@ -1115,9 +1153,7 @@ func TestIsAntigravityAccountSwitchError(t *testing.T) {
 	}
 }
 
-func TestResolveAntigravityForwardBaseURL_DefaultDaily(t *testing.T) {
-	t.Setenv(antigravityForwardBaseURLEnv, "")
-
+func TestResolveAntigravityForwardBaseURL(t *testing.T) {
 	oldBaseURLs := append([]string(nil), antigravity.BaseURLs...)
 	defer func() {
 		antigravity.BaseURLs = oldBaseURLs
@@ -1125,10 +1161,46 @@ func TestResolveAntigravityForwardBaseURL_DefaultDaily(t *testing.T) {
 
 	prodURL := "https://prod.test"
 	dailyURL := "https://daily.test"
-	antigravity.BaseURLs = []string{dailyURL, prodURL}
+	antigravity.BaseURLs = []string{prodURL, dailyURL}
 
-	resolved := resolveAntigravityForwardBaseURL()
-	require.Equal(t, dailyURL, resolved)
+	tests := []struct {
+		name    string
+		env     string
+		account *Account
+		want    string
+	}{
+		{
+			name: "pro defaults to daily", account: &Account{Credentials: map[string]any{"plan_type": " Pro "}},
+			want: dailyURL,
+		},
+		{
+			name: "ultra defaults to daily", account: &Account{Credentials: map[string]any{"plan_type": "ULTRA"}},
+			want: dailyURL,
+		},
+		{name: "free defaults to prod", account: &Account{Credentials: map[string]any{"plan_type": "free"}}, want: prodURL},
+		{name: "abnormal defaults to prod", account: &Account{Credentials: map[string]any{"plan_type": "Abnormal"}}, want: prodURL},
+		{name: "unknown defaults to prod", account: &Account{Credentials: map[string]any{"plan_type": "enterprise"}}, want: prodURL},
+		{name: "malformed defaults to prod", account: &Account{Credentials: map[string]any{"plan_type": map[string]any{"name": "pro"}}}, want: prodURL},
+		{name: "missing defaults to prod", account: &Account{Credentials: map[string]any{}}, want: prodURL},
+		{name: "nil account defaults to prod", account: nil, want: prodURL},
+		{
+			name: "daily override wins for free tier", env: " daily ",
+			account: &Account{Credentials: map[string]any{"plan_type": "free"}},
+			want:    dailyURL,
+		},
+		{
+			name: "prod override wins for paid tier", env: " PROD ",
+			account: &Account{Credentials: map[string]any{"plan_type": "pro"}},
+			want:    prodURL,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(antigravityForwardBaseURLEnv, tt.env)
+			require.Equal(t, tt.want, resolveAntigravityForwardBaseURL(tt.account))
+		})
+	}
 }
 
 func TestAntigravityAccountSwitchError_Error(t *testing.T) {

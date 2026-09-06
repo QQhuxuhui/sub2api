@@ -116,6 +116,8 @@ type UserUpdateFields struct {
 	// RequestTimeoutSeconds 为 true 时才写 request_timeout_seconds 列（dev 用户级请求超时）；
 	// 纳入掩码后遵循上游 lost-update 安全修复，且支持“仅改超时”的部分更新。
 	RequestTimeoutSeconds bool
+	// RestrictPublicGroups 覆盖 restrict_public_groups 列。
+	RestrictPublicGroups bool
 }
 
 // BalanceChange 记录一次余额变更前后的值。

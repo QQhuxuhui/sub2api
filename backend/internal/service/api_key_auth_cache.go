@@ -41,6 +41,7 @@ type APIKeyAuthUserSnapshot struct {
 	Email                      string             `json:"email"`
 	Username                   string             `json:"username"`
 	BalanceNotifyEnabled       bool               `json:"balance_notify_enabled"`
+	RestrictPublicGroups       bool               `json:"restrict_public_groups"`
 	BalanceNotifyThresholdType string             `json:"balance_notify_threshold_type"`
 	BalanceNotifyThreshold     *float64           `json:"balance_notify_threshold,omitempty"`
 	BalanceNotifyExtraEmails   []NotifyEmailEntry `json:"balance_notify_extra_emails,omitempty"`
@@ -91,13 +92,9 @@ type APIKeyAuthGroupSnapshot struct {
 	ClaudeCodeOnly               bool                          `json:"claude_code_only"`
 	NormalizeAnthropicEnvelope   bool                          `json:"normalize_anthropic_envelope"`
 	NormalizeResponseModel       bool                          `json:"normalize_response_model"`
-	// 分组逐模型定价（上游 v0.1.177 新增）。它俩必须进快照：网关热路径上的
-	// apiKey.Group 是从本快照物化出来的，缺字段不会报错，只会让
-	// ModelPricing 恒为 nil、LongContextPricingEnabled 恒为 false ——
-	// 管理员配的分组逐模型价在计费时读不到（等于没配），
-	// 且 model_pricing_resolver.go 的区间定价会被压平到最低档、长上下文阶梯失效。
-	// 上游 v0.1.177 自己也漏了这两个字段（其 api_key_auth_cache*.go 里 0 命中），
-	// 本仓先行补上，属刻意分叉；日后同步上游时不要按「上游没有」为由删掉。
+	// 分组逐模型定价：必须进快照（网关热路径上的 apiKey.Group 从本快照物化，缺字段
+	// 不报错只会让 ModelPricing 恒为 nil、LongContextPricingEnabled 恒为 false）。
+	// 本仓 v22 先行补上，上游 v0.1.185（快照 v20）已同样补齐。
 	LongContextPricingEnabled       bool                  `json:"long_context_pricing_enabled"`
 	ModelPricing                    []ChannelModelPricing `json:"model_pricing,omitempty"`
 	FallbackGroupID                 *int64                `json:"fallback_group_id,omitempty"`

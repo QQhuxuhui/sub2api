@@ -62,41 +62,17 @@ func resolveAccountStatsCost(
 }
 
 // tryModelFilePricing 使用模型定价文件（LiteLLM/fallback）中的价格计算费用。
+// 与用户计费共用同一条定价管线，避免这里维护第二份"单价 × token 数"实现后，
+// 每加一个定价特性都要手工镜像一次。channelPricing 为 nil，保持优先级 3 的
+// 语义：只取模型定价文件，不引入渠道自定义定价。
 func tryModelFilePricing(billingService *BillingService, model string, tokens UsageTokens, serviceTier string) *float64 {
-	pricing, err := billingService.GetModelPricing(model)
-	if err != nil || pricing == nil {
+	breakdown, err := billingService.CalculateCostWithServiceTier(
+		model, tokens, 1, normalizeBillingServiceTier(serviceTier),
+	)
+	if err != nil || breakdown == nil || breakdown.TotalCost <= 0 {
 		return nil
 	}
-	normalizedTier := normalizeBillingServiceTier(serviceTier)
-	if normalizedTier == "priority" || normalizedTier == "flex" ||
-		billingService.shouldApplySessionLongContextPricing(tokens, pricing) {
-		breakdown, err := billingService.CalculateCostWithServiceTier(model, tokens, 1, normalizedTier)
-		if err != nil || breakdown == nil || breakdown.TotalCost <= 0 {
-			return nil
-		}
-		return &breakdown.TotalCost
-	}
-	textInputTokens, imageInputTokens := splitInputTokenCounts(tokens)
-	textOutputTokens, imageOutputTokens := splitOutputTokenCounts(tokens)
-	imageInputPrice := pricing.ImageInputPricePerToken
-	if imageInputPrice == 0 && !pricing.ImageInputPriceExplicit {
-		imageInputPrice = pricing.InputPricePerToken
-	}
-	imageOutputPrice := pricing.ImageOutputPricePerToken
-	if imageOutputPrice == 0 && !pricing.ImageOutputPriceExplicit {
-		// 未配置图片输出档时回退普通输出价，与正式计费口径一致；显式 0 则免费不回退。
-		imageOutputPrice = pricing.OutputPricePerToken
-	}
-	cost := float64(textInputTokens)*pricing.InputPricePerToken +
-		float64(imageInputTokens)*imageInputPrice +
-		float64(textOutputTokens)*pricing.OutputPricePerToken +
-		float64(tokens.CacheCreationTokens)*pricing.CacheCreationPricePerToken +
-		float64(tokens.CacheReadTokens)*pricing.CacheReadPricePerToken +
-		float64(imageOutputTokens)*imageOutputPrice
-	if cost <= 0 {
-		return nil
-	}
-	return &cost
+	return &breakdown.TotalCost
 }
 
 // tryCustomRules 遍历自定义规则，按数组顺序先命中为准。
