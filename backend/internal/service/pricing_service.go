@@ -648,9 +648,6 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		if entry.OutputCostPerImageToken != nil {
 			pricing.OutputCostPerImageToken = *entry.OutputCostPerImageToken
 		}
-		if entry.InputCostPerImageToken != nil {
-			pricing.InputCostPerImageToken = *entry.InputCostPerImageToken
-		}
 
 		hasExplicitLongContext := entry.LongContextInputTokenThreshold != nil ||
 			entry.LongContextInputCostMultiplier != nil ||

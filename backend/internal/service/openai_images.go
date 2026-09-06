@@ -1241,6 +1241,10 @@ func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(
 	if err != nil {
 		return OpenAIUsage{}, 0, nil, false, err
 	}
+	// 先做上游「URL → b64_json 回填」，再做本仓用量模拟：模拟需要 data[].b64_json 解码真实像素，
+	// 若回填在后，URL 型响应会让模拟直接放弃，退回按请求档位计费，与内联 b64 响应口径不一致。
+	// 回填失败的条目保留 url，模拟照旧放弃，行为与单独启用回填时相同。
+	body = s.backfillOpenAIImagesB64JSON(ctx, account, parsed, body)
 	usage, _ := extractOpenAIUsageFromJSONBytes(body)
 	usageSimulated := false
 	var simulatedOutputSizes []string
@@ -1258,7 +1262,6 @@ func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(
 			zap.Int("image_output_tokens", usage.ImageOutputTokens),
 		)
 	}
-	body = s.backfillOpenAIImagesB64JSON(ctx, account, parsed, body)
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	contentType := "application/json"
 	if s.cfg != nil && !s.cfg.Security.ResponseHeaders.Enabled {

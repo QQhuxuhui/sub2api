@@ -760,7 +760,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			empty_response_waived_cost
 		) AS (VALUES `)
 
-	// Each batch row prepends the synthetic input_index before the 61
+	// Each batch row prepends the synthetic input_index before the 62
 	// usage-log column values.
 	args := make([]any, 0, len(keys)*61)
 	argPos := 1
@@ -1034,7 +1034,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			empty_response_waived_cost
 		) AS (VALUES `)
 
-	args := make([]any, 0, len(preparedList)*60)
+	args := make([]any, 0, len(preparedList)*62)
 	argPos := 1
 	for idx, prepared := range preparedList {
 		if idx > 0 {
