@@ -1616,6 +1616,11 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			if nb, u, ok := applyGeminiImageUsageAdjustment(b, imageUsageParams); ok {
 				b = nb
 				usageObj = u
+				// ProMaskEnabled 时 applyGeminiImageUsageAdjustment 只走 pro 伪装分支，
+				// ok 即代表确实伪装了：写出前补延迟，别让 flash 的秒回从耗时上露馅。
+				if imageUsageParams.ProMaskEnabled {
+					delayGeminiProImageMask(c.Request.Context())
+				}
 			}
 			observeGeminiImageOutputs(c, b)
 			// 分组开启 normalize_response_model：把 modelVersion 归一化为客户端请求的模型，
@@ -2903,6 +2908,10 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	if nb, u, ok := applyGeminiImageUsageAdjustment(respBody, imageUsage); ok {
 		respBody = nb
 		adjustedUsage = u
+		// 同上：ProMaskEnabled 下 ok 即确实伪装，写出前补延迟模拟真 pro 的出图耗时。
+		if imageUsage.ProMaskEnabled {
+			delayGeminiProImageMask(c.Request.Context())
+		}
 	}
 	// 分组开启 normalize_response_model：modelVersion 归一化为客户端请求的模型
 	// （观测点在上方 ObserveGemini，审计仍记录上游真实模型）。
@@ -2968,6 +2977,9 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 	}
 	var firstTokenMs *int
 	flashState := &geminiFlashImageStreamState{}
+	// 流式的伪装延迟只补一次：第一个被伪装的分块（通常就是首块，modelVersion 露出 flash）
+	// 写出前阻塞；之后的分块照常透传，否则每块都等一遍会把整条流拖成几十秒。
+	proMaskDelayed := false
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -3008,6 +3020,10 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 						rawToWrite = string(nb)
 						if u != nil {
 							usage = u
+						}
+						if !proMaskDelayed {
+							proMaskDelayed = true
+							delayGeminiProImageMask(c.Request.Context())
 						}
 					} else if nb, u, ok := flashState.process(rawBytes, imageUsage.Model, imageUsage.FlashImageSize, imageUsage.FlashRepairEnabled, geminiFlashUsageRepairOptions{
 						PromptTextOnly:       imageUsage.FlashPromptTextOnly,

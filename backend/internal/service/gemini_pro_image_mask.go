@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"strings"
+	"time"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -45,6 +47,44 @@ func geminiProImageProfile(tier string) proImageProfile {
 
 // geminiProImageIntn 是可注入的随机源，返回 [0,n) 内的整数；测试可替换为确定序列。
 var geminiProImageIntn = rand.Intn
+
+// 伪装延迟：真 pro 出一张图要比 flash 慢得多，flash 秒回会从耗时上露馅。
+// 只在**确实发生了伪装**（响应非真 pro 且改写成功）时补一段延迟；真 pro 本来就慢，不再叠加。
+// 基准 10s，抖动 ±2s（均匀），避免每笔都是同一个整数秒。
+const (
+	geminiProImageMaskDelayBase   = 10 * time.Second
+	geminiProImageMaskDelayJitter = 2 * time.Second
+)
+
+// geminiProImageMaskSleep 是可注入的睡眠实现；测试替换为记录器，避免真等 10s。
+// 客户端断开（ctx 取消）时提前返回，不让已经没人等的请求继续占着 goroutine。
+var geminiProImageMaskSleep = func(ctx context.Context, d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+}
+
+// geminiProImageMaskDelayDuration 取一次带抖动的延迟时长：[base-jitter, base+jitter]，毫秒粒度。
+func geminiProImageMaskDelayDuration() time.Duration {
+	span := int(2 * geminiProImageMaskDelayJitter / time.Millisecond)
+	offset := time.Duration(geminiProImageIntn(span+1)) * time.Millisecond
+	return geminiProImageMaskDelayBase - geminiProImageMaskDelayJitter + offset
+}
+
+// delayGeminiProImageMask 在把伪装后的响应写给下游之前阻塞一段时间。
+// 调用方保证只在 masked=true 时调用；ctx 传请求上下文以便下游断开时立即放行。
+func delayGeminiProImageMask(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	geminiProImageMaskSleep(ctx, geminiProImageMaskDelayDuration())
+}
 
 // geminiSynthUsage 是一次合成的 pro 生图 usage 结果，供响应体改写与计费共用。
 type geminiSynthUsage struct {
