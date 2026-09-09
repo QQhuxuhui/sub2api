@@ -93,6 +93,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
 	geminiReq = ensureGeminiFunctionCallThoughtSignatures(geminiReq)
+	// reasoning_effort is dropped by the Chat Completions → Claude → Gemini
+	// conversion chain; re-inject it as thinkingConfig against the upstream model.
+	geminiReq = applyGeminiThinkingConfigFromOpenAIBody(geminiReq, originalChatBody, mappedModel)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
