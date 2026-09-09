@@ -47,6 +47,19 @@ func TestClassifyImageBillingTier(t *testing.T) {
 	}
 }
 
+// Gemini 512 档的四种写法都要归 1K，且经默认兜底后不得再落到 2K。
+func TestClassifyImageBillingTier_Gemini512TierCountsAs1K(t *testing.T) {
+	for _, size := range []string{"512", "512P", "512PX", "512px", "0.5K", "0.5k", " 512PX "} {
+		tier, ok := ClassifyImageBillingTier(size)
+		require.True(t, ok, size)
+		require.Equal(t, ImageBillingSize1K, tier, size)
+		require.Equal(t, ImageBillingSize1K, NormalizeImageBillingTierOrDefault(size), size)
+	}
+	resolved := ResolveImageBillingSize("512PX", nil)
+	require.Equal(t, ImageBillingSize1K, resolved.BillingSize)
+	require.Equal(t, ImageSizeSourceInput, resolved.Source)
+}
+
 func TestClassifyImageBillingTier_LargeDimensionsDoNotOverflow(t *testing.T) {
 	width := int(^uint(0)>>1)/2 + 1
 	tier, ok := ClassifyImageBillingTier(strconv.Itoa(width) + "x3")

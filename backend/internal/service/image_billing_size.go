@@ -31,6 +31,12 @@ func ClassifyImageBillingTier(size string) (string, bool) {
 	switch normalized {
 	case "", "auto":
 		return "", false
+	// Gemini 3.x flash 生图的 512 档（imageSize 可写 512 / 512P / 512PX / 0.5K）。
+	// 分组定价只有 1K/2K/4K 三档、没有 512 档，按最接近的下沿 1K 计；
+	// 不认这几种写法会掉到 NormalizeImageBillingTierOrDefault 的默认 2K，
+	// 小图反而按 2K 收钱（线上 2026-09-09 实测：512PX 出 704x384，账单记 2K）。
+	case "512", "512p", "512px", "0.5k":
+		return ImageBillingSize1K, true
 	case "1k":
 		return ImageBillingSize1K, true
 	case "2k":

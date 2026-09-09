@@ -41,6 +41,8 @@ func TestGemini31FlashImageTokens(t *testing.T) {
 		{size: "", want: 1120, ok: true},
 		{size: "0.5K", want: 747, ok: true},
 		{size: "512px", want: 747, ok: true},
+		{size: "512", want: 747, ok: true},
+		{size: "512P", want: 747, ok: true},
 		{size: "1K", want: 1120, ok: true},
 		{size: "1k", want: 1120, ok: true},
 		{size: "2K", want: 1680, ok: true},
