@@ -128,12 +128,13 @@ func isGemini31FlashImageModel(model string) bool {
 }
 
 func gemini31FlashImageTokens(size string) (int, bool) {
+	if IsGemini512ImageSize(size) {
+		return 747, true
+	}
 	switch strings.ToLower(strings.TrimSpace(size)) {
 	case "":
 		// Gemini 3 image models default to 1K when imageSize is omitted.
 		return 1120, true
-	case "0.5k", "512", "512p", "512px":
-		return 747, true
 	case "1k":
 		return 1120, true
 	case "2k":

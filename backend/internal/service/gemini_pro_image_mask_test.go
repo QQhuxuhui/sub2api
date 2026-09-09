@@ -354,3 +354,37 @@ func TestMaskGeminiProImageStreamChunkUsesCarriedImageCount(t *testing.T) {
 	require.Equal(t, oneUsage.ImageOutputTokens*3, threeUsage.ImageOutputTokens,
 		"累计张数没被 withImageCount 带进去 —— 流式多图会按 1 张收费")
 }
+
+func TestUpgradeGeminiProImage512To1K(t *testing.T) {
+	body := func(size string) []byte {
+		return []byte(`{"contents":[{"parts":[{"text":"draw"}]}],"generationConfig":{"responseModalities":["IMAGE"],"imageConfig":{"imageSize":"` + size + `"}}}`)
+	}
+	sizeOf := func(b []byte) string { return gjson.GetBytes(b, "generationConfig.imageConfig.imageSize").String() }
+
+	// pro + 出图 action + 512 档四种写法 → 1K，其余字段不动
+	for _, size := range []string{"512", "512P", "512PX", "0.5K", "0.5k"} {
+		for _, action := range []string{"generateContent", "streamGenerateContent"} {
+			out := upgradeGeminiProImage512To1K(body(size), "gemini-3-pro-image-preview", action)
+			require.Equal(t, "1K", sizeOf(out), "%s/%s", size, action)
+			require.Equal(t, "draw", gjson.GetBytes(out, "contents.0.parts.0.text").String())
+			require.Equal(t, "IMAGE", gjson.GetBytes(out, "generationConfig.responseModalities.0").String())
+		}
+	}
+	// 不带 -preview 的售卖名同样命中
+	require.Equal(t, "1K", sizeOf(upgradeGeminiProImage512To1K(body("512PX"), "gemini-3-pro-image", "generateContent")))
+
+	// 原样返回的情形
+	untouched := map[string][3]string{
+		"countTokens 不出图": {"512PX", "gemini-3-pro-image-preview", "countTokens"},
+		"flash 自身支持 512":  {"512PX", "gemini-3.1-flash-image", "generateContent"},
+		"pro 1K 不是 512 档": {"1K", "gemini-3-pro-image-preview", "generateContent"},
+		"pro 2K 不是 512 档": {"2K", "gemini-3-pro-image-preview", "generateContent"},
+	}
+	for name, tc := range untouched {
+		in := body(tc[0])
+		require.Equal(t, string(in), string(upgradeGeminiProImage512To1K(in, tc[1], tc[2])), name)
+	}
+	// 没有 imageConfig 的请求不凭空造出字段
+	plain := []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`)
+	require.Equal(t, string(plain), string(upgradeGeminiProImage512To1K(plain, "gemini-3-pro-image-preview", "generateContent")))
+}

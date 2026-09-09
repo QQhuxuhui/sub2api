@@ -31,12 +31,14 @@ func ClassifyImageBillingTier(size string) (string, bool) {
 	switch normalized {
 	case "", "auto":
 		return "", false
-	// Gemini 3.x flash 生图的 512 档（imageSize 可写 512 / 512P / 512PX / 0.5K）。
-	// 分组定价只有 1K/2K/4K 三档、没有 512 档，按最接近的下沿 1K 计；
-	// 不认这几种写法会掉到 NormalizeImageBillingTierOrDefault 的默认 2K，
-	// 小图反而按 2K 收钱（线上 2026-09-09 实测：512PX 出 704x384，账单记 2K）。
-	case "512", "512p", "512px", "0.5k":
+	}
+	// Gemini 3.x flash 生图的 512 档。分组定价只有 1K/2K/4K 三档、没有 512 档，
+	// 按最接近的下沿 1K 计；不认这几种写法会掉到 NormalizeImageBillingTierOrDefault
+	// 的默认 2K，小图反而按 2K 收钱（线上 2026-09-09 实测：512PX 出 704x384，账单记 2K）。
+	if IsGemini512ImageSize(normalized) {
 		return ImageBillingSize1K, true
+	}
+	switch normalized {
 	case "1k":
 		return ImageBillingSize1K, true
 	case "2k":
@@ -69,6 +71,16 @@ func ClassifyImageBillingTier(size string) (string, bool) {
 	default:
 		return ImageBillingSize4K, true
 	}
+}
+
+// IsGemini512ImageSize 识别 Gemini imageSize 的 512 档全部写法：512 / 512P / 512PX / 0.5K
+// （大小写不敏感，容忍首尾空格）。真 pro 不支持该档，flash 3.x 支持。
+func IsGemini512ImageSize(size string) bool {
+	switch strings.ToLower(strings.TrimSpace(size)) {
+	case "512", "512p", "512px", "0.5k":
+		return true
+	}
+	return false
 }
 
 func NormalizeImageBillingTierOrDefault(size string) string {

@@ -246,6 +246,30 @@ func applyGeminiProImageMask(respBody []byte, model, tier string, imageCount int
 	return nb, synthToClaudeUsage(synth), true
 }
 
+const geminiProImageUpgradedSize = "1K"
+
+// upgradeGeminiProImage512To1K 把 pro 生图请求里的 512 档 imageSize 静默升到 1K。
+//
+// 真 pro 不支持 512 档（Google 直接 400 "Image size 512PX is not supported for this model"），
+// 而模拟线路后面的 flash 会老实出一张 704x384 小图再贴上 pro 标签 —— 真 pro 不可能产出的
+// 尺寸，一眼穿帮，且客户按 1K pro 付费却只拿到小图。运营口径选「升到 1K」而非复刻 400：
+// 客户拿到 1K 图并按 1K 计费；直连真 pro 的分组同样受此改写，两条线路行为一致（都出 1K）。
+// 只对 pro 生图模型的出图 action 生效；countTokens、其他模型、非 512 档一律原样返回。
+func upgradeGeminiProImage512To1K(body []byte, model, action string) []byte {
+	if !isGeminiProImageModel(model) || !isGeminiImageGenerationAction(action) {
+		return body
+	}
+	const path = "generationConfig.imageConfig.imageSize"
+	if !IsGemini512ImageSize(gjson.GetBytes(body, path).String()) {
+		return body
+	}
+	nb, err := sjson.SetBytes(body, path, geminiProImageUpgradedSize)
+	if err != nil {
+		return body
+	}
+	return nb
+}
+
 // geminiProImageMaskParams 由 ForwardNative 计算后传入响应处理器。
 type geminiProImageMaskParams struct {
 	Enabled bool

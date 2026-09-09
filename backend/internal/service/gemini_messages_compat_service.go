@@ -1171,6 +1171,11 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	// `thoughtSignature` to avoid frequent INVALID_ARGUMENT 400s.
 	body = ensureGeminiFunctionCallThoughtSignatures(body)
 
+	// pro 生图的 512 档静默升 1K（真 pro 不支持 512；模拟线路的 flash 会出小图穿帮）。
+	// 必须在这里改，后面的 imageUsageParams / imageInputSize 都从同一个 body 取尺寸，
+	// 计费与伪装档位随之按 1K 走。
+	body = upgradeGeminiProImage512To1K(body, originalModel, action)
+
 	mappedModel := originalModel
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(originalModel)
