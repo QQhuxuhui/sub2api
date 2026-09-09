@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"strings"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -25,7 +26,39 @@ var geminiImageConfigUnsupportedKeys = []string{"outputMimeType", "output_mime_t
 var (
 	geminiGenerationConfigKeys = []string{"generationConfig", "generation_config"}
 	geminiImageConfigKeys      = []string{"imageConfig", "image_config"}
+	geminiImageSizeKeys        = []string{"imageSize", "image_size"}
 )
+
+// geminiImageSizePaths 是 imageSize 在请求体里所有可能的 gjson 路径（驼峰 × 下划线，8 种），
+// 驼峰全写法排在最前。尺寸提取与 pro 512 升档都从这张表取，不再各自只认驼峰。
+var geminiImageSizePaths = func() []string {
+	paths := make([]string, 0, 8)
+	for _, gen := range geminiGenerationConfigKeys {
+		for _, img := range geminiImageConfigKeys {
+			for _, size := range geminiImageSizeKeys {
+				paths = append(paths, gen+"."+img+"."+size)
+			}
+		}
+	}
+	return paths
+}()
+
+// ExtractGeminiImageSize 从 Gemini 原生请求体里取 imageSize，驼峰与下划线命名都认，
+// 返回首个非空值（去首尾空格）；没有则返回空串。
+//
+// 此前两条链路（GeminiMessagesCompatService / AntigravityGatewayService）各自用结构体只解
+// 驼峰，客户端写 generation_config.image_config.image_size 时被当成「没传」，计费掉到默认档。
+func ExtractGeminiImageSize(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	for _, path := range geminiImageSizePaths {
+		if v := strings.TrimSpace(gjson.GetBytes(body, path).String()); v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 // SanitizeGeminiNativeImageConfig 从 Gemini 原生请求体里剔除 imageConfig 下 Google 不接受的
 // 字段，返回处理后的 body 和被删掉的字段路径（供日志观测；无改动时返回原 body 与 nil）。

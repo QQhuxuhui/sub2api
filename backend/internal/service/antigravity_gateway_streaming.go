@@ -1197,16 +1197,7 @@ func (s *AntigravityGatewayService) handleClaudeStreamingResponse(c *gin.Context
 }
 
 func (s *AntigravityGatewayService) extractImageInputSize(body []byte) string {
-	var req antigravity.GeminiRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		return ""
-	}
-
-	if req.GenerationConfig != nil && req.GenerationConfig.ImageConfig != nil {
-		return strings.TrimSpace(req.GenerationConfig.ImageConfig.ImageSize)
-	}
-
-	return ""
+	return ExtractGeminiImageSize(body)
 }
 
 // isImageGenerationModel 判断模型是否为图片生成模型

@@ -259,15 +259,18 @@ func upgradeGeminiProImage512To1K(body []byte, model, action string) []byte {
 	if !isGeminiProImageModel(model) || !isGeminiImageGenerationAction(action) {
 		return body
 	}
-	const path = "generationConfig.imageConfig.imageSize"
-	if !IsGemini512ImageSize(gjson.GetBytes(body, path).String()) {
-		return body
+	// proto JSON 驼峰 / 下划线两种命名都可能出现（Google 两种都收），逐个路径检查改写；
+	// 客户端同时写两种时两处都升，否则上游以哪个为准都不会漏。
+	out := body
+	for _, path := range geminiImageSizePaths {
+		if !IsGemini512ImageSize(gjson.GetBytes(out, path).String()) {
+			continue
+		}
+		if nb, err := sjson.SetBytes(out, path, geminiProImageUpgradedSize); err == nil {
+			out = nb
+		}
 	}
-	nb, err := sjson.SetBytes(body, path, geminiProImageUpgradedSize)
-	if err != nil {
-		return body
-	}
-	return nb
+	return out
 }
 
 // geminiProImageMaskParams 由 ForwardNative 计算后传入响应处理器。

@@ -388,3 +388,32 @@ func TestUpgradeGeminiProImage512To1K(t *testing.T) {
 	plain := []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`)
 	require.Equal(t, string(plain), string(upgradeGeminiProImage512To1K(plain, "gemini-3-pro-image-preview", "generateContent")))
 }
+
+func TestUpgradeGeminiProImage512To1K_SnakeCaseKeys(t *testing.T) {
+	snake := []byte(`{"contents":[{"parts":[{"text":"draw"}]}],"generation_config":{"response_modalities":["IMAGE"],"image_config":{"image_size":"512PX","aspect_ratio":"9:16"}}}`)
+	out := upgradeGeminiProImage512To1K(snake, "gemini-3-pro-image-preview", "generateContent")
+	require.Equal(t, "1K", gjson.GetBytes(out, "generation_config.image_config.image_size").String())
+	require.Equal(t, "9:16", gjson.GetBytes(out, "generation_config.image_config.aspect_ratio").String(), "同级字段不动")
+	require.False(t, gjson.GetBytes(out, "generationConfig").Exists(), "不凭空造驼峰分支")
+
+	mixed := []byte(`{"generationConfig":{"image_config":{"image_size":"0.5K"}}}`)
+	out = upgradeGeminiProImage512To1K(mixed, "gemini-3-pro-image", "streamGenerateContent")
+	require.Equal(t, "1K", gjson.GetBytes(out, "generationConfig.image_config.image_size").String())
+}
+
+func TestExtractGeminiImageSize(t *testing.T) {
+	cases := map[string]string{
+		`{"generationConfig":{"imageConfig":{"imageSize":" 512PX "}}}`: "512PX",
+		`{"generation_config":{"image_config":{"image_size":"2K"}}}`:   "2K",
+		`{"generationConfig":{"image_config":{"image_size":"4K"}}}`:    "4K",
+		`{"generation_config":{"imageConfig":{"imageSize":"1K"}}}`:     "1K",
+		`{"generationConfig":{"imageConfig":{"aspectRatio":"1:1"}}}`:   "",
+		`{"generationConfig":{"imageConfig":{"imageSize":""}}}`:        "",
+		`{"contents":[]}`: "",
+		``:                "",
+		`{"generationConfig":{"imageConfig":{"imageSize":"1K","image_size":"4K"}}}`: "1K",
+	}
+	for body, want := range cases {
+		require.Equal(t, want, ExtractGeminiImageSize([]byte(body)), body)
+	}
+}
