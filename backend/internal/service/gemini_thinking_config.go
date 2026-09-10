@@ -36,7 +36,7 @@ func applyGeminiThinkingConfigFromOpenAIBody(geminiReq []byte, openAIBody []byte
 // a Gemini thinkingConfig object for the given upstream model. It returns nil
 // for empty / unrecognized efforts.
 //
-// Gemini 2.x models only understand thinkingBudget (0 disables on flash /
+// Gemini 2.5 models only understand thinkingBudget (0 disables on flash /
 // flash-lite; pro cannot go below 128; -1 means dynamic). Gemini 3.x models use
 // thinkingLevel and cannot be fully disabled: the floor is "minimal" where
 // supported (3.0 / 3.5 / 3.6 flash families) and "low" elsewhere (all pro
@@ -50,9 +50,22 @@ func geminiThinkingConfigForEffort(effort, model string) map[string]any {
 
 	name := geminiModelBaseName(model)
 	major, minor, versioned := geminiModelVersion(name)
-	isPro := strings.Contains(name, "pro")
+	family := geminiThinkingModelFamily(name)
 
-	if !versioned || major < 3 {
+	// Only model families with a documented Gemini thinking contract should be
+	// touched. In particular, Gemini 2.0 and ambiguous aliases must retain the
+	// original request instead of receiving an unsupported generationConfig key.
+	if !versioned || (major != 2 && major != 3) {
+		return nil
+	}
+	if major == 2 && minor != 5 {
+		return nil
+	}
+	if family == "" {
+		return nil
+	}
+	isPro := family == "pro"
+	if major == 2 {
 		return map[string]any{"thinkingBudget": geminiThinkingBudgetForEffort(level, isPro)}
 	}
 
@@ -144,16 +157,44 @@ func geminiModelVersion(name string) (major, minor int, ok bool) {
 	if ver == "" {
 		return 0, 0, false
 	}
+	if end < len(rest) && rest[end] != '-' {
+		return 0, 0, false
+	}
 	parts := strings.SplitN(ver, ".", 2)
 	major, err := strconv.Atoi(parts[0])
 	if err != nil {
 		return 0, 0, false
 	}
-	if len(parts) == 2 && parts[1] != "" {
+	if len(parts) == 2 {
+		if parts[1] == "" {
+			return 0, 0, false
+		}
 		minor, err = strconv.Atoi(parts[1])
 		if err != nil {
 			return 0, 0, false
 		}
 	}
 	return major, minor, true
+}
+
+func geminiThinkingModelFamily(name string) string {
+	const prefix = "gemini-"
+	if !strings.HasPrefix(name, prefix) {
+		return ""
+	}
+	rest := name[len(prefix):]
+	end := 0
+	for end < len(rest) && (rest[end] >= '0' && rest[end] <= '9' || rest[end] == '.') {
+		end++
+	}
+	if end >= len(rest) || rest[end] != '-' {
+		return ""
+	}
+	familyAndSuffix := rest[end+1:]
+	for _, family := range []string{"flash-lite", "flash", "pro"} {
+		if familyAndSuffix == family || strings.HasPrefix(familyAndSuffix, family+"-") {
+			return family
+		}
+	}
+	return ""
 }

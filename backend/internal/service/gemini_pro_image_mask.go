@@ -146,7 +146,14 @@ func synthToClaudeUsage(s geminiSynthUsage) *ClaudeUsage {
 // shouldMaskGeminiProImage 判断该响应是否需要伪装成 pro。
 // 前置由调用方保证已是 pro 生图请求；这里判断响应是否为「真 pro」。
 func shouldMaskGeminiProImage(respBody []byte, model string) bool {
+	return shouldMaskGeminiProImageWithObservedModel(respBody, model, "")
+}
+
+func shouldMaskGeminiProImageWithObservedModel(respBody []byte, model, observedModelVersion string) bool {
 	mv := strings.ToLower(strings.TrimSpace(gjson.GetBytes(respBody, "modelVersion").String()))
+	if mv == "" {
+		mv = strings.ToLower(strings.TrimSpace(observedModelVersion))
+	}
 	modelLower := strings.ToLower(strings.TrimSpace(model))
 	modelVersionMatches := mv != "" && strings.HasPrefix(mv, modelLower)
 
@@ -228,10 +235,14 @@ func maskGeminiProImageResponseBody(body []byte, model string, s geminiSynthUsag
 // 流式必须由调用方传入累计值：终结分块只带 finishReason 与 usage，
 // 图片 part 早在前面的分块里到达，在这里数只会得到 0。
 func applyGeminiProImageMask(respBody []byte, model, tier string, imageCount int) (newBody []byte, usage *ClaudeUsage, masked bool) {
+	return applyGeminiProImageMaskWithObservedModel(respBody, model, tier, imageCount, "")
+}
+
+func applyGeminiProImageMaskWithObservedModel(respBody []byte, model, tier string, imageCount int, observedModelVersion string) (newBody []byte, usage *ClaudeUsage, masked bool) {
 	if !isGeminiProImageModel(model) {
 		return respBody, nil, false
 	}
-	if !shouldMaskGeminiProImage(respBody, model) {
+	if !shouldMaskGeminiProImageWithObservedModel(respBody, model, observedModelVersion) {
 		return respBody, nil, false
 	}
 	promptTokens := int(gjson.GetBytes(respBody, "usageMetadata.promptTokenCount").Int())
@@ -255,8 +266,8 @@ const geminiProImageUpgradedSize = "1K"
 // 尺寸，一眼穿帮，且客户按 1K pro 付费却只拿到小图。运营口径选「升到 1K」而非复刻 400：
 // 客户拿到 1K 图并按 1K 计费；直连真 pro 的分组同样受此改写，两条线路行为一致（都出 1K）。
 // 只对 pro 生图模型的出图 action 生效；countTokens、其他模型、非 512 档一律原样返回。
-func upgradeGeminiProImage512To1K(body []byte, model, action string) []byte {
-	if !isGeminiProImageModel(model) || !isGeminiImageGenerationAction(action) {
+func upgradeGeminiProImage512To1K(body []byte, requestedModel, mappedModel, action string) []byte {
+	if (!isGeminiProImageModel(requestedModel) && !isGeminiProImageModel(mappedModel)) || !isGeminiImageGenerationAction(action) {
 		return body
 	}
 	// proto JSON 驼峰 / 下划线两种命名都可能出现（Google 两种都收），逐个路径检查改写；
@@ -275,9 +286,11 @@ func upgradeGeminiProImage512To1K(body []byte, model, action string) []byte {
 
 // geminiProImageMaskParams 由 ForwardNative 计算后传入响应处理器。
 type geminiProImageMaskParams struct {
-	Enabled bool
-	Model   string
-	Tier    string
+	Enabled              bool
+	Model                string
+	Tier                 string
+	Terminal             bool
+	ObservedModelVersion string
 	// ImageCount 是**累计**张数（observedGeminiImageOutputs），由流式调用方在每个分块
 	// 上刷新后传入。0 表示未知，交由 applyGeminiProImageMask 自己从 body 数。
 	ImageCount int
@@ -291,10 +304,10 @@ func maskGeminiProImageStreamChunk(payload []byte, mask geminiProImageMaskParams
 	if !mask.Enabled || !isGeminiProImageModel(mask.Model) {
 		return payload, nil, false
 	}
-	isFinal := gjson.GetBytes(payload, "candidates.0.finishReason").Exists()
+	isFinal := mask.Terminal || gjson.GetBytes(payload, "candidates.0.finishReason").Exists()
 	hasUsage := gjson.GetBytes(payload, "usageMetadata").Exists()
 	if isFinal && hasUsage {
-		if nb, u, ok := applyGeminiProImageMask(payload, mask.Model, mask.Tier, mask.ImageCount); ok {
+		if nb, u, ok := applyGeminiProImageMaskWithObservedModel(payload, mask.Model, mask.Tier, mask.ImageCount, mask.ObservedModelVersion); ok {
 			return nb, u, true
 		}
 		return payload, nil, false

@@ -364,14 +364,14 @@ func TestUpgradeGeminiProImage512To1K(t *testing.T) {
 	// pro + 出图 action + 512 档四种写法 → 1K，其余字段不动
 	for _, size := range []string{"512", "512P", "512PX", "0.5K", "0.5k"} {
 		for _, action := range []string{"generateContent", "streamGenerateContent"} {
-			out := upgradeGeminiProImage512To1K(body(size), "gemini-3-pro-image-preview", action)
+			out := upgradeGeminiProImage512To1K(body(size), "gemini-3-pro-image-preview", "gemini-3-pro-image-preview", action)
 			require.Equal(t, "1K", sizeOf(out), "%s/%s", size, action)
 			require.Equal(t, "draw", gjson.GetBytes(out, "contents.0.parts.0.text").String())
 			require.Equal(t, "IMAGE", gjson.GetBytes(out, "generationConfig.responseModalities.0").String())
 		}
 	}
 	// 不带 -preview 的售卖名同样命中
-	require.Equal(t, "1K", sizeOf(upgradeGeminiProImage512To1K(body("512PX"), "gemini-3-pro-image", "generateContent")))
+	require.Equal(t, "1K", sizeOf(upgradeGeminiProImage512To1K(body("512PX"), "gemini-3-pro-image", "gemini-3-pro-image", "generateContent")))
 
 	// 原样返回的情形
 	untouched := map[string][3]string{
@@ -382,22 +382,33 @@ func TestUpgradeGeminiProImage512To1K(t *testing.T) {
 	}
 	for name, tc := range untouched {
 		in := body(tc[0])
-		require.Equal(t, string(in), string(upgradeGeminiProImage512To1K(in, tc[1], tc[2])), name)
+		require.Equal(t, string(in), string(upgradeGeminiProImage512To1K(in, tc[1], tc[1], tc[2])), name)
 	}
 	// 没有 imageConfig 的请求不凭空造出字段
 	plain := []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`)
-	require.Equal(t, string(plain), string(upgradeGeminiProImage512To1K(plain, "gemini-3-pro-image-preview", "generateContent")))
+	require.Equal(t, string(plain), string(upgradeGeminiProImage512To1K(plain, "gemini-3-pro-image-preview", "gemini-3-pro-image-preview", "generateContent")))
+}
+
+func TestUpgradeGeminiProImage512To1K_UsesMappedModel(t *testing.T) {
+	body := []byte(`{"generationConfig":{"imageConfig":{"imageSize":"512PX"}}}`)
+	if got := upgradeGeminiProImage512To1K(body, "custom-pro-alias", "gemini-3-pro-image", "generateContent"); got == nil || gjson.GetBytes(got, "generationConfig.imageConfig.imageSize").String() != "1K" {
+		t.Fatalf("mapped pro model must upgrade 512 to 1K, got %s", got)
+	}
+
+	if got := upgradeGeminiProImage512To1K(body, "gemini-3-pro-image", "gemini-3.1-flash-image", "generateContent"); got == nil || gjson.GetBytes(got, "generationConfig.imageConfig.imageSize").String() != "1K" {
+		t.Fatalf("requested pro model must upgrade 512 to 1K after flash mapping, got %s", got)
+	}
 }
 
 func TestUpgradeGeminiProImage512To1K_SnakeCaseKeys(t *testing.T) {
 	snake := []byte(`{"contents":[{"parts":[{"text":"draw"}]}],"generation_config":{"response_modalities":["IMAGE"],"image_config":{"image_size":"512PX","aspect_ratio":"9:16"}}}`)
-	out := upgradeGeminiProImage512To1K(snake, "gemini-3-pro-image-preview", "generateContent")
+	out := upgradeGeminiProImage512To1K(snake, "gemini-3-pro-image-preview", "gemini-3-pro-image-preview", "generateContent")
 	require.Equal(t, "1K", gjson.GetBytes(out, "generation_config.image_config.image_size").String())
 	require.Equal(t, "9:16", gjson.GetBytes(out, "generation_config.image_config.aspect_ratio").String(), "同级字段不动")
 	require.False(t, gjson.GetBytes(out, "generationConfig").Exists(), "不凭空造驼峰分支")
 
 	mixed := []byte(`{"generationConfig":{"image_config":{"image_size":"0.5K"}}}`)
-	out = upgradeGeminiProImage512To1K(mixed, "gemini-3-pro-image", "streamGenerateContent")
+	out = upgradeGeminiProImage512To1K(mixed, "gemini-3-pro-image", "gemini-3-pro-image", "streamGenerateContent")
 	require.Equal(t, "1K", gjson.GetBytes(out, "generationConfig.image_config.image_size").String())
 }
 

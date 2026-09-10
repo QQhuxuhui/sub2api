@@ -40,8 +40,6 @@ func TestGeminiThinkingConfigForEffort(t *testing.T) {
 		// prefixes / spellings
 		{"NONE", "models/gemini-3-flash", "thinkingLevel", "minimal"},
 		{"x-high", "vertex/gemini-2.5-flash", "thinkingBudget", -1},
-		// non-gemini mapped model: budget based
-		{"none", "some-relay-model", "thinkingBudget", 0},
 	}
 	for _, tc := range cases {
 		got := geminiThinkingConfigForEffort(tc.effort, tc.model)
@@ -61,6 +59,25 @@ func TestGeminiThinkingConfigForEffort_EmptyOrUnknown(t *testing.T) {
 	for _, effort := range []string{"", "  ", "bogus", "auto"} {
 		if got := geminiThinkingConfigForEffort(effort, "gemini-3-flash"); got != nil {
 			t.Fatalf("effort %q: expected nil, got %v", effort, got)
+		}
+	}
+}
+
+func TestGeminiThinkingConfigForEffort_UnsupportedModelsUntouched(t *testing.T) {
+	for _, model := range []string{"gemini-2.0-flash", "gemini-pro-latest", "relay-model", "gemini-3rd-party", "gemini-2.5relay", "gemini-3.-flash"} {
+		if got := geminiThinkingConfigForEffort("high", model); got != nil {
+			t.Fatalf("model %q: expected nil for unsupported or ambiguous model, got %v", model, got)
+		}
+	}
+	if got := geminiThinkingConfigForEffort("none", "gemini-2.5-flash-proxy"); got == nil || got["thinkingBudget"] != 0 {
+		t.Fatalf("flash family suffix must not be misclassified as pro, got %v", got)
+	}
+
+	geminiReq := []byte(`{"contents":[]}`)
+	for _, model := range []string{"gemini-2.0-flash", "relay-model"} {
+		got := applyGeminiThinkingConfigFromOpenAIBody(geminiReq, []byte(`{"reasoning_effort":"none"}`), model)
+		if string(got) != string(geminiReq) {
+			t.Fatalf("model %q: request must remain untouched, got %s", model, got)
 		}
 	}
 }

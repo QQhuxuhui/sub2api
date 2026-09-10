@@ -1171,15 +1171,15 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	// `thoughtSignature` to avoid frequent INVALID_ARGUMENT 400s.
 	body = ensureGeminiFunctionCallThoughtSignatures(body)
 
-	// pro 生图的 512 档静默升 1K（真 pro 不支持 512；模拟线路的 flash 会出小图穿帮）。
-	// 必须在这里改，后面的 imageUsageParams / imageInputSize 都从同一个 body 取尺寸，
-	// 计费与伪装档位随之按 1K 走。
-	body = upgradeGeminiProImage512To1K(body, originalModel, action)
-
 	mappedModel := originalModel
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(originalModel)
 	}
+
+	// pro 生图的 512 档静默升 1K（真 pro 不支持 512；模拟线路的 flash 会出小图穿帮）。
+	// 同时检查请求模型和映射模型：任一侧表达 pro 语义，都要保持这条兼容策略。
+	// 后面的 imageUsageParams / imageInputSize 都从同一个 body 取尺寸，计费与伪装档位随之按 1K 走。
+	body = upgradeGeminiProImage512To1K(body, originalModel, mappedModel, action)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -1614,6 +1614,11 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			if err != nil {
 				return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to read upstream stream")
 			}
+			// The upstream stream is fully aggregated before the masked response
+			// delay. Release the tracked connection before sleeping; the client and
+			// account concurrency leases still cover the complete request below.
+			_ = resp.Body.Close()
+			resp.Body = http.NoBody
 			b, _ := json.Marshal(collected)
 			// 先观察还原前的原始上游响应（上游响应模型审计；对 dev 的 pro 伪装线
 			// 这里的 mismatch 恰好可作伪装链路健康监控），再做 dev 的图片 usage 调整。
@@ -2895,6 +2900,10 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	if err != nil {
 		return nil, err
 	}
+	// The body is completely read before masking and delaying. Close the
+	// tracked upstream body now so the delay does not retain a connection.
+	_ = resp.Body.Close()
+	resp.Body = http.NoBody
 
 	if isOAuth {
 		unwrappedBody, uwErr := unwrapGeminiResponse(respBody)
@@ -2985,6 +2994,44 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 	// 流式的伪装延迟只补一次：第一个被伪装的分块（通常就是首块，modelVersion 露出 flash）
 	// 写出前阻塞；之后的分块照常透传，否则每块都等一遍会把整条流拖成几十秒。
 	proMaskDelayed := false
+	proMaskResolved := !imageUsage.ProMaskEnabled
+	proMaskConfirmedGenuine := false
+	proMaskSeenFinish := false
+	proMaskObservedModelVersion := ""
+	pendingProMaskLines := make([]string, 0, 4)
+	pendingProMaskHasSemanticData := false
+	markFirstToken := func() {
+		if firstTokenMs == nil {
+			ms := int(time.Since(startTime).Milliseconds())
+			firstTokenMs = &ms
+		}
+	}
+	writeLine := func(line string) {
+		_, _ = io.WriteString(c.Writer, line)
+		flusher.Flush()
+	}
+	flushPendingProMaskLines := func() {
+		if pendingProMaskHasSemanticData {
+			markFirstToken()
+		}
+		for _, pending := range pendingProMaskLines {
+			_, _ = io.WriteString(c.Writer, pending)
+		}
+		pendingProMaskLines = pendingProMaskLines[:0]
+		pendingProMaskHasSemanticData = false
+		flusher.Flush()
+	}
+	emitPendingOrLine := func(line string, semanticData bool) {
+		if !proMaskResolved {
+			pendingProMaskLines = append(pendingProMaskLines, line)
+			pendingProMaskHasSemanticData = pendingProMaskHasSemanticData || semanticData
+			return
+		}
+		if semanticData {
+			markFirstToken()
+		}
+		writeLine(line)
+	}
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -2994,8 +3041,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
 				// Keepalive / done markers
 				if payload == "" || payload == "[DONE]" {
-					_, _ = io.WriteString(c.Writer, line)
-					flusher.Flush()
+					emitPendingOrLine(line, false)
 				} else {
 					var rawToWrite string
 					rawToWrite = payload
@@ -3020,7 +3066,30 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					// usageMetadata / candidates.N.index，从不碰 content.parts[].inlineData），
 					// 但提前刷新才能让终结分块拿到含本块在内的累计值。
 					observeGeminiImageOutputs(c, rawBytes)
-					if nb, u, ok := maskGeminiProImageStreamChunk(rawBytes, imageUsage.proMaskParams().withImageCount(observedGeminiImageOutputs(c))); ok {
+					if mv := strings.TrimSpace(gjson.GetBytes(rawBytes, "modelVersion").String()); mv != "" {
+						proMaskObservedModelVersion = mv
+					}
+					if gjson.GetBytes(rawBytes, "candidates.0.finishReason").Exists() {
+						proMaskSeenFinish = true
+					}
+					genuineProChunk := imageUsage.ProMaskEnabled && !shouldMaskGeminiProImageWithObservedModel(
+						rawBytes,
+						imageUsage.Model,
+						proMaskObservedModelVersion,
+					)
+					if genuineProChunk {
+						proMaskConfirmedGenuine = true
+						proMaskResolved = true
+					}
+					finalProMaskChunk := imageUsage.ProMaskEnabled && proMaskSeenFinish &&
+						gjson.GetBytes(rawBytes, "usageMetadata").Exists()
+					maskedChunk := false
+					maskParams := imageUsage.proMaskParams().
+						withImageCount(observedGeminiImageOutputs(c)).
+						withStreamState(finalProMaskChunk, proMaskObservedModelVersion)
+					maskParams.Enabled = maskParams.Enabled && !proMaskConfirmedGenuine
+					if nb, u, ok := maskGeminiProImageStreamChunk(rawBytes, maskParams); ok {
+						maskedChunk = true
 						rawBytes = nb
 						rawToWrite = string(nb)
 						if u != nil {
@@ -3040,6 +3109,9 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 							usage = u
 						}
 					} else if u := extractGeminiUsage(rawBytes); u != nil {
+						if proMaskConfirmedGenuine && u.ImageOutputTokens == 0 && usage.ImageOutputTokens > 0 {
+							u.ImageOutputTokens = usage.ImageOutputTokens
+						}
 						usage = u
 					}
 					observer.ObserveGemini(observedRaw)
@@ -3054,33 +3126,51 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 						}
 					}
 
-					if firstTokenMs == nil {
-						ms := int(time.Since(startTime).Milliseconds())
-						firstTokenMs = &ms
+					// Keep the original line for unmodified AI Studio chunks. Rebuilt
+					// chunks always use a valid SSE data event, as before.
+					outputLine := line
+					if isOAuth || rawToWrite != payload {
+						outputLine = fmt.Sprintf("data: %s\n\n", rawToWrite)
 					}
-
-					if isOAuth {
-						// SSE format requires double newline (\n\n) to separate events
-						_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", rawToWrite)
-					} else if rawToWrite != payload {
-						// 已伪装：写改写后的 data 行（保持 SSE 事件分隔）。
-						_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", rawToWrite)
+					if maskedChunk || finalProMaskChunk {
+						// The current chunk must follow the already buffered chunks,
+						// and all of them must be released only after the final
+						// pro-vs-flash decision (and, for masked chunks, the delay).
+						pendingProMaskLines = append(pendingProMaskLines, outputLine)
+						pendingProMaskHasSemanticData = true
+						proMaskResolved = true
+						flushPendingProMaskLines()
 					} else {
-						// Pass-through for AI Studio responses.
-						_, _ = io.WriteString(c.Writer, line)
+						if proMaskResolved && len(pendingProMaskLines) > 0 {
+							pendingProMaskLines = append(pendingProMaskLines, outputLine)
+							pendingProMaskHasSemanticData = true
+							flushPendingProMaskLines()
+						} else {
+							emitPendingOrLine(outputLine, true)
+						}
 					}
-					flusher.Flush()
 				}
 			} else {
-				_, _ = io.WriteString(c.Writer, line)
-				flusher.Flush()
+				emitPendingOrLine(line, false)
 			}
 		}
 
 		if errors.Is(err, io.EOF) {
+			if len(pendingProMaskLines) > 0 {
+				// A truncated stream without a terminal usage/model decision must not
+				// lose already received SSE data. Flush it unchanged and skip the mask
+				// delay because the response was never conclusively classified.
+				flushPendingProMaskLines()
+			}
 			break
 		}
 		if err != nil {
+			if len(pendingProMaskLines) > 0 {
+				// Preserve already received SSE data on abrupt upstream errors.
+				// The incomplete response cannot be classified reliably, so it is
+				// flushed unchanged and without an artificial mask delay.
+				flushPendingProMaskLines()
+			}
 			return nil, err
 		}
 	}

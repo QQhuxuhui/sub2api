@@ -48,6 +48,12 @@ func (m geminiProImageMaskParams) withImageCount(n int) geminiProImageMaskParams
 	return m
 }
 
+func (m geminiProImageMaskParams) withStreamState(terminal bool, observedModelVersion string) geminiProImageMaskParams {
+	m.Terminal = terminal
+	m.ObservedModelVersion = observedModelVersion
+	return m
+}
+
 func applyGeminiImageUsageAdjustment(body []byte, params geminiImageUsageParams) ([]byte, *ClaudeUsage, bool) {
 	if params.ProMaskEnabled {
 		// 非流式：传 0，让 applyGeminiProImageMask 自己从完整响应体数图片张数。
