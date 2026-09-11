@@ -595,6 +595,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 	openBlockIndex := -1
 	openBlockType := ""
 	seenText := ""
+	seenThought := ""
 	openToolIndex := -1
 	openToolName := ""
 	seenToolJSON := ""
@@ -655,36 +656,41 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 								}
-								delta, newSeen := computeGeminiTextDelta(seenText, text)
-								seenText = newSeen
+								// thought:true → thinking 块 + thinking_delta，兼容链映射为 reasoning_content；
+								// 去重缓冲与正文分开（两段文本互不为前缀，共用会误判成回退吞掉正文）。
+								isThought := geminiPartIsThought(part)
+								blockType, seen := "text", &seenText
+								if isThought {
+									blockType, seen = "thinking", &seenThought
+								}
+								delta, newSeen := computeGeminiTextDelta(*seen, text)
+								*seen = newSeen
 								if delta == "" {
 									continue
 								}
-								if openBlockType != "text" {
+								if openBlockType != blockType {
 									if closeOpenBlock() {
 										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 									idx := nextBlockIndex
 									nextBlockIndex++
 									openBlockIndex = idx
-									openBlockType = "text"
+									openBlockType = blockType
 									if emitAnthropicEvent(&apicompat.AnthropicStreamEvent{
-										Type:  "content_block_start",
-										Index: &idx,
-										ContentBlock: &apicompat.AnthropicContentBlock{
-											Type: "text",
-											Text: "",
-										},
+										Type:         "content_block_start",
+										Index:        &idx,
+										ContentBlock: &apicompat.AnthropicContentBlock{Type: blockType},
 									}) {
 										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 								}
+								deltaEvt := &apicompat.AnthropicDelta{Type: "text_delta", Text: delta}
+								if isThought {
+									deltaEvt = &apicompat.AnthropicDelta{Type: "thinking_delta", Thinking: delta}
+								}
 								if emitAnthropicEvent(&apicompat.AnthropicStreamEvent{
-									Type: "content_block_delta",
-									Delta: &apicompat.AnthropicDelta{
-										Type: "text_delta",
-										Text: delta,
-									},
+									Type:  "content_block_delta",
+									Delta: deltaEvt,
 								}) {
 									return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 								}

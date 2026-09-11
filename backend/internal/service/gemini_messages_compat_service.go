@@ -2194,6 +2194,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 	openBlockIndex := -1
 	openBlockType := ""
 	seenText := ""
+	seenThought := ""
 	openToolIndex := -1
 	openToolID := ""
 	openToolName := ""
@@ -2259,28 +2260,36 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 					seenToolJSON = ""
 				}
 
-				delta, newSeen := computeGeminiTextDelta(seenText, text)
-				seenText = newSeen
+				// thought:true 的 part 走独立的 thinking 块与独立的去重缓冲：
+				// 思考摘要与正文是两段互不为前缀的文本，共用 seenText 会让
+				// computeGeminiTextDelta 的累计模式误判成「回退」而吞掉正文。
+				isThought := geminiPartIsThought(part)
+				blockType, deltaType, deltaKey, seen := "text", "text_delta", "text", &seenText
+				if isThought {
+					blockType, deltaType, deltaKey, seen = "thinking", "thinking_delta", "thinking", &seenThought
+				}
+				delta, newSeen := computeGeminiTextDelta(*seen, text)
+				*seen = newSeen
 				if delta == "" {
 					continue
 				}
 
-				if openBlockType != "text" {
+				if openBlockType != blockType {
 					if openBlockIndex >= 0 {
 						writeSSE(c.Writer, "content_block_stop", map[string]any{
 							"type":  "content_block_stop",
 							"index": openBlockIndex,
 						})
 					}
-					openBlockType = "text"
+					openBlockType = blockType
 					openBlockIndex = nextBlockIndex
 					nextBlockIndex++
 					writeSSE(c.Writer, "content_block_start", map[string]any{
 						"type":  "content_block_start",
 						"index": openBlockIndex,
 						"content_block": map[string]any{
-							"type": "text",
-							"text": "",
+							"type":   blockType,
+							deltaKey: "",
 						},
 					})
 				}
@@ -2293,8 +2302,8 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 					"type":  "content_block_delta",
 					"index": openBlockIndex,
 					"delta": map[string]any{
-						"type": "text_delta",
-						"text": delta,
+						"type":   deltaType,
+						deltaKey: delta,
 					},
 				})
 				flusher.Flush()
@@ -3278,10 +3287,21 @@ func convertGeminiToClaudeMessage(geminiResp map[string]any, originalModel strin
 							continue
 						}
 						if text, ok := pm["text"].(string); ok && text != "" {
-							contentBlocks = append(contentBlocks, map[string]any{
-								"type": "text",
-								"text": text,
-							})
+							if geminiPartIsThought(pm) {
+								// thought:true 是 Gemini 的思考摘要（CLIProxyAPI 等上游只要设了
+								// thinkingConfig 就会带），必须落成 thinking 块：Claude 客户端看到
+								// thinking，Chat Completions 兼容链再映射成 reasoning_content。
+								// 以前一律当 text，思考和正文被拼进同一个 content 里。
+								contentBlocks = append(contentBlocks, map[string]any{
+									"type":     "thinking",
+									"thinking": text,
+								})
+							} else {
+								contentBlocks = append(contentBlocks, map[string]any{
+									"type": "text",
+									"text": text,
+								})
+							}
 						}
 						if inlineData, ok := pm["inlineData"].(map[string]any); includeInlineData && ok {
 							mimeType, _ := inlineData["mimeType"].(string)
@@ -3603,6 +3623,12 @@ func extractGeminiParts(geminiResp map[string]any) []map[string]any {
 		}
 	}
 	return nil
+}
+
+// geminiPartIsThought 报告一个 Gemini part 是否为思考摘要（`"thought": true`）。
+func geminiPartIsThought(part map[string]any) bool {
+	v, ok := part["thought"].(bool)
+	return ok && v
 }
 
 func computeGeminiTextDelta(seen, incoming string) (delta, newSeen string) {
