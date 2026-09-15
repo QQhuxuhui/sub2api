@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -29,9 +30,62 @@ func TestOpenAIImagesModelFamily(t *testing.T) {
 		if got != want || ok != (want != "") {
 			t.Errorf("openAIImagesModelFamily(%q) = %q,%v want %q", model, got, ok, want)
 		}
-		if isSimulatableOpenAIImagesModel(model) != (want != "") || isGPTImage2Model(model) != (want != "") {
-			t.Errorf("gates disagree with family for %q", model)
+		if isSimulatableOpenAIImagesModel(model) != (want != "") {
+			t.Errorf("simulation gate disagrees with family for %q", model)
 		}
+		if isGPTImage2Model(model) != (want == openAIImagesFamilyV2) {
+			t.Errorf("GPT Image 2 capability gate is wrong for %q", model)
+		}
+	}
+}
+
+func TestNormalizeOpenAIImagesOptionsPreservesNativeV25Capabilities(t *testing.T) {
+	partialImages := 2
+	req := &OpenAIImagesRequest{
+		Endpoint:         openAIImagesEditsEndpoint,
+		Model:            "gpt-image-2.5-sunburst",
+		Prompt:           "edit",
+		Stream:           true,
+		N:                1,
+		PartialImages:    &partialImages,
+		InputFidelity:    "low",
+		HasInputFidelity: true,
+	}
+
+	normalized, err := NormalizeOpenAIImagesRequestForModel(req, req.Model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !normalized.Stream || normalized.PartialImages == nil || *normalized.PartialImages != 2 {
+		t.Fatalf("native 2.5 streaming options were removed: %+v", normalized)
+	}
+	if normalized.InputFidelity != "low" || !normalized.HasInputFidelity {
+		t.Fatalf("native 2.5 input_fidelity was removed: %+v", normalized)
+	}
+}
+
+func TestRewriteOpenAIImagesRequestPreservesNativeV25Capabilities(t *testing.T) {
+	partialImages := 2
+	parsed := &OpenAIImagesRequest{
+		Endpoint:         openAIImagesEditsEndpoint,
+		Model:            "gpt-image-2.5-sunburst",
+		Stream:           true,
+		N:                1,
+		PartialImages:    &partialImages,
+		InputFidelity:    "low",
+		HasInputFidelity: true,
+	}
+	body := []byte(`{"model":"gpt-image-2.5-sunburst","stream":true,"partial_images":2,"input_fidelity":"low"}`)
+
+	out, _, err := rewriteOpenAIImagesRequest(body, "application/json", parsed.Model, parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gjson.GetBytes(out, "stream").Bool() || gjson.GetBytes(out, "partial_images").Int() != 2 {
+		t.Fatalf("native 2.5 streaming fields were removed: %s", out)
+	}
+	if got := gjson.GetBytes(out, "input_fidelity").String(); got != "low" {
+		t.Fatalf("native 2.5 input_fidelity = %q, want low: %s", got, out)
 	}
 }
 
@@ -44,8 +98,8 @@ func TestNormalizeOpenAIImageQualityForFamily(t *testing.T) {
 		{openAIImagesFamilyV2, "xhigh", "", false},
 		{openAIImagesFamilyV2, "max", "", false},
 		{openAIImagesFamilyV2, "high", "high", true},
-		{openAIImagesFamilyV25, "", "low", true},
-		{openAIImagesFamilyV25, "auto", "low", true},
+		{openAIImagesFamilyV25, "", "", false},
+		{openAIImagesFamilyV25, "auto", "", false},
 		{openAIImagesFamilyV25, "medium", "medium", true},
 		{openAIImagesFamilyV25, " XHIGH ", "xhigh", true},
 		{openAIImagesFamilyV25, "max", "max", true},
@@ -103,12 +157,12 @@ func TestOpenAIImagesForwardQuality(t *testing.T) {
 	}
 }
 
-func TestOpenAIImagesQualityEchoAcceptable(t *testing.T) {
-	if !openAIImagesQualityEchoAcceptable("high", "xhigh") || !openAIImagesQualityEchoAcceptable("HIGH", "max") {
-		t.Error("2 系上游回显 high 应视为与 xhigh/max 一致")
+func TestOpenAIImagesQualityEchoRequiresForwardedTier(t *testing.T) {
+	if openAIImagesQualityEchoAcceptable("high", "xhigh") || openAIImagesQualityEchoAcceptable("HIGH", "max") {
+		t.Error("high must not globally match xhigh or max")
 	}
-	if openAIImagesQualityEchoAcceptable("medium", "xhigh") || openAIImagesQualityEchoAcceptable("high", "medium") || openAIImagesQualityEchoAcceptable("low", "high") {
-		t.Error("其余档位必须严格相等")
+	if !openAIImagesQualityEchoAcceptable(" HIGH ", "high") {
+		t.Error("equal forwarded and echoed tiers should match case-insensitively")
 	}
 }
 
@@ -117,7 +171,8 @@ func TestOpenAIImagesQualityEchoAcceptable(t *testing.T) {
 func TestApplyOpenAIImagesUsageSimulationV25MappedToV2Upstream(t *testing.T) {
 	body := []byte(`{"created":1,"quality":"high","data":[{"b64_json":"` + testPNGBase64(t, 1024, 1024) + `"}],"usage":{"input_tokens":20,"input_tokens_details":{"text_tokens":20,"image_tokens":0}}}`)
 	parsed := &OpenAIImagesRequest{Model: "gpt-image-2.5-flare", Prompt: "x", Quality: "xhigh", N: 1}
-	out, usage, _, applied := applyOpenAIImagesUsageSimulation(body, parsed)
+	account := &Account{Credentials: map[string]any{openAIImagesUsageSimulationCredentialKey: true}}
+	out, usage, _, applied := maybeSimulateOpenAIImagesUsage(body, account, parsed, "gpt-image-2")
 	if !applied {
 		t.Fatal("expected simulation to apply")
 	}
@@ -144,6 +199,42 @@ func TestApplyOpenAIImagesUsageSimulationV25MappedToV2Upstream(t *testing.T) {
 	}
 }
 
+func TestApplyOpenAIImagesUsageSimulationV25NativeRejectsMismatchedQuality(t *testing.T) {
+	body := []byte(`{"quality":"high","data":[{"b64_json":"` + testPNGBase64(t, 1024, 1024) + `"}],"usage":{"input_tokens_details":{"text_tokens":5}}}`)
+	parsed := &OpenAIImagesRequest{Model: "gpt-image-2.5-sunburst", Prompt: "x", Quality: "xhigh", N: 1}
+	account := &Account{Credentials: map[string]any{openAIImagesUsageSimulationCredentialKey: true}}
+
+	out, _, _, applied := maybeSimulateOpenAIImagesUsage(body, account, parsed, parsed.Model)
+	if applied || !bytes.Equal(out, body) {
+		t.Fatal("native 2.5 quality mismatch must skip simulation")
+	}
+}
+
+func TestApplyOpenAIImagesUsageSimulationV25AutoUsesResponseQuality(t *testing.T) {
+	body := []byte(`{"quality":"max","data":[{"b64_json":"` + testPNGBase64(t, 1024, 1024) + `"}],"usage":{"input_tokens_details":{"text_tokens":5}}}`)
+	parsed := &OpenAIImagesRequest{Model: "gpt-image-2.5-sunburst", Prompt: "x", Quality: "auto", HasQuality: true, N: 1}
+	account := &Account{Credentials: map[string]any{openAIImagesUsageSimulationCredentialKey: true}}
+
+	out, usage, _, applied := maybeSimulateOpenAIImagesUsage(body, account, parsed, parsed.Model)
+	if !applied || usage.ImageOutputTokens != 7024 {
+		t.Fatalf("2.5 auto usage = %+v applied=%v, want response max/7024", usage, applied)
+	}
+	if got := gjson.GetBytes(out, "quality").String(); got != "max" {
+		t.Fatalf("rewritten quality = %q, want max", got)
+	}
+}
+
+func TestApplyOpenAIImagesUsageSimulationV25AutoRequiresResponseQuality(t *testing.T) {
+	body := []byte(`{"data":[{"b64_json":"` + testPNGBase64(t, 1024, 1024) + `"}],"usage":{"input_tokens_details":{"text_tokens":5}}}`)
+	parsed := &OpenAIImagesRequest{Model: "gpt-image-2.5-flare", Prompt: "x", N: 1}
+	account := &Account{Credentials: map[string]any{openAIImagesUsageSimulationCredentialKey: true}}
+
+	out, _, _, applied := maybeSimulateOpenAIImagesUsage(body, account, parsed, parsed.Model)
+	if applied || !bytes.Equal(out, body) {
+		t.Fatal("2.5 omitted quality without an actual response tier must skip simulation")
+	}
+}
+
 // 请求校验：2.5 客户端模型可传 xhigh/max，即便将接收请求的上游模型是 gpt-image-2；
 // 纯 2 系请求仍拒绝 xhigh/max。
 func TestNormalizeOpenAIImagesOptionsV25Quality(t *testing.T) {
@@ -159,6 +250,37 @@ func TestNormalizeOpenAIImagesOptionsV25Quality(t *testing.T) {
 	req = &OpenAIImagesRequest{Model: "gpt-image-2", Prompt: "x", Quality: "xhigh", HasQuality: true, N: 1}
 	if _, err = NormalizeOpenAIImagesRequestForModel(req, "gpt-image-2"); err == nil || !strings.Contains(err.Error(), "invalid quality") {
 		t.Fatalf("gpt-image-2 must reject xhigh, got %v", err)
+	}
+	req = &OpenAIImagesRequest{Model: "gpt-image-2.5-flare", Prompt: "x", Quality: "max", HasQuality: true, N: 1}
+	if _, err = NormalizeOpenAIImagesRequestForModel(req, "gpt-image-1.5"); err == nil || !strings.Contains(err.Error(), "invalid quality") {
+		t.Fatalf("2.5 client mapped to 1.5 must reject max, got %v", err)
+	}
+}
+
+func TestBuildOpenAIImagesResponsesRequestDowngradesV25QualityForV2Tool(t *testing.T) {
+	parsed := &OpenAIImagesRequest{
+		Endpoint:   openAIImagesGenerationsEndpoint,
+		Model:      "gpt-image-2.5-flare",
+		Prompt:     "x",
+		Quality:    "max",
+		HasQuality: true,
+		N:          1,
+	}
+
+	body, err := buildOpenAIImagesResponsesRequest(parsed, "gpt-image-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gjson.GetBytes(body, "tools.0.quality").String(); got != "high" {
+		t.Fatalf("mapped Responses tool quality = %q, want high: %s", got, body)
+	}
+
+	body, err = buildOpenAIImagesResponsesRequest(parsed, "gpt-image-2.5-flare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gjson.GetBytes(body, "tools.0.quality").String(); got != "max" {
+		t.Fatalf("native Responses tool quality = %q, want max: %s", got, body)
 	}
 }
 

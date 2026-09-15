@@ -242,12 +242,16 @@ func normalizeOpenAIImageQuality(raw string) (string, bool) {
 	return normalizeOpenAIImageQualityForFamily(openAIImagesFamilyV2, raw)
 }
 
-// normalizeOpenAIImageQualityForFamily 按模型族归一 quality；2.5 多出 xhigh / max 两档。
-// auto/缺省两族都按 low 计（2 系已实测官方缺省回显 low；2.5 官方未公开缺省档，取最低档
-// 是对客户最保守的口径）。
+// normalizeOpenAIImageQualityForFamily normalizes a concrete quality for a
+// model family. GPT Image 2 defaults to low; GPT Image 2.5 auto/default must
+// be resolved from response metadata because the model chooses the tier.
 func normalizeOpenAIImageQualityForFamily(family, raw string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "auto", "low":
+	case "", "auto":
+		if family == openAIImagesFamilyV2 {
+			return "low", true
+		}
+	case "low":
 		return "low", true
 	case "medium":
 		return "medium", true
@@ -782,19 +786,12 @@ func openAIImagesResponseSimulatableFromDecoded(root map[string]any, actualForma
 	return true
 }
 
-// openAIImagesQualityEchoAcceptable 判断上游回显的 quality 是否与本次计费档位一致。
-// 2.5 的 xhigh/max 被降成 high 转发给 2 系上游（见 openAIImagesForwardQuality）时，
-// 上游只会回显 high，同样视为一致；其余必须严格相等。
+// openAIImagesQualityEchoAcceptable compares the response with the quality
+// actually forwarded upstream. Compatibility downgrades are resolved before
+// this check, so no global xhigh/max exception is needed here.
 func openAIImagesQualityEchoAcceptable(echoed, expectedQuality string) bool {
 	echoed = strings.ToLower(strings.TrimSpace(echoed))
-	if strings.EqualFold(echoed, expectedQuality) {
-		return true
-	}
-	switch expectedQuality {
-	case "xhigh", "max":
-		return echoed == "high"
-	}
-	return false
+	return strings.EqualFold(echoed, strings.TrimSpace(expectedQuality))
 }
 
 func openAIImagesResponseSimulatable(body []byte, actualFormat, expectedQuality string) bool {
@@ -808,6 +805,18 @@ func applyOpenAIImagesUsageSimulation(
 	body []byte,
 	parsed *OpenAIImagesRequest,
 ) ([]byte, OpenAIUsage, []string, bool) {
+	effectiveUpstreamModel := ""
+	if parsed != nil {
+		effectiveUpstreamModel = parsed.Model
+	}
+	return applyOpenAIImagesUsageSimulationForUpstream(body, parsed, effectiveUpstreamModel)
+}
+
+func applyOpenAIImagesUsageSimulationForUpstream(
+	body []byte,
+	parsed *OpenAIImagesRequest,
+	effectiveUpstreamModel string,
+) ([]byte, OpenAIUsage, []string, bool) {
 	if len(body) == 0 || !openAIImagesRequestSimulatable(parsed) {
 		return body, OpenAIUsage{}, nil, false
 	}
@@ -817,16 +826,25 @@ func applyOpenAIImagesUsageSimulation(
 	if !ok {
 		return body, OpenAIUsage{}, nil, false
 	}
-	quality, ok := normalizeOpenAIImageQualityForFamily(family, parsed.Quality)
-	if !ok {
-		return body, OpenAIUsage{}, nil, false
-	}
 	root, ok := parseOpenAIImagesSimulationResponse(body)
 	if !ok {
 		return body, OpenAIUsage{}, nil, false
 	}
+	requestedQuality := strings.ToLower(strings.TrimSpace(parsed.Quality))
+	quality, ok := normalizeOpenAIImageQualityForFamily(family, requestedQuality)
+	if !ok && family == openAIImagesFamilyV25 && (requestedQuality == "" || requestedQuality == "auto") {
+		responseQuality, exists := root["quality"].(string)
+		if !exists {
+			return body, OpenAIUsage{}, nil, false
+		}
+		quality, ok = normalizeOpenAIImageQualityForFamily(family, responseQuality)
+	}
+	if !ok {
+		return body, OpenAIUsage{}, nil, false
+	}
+	forwardedQuality := openAIImagesForwardQuality(parsed.Model, effectiveUpstreamModel, quality)
 	geometries, format, ok := resolveOpenAIImageGeometriesFromDecoded(root)
-	if !ok || !openAIImagesResponseSimulatableFromDecoded(root, format, quality) {
+	if !ok || !openAIImagesResponseSimulatableFromDecoded(root, format, forwardedQuality) {
 		return body, OpenAIUsage{}, nil, false
 	}
 	// The response must carry exactly the requested number of images; a
@@ -898,5 +916,5 @@ func maybeSimulateOpenAIImagesUsage(
 		!isSimulatableOpenAIImagesModel(parsed.Model) || !isSimulatableOpenAIImagesModel(effectiveUpstreamModel) {
 		return body, OpenAIUsage{}, nil, false
 	}
-	return applyOpenAIImagesUsageSimulation(body, parsed)
+	return applyOpenAIImagesUsageSimulationForUpstream(body, parsed, effectiveUpstreamModel)
 }

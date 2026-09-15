@@ -532,11 +532,11 @@ func isGrokImageGenerationModel(model string) bool {
 		strings.HasPrefix(model, "grok-imagine-image")
 }
 
-// isGPTImage2Model 覆盖 gpt-image-2 与 2.5（flare/sunburst）两族：请求侧的规则
-// （忽略 stream/partial_images/input_fidelity、剥字段）对两族一致。
+// isGPTImage2Model identifies the GPT Image 2 family for its model-specific
+// request restrictions. GPT Image 2.5 has separate capabilities.
 func isGPTImage2Model(model string) bool {
-	_, ok := openAIImagesModelFamily(model)
-	return ok
+	family, ok := openAIImagesModelFamily(model)
+	return ok && family == openAIImagesFamilyV2
 }
 
 // ValidateOpenAIImagesOptions validates options against the model that will
@@ -599,11 +599,13 @@ func normalizeOpenAIImagesOptions(req *OpenAIImagesRequest, model string) (*Open
 		case "standard":
 			normalized.Quality = "medium"
 		}
-		// xhigh / max 是 gpt-image-2.5 的新档位：客户端请求的模型或将要接收请求的
-		// 上游模型任一属于 2.5 族即放行（账号把 2.5 映射到 2 系上游时转发前会降档）。
+		// xhigh / max are GPT Image 2.5 tiers. They are valid for a 2.5
+		// request only when the upstream is also 2.5, or is GPT Image 2 and
+		// the forwarding layer can apply the explicit compatibility downgrade.
 		clientFamily, _ := openAIImagesModelFamily(req.Model)
 		upstreamFamily, _ := openAIImagesModelFamily(model)
-		allowV25Quality := clientFamily == openAIImagesFamilyV25 || upstreamFamily == openAIImagesFamilyV25
+		allowV25Quality := clientFamily == openAIImagesFamilyV25 &&
+			(upstreamFamily == openAIImagesFamilyV25 || upstreamFamily == openAIImagesFamilyV2)
 		switch normalized.Quality {
 		case "auto", "low", "medium", "high":
 		case "xhigh", "max":
