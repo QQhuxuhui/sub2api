@@ -532,13 +532,11 @@ func isGrokImageGenerationModel(model string) bool {
 		strings.HasPrefix(model, "grok-imagine-image")
 }
 
+// isGPTImage2Model 覆盖 gpt-image-2 与 2.5（flare/sunburst）两族：请求侧的规则
+// （忽略 stream/partial_images/input_fidelity、剥字段）对两族一致。
 func isGPTImage2Model(model string) bool {
-	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "gpt-image-2", "gpt-image-2-2026-04-21":
-		return true
-	default:
-		return false
-	}
+	_, ok := openAIImagesModelFamily(model)
+	return ok
 }
 
 // ValidateOpenAIImagesOptions validates options against the model that will
@@ -601,13 +599,25 @@ func normalizeOpenAIImagesOptions(req *OpenAIImagesRequest, model string) (*Open
 		case "standard":
 			normalized.Quality = "medium"
 		}
+		// xhigh / max 是 gpt-image-2.5 的新档位：客户端请求的模型或将要接收请求的
+		// 上游模型任一属于 2.5 族即放行（账号把 2.5 映射到 2 系上游时转发前会降档）。
+		clientFamily, _ := openAIImagesModelFamily(req.Model)
+		upstreamFamily, _ := openAIImagesModelFamily(model)
+		allowV25Quality := clientFamily == openAIImagesFamilyV25 || upstreamFamily == openAIImagesFamilyV25
 		switch normalized.Quality {
 		case "auto", "low", "medium", "high":
+		case "xhigh", "max":
+			if !allowV25Quality {
+				return nil, fmt.Errorf("invalid quality %q: gpt-image models accept auto, low, medium or high", normalized.Quality)
+			}
 		case "":
 			if qualityPresent {
 				return nil, fmt.Errorf("invalid quality: value must not be empty")
 			}
 		default:
+			if allowV25Quality {
+				return nil, fmt.Errorf("invalid quality %q: gpt-image-2.5 models accept auto, low, medium, high, xhigh or max", normalized.Quality)
+			}
 			return nil, fmt.Errorf("invalid quality %q: gpt-image models accept auto, low, medium or high", normalized.Quality)
 		}
 
@@ -1099,7 +1109,7 @@ func rewriteOpenAIImagesRequest(body []byte, contentType string, model string, p
 		}
 	}
 	if parsed != nil && IsGPTImageGenerationModel(model) && parsed.HasQuality {
-		rewritten, err = sjson.SetBytes(rewritten, "quality", parsed.Quality)
+		rewritten, err = sjson.SetBytes(rewritten, "quality", openAIImagesForwardQuality(parsed.Model, model, parsed.Quality))
 		if err != nil {
 			return nil, "", fmt.Errorf("rewrite image request quality: %w", err)
 		}
@@ -1174,7 +1184,7 @@ func rewriteOpenAIImagesMultipartRequest(body []byte, contentType string, model 
 			continue
 		}
 		if part.FileName() == "" && parsed != nil && IsGPTImageGenerationModel(model) && formName == "quality" {
-			if _, err := target.Write([]byte(parsed.Quality)); err != nil {
+			if _, err := target.Write([]byte(openAIImagesForwardQuality(parsed.Model, model, parsed.Quality))); err != nil {
 				_ = part.Close()
 				return nil, "", fmt.Errorf("rewrite multipart quality: %w", err)
 			}

@@ -16,13 +16,50 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-// isSimulatableOpenAIImagesModel only admits model versions covered by the token table.
-func isSimulatableOpenAIImagesModel(model string) bool {
+// GPT Image 模型族：出图 token 公式相同，只是 quality 档位与每档的网格长边不同。
+const (
+	openAIImagesFamilyV2  = "2"   // gpt-image-2：low/medium/high = 16/48/96
+	openAIImagesFamilyV25 = "2.5" // gpt-image-2.5 flare/sunburst：low/medium/high/xhigh/max = 16/24/48/64/96
+)
+
+// openAIImagesModelFamily 把公开模型名归到有实测/公开 token 数据支撑的模型族；
+// 只认显式列出的名字，未知的 dated 快照与 -codex 之类别名一律不模拟。
+//
+// 2.5 的档位网格长边由官方公开的 1024×1024 五档数值反推（196/439/1756/3122/7024，
+// 与同一公式逐个吻合）；官方声明 2.5 与 2 的 token 单价相同、但 2 的计算器不适用于 2.5。
+func openAIImagesModelFamily(model string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(model)) {
 	case "gpt-image-2", "gpt-image-2-2026-04-21":
-		return true
+		return openAIImagesFamilyV2, true
+	case "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
+		"gpt-image-2.5-flare-2026-09-08", "gpt-image-2.5-sunburst-2026-09-08":
+		return openAIImagesFamilyV25, true
 	default:
-		return false
+		return "", false
+	}
+}
+
+// isSimulatableOpenAIImagesModel only admits model versions covered by the token table.
+func isSimulatableOpenAIImagesModel(model string) bool {
+	_, ok := openAIImagesModelFamily(model)
+	return ok
+}
+
+// openAIImagesForwardQuality 决定转发给上游的 quality：客户端按 2.5 语义传了
+// xhigh/max，而账号把模型映射成了 2 系（如 adobe2api 只认 gpt-image-2 与三档 quality），
+// 上游听不懂新档位，降成 high 转发；计费仍按客户端模型族与原始档位算。
+// 其余情况原样透传。
+func openAIImagesForwardQuality(clientModel, upstreamModel, quality string) string {
+	clientFamily, _ := openAIImagesModelFamily(clientModel)
+	upstreamFamily, _ := openAIImagesModelFamily(upstreamModel)
+	if clientFamily != openAIImagesFamilyV25 || upstreamFamily != openAIImagesFamilyV2 {
+		return quality
+	}
+	switch strings.ToLower(strings.TrimSpace(quality)) {
+	case "xhigh", "max":
+		return "high"
+	default:
+		return quality
 	}
 }
 
@@ -202,6 +239,13 @@ func parseOpenAIImageWidthHeight(value string) (int, int, bool) {
 }
 
 func normalizeOpenAIImageQuality(raw string) (string, bool) {
+	return normalizeOpenAIImageQualityForFamily(openAIImagesFamilyV2, raw)
+}
+
+// normalizeOpenAIImageQualityForFamily 按模型族归一 quality；2.5 多出 xhigh / max 两档。
+// auto/缺省两族都按 low 计（2 系已实测官方缺省回显 low；2.5 官方未公开缺省档，取最低档
+// 是对客户最保守的口径）。
+func normalizeOpenAIImageQualityForFamily(family, raw string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", "auto", "low":
 		return "low", true
@@ -209,9 +253,16 @@ func normalizeOpenAIImageQuality(raw string) (string, bool) {
 		return "medium", true
 	case "high":
 		return "high", true
-	default:
-		return "", false
+	case "xhigh":
+		if family == openAIImagesFamilyV25 {
+			return "xhigh", true
+		}
+	case "max":
+		if family == openAIImagesFamilyV25 {
+			return "max", true
+		}
 	}
+	return "", false
 }
 
 // officialOpenAIImageOutputTokens reproduces the official gpt-image-2 output-token
@@ -225,15 +276,41 @@ func normalizeOpenAIImageQuality(raw string) (string, bool) {
 //	other  = max(1, round(base * min(w,h) / max(w,h)))
 //	tokens = ceil(base * other * (2e6 + w*h) / 4e6)
 func officialOpenAIImageOutputTokens(width, height int, quality string) (int, bool) {
-	var base float64
-	switch quality {
-	case "low":
-		base = 16
-	case "medium":
-		base = 48
-	case "high":
-		base = 96
-	default:
+	return officialOpenAIImageOutputTokensForFamily(openAIImagesFamilyV2, width, height, quality)
+}
+
+// openAIImageOutputTokenBase 是各模型族每档 quality 的网格长边（见上方公式）。
+func openAIImageOutputTokenBase(family, quality string) (float64, bool) {
+	switch family {
+	case openAIImagesFamilyV2:
+		switch quality {
+		case "low":
+			return 16, true
+		case "medium":
+			return 48, true
+		case "high":
+			return 96, true
+		}
+	case openAIImagesFamilyV25:
+		switch quality {
+		case "low":
+			return 16, true
+		case "medium":
+			return 24, true
+		case "high":
+			return 48, true
+		case "xhigh":
+			return 64, true
+		case "max":
+			return 96, true
+		}
+	}
+	return 0, false
+}
+
+func officialOpenAIImageOutputTokensForFamily(family string, width, height int, quality string) (int, bool) {
+	base, ok := openAIImageOutputTokenBase(family, quality)
+	if !ok {
 		return 0, false
 	}
 	if width <= 0 || height <= 0 {
@@ -488,7 +565,17 @@ func synthesizeOpenAIImagesUsage(
 	textInputTokens int,
 	imageInputTokens int,
 ) (openAIImagesSynthUsage, bool) {
-	imageOutputTokens, ok := officialOpenAIImageOutputTokens(geometry.Width, geometry.Height, quality)
+	return synthesizeOpenAIImagesUsageForFamily(openAIImagesFamilyV2, geometry, quality, textInputTokens, imageInputTokens)
+}
+
+func synthesizeOpenAIImagesUsageForFamily(
+	family string,
+	geometry openAIImageGeometry,
+	quality string,
+	textInputTokens int,
+	imageInputTokens int,
+) (openAIImagesSynthUsage, bool) {
+	imageOutputTokens, ok := officialOpenAIImageOutputTokensForFamily(family, geometry.Width, geometry.Height, quality)
 	if !ok {
 		return openAIImagesSynthUsage{}, false
 	}
@@ -517,15 +604,25 @@ func synthesizeOpenAIImagesUsageMulti(
 	textInputTokens int,
 	imageInputTokens int,
 ) (openAIImagesSynthUsage, bool) {
+	return synthesizeOpenAIImagesUsageMultiForFamily(openAIImagesFamilyV2, geometries, quality, textInputTokens, imageInputTokens)
+}
+
+func synthesizeOpenAIImagesUsageMultiForFamily(
+	family string,
+	geometries []openAIImageGeometry,
+	quality string,
+	textInputTokens int,
+	imageInputTokens int,
+) (openAIImagesSynthUsage, bool) {
 	if len(geometries) == 0 {
 		return openAIImagesSynthUsage{}, false
 	}
-	usage, ok := synthesizeOpenAIImagesUsage(geometries[0], quality, textInputTokens, imageInputTokens)
+	usage, ok := synthesizeOpenAIImagesUsageForFamily(family, geometries[0], quality, textInputTokens, imageInputTokens)
 	if !ok {
 		return openAIImagesSynthUsage{}, false
 	}
 	for _, geometry := range geometries[1:] {
-		tokens, ok := officialOpenAIImageOutputTokens(geometry.Width, geometry.Height, quality)
+		tokens, ok := officialOpenAIImageOutputTokensForFamily(family, geometry.Width, geometry.Height, quality)
 		if !ok {
 			return openAIImagesSynthUsage{}, false
 		}
@@ -668,7 +765,7 @@ func openAIImagesResponseSimulatableFromDecoded(root map[string]any, actualForma
 	}
 	if qualityValue, exists := root["quality"]; exists {
 		quality, ok := qualityValue.(string)
-		if !ok || !strings.EqualFold(strings.TrimSpace(quality), expectedQuality) {
+		if !ok || !openAIImagesQualityEchoAcceptable(quality, expectedQuality) {
 			return false
 		}
 	}
@@ -685,6 +782,21 @@ func openAIImagesResponseSimulatableFromDecoded(root map[string]any, actualForma
 	return true
 }
 
+// openAIImagesQualityEchoAcceptable 判断上游回显的 quality 是否与本次计费档位一致。
+// 2.5 的 xhigh/max 被降成 high 转发给 2 系上游（见 openAIImagesForwardQuality）时，
+// 上游只会回显 high，同样视为一致；其余必须严格相等。
+func openAIImagesQualityEchoAcceptable(echoed, expectedQuality string) bool {
+	echoed = strings.ToLower(strings.TrimSpace(echoed))
+	if strings.EqualFold(echoed, expectedQuality) {
+		return true
+	}
+	switch expectedQuality {
+	case "xhigh", "max":
+		return echoed == "high"
+	}
+	return false
+}
+
 func openAIImagesResponseSimulatable(body []byte, actualFormat, expectedQuality string) bool {
 	root, ok := parseOpenAIImagesSimulationResponse(body)
 	return ok && openAIImagesResponseSimulatableFromDecoded(root, actualFormat, expectedQuality)
@@ -699,7 +811,13 @@ func applyOpenAIImagesUsageSimulation(
 	if len(body) == 0 || !openAIImagesRequestSimulatable(parsed) {
 		return body, OpenAIUsage{}, nil, false
 	}
-	quality, ok := normalizeOpenAIImageQuality(parsed.Quality)
+	// 档位与 token 网格按【客户端请求的模型族】算：账号把 2.5 映射成 2 系上游时，
+	// 客户买的仍是 2.5 的档位与价格。
+	family, ok := openAIImagesModelFamily(parsed.Model)
+	if !ok {
+		return body, OpenAIUsage{}, nil, false
+	}
+	quality, ok := normalizeOpenAIImageQualityForFamily(family, parsed.Quality)
 	if !ok {
 		return body, OpenAIUsage{}, nil, false
 	}
@@ -746,7 +864,7 @@ func applyOpenAIImagesUsageSimulation(
 		textInputTokens = estimateOpenAIImagePromptTokens(parsed.Prompt)
 	}
 
-	synthesized, ok := synthesizeOpenAIImagesUsageMulti(geometries, quality, textInputTokens, imageInputTokens)
+	synthesized, ok := synthesizeOpenAIImagesUsageMultiForFamily(family, geometries, quality, textInputTokens, imageInputTokens)
 	if !ok {
 		return body, OpenAIUsage{}, nil, false
 	}
