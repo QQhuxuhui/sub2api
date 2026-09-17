@@ -709,6 +709,7 @@ const paymentButtonClass = computed(() => {
   if (isBuiltInWxpayMethod(m)) return 'btn-wxpay'
   if (m === 'stripe') return 'btn-stripe'
   if (m === 'airwallex') return 'btn-airwallex'
+  if (m === 'usdt') return 'btn-usdt'
   return 'btn-primary'
 })
 

@@ -2,7 +2,10 @@
 // registry, load balancing, and shared utilities for the payment subsystem.
 package payment
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // PaymentType represents a supported payment method.
 type PaymentType = string
@@ -18,6 +21,10 @@ const (
 	TypeLink         PaymentType = "link"
 	TypeEasyPay      PaymentType = "easypay"
 	TypeAirwallex    PaymentType = "airwallex"
+	// TypeEpusdt 是自托管 Epusdt（GM Pay）加密货币网关的服务商 key。
+	TypeEpusdt PaymentType = "epusdt"
+	// TypeUSDT 是 Epusdt 服务商暴露给用户的可见支付方式。
+	TypeUSDT PaymentType = "usdt"
 )
 
 // Order status constants shared across payment and service layers.
@@ -86,6 +93,8 @@ func GetBasePaymentType(t string) string {
 		return TypeEasyPay
 	case t == TypeAirwallex:
 		return TypeAirwallex
+	case t == TypeEpusdt:
+		return TypeEpusdt
 	case t == TypeStripe || t == TypeCard || t == TypeLink:
 		return TypeStripe
 	case len(t) >= len(TypeAlipay) && t[:len(TypeAlipay)] == TypeAlipay:
@@ -153,6 +162,7 @@ type CreatePaymentResponse struct {
 	Currency     string                  // 服务商支付币种
 	CountryCode  string                  // 服务商收银台国家/地区代码
 	PaymentEnv   string                  // 服务商前端环境标识
+	ExpiresAt    time.Time               // Optional upstream payment expiration
 	ResultType   CreatePaymentResultType // Typed result contract for frontend flows
 	OAuth        *WechatOAuthInfo        // WeChat OAuth bootstrap payload when required
 	JSAPI        *WechatJSAPIPayload     // WeChat JSAPI invocation payload when ready

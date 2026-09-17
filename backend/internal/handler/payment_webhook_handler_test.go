@@ -55,6 +55,13 @@ func TestWriteSuccessResponse(t *testing.T) {
 			wantBody:        "",
 		},
 		{
+			name:            "epusdt returns plain text success",
+			providerKey:     payment.TypeEpusdt,
+			wantCode:        http.StatusOK,
+			wantContentType: "text/plain",
+			wantBody:        "success",
+		},
+		{
 			name:            "easypay returns plain text success",
 			providerKey:     "easypay",
 			wantCode:        http.StatusOK,
@@ -177,6 +184,18 @@ func TestExtractOutTradeNo(t *testing.T) {
 			providerKey: payment.TypeAirwallex,
 			rawBody:     `{"name":"payment_intent.succeeded","data":{"object":{"merchant_order_id":"sub2_awx_123"}}}`,
 			want:        "sub2_awx_123",
+		},
+		{
+			name:        "epusdt gmpay callback payload",
+			providerKey: payment.TypeEpusdt,
+			rawBody:     `{"pid":"1000","trade_id":"20260523171652123456001","order_id":"sub2_usdt_123","amount":100,"status":2,"signature":"abc"}`,
+			want:        "sub2_usdt_123",
+		},
+		{
+			name:        "epusdt malformed payload",
+			providerKey: payment.TypeEpusdt,
+			rawBody:     `order_id=sub2_usdt_123`,
+			want:        "",
 		},
 	}
 

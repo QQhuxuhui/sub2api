@@ -51,7 +51,7 @@ func (s *PaymentService) GetWebhookProviders(ctx context.Context, providerKey, o
 				}
 				return []payment.Provider{prov}, nil
 			}
-			if strings.TrimSpace(providerKey) == payment.TypeWxpay {
+			if webhookProviderNeedsCandidateVerification(providerKey) {
 				return s.getEnabledWebhookProvidersByKey(ctx, providerKey)
 			}
 			if !s.webhookRegistryFallbackAllowed(ctx, providerKey) {
@@ -66,7 +66,7 @@ func (s *PaymentService) GetWebhookProviders(ctx context.Context, providerKey, o
 		}
 	}
 
-	if strings.TrimSpace(providerKey) == payment.TypeWxpay {
+	if webhookProviderNeedsCandidateVerification(providerKey) {
 		return s.getEnabledWebhookProvidersByKey(ctx, providerKey)
 	}
 
@@ -80,6 +80,15 @@ func (s *PaymentService) GetWebhookProviders(ctx context.Context, providerKey, o
 		return nil, err
 	}
 	return []payment.Provider{prov}, nil
+}
+
+func webhookProviderNeedsCandidateVerification(providerKey string) bool {
+	switch strings.TrimSpace(providerKey) {
+	case payment.TypeWxpay, payment.TypeEpusdt:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *PaymentService) getPinnedOrderProvider(ctx context.Context, o *dbent.PaymentOrder) (payment.Provider, error) {

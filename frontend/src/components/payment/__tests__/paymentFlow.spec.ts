@@ -160,6 +160,25 @@ describe('decidePaymentLaunch', () => {
     expect(decision.recovery.resumeToken).toBe('resume-2')
   })
 
+  it('redirects usdt orders to the gateway cashier on desktop and mobile', () => {
+    for (const isMobile of [false, true]) {
+      const decision = decidePaymentLaunch(createOrderResult({
+        pay_url: 'https://pay.example.com/pay/checkout-counter/20260523171652123456001',
+        out_trade_no: 'sub2_usdt',
+        payment_type: 'usdt',
+      }), {
+        visibleMethod: 'usdt',
+        orderType: 'balance',
+        isMobile,
+      })
+
+      expect(decision.kind).toBe('redirect_waiting')
+      expect(decision.paymentState.paymentType).toBe('usdt')
+      expect(decision.paymentState.payUrl).toBe('https://pay.example.com/pay/checkout-counter/20260523171652123456001')
+      expect(decision.paymentState.qrCode).toBe('')
+    }
+  })
+
   it('prefers redirect on mobile when both pay_url and qr_code are present', () => {
     const decision = decidePaymentLaunch(createOrderResult({
       pay_url: 'https://pay.example.com/mobile/session',

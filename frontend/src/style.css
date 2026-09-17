@@ -126,6 +126,13 @@
     @apply dark:hover:bg-[#635bff];
   }
 
+  .btn-usdt {
+    @apply bg-[#26A17B] text-white shadow-md shadow-[#26A17B]/25;
+    @apply hover:bg-[#1f8a69] hover:shadow-lg hover:shadow-[#26A17B]/30;
+    @apply dark:bg-[#50AF95] dark:shadow-[#50AF95]/20;
+    @apply dark:hover:bg-[#26A17B];
+  }
+
   .btn-airwallex {
     @apply bg-[#14171A] text-white shadow-md shadow-emerald-500/20;
     @apply hover:bg-[#20252a] hover:shadow-lg hover:shadow-emerald-500/25;

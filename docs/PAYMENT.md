@@ -25,6 +25,7 @@ Sub2API has a built-in payment system that enables user self-service top-up with
 | **Alipay (Direct)** | Desktop QR code, mobile Alipay redirect | Direct integration with Alipay Open Platform, returning desktop QR codes and mobile WAP/app launch links |
 | **WeChat Pay (Direct)** | Native QR, H5, MP/JSAPI Pay | Direct integration with WeChat Pay APIv3 with environment-aware routing |
 | **Stripe** | Card, Alipay, WeChat Pay, Link, etc. | International payments, multi-currency support |
+| **Epusdt (USDT)** | USDT / TRX and other on-chain tokens (TRON, BSC, Solana, ...) | Self-hosted [Epusdt / GM Pay](https://github.com/GMWalletApp/epusdt) crypto gateway; orders carry a fiat amount, the gateway converts it at its rate and the payer transfers on the hosted cashier |
 
 > Alipay/WeChat Pay direct and EasyPay can both exist as backend provider instances, but the frontend always exposes only two visible buttons: `Alipay` and `WeChat Pay`. Admins choose exactly one source for each visible method: direct or EasyPay. Direct channels connect to payment APIs directly with lower fees; EasyPay aggregates through third-party platforms with easier setup.
 
@@ -154,6 +155,24 @@ International payment platform supporting multiple payment methods and currencie
 | **Publishable Key** | Stripe publishable key (`pk_live_...` or `pk_test_...`) | Yes |
 | **Webhook Secret** | Stripe Webhook signing secret (`whsec_...`) | Yes |
 
+### Epusdt (USDT)
+
+Integrates a self-hosted [Epusdt / GM Pay](https://github.com/GMWalletApp/epusdt) v2 crypto gateway (GMPay protocol, HMAC-SHA256 signatures). It appears to users as a `USDT` button: the order is created with the site's fiat amount, Sub2API creates a gateway transaction, the payer is redirected to the gateway cashier to transfer to the receiving address, and once the on-chain payment lands the gateway calls Sub2API back to complete the top-up.
+
+| Parameter | Description | Required |
+|-----------|-------------|----------|
+| **PID** | Merchant PID from the Epusdt admin "API keys" page (`1000` on a default install) | Yes |
+| **Secret Key** | The `secret_key` of that PID | Yes |
+| **API Base URL** | Epusdt site origin such as `https://pay.example.com`, without the `/payments/...` path | Yes |
+| **Receiving token** | Pinned token such as `usdt`; set together with the network or leave both empty | No |
+| **Receiving network** | Pinned network such as `tron`, `bsc`, `solana`; set together with the token or leave both empty | No |
+| **Payment currency** | Fiat currency of the order, CNY by default; the gateway converts it into the token amount | Yes |
+
+> - With both token and network empty the gateway creates a placeholder order and the payer picks any chain enabled on the gateway in the cashier. Filling only one of them is rejected.
+> - The notify and return URLs are submitted with every order, so nothing needs configuring in the Epusdt admin, but the gateway must be able to reach this site's webhook URL.
+> - Callbacks are verified with the secret of the `pid` they carry and matched against the PID snapshotted on the order; the fiat amount is checked against the order.
+> - On-chain transfers are irreversible and the gateway has no refund API, so keep refunds disabled. Admin order queries read the gateway status first and, once paid, the cashier info to recover the amount.
+
 ---
 
 ## Provider Instance Management
@@ -195,6 +214,7 @@ When adding a provider, the system auto-generates callback URLs from your site d
 | **Alipay (Direct)** | `https://your-domain.com/api/v1/payment/webhook/alipay` |
 | **WeChat Pay (Direct)** | `https://your-domain.com/api/v1/payment/webhook/wxpay` |
 | **Stripe** | `https://your-domain.com/api/v1/payment/webhook/stripe` |
+| **Epusdt** | `https://your-domain.com/api/v1/payment/webhook/epusdt` |
 
 > Replace `your-domain.com` with your actual domain. For EasyPay / Alipay / WeChat Pay, the callback URL is auto-filled when adding the provider — no manual configuration needed.
 

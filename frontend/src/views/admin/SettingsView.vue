@@ -12586,6 +12586,7 @@ const allPaymentTypes = computed(() => [
   { value: "wxpay", label: t("payment.methods.wxpay") },
   { value: "stripe", label: t("payment.methods.stripe") },
   { value: "airwallex", label: t("payment.methods.airwallex") },
+  { value: "epusdt", label: t("payment.methods.epusdt") },
 ]);
 
 function isPaymentTypeEnabled(type: string): boolean {
@@ -12643,6 +12644,7 @@ const providerKeyOptions = computed(() => [
   { value: "wxpay", label: t("admin.settings.payment.providerWxpay") },
   { value: "stripe", label: t("admin.settings.payment.providerStripe") },
   { value: "airwallex", label: t("admin.settings.payment.providerAirwallex") },
+  { value: "epusdt", label: t("admin.settings.payment.providerEpusdt") },
 ]);
 
 const enabledProviderKeyOptions = computed(() => {

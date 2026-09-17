@@ -185,6 +185,45 @@ describe('PaymentStatusPanel', () => {
     expect(wrapper.emitted('success')).toHaveLength(1)
   })
 
+  it('actively verifies a pending USDT order', async () => {
+    pollOrderStatus.mockResolvedValue({
+      ...orderFactory('PENDING'),
+      payment_type: 'usdt',
+    })
+    verifyOrder.mockResolvedValue({
+      data: {
+        ...orderFactory('COMPLETED'),
+        payment_type: 'usdt',
+      },
+    })
+
+    const wrapper = mount(PaymentStatusPanel, {
+      props: {
+        orderId: 42,
+        qrCode: '',
+        payUrl: 'https://pay.example.com/pay/checkout-counter/trade-1',
+        expiresAt: '2099-01-01T12:30:00Z',
+        paymentType: 'usdt',
+        orderType: 'balance',
+      },
+      global: {
+        stubs: {
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+
+    expect(pollOrderStatus).toHaveBeenCalledWith(42)
+    expect(verifyOrder).toHaveBeenCalledWith('sub2_20260420abcd1234')
+    expect(wrapper.emitted('success')).toHaveLength(1)
+
+    wrapper.unmount()
+  })
+
   it('actively verifies a pending mobile Alipay precreate order', async () => {
     const originalLocation = window.location
     const originalHidden = Object.getOwnPropertyDescriptor(document, 'hidden')
