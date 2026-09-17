@@ -5,6 +5,8 @@
 - [x] 1.3 `factory.go` 注册 `epusdt`
 - [x] 1.4 单测 `epusdt_test.go`：配置校验、官方文档示例签名、浮点/字符串规范化等价、建单表单与签名、无链省略字段、网关错误与非 JSON 响应、查单待支付/已支付/不存在、回调成功/未支付/篡改/错密钥/缺签名/非 JSON、退款不支持、相对 payment_url 补全
 
+- [x] 1.5 可选配置 `cashierBase`：校验为绝对 http(s) URL、只保留 scheme+host；`CreatePayment` 把网关收银台链接（`/pay/`、`/cashier/` 路径）的 origin 改写到该域名，第三方托管链接不改写；前端字段、中英文提示、文档与单测
+
 ## 2. 服务层与回调
 
 - [x] 2.1 `payment_webhook_handler.go` 新增 `EpusdtNotify` 与 `extractOutTradeNo` 的 JSON `order_id` 分支；`routes/payment.go` 注册 `POST /payment/webhook/epusdt`

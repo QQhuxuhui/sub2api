@@ -171,6 +171,7 @@ export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
     { key: 'apiBase', label: '', sensitive: false, hintKey: 'admin.settings.payment.field_epusdtApiBaseHint' },
     { key: 'token', label: '', sensitive: false, optional: true, clearable: true, hintKey: 'admin.settings.payment.field_epusdtChainHint' },
     { key: 'network', label: '', sensitive: false, optional: true, clearable: true },
+    { key: 'cashierBase', label: '', sensitive: false, optional: true, clearable: true, hintKey: 'admin.settings.payment.field_epusdtCashierBaseHint' },
     { key: 'currency', label: '', sensitive: false, defaultValue: 'CNY', hintKey: 'admin.settings.payment.field_paymentCurrencyHint', options: PAYMENT_CURRENCY_OPTIONS },
   ],
 }

@@ -229,6 +229,33 @@ func TestEpusdtCreatePaymentSignsFormAndReturnsCashierURL(t *testing.T) {
 	require.Equal(t, epusdtTestSignForm(gotForm, epusdtTestSecret), gotForm.Get("signature"))
 }
 
+func TestEpusdtCashierBaseRewritesPayerFacingLink(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status_code":200,"message":"success","data":{"trade_id":"t-9","status":1,"payment_url":"https://gateway.example/pay/checkout-counter/t-9?lang=zh"}}`))
+	}))
+	defer server.Close()
+
+	cfg := epusdtTestConfig(server.URL)
+	cfg["cashierBase"] = " https://pay.merchant.example/ignored/path?x=1 "
+	prov, err := NewEpusdt("7", cfg)
+	require.NoError(t, err)
+	require.Equal(t, "https://pay.merchant.example", prov.config["cashierBase"])
+
+	resp, err := prov.CreatePayment(context.Background(), payment.CreatePaymentRequest{OrderID: "sub2_x", Amount: "10.00"})
+	require.NoError(t, err)
+	require.Equal(t, "https://pay.merchant.example/pay/checkout-counter/t-9?lang=zh", resp.PayURL)
+
+	// Third-party hosted checkout links are not on the gateway cashier routes.
+	require.Equal(t, "https://okpay.example/c/abc", rewriteEpusdtCashierURL("https://okpay.example/c/abc", "https://pay.merchant.example"))
+	require.Equal(t, "https://gateway.example/pay/x", rewriteEpusdtCashierURL("https://gateway.example/pay/x", ""))
+
+	cfg["cashierBase"] = "pay.merchant.example"
+	_, err = NewEpusdt("7", cfg)
+	require.ErrorContains(t, err, "cashierBase must be an absolute")
+}
+
 func TestEpusdtCreatePaymentOmitsChainWhenUnset(t *testing.T) {
 	t.Parallel()
 

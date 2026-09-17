@@ -801,6 +801,8 @@ export default {
         field_paymentCurrencyHint: '默认 CNY。Stripe、Airwallex 和 Epusdt 可从下拉项选择 HKD、USD 等币种；微信、支付宝、易支付仍按 CNY。Epusdt 按该法币金额换算成链上代币数量收款。',
         field_token: '收款币种（token）',
         field_network: '收款网络（network）',
+        field_cashierBase: '收银台域名',
+        field_epusdtCashierBaseHint: '可选。网关返回的收银台链接固定使用它自己的站点地址；若你把同一个网关另外反代到本站域名（如 https://pay.example.com），填在这里后用户跳转的收银台链接会改写到该域名。该域名需放行网关的 /pay、/cashier、/assets 路径。留空则使用网关原始地址。',
         field_epusdtPidHint: 'Epusdt 后台「API 密钥」中的商户 PID，默认安装为 1000；密钥填该 PID 对应的 secret_key。',
         field_epusdtApiBaseHint: 'Epusdt 站点地址（如 https://pay.example.com），不要带 /payments/... 路径；Sub2API 会自行拼接 GMPay 接口和收银台地址。',
         field_epusdtChainHint: '固定收款链时同时填写币种和网络（如 usdt / tron、usdt / bsc）；两项都留空则由用户在收银台自行选择网关已启用的链。只填其中一项会被拒绝。',
