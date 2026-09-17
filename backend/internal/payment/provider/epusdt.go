@@ -54,7 +54,11 @@ type Epusdt struct {
 }
 
 // NewEpusdt creates a new Epusdt provider.
-// config keys: pid, secretKey, apiBase, notifyUrl, returnUrl, token, network, currency
+// config keys: pid, secretKey, apiBase, notifyUrl, returnUrl, token, network, currency, cashierBase
+//
+// cashierBase is optional: the gateway always builds payment_url from its own
+// app_uri, so a site that fronts the same gateway under its own domain sets
+// cashierBase to have the payer-facing cashier link rewritten to that origin.
 //
 // token/network must be set together (a fixed chain such as usdt/tron) or
 // left empty together (the cashier lets the payer pick a supported chain).
@@ -100,6 +104,14 @@ func NormalizeEpusdtConfig(config map[string]string) (map[string]string, error) 
 	}
 	cfg["currency"] = currency
 
+	if cfg["cashierBase"] != "" {
+		cashierBase, err := normalizeEpusdtCashierBase(cfg["cashierBase"])
+		if err != nil {
+			return nil, err
+		}
+		cfg["cashierBase"] = cashierBase
+	}
+
 	return cfg, nil
 }
 
@@ -128,6 +140,40 @@ func normalizeEpusdtAPIBase(raw string) (string, error) {
 	}
 	parsed.Path = strings.TrimRight(path, "/")
 	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+// normalizeEpusdtCashierBase validates the payer-facing cashier origin. Only
+// scheme and host are kept: the cashier routes are fixed by the gateway.
+func normalizeEpusdtCashierBase(raw string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", fmt.Errorf("epusdt config cashierBase must be an absolute http(s) URL")
+	}
+	return parsed.Scheme + "://" + parsed.Host, nil
+}
+
+// rewriteEpusdtCashierURL swaps the origin of the gateway cashier link for the
+// configured cashierBase, keeping path, query and fragment. Links that are not
+// on the gateway's own cashier routes (e.g. a third-party hosted checkout) are
+// returned untouched.
+func rewriteEpusdtCashierURL(payURL, cashierBase string) string {
+	if cashierBase == "" {
+		return payURL
+	}
+	parsed, err := url.Parse(payURL)
+	if err != nil || parsed.Host == "" {
+		return payURL
+	}
+	if !strings.HasPrefix(parsed.Path, "/pay/") && !strings.HasPrefix(parsed.Path, "/cashier/") {
+		return payURL
+	}
+	base, err := url.Parse(cashierBase)
+	if err != nil || base.Host == "" {
+		return payURL
+	}
+	parsed.Scheme = base.Scheme
+	parsed.Host = base.Host
+	return parsed.String()
 }
 
 func (e *Epusdt) Name() string        { return "Epusdt" }
@@ -238,6 +284,7 @@ func (e *Epusdt) CreatePayment(ctx context.Context, req payment.CreatePaymentReq
 	if payURL == "" {
 		payURL = e.apiBase() + epusdtCheckoutCounterPath + url.PathEscape(tradeID)
 	}
+	payURL = rewriteEpusdtCashierURL(payURL, e.config["cashierBase"])
 	expiresAt := time.Time{}
 	if data.ExpirationTime > time.Now().Unix() {
 		expiresAt = time.Unix(data.ExpirationTime, 0)

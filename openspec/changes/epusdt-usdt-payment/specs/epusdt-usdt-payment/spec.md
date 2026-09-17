@@ -35,6 +35,11 @@
 - **WHEN** 网关返回 `status_code` 非 200（如 10003 无可用钱包地址）
 - **THEN** 系统 MUST 以包含网关错误码与 message 的错误终止下单，不写入订单支付信息
 
+#### Scenario: 配置了收银台域名
+- **WHEN** 实例配置 `cashierBase=https://pay.example.com`，网关返回 `payment_url=https://gateway.example/pay/checkout-counter/{trade_id}`
+- **THEN** 返回前端的跳转地址 MUST 为 `https://pay.example.com/pay/checkout-counter/{trade_id}`（保留路径与查询串）
+- **THEN** 不在网关 `/pay/`、`/cashier/` 路径下的第三方托管支付链接 MUST NOT 被改写
+
 #### Scenario: payment_url 为相对路径
 - **WHEN** 网关返回 `payment_url=/pay/checkout-counter/{trade_id}`
 - **THEN** 系统 MUST 按 `apiBase` 补全为绝对地址后返回

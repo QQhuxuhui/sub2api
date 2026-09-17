@@ -167,6 +167,7 @@ Integrates a self-hosted [Epusdt / GM Pay](https://github.com/GMWalletApp/epusdt
 | **Receiving token** | Pinned token such as `usdt`; set together with the network or leave both empty | No |
 | **Receiving network** | Pinned network such as `tron`, `bsc`, `solana`; set together with the token or leave both empty | No |
 | **Payment currency** | Fiat currency of the order, CNY by default; the gateway converts it into the token amount | Yes |
+| **Cashier domain** | Optional. If the same gateway is also reverse-proxied under your own domain (e.g. `https://pay.example.com`, exposing `/pay`, `/cashier`, `/assets`), the cashier link payers are redirected to is rewritten to that origin; leave empty to keep the gateway's own address | No |
 
 > - With both token and network empty the gateway creates a placeholder order and the payer picks any chain enabled on the gateway in the cashier. Filling only one of them is rejected.
 > - The notify and return URLs are submitted with every order, so nothing needs configuring in the Epusdt admin, but the gateway must be able to reach this site's webhook URL.

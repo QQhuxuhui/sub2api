@@ -794,6 +794,8 @@ export default {
         field_paymentCurrencyHint: 'Default is CNY. Stripe, Airwallex, and Epusdt can choose HKD, USD, or another listed currency; WeChat Pay, Alipay, and EasyPay remain CNY. Epusdt converts this fiat amount into the on-chain token amount to collect.',
         field_token: 'Receiving token',
         field_network: 'Receiving network',
+        field_cashierBase: 'Cashier domain',
+        field_epusdtCashierBaseHint: 'Optional. The gateway always builds the cashier link from its own site URL. If you also reverse-proxy the same gateway under this site\'s domain (e.g. https://pay.example.com), set it here and the cashier link payers are redirected to is rewritten to that origin. That domain must expose the gateway\'s /pay, /cashier and /assets paths. Leave empty to keep the gateway\'s original address.',
         field_epusdtPidHint: 'Merchant PID from the Epusdt admin "API keys" page (1000 on a default install); the secret key is the secret_key of that PID.',
         field_epusdtApiBaseHint: 'Epusdt site origin (e.g. https://pay.example.com) without the /payments/... path; Sub2API appends the GMPay API and cashier routes itself.',
         field_epusdtChainHint: 'Fill both token and network to pin the receiving chain (e.g. usdt / tron, usdt / bsc); leave both empty to let the payer pick any chain enabled on the gateway. Filling only one is rejected.',

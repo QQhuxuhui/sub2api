@@ -75,6 +75,15 @@ describe('PROVIDER_CONFIG_FIELDS.epusdt', () => {
     expect(network?.defaultValue).toBeUndefined()
   })
 
+  it('offers an optional cashier domain override', () => {
+    const cashierBase = findField('epusdt', 'cashierBase')
+
+    expect(cashierBase?.optional).toBe(true)
+    expect(cashierBase?.clearable).toBe(true)
+    expect(cashierBase?.sensitive).toBe(false)
+    expect(cashierBase?.hintKey).toBe('admin.settings.payment.field_epusdtCashierBaseHint')
+  })
+
   it('adds currency config with CNY as the default', () => {
     const currency = findField('epusdt', 'currency')
 
