@@ -18,6 +18,8 @@ const messages: Record<string, string> = {
   'admin.settings.payment.alipayGuideSummary': 'Desktop prefers QR precreate and falls back to cashier; mobile prefers WAP checkout.',
   'admin.settings.payment.wxpayGuideSummary': 'Desktop prefers Native QR; mobile routes to JSAPI or H5 based on browser context.',
   'admin.settings.payment.airwallexGuideSummary': 'Use Payment Acceptance read/write only.',
+  'admin.settings.payment.epusdtGuideSummary': 'Self-hosted Epusdt crypto gateway with hosted cashier.',
+  'admin.settings.payment.field_notifyUrl': 'Notify URL',
   'admin.settings.payment.stripeWebhookHint': 'Configure Stripe webhook.',
   'admin.settings.payment.stripeWebhookApiVersionHint': 'Use Stripe API version {version}.',
   'admin.settings.payment.airwallexWebhookHint': 'Select payment_intent.succeeded and use the latest stable API version.',
@@ -65,6 +67,7 @@ function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
         { value: 'wxpay', label: 'WeChat Pay' },
         { value: 'stripe', label: 'Stripe' },
         { value: 'airwallex', label: 'Airwallex' },
+        { value: 'epusdt', label: 'Epusdt' },
       ],
       enabledKeyOptions: [
         { value: 'easypay', label: 'EasyPay' },
@@ -108,6 +111,7 @@ describe('PaymentProviderDialog payment guide', () => {
     ['alipay', 'admin.settings.payment.alipayGuideSummary'],
     ['wxpay', 'admin.settings.payment.wxpayGuideSummary'],
     ['airwallex', 'admin.settings.payment.airwallexGuideSummary'],
+    ['epusdt', 'admin.settings.payment.epusdtGuideSummary'],
   ])('shows the payment guide summary for %s', async (providerKey, summaryKey) => {
     const wrapper = mountDialog()
 
@@ -126,6 +130,18 @@ describe('PaymentProviderDialog payment guide', () => {
 
     expect(wrapper.text()).toContain(messages['admin.settings.payment.airwallexWebhookHint'])
     expect(wrapper.text()).toContain('/api/v1/payment/webhook/airwallex')
+  })
+
+  it('shows the per-order Epusdt callback path instead of a gateway webhook hint', async () => {
+    const wrapper = mountDialog()
+
+    ;(wrapper.vm as unknown as { reset: (key: string) => void }).reset('epusdt')
+    await nextTick()
+
+    expect(wrapper.text()).toContain('/api/v1/payment/webhook/epusdt')
+    expect(wrapper.text()).toContain('/payment/result')
+    expect(wrapper.text()).not.toContain(messages['admin.settings.payment.stripeWebhookHint'])
+    expect(wrapper.text()).not.toContain(messages['admin.settings.payment.airwallexWebhookHint'])
   })
 
   it('shows Stripe webhook API version guidance with the integrated SDK version', async () => {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -186,6 +187,7 @@ type TopUsersByCurrency map[string][]TopUserStat
 
 type PaymentService struct {
 	providerMu               sync.Mutex
+	pendingReconcileCursor   atomic.Int64
 	providersLoaded          bool
 	entClient                *dbent.Client
 	registry                 *payment.Registry

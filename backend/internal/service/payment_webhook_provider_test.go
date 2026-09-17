@@ -78,6 +78,21 @@ func encryptValidWebhookWxpayConfig(t *testing.T, suffix string) string {
 	})
 }
 
+func encryptValidWebhookEpusdtConfig(t *testing.T, suffix string) string {
+	t.Helper()
+
+	return encryptWebhookProviderConfig(t, map[string]string{
+		"pid":       "pid-" + suffix,
+		"secretKey": "secret-" + suffix,
+		"apiBase":   "https://pay-" + suffix + ".example.com",
+		"notifyUrl": "https://merchant.example.com/api/v1/payment/webhook/epusdt",
+		"returnUrl": "https://merchant.example.com/payment/result",
+		"token":     "usdt",
+		"network":   "tron",
+		"currency":  "CNY",
+	})
+}
+
 func TestGetOrderProviderInstanceResolvesUniqueLegacyProviderKey(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
@@ -330,6 +345,35 @@ func TestGetWebhookProviderRejectsAmbiguousRegistryFallback(t *testing.T) {
 	providers, err := svc.GetWebhookProviders(ctx, payment.TypeWxpay, "")
 	require.NoError(t, err)
 	require.Len(t, providers, 2)
+}
+
+func TestGetWebhookProvidersReturnsAllEpusdtCandidatesWithoutOrderID(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	for _, suffix := range []string{"a", "b"} {
+		_, err := client.PaymentProviderInstance.Create().
+			SetProviderKey(payment.TypeEpusdt).
+			SetName("epusdt-" + suffix).
+			SetConfig(encryptValidWebhookEpusdtConfig(t, suffix)).
+			SetSupportedTypes(payment.TypeUSDT).
+			SetEnabled(true).
+			Save(ctx)
+		require.NoError(t, err)
+	}
+
+	svc := &PaymentService{
+		entClient:       client,
+		loadBalancer:    newWebhookProviderTestLoadBalancer(client),
+		registry:        payment.NewRegistry(),
+		providersLoaded: true,
+	}
+
+	providers, err := svc.GetWebhookProviders(ctx, payment.TypeEpusdt, "")
+	require.NoError(t, err)
+	require.Len(t, providers, 2)
+	for _, candidate := range providers {
+		require.Equal(t, payment.TypeEpusdt, candidate.ProviderKey())
+	}
 }
 
 func TestGetWebhookProvidersRejectAmbiguousFallbackForNonWxpay(t *testing.T) {

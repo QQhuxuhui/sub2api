@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  METHOD_ORDER,
   PAYMENT_CURRENCY_OPTIONS,
+  PROVIDER_CALLBACK_PATHS,
   PROVIDER_CONFIG_FIELDS,
+  PROVIDER_SUPPORTED_TYPES,
+  WEBHOOK_PATHS,
   isBuiltInAlipayMethod,
   isBuiltInWxpayMethod,
   parseEasyPayCustomMethods,
@@ -45,6 +49,38 @@ describe('PROVIDER_CONFIG_FIELDS.airwallex', () => {
 
   it('explains that apiBase must match the Airwallex key environment', () => {
     expect(findField('airwallex', 'apiBase')?.hintKey).toBe('admin.settings.payment.field_airwallexApiBaseHint')
+  })
+})
+
+describe('PROVIDER_CONFIG_FIELDS.epusdt', () => {
+  it('exposes the USDT method through the epusdt provider with per-order callback URLs', () => {
+    expect(PROVIDER_SUPPORTED_TYPES.epusdt).toEqual(['usdt'])
+    expect(METHOD_ORDER).toContain('usdt')
+    expect(WEBHOOK_PATHS.epusdt).toBe('/api/v1/payment/webhook/epusdt')
+    expect(PROVIDER_CALLBACK_PATHS.epusdt).toEqual({ notifyUrl: '/api/v1/payment/webhook/epusdt', returnUrl: '/payment/result' })
+  })
+
+  it('requires pid, secret and api base and keeps the chain optional', () => {
+    expect(findField('epusdt', 'pid')?.optional).toBeFalsy()
+    expect(findField('epusdt', 'secretKey')?.sensitive).toBe(true)
+    expect(findField('epusdt', 'apiBase')?.hintKey).toBe('admin.settings.payment.field_epusdtApiBaseHint')
+
+    const token = findField('epusdt', 'token')
+    const network = findField('epusdt', 'network')
+    expect(token?.optional).toBe(true)
+    expect(token?.clearable).toBe(true)
+    expect(token?.defaultValue).toBeUndefined()
+    expect(network?.optional).toBe(true)
+    expect(network?.clearable).toBe(true)
+    expect(network?.defaultValue).toBeUndefined()
+  })
+
+  it('adds currency config with CNY as the default', () => {
+    const currency = findField('epusdt', 'currency')
+
+    expect(currency?.defaultValue).toBe('CNY')
+    expect(currency?.hintKey).toBe('admin.settings.payment.field_paymentCurrencyHint')
+    expect(currency?.options).toBe(PAYMENT_CURRENCY_OPTIONS)
   })
 })
 

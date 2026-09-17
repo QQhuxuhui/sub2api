@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 type paymentOrderLifecycleQueryProvider struct {
 	key               string
 	lastQueryTradeNo  string
+	queryTradeNos     []string
 	lastCancelTradeNo string
 	queryCalls        int
 	cancelCalls       int
@@ -49,6 +51,9 @@ func (p *paymentOrderLifecycleQueryProvider) ProviderKey() string {
 }
 
 func (p *paymentOrderLifecycleQueryProvider) SupportedTypes() []payment.PaymentType {
+	if p.ProviderKey() == payment.TypeEpusdt {
+		return []payment.PaymentType{payment.TypeUSDT}
+	}
 	return []payment.PaymentType{p.ProviderKey()}
 }
 
@@ -58,6 +63,7 @@ func (p *paymentOrderLifecycleQueryProvider) CreatePayment(context.Context, paym
 
 func (p *paymentOrderLifecycleQueryProvider) QueryOrder(_ context.Context, tradeNo string) (*payment.QueryOrderResponse, error) {
 	p.lastQueryTradeNo = tradeNo
+	p.queryTradeNos = append(p.queryTradeNos, tradeNo)
 	p.queryCalls++
 	if len(p.responses) > 0 {
 		resp := p.responses[0]
@@ -720,6 +726,118 @@ func TestReconcilePendingPaymentOrdersQueriesAlipayOrder(t *testing.T) {
 	require.Zero(t, recovered)
 	require.Equal(t, 1, provider.queryCalls)
 	require.Equal(t, order.OutTradeNo, provider.lastQueryTradeNo)
+}
+
+func TestReconcilePendingPaymentOrdersQueriesEpusdtOrder(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentOrderLifecycleTestClient(t)
+
+	user, err := client.User.Create().
+		SetEmail("epusdt-reconcile@example.com").
+		SetPasswordHash("hash").
+		SetUsername("epusdt-reconcile-user").
+		Save(ctx)
+	require.NoError(t, err)
+
+	order, err := client.PaymentOrder.Create().
+		SetUserID(user.ID).
+		SetUserEmail(user.Email).
+		SetUserName(user.Username).
+		SetAmount(50).
+		SetPayAmount(50).
+		SetFeeRate(0).
+		SetRechargeCode("EPUSDT-RECONCILE").
+		SetOutTradeNo("sub2_epusdt_reconcile").
+		SetPaymentType(payment.TypeUSDT).
+		SetPaymentTradeNo("").
+		SetOrderType(payment.OrderTypeBalance).
+		SetStatus(OrderStatusPending).
+		SetExpiresAt(time.Now().Add(time.Hour)).
+		SetClientIP("127.0.0.1").
+		SetSrcHost("api.example.com").
+		Save(ctx)
+	require.NoError(t, err)
+
+	registry := payment.NewRegistry()
+	provider := &paymentOrderLifecycleQueryProvider{
+		key: payment.TypeEpusdt,
+		resp: &payment.QueryOrderResponse{
+			TradeNo: order.OutTradeNo,
+			Status:  payment.ProviderStatusPending,
+		},
+	}
+	registry.Register(provider)
+
+	svc := &PaymentService{
+		entClient:       client,
+		registry:        registry,
+		providersLoaded: true,
+	}
+
+	recovered, err := svc.ReconcilePendingPaymentOrders(ctx)
+	require.NoError(t, err)
+	require.Zero(t, recovered)
+	require.Equal(t, 1, provider.queryCalls)
+	require.Equal(t, order.OutTradeNo, provider.lastQueryTradeNo)
+}
+
+func TestReconcilePendingPaymentOrdersRotatesPastBatchLimit(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentOrderLifecycleTestClient(t)
+
+	user, err := client.User.Create().
+		SetEmail("epusdt-reconcile-rotation@example.com").
+		SetPasswordHash("hash").
+		SetUsername("epusdt-reconcile-rotation-user").
+		Save(ctx)
+	require.NoError(t, err)
+
+	var lastOutTradeNo string
+	for i := 1; i <= pendingPaymentReconcileLimit+1; i++ {
+		outTradeNo := fmt.Sprintf("sub2_epusdt_rotation_%02d", i)
+		_, err := client.PaymentOrder.Create().
+			SetUserID(user.ID).
+			SetUserEmail(user.Email).
+			SetUserName(user.Username).
+			SetAmount(50).
+			SetPayAmount(50).
+			SetFeeRate(0).
+			SetRechargeCode(fmt.Sprintf("EPUSDT-ROTATION-%02d", i)).
+			SetOutTradeNo(outTradeNo).
+			SetPaymentType(payment.TypeUSDT).
+			SetPaymentTradeNo("").
+			SetOrderType(payment.OrderTypeBalance).
+			SetStatus(OrderStatusPending).
+			SetExpiresAt(time.Now().Add(time.Hour)).
+			SetClientIP("127.0.0.1").
+			SetSrcHost("api.example.com").
+			Save(ctx)
+		require.NoError(t, err)
+		lastOutTradeNo = outTradeNo
+	}
+
+	registry := payment.NewRegistry()
+	provider := &paymentOrderLifecycleQueryProvider{
+		key: payment.TypeEpusdt,
+		resp: &payment.QueryOrderResponse{
+			Status: payment.ProviderStatusPending,
+		},
+	}
+	registry.Register(provider)
+	svc := &PaymentService{
+		entClient:       client,
+		registry:        registry,
+		providersLoaded: true,
+	}
+
+	_, err = svc.ReconcilePendingPaymentOrders(ctx)
+	require.NoError(t, err)
+	require.Equal(t, pendingPaymentReconcileLimit, provider.queryCalls)
+	require.NotContains(t, provider.queryTradeNos, lastOutTradeNo)
+
+	_, err = svc.ReconcilePendingPaymentOrders(ctx)
+	require.NoError(t, err)
+	require.Contains(t, provider.queryTradeNos, lastOutTradeNo)
 }
 
 func TestVerifyOrderByOutTradeNoUsesOutTradeNoWhenPaymentTradeNoAlreadyExistsForAlipay(t *testing.T) {

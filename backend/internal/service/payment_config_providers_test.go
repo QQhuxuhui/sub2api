@@ -14,6 +14,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
+	"github.com/Wei-Shaw/sub2api/internal/payment/provider"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,6 +50,13 @@ func TestValidateProviderRequest(t *testing.T) {
 			providerKey:    payment.TypeAirwallex,
 			providerName:   "Airwallex Provider",
 			supportedTypes: payment.TypeAirwallex,
+			wantErr:        false,
+		},
+		{
+			name:           "valid epusdt provider",
+			providerKey:    payment.TypeEpusdt,
+			providerName:   "USDT Gateway",
+			supportedTypes: payment.TypeUSDT,
 			wantErr:        false,
 		},
 		{
@@ -261,6 +269,14 @@ func TestIsSensitiveProviderConfigField(t *testing.T) {
 		{payment.TypeAirwallex, "accountId", false},
 		{payment.TypeAirwallex, "currency", false},
 
+		// Epusdt
+		{payment.TypeEpusdt, "secretKey", true},
+		{payment.TypeEpusdt, "pid", false},
+		{payment.TypeEpusdt, "apiBase", false},
+		{payment.TypeEpusdt, "token", false},
+		{payment.TypeEpusdt, "network", false},
+		{payment.TypeEpusdt, "currency", false},
+
 		// Unknown provider: never sensitive
 		{"unknown", "secretKey", false},
 	}
@@ -437,6 +453,115 @@ func TestUpdateProviderInstancePersistsEnabledAndSupportedTypes(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, saved.Enabled)
 	require.Equal(t, "alipay,wxpay", saved.SupportedTypes)
+}
+
+func TestEpusdtProviderConfigPersistsCanonicalValues(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	svc := &PaymentConfigService{
+		entClient:     client,
+		encryptionKey: []byte("0123456789abcdef0123456789abcdef"),
+	}
+
+	rawConfig := func() map[string]string {
+		return map[string]string{
+			"pid":       " 1000 ",
+			"secretKey": " secret ",
+			"apiBase":   " https://pay.example/payments/gmpay/v1/order/create-transaction?ignored=1 ",
+			"notifyUrl": " https://merchant.example/notify ",
+			"returnUrl": " https://merchant.example/return ",
+			"token":     " USDT ",
+			"network":   " TRON ",
+			"currency":  " cny ",
+		}
+	}
+	assertCanonical := func(t *testing.T, instanceID int64) {
+		t.Helper()
+		saved, err := client.PaymentProviderInstance.Get(ctx, instanceID)
+		require.NoError(t, err)
+		cfg, err := svc.decryptConfig(saved.Config)
+		require.NoError(t, err)
+		require.Equal(t, "1000", cfg["pid"])
+		require.Equal(t, "secret", cfg["secretKey"])
+		require.Equal(t, "https://pay.example", cfg["apiBase"])
+		require.Equal(t, "usdt", cfg["token"])
+		require.Equal(t, "tron", cfg["network"])
+		require.Equal(t, "CNY", cfg["currency"])
+	}
+
+	created, err := svc.CreateProviderInstance(ctx, CreateProviderInstanceRequest{
+		ProviderKey:    payment.TypeEpusdt,
+		Name:           "Epusdt enabled",
+		Config:         rawConfig(),
+		SupportedTypes: []string{payment.TypeUSDT},
+		Enabled:        true,
+	})
+	require.NoError(t, err)
+	assertCanonical(t, created.ID)
+
+	draft, err := svc.CreateProviderInstance(ctx, CreateProviderInstanceRequest{
+		ProviderKey:    payment.TypeEpusdt,
+		Name:           "Epusdt draft",
+		Config:         rawConfig(),
+		SupportedTypes: []string{payment.TypeUSDT},
+		Enabled:        false,
+	})
+	require.NoError(t, err)
+
+	_, err = svc.UpdateProviderInstance(ctx, draft.ID, UpdateProviderInstanceRequest{
+		Enabled: boolPtrValue(true),
+	})
+	require.NoError(t, err)
+	assertCanonical(t, draft.ID)
+}
+
+func TestEpusdtEquivalentCanonicalConfigUpdateAllowedWithPendingOrder(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	svc := &PaymentConfigService{
+		entClient:     client,
+		encryptionKey: []byte("0123456789abcdef0123456789abcdef"),
+	}
+	rawConfig := map[string]string{
+		"pid":       " 1000 ",
+		"secretKey": " secret ",
+		"apiBase":   " https://pay.example/payments/gmpay/v1/order/create-transaction ",
+		"notifyUrl": " https://merchant.example/notify ",
+		"returnUrl": " https://merchant.example/return ",
+		"token":     " USDT ",
+		"network":   " TRON ",
+		"currency":  " cny ",
+	}
+	stored, err := svc.encryptConfig(rawConfig)
+	require.NoError(t, err)
+	instance, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeEpusdt).
+		SetName("Legacy Epusdt").
+		SetConfig(stored).
+		SetSupportedTypes(payment.TypeUSDT).
+		SetEnabled(true).
+		Save(ctx)
+	require.NoError(t, err)
+	createPendingProviderConfigOrder(t, ctx, client, instance)
+
+	canonical, err := provider.NormalizeEpusdtConfig(rawConfig)
+	require.NoError(t, err)
+	updated, err := svc.UpdateProviderInstance(ctx, instance.ID, UpdateProviderInstanceRequest{
+		Config: canonical,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+
+	saved, err := client.PaymentProviderInstance.Get(ctx, instance.ID)
+	require.NoError(t, err)
+	cfg, err := svc.decryptConfig(saved.Config)
+	require.NoError(t, err)
+	require.Equal(t, "https://pay.example", cfg["apiBase"])
+	require.Equal(t, "1000", cfg["pid"])
 }
 
 func TestUpdateProviderInstanceRejectsProtectedConfigChangesWhilePendingOrders(t *testing.T) {

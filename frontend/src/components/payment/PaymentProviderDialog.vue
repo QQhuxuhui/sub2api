@@ -538,6 +538,14 @@ const paymentGuide = computed<PaymentGuide | null>(() => {
     }
   }
 
+  if (form.provider_key === 'epusdt') {
+    return {
+      summary: t('admin.settings.payment.epusdtGuideSummary'),
+      note: t('admin.settings.payment.epusdtGuideNote'),
+      items: [],
+    }
+  }
+
   return null
 })
 
@@ -549,7 +557,7 @@ const limitableTypes = computed(() => {
   const selected = form.supported_types.filter(t => t !== 'easypay')
   return selected.map(v => {
     const found = props.allPaymentTypes.find(pt => pt.value === v)
-    return found || { value: v, label: v }
+    return found || { value: v, label: t(`payment.methods.${v}`, v) }
   })
 })
 

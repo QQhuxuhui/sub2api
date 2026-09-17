@@ -303,11 +303,45 @@ func (s *PaymentService) VerifyOrderByOutTradeNo(ctx context.Context, outTradeNo
 	return o, nil
 }
 
-// ReconcilePendingPaymentOrders actively checks recent pending Alipay and WeChat
-// orders so missed provider notifications do not wait until order expiry to fulfill.
+// ReconcilePendingPaymentOrders actively checks recent pending orders for
+// providers whose missed notifications should not wait until order expiry.
 func (s *PaymentService) ReconcilePendingPaymentOrders(ctx context.Context) (int, error) {
 	now := time.Now()
-	orders, err := s.entClient.PaymentOrder.Query().
+	cursor := s.pendingReconcileCursor.Load()
+	orders, err := s.pendingPaymentReconcileQuery(now).
+		Where(paymentorder.IDGT(cursor)).
+		Order(dbent.Asc(paymentorder.FieldID)).
+		Limit(pendingPaymentReconcileLimit).
+		All(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("query pending payment orders: %w", err)
+	}
+	if len(orders) < pendingPaymentReconcileLimit && cursor > 0 {
+		wrapped, err := s.pendingPaymentReconcileQuery(now).
+			Where(paymentorder.IDLTE(cursor)).
+			Order(dbent.Asc(paymentorder.FieldID)).
+			Limit(pendingPaymentReconcileLimit - len(orders)).
+			All(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("query wrapped pending payment orders: %w", err)
+		}
+		orders = append(orders, wrapped...)
+	}
+	if len(orders) > 0 {
+		s.pendingReconcileCursor.Store(orders[len(orders)-1].ID)
+	}
+
+	recovered := 0
+	for _, order := range orders {
+		if s.reconcilePaid(ctx, order) == checkPaidResultAlreadyPaid {
+			recovered++
+		}
+	}
+	return recovered, nil
+}
+
+func (s *PaymentService) pendingPaymentReconcileQuery(now time.Time) *dbent.PaymentOrderQuery {
+	return s.entClient.PaymentOrder.Query().
 		Where(
 			paymentorder.StatusEQ(OrderStatusPending),
 			paymentorder.ExpiresAtGT(now),
@@ -320,22 +354,10 @@ func (s *PaymentService) ReconcilePendingPaymentOrders(ctx context.Context) (int
 				paymentorder.PaymentTypeHasPrefix(payment.TypeAlipay+"_"),
 				paymentorder.ProviderKeyEQ(payment.TypeAlipay),
 				paymentorder.ProviderKeyHasPrefix(payment.TypeAlipay+"_"),
+				paymentorder.PaymentTypeEQ(payment.TypeUSDT),
+				paymentorder.ProviderKeyEQ(payment.TypeEpusdt),
 			),
-		).
-		Order(dbent.Asc(paymentorder.FieldCreatedAt)).
-		Limit(pendingPaymentReconcileLimit).
-		All(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("query pending payment orders: %w", err)
-	}
-
-	recovered := 0
-	for _, order := range orders {
-		if s.reconcilePaid(ctx, order) == checkPaidResultAlreadyPaid {
-			recovered++
-		}
-	}
-	return recovered, nil
+		)
 }
 
 // VerifyOrderPublic returns the currently persisted public order state without

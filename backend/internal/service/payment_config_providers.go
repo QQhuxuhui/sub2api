@@ -116,6 +116,7 @@ var providerSensitiveConfigFields = map[string]map[string]struct{}{
 	payment.TypeWxpay:     {"privatekey": {}, "apiv3key": {}, "publickey": {}},
 	payment.TypeStripe:    {"secretkey": {}, "webhooksecret": {}},
 	payment.TypeAirwallex: {"apikey": {}, "webhooksecret": {}},
+	payment.TypeEpusdt:    {"secretkey": {}},
 }
 
 // providerPendingOrderProtectedConfigFields lists config keys that cannot be
@@ -128,6 +129,7 @@ var providerPendingOrderProtectedConfigFields = map[string]map[string]struct{}{
 	payment.TypeWxpay:     {"privatekey": {}, "apiv3key": {}, "publickey": {}, "appid": {}, "mpappid": {}, "mchid": {}, "publickeyid": {}, "certserial": {}},
 	payment.TypeStripe:    {"secretkey": {}, "webhooksecret": {}, "currency": {}},
 	payment.TypeAirwallex: {"clientid": {}, "apikey": {}, "webhooksecret": {}, "apibase": {}, "accountid": {}, "currency": {}},
+	payment.TypeEpusdt:    {"secretkey": {}, "pid": {}, "apibase": {}, "currency": {}},
 }
 
 func isSensitiveProviderConfigField(providerKey, fieldName string) bool {
@@ -179,6 +181,7 @@ func (s *PaymentConfigService) countPendingOrdersByPlan(ctx context.Context, pla
 
 var validProviderKeys = map[string]bool{
 	payment.TypeEasyPay: true, payment.TypeAlipay: true, payment.TypeWxpay: true, payment.TypeStripe: true, payment.TypeAirwallex: true,
+	payment.TypeEpusdt: true,
 }
 
 func (s *PaymentConfigService) CreateProviderInstance(ctx context.Context, req CreateProviderInstanceRequest) (*dbent.PaymentProviderInstance, error) {
@@ -194,12 +197,18 @@ func (s *PaymentConfigService) CreateProviderInstance(ctx context.Context, req C
 	if err := s.validateVisibleMethodEnablementConflicts(ctx, 0, req.ProviderKey, typesStr, req.Enabled); err != nil {
 		return nil, err
 	}
+	configToStore := req.Config
 	if req.Enabled {
-		if err := s.validateProviderConfig(req.ProviderKey, req.Config); err != nil {
+		normalizedConfig, err := normalizeProviderConfigForPersistence(req.ProviderKey, req.Config)
+		if err != nil {
+			return nil, err
+		}
+		configToStore = normalizedConfig
+		if err := s.validateProviderConfig(req.ProviderKey, configToStore); err != nil {
 			return nil, err
 		}
 	}
-	enc, err := s.encryptConfig(req.Config)
+	enc, err := s.encryptConfig(configToStore)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +335,9 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 		if err != nil {
 			return nil, err
 		}
-		if hasPendingOrderProtectedConfigChange(current.ProviderKey, currentConfig, mergedConfig) {
+		currentConfigForComparison := normalizedProviderConfigForComparison(current.ProviderKey, currentConfig)
+		mergedConfigForComparison := normalizedProviderConfigForComparison(current.ProviderKey, mergedConfig)
+		if hasPendingOrderProtectedConfigChange(current.ProviderKey, currentConfigForComparison, mergedConfigForComparison) {
 			count, err := getPendingOrderCount()
 			if err != nil {
 				return nil, err
@@ -367,8 +378,15 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 		finalEnabled = *req.Enabled
 	}
 	if finalEnabled {
+		configToValidate, err = normalizeProviderConfigForPersistence(current.ProviderKey, configToValidate)
+		if err != nil {
+			return nil, err
+		}
 		if err := s.validateProviderConfig(current.ProviderKey, configToValidate); err != nil {
 			return nil, err
+		}
+		if current.ProviderKey == payment.TypeEpusdt {
+			mergedConfig = configToValidate
 		}
 	}
 	u := s.entClient.PaymentProviderInstance.UpdateOneID(id)
@@ -448,6 +466,21 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 		u.SetPaymentMode(*req.PaymentMode)
 	}
 	return u.Save(ctx)
+}
+
+func normalizeProviderConfigForPersistence(providerKey string, config map[string]string) (map[string]string, error) {
+	if providerKey == payment.TypeEpusdt {
+		return provider.NormalizeEpusdtConfig(config)
+	}
+	return config, nil
+}
+
+func normalizedProviderConfigForComparison(providerKey string, config map[string]string) map[string]string {
+	normalized, err := normalizeProviderConfigForPersistence(providerKey, config)
+	if err != nil {
+		return config
+	}
+	return normalized
 }
 
 // GetUserRefundEligibleInstanceIDs returns provider instance IDs that allow user refund.

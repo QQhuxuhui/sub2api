@@ -144,6 +144,33 @@ func TestBuildCreateOrderResponseCopiesJSAPIPayload(t *testing.T) {
 	}
 }
 
+func TestEffectivePaymentOrderExpiration(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 9, 17, 3, 0, 0, 0, time.UTC)
+	local := now.Add(30 * time.Minute)
+
+	tests := []struct {
+		name     string
+		provider time.Time
+		want     time.Time
+	}{
+		{name: "uses earlier provider expiration", provider: now.Add(10 * time.Minute), want: now.Add(10 * time.Minute)},
+		{name: "keeps earlier local expiration", provider: now.Add(45 * time.Minute), want: local},
+		{name: "ignores missing provider expiration", provider: time.Time{}, want: local},
+		{name: "ignores elapsed provider expiration", provider: now.Add(-time.Minute), want: local},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := effectivePaymentOrderExpiration(local, tt.provider, now); !got.Equal(tt.want) {
+				t.Fatalf("effectivePaymentOrderExpiration() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSanitizeCreatePaymentResponseDetailsRemovesNULBytes(t *testing.T) {
 	t.Parallel()
 
