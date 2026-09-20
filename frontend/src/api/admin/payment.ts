@@ -61,6 +61,26 @@ export interface RefundResult {
   subscription_days_deducted?: number
 }
 
+/** Chain facts of a transaction next to what the gateway expected for the order. */
+export interface SettleByTxResult {
+  order_id: number
+  order_status: string
+  settled: boolean
+  tx_hash: string
+  network: string
+  token: string
+  from: string
+  to: string
+  received_amount: string
+  expected_amount: string
+  expected_network: string
+  expected_token: string
+  shortfall: string
+  allowed_shortfall: string
+  block_time: string
+  confirmations: number
+}
+
 export const adminPaymentAPI = {
   // ==================== Config ====================
 
@@ -108,6 +128,11 @@ export const adminPaymentAPI = {
   /** Cancel an order (admin) */
   cancelOrder(id: number) {
     return apiClient.post(`/admin/payment/orders/${id}/cancel`)
+  },
+
+  /** Verify an on-chain transfer against an unpaid crypto order and (unless dry_run) settle it */
+  settleByTx(id: number, data: { tx_hash: string; network?: string; dry_run?: boolean }) {
+    return apiClient.post<SettleByTxResult>(`/admin/payment/orders/${id}/settle-by-tx`, data)
   },
 
   /** Retry recharge for a failed order */

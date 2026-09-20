@@ -113,7 +113,7 @@ func (s *PaymentService) confirmPayment(ctx context.Context, oid int64, tradeNo 
 		s.writeAuditLog(ctx, o.ID, "PAYMENT_AMOUNT_MISMATCH", pk, map[string]any{"expected": o.PayAmount, "paid": paid, "tradeNo": tradeNo})
 		return fmt.Errorf("amount mismatch: expected %s, got %s", strconv.FormatFloat(o.PayAmount, 'f', -1, 64), strconv.FormatFloat(paid, 'f', -1, 64))
 	}
-	return s.toPaid(ctx, o, tradeNo, paid, pk)
+	return s.toPaid(ctx, o, tradeNo, paid, pk, paymentTxHashFromMetadata(metadata))
 }
 
 func paymentAmountToleranceForCurrency(currency string) float64 {
@@ -147,7 +147,10 @@ func expectedNotificationProviderKey(registry *payment.Registry, orderPaymentTyp
 	return strings.TrimSpace(orderPaymentType)
 }
 
-func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, tradeNo string, paid float64, pk string) error {
+// toPaid marks the order paid and runs fulfillment. txHash is the on-chain
+// hash reported by crypto gateways (empty otherwise); it is audited so a manual
+// settle-by-hash cannot reuse a transaction the gateway already matched.
+func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, tradeNo string, paid float64, pk string, txHash string) error {
 	previousStatus := o.Status
 	now := time.Now()
 	grace := now.Add(-paymentGraceMinutes * time.Minute)
@@ -182,7 +185,11 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 			"reason":          "webhook payment success received after order " + previousStatus,
 		})
 	}
-	s.writeAuditLog(ctx, o.ID, "ORDER_PAID", pk, map[string]any{"tradeNo": tradeNo, "paidAmount": paid})
+	paidDetail := map[string]any{"tradeNo": tradeNo, "paidAmount": paid}
+	if txHash != "" {
+		paidDetail["txHash"] = txHash
+	}
+	s.writeAuditLog(ctx, o.ID, "ORDER_PAID", pk, paidDetail)
 	return s.executeFulfillment(ctx, o.ID)
 }
 

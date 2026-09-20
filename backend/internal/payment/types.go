@@ -251,6 +251,28 @@ type CancelableProvider interface {
 	CancelPayment(ctx context.Context, tradeNo string) error
 }
 
+// OnChainSettlementTarget is what a crypto gateway expected for an order: where
+// the payer had to send funds and how much, in token units.
+type OnChainSettlementTarget struct {
+	Network        string
+	Token          string
+	ReceiveAddress string
+	// ExpectedAmount is the token amount quoted by the gateway (decimal string).
+	ExpectedAmount string
+	// TrustedAddresses are extra merchant-owned receiving addresses configured
+	// on the instance, used when the payer switched chains inside the cashier
+	// and the gateway no longer reports that chain's address for the order.
+	TrustedAddresses []string
+	// ChainRPC holds optional per-network RPC endpoint overrides.
+	ChainRPC map[string][]string
+}
+
+// OnChainSettlementProvider is implemented by crypto providers whose orders an
+// admin may settle manually by transaction hash.
+type OnChainSettlementProvider interface {
+	OnChainSettlementTarget(ctx context.Context, tradeNo string) (*OnChainSettlementTarget, error)
+}
+
 // MerchantIdentityProvider exposes the current non-sensitive merchant identity
 // derived from provider configuration for snapshot consistency checks.
 type MerchantIdentityProvider interface {

@@ -527,3 +527,49 @@ func TestResolveEpusdtReturnedRef(t *testing.T) {
 	require.Equal(t, "https://cdn.example/x", resolveEpusdtReturnedRef("https://pay.example", "https://cdn.example/x"))
 	require.Equal(t, "", resolveEpusdtReturnedRef("https://pay.example", "  "))
 }
+
+func TestEpusdtOnChainSettlementTarget(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/pay/checkout-counter-resp/trade-expired" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		// Shape of a real expired order: the gateway keeps the chain quote.
+		_, _ = w.Write([]byte(`{"status_code":200,"message":"success","data":{"trade_id":"trade-expired","amount":30,"actual_amount":4.48,"token":"USDT","currency":"CNY","receive_address":"0x4c1349a30c3a91d2cd69329c48dfb02c10d812c7","network":"binance","status":3}}`))
+	}))
+	defer server.Close()
+
+	cfg := epusdtTestConfig(server.URL)
+	cfg["receiveAddresses"] = "TP525BEN7X9N1pfkVdc9Pv1W43M2LzU6pe, 0x1111111111111111111111111111111111111111"
+	cfg["chainRpc"] = "bsc=https://rpc.example.com"
+	prov, err := NewEpusdt("1", cfg)
+	if err != nil {
+		t.Fatalf("NewEpusdt: %v", err)
+	}
+	target, err := prov.OnChainSettlementTarget(context.Background(), " trade-expired ")
+	if err != nil {
+		t.Fatalf("OnChainSettlementTarget: %v", err)
+	}
+	if target.Network != "binance" || target.Token != "USDT" || target.ExpectedAmount != "4.48" ||
+		target.ReceiveAddress != "0x4c1349a30c3a91d2cd69329c48dfb02c10d812c7" {
+		t.Fatalf("unexpected target: %+v", target)
+	}
+	if len(target.TrustedAddresses) != 2 || target.TrustedAddresses[0] != "TP525BEN7X9N1pfkVdc9Pv1W43M2LzU6pe" {
+		t.Fatalf("unexpected trusted addresses: %v", target.TrustedAddresses)
+	}
+	if got := target.ChainRPC["binance"]; len(got) != 1 || got[0] != "https://rpc.example.com" {
+		t.Fatalf("unexpected chain rpc overrides: %v", target.ChainRPC)
+	}
+	var _ payment.OnChainSettlementProvider = prov
+}
+
+func TestNormalizeEpusdtConfigRejectsBadChainRPC(t *testing.T) {
+	t.Parallel()
+
+	cfg := epusdtTestConfig("https://pay.example.com")
+	cfg["chainRpc"] = "binance=http://insecure.example.com"
+	if _, err := NormalizeEpusdtConfig(cfg); err == nil || !strings.Contains(err.Error(), "chainRpc") {
+		t.Fatalf("expected chainRpc validation error, got %v", err)
+	}
+}
