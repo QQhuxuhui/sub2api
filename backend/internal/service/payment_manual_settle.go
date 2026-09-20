@@ -10,8 +10,6 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/payment/chainverify"
@@ -125,6 +123,9 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 	if err != nil || !expected.IsPositive() {
 		return nil, infraerrors.BadRequest("NO_CHAIN_QUOTE", "the payer never picked a network for this order, so the gateway has no amount to verify against")
 	}
+	if !manualSettleStablecoin(target.Token) {
+		return nil, infraerrors.BadRequest("UNSUPPORTED_QUOTE_TOKEN", "settling by transaction hash requires a USDT or USDC quote; native coin amounts use a different unit")
+	}
 
 	if usedBy, err := s.orderUsingTxHash(ctx, normalizedHash); err != nil {
 		return nil, fmt.Errorf("check tx hash reuse: %w", err)
@@ -181,7 +182,16 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 	}
 
 	previousStatus := o.Status
-	updated, err := s.entClient.PaymentOrder.Update().Where(
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin manual settlement: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	client := tx.Client()
+	if err := claimPaymentTransaction(ctx, client, o.ID, normalizedHash); err != nil {
+		return nil, err
+	}
+	updated, err := client.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),
 		paymentorder.StatusIn(OrderStatusPending, OrderStatusExpired, OrderStatusCancelled),
 	).SetStatus(OrderStatusPaid).SetPaidAt(time.Now()).ClearFailedAt().ClearFailedReason().Save(ctx)
@@ -195,8 +205,7 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 	if operator == "" {
 		operator = "admin"
 	}
-	slog.Info("order settled manually by tx hash", "orderID", o.ID, "txHash", first.TxHash, "network", network, "operator", operator)
-	s.writeAuditLog(ctx, o.ID, auditActionManualSettled, operator, map[string]any{
+	if err := writePaymentAudit(ctx, client, o.ID, auditActionManualSettled, operator, map[string]any{
 		"txHash":          normalizedHash,
 		"network":         network,
 		"token":           first.Token,
@@ -208,7 +217,13 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 		"blockTime":       first.BlockTime.UTC().Format(time.RFC3339),
 		"previous_status": previousStatus,
 		"tradeNo":         tradeNo,
-	})
+	}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit manual settlement: %w", err)
+	}
+	slog.Info("order settled manually by tx hash", "orderID", o.ID, "txHash", first.TxHash, "network", network, "operator", operator)
 	result.Settled = true
 	result.OrderStatus = OrderStatusPaid
 	if err := s.executeFulfillment(ctx, o.ID); err != nil {
@@ -271,6 +286,9 @@ func matchSettlementTransfers(transfers []chainverify.Transfer, network string, 
 	var matched []chainverify.Transfer
 	total := decimal.Zero
 	for _, tr := range transfers {
+		if !manualSettleStablecoin(tr.Token) {
+			continue
+		}
 		for _, addr := range addresses {
 			if chainverify.SameAddress(network, tr.To, addr) {
 				matched = append(matched, tr)
@@ -294,28 +312,11 @@ func manualSettleAddressMismatchMessage(transfers []chainverify.Transfer, target
 		strings.Join(recipients, ", "), target.ReceiveAddress)
 }
 
-// orderUsingTxHash returns the order id that already consumed the hash, either
-// through a gateway callback (ORDER_PAID carries txHash) or a manual settle.
-func (s *PaymentService) orderUsingTxHash(ctx context.Context, normalizedHash string) (string, error) {
-	row, err := s.entClient.PaymentAuditLog.Query().Where(
-		paymentauditlog.ActionIn("ORDER_PAID", auditActionManualSettled),
-		paymentauditlog.DetailContainsFold(normalizedHash),
-	).First(ctx)
-	if dbent.IsNotFound(err) {
-		return "", nil
+func manualSettleStablecoin(token string) bool {
+	switch strings.ToUpper(strings.TrimSpace(token)) {
+	case "USDT", "USDC", "USDC.E":
+		return true
+	default:
+		return false
 	}
-	if err != nil {
-		return "", err
-	}
-	return row.OrderID, nil
-}
-
-// paymentTxHashFromMetadata extracts the on-chain hash a crypto gateway
-// reported, normalized the way manual settlement stores it.
-func paymentTxHashFromMetadata(metadata map[string]string) string {
-	hash, err := chainverify.NormalizeTxHash(metadata["block_transaction_id"])
-	if err != nil {
-		return ""
-	}
-	return hash
 }

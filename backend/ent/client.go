@@ -37,6 +37,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
+	"github.com/Wei-Shaw/sub2api/ent/paymenttransactionclaim"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
@@ -107,6 +108,8 @@ type Client struct {
 	PaymentOrder *PaymentOrderClient
 	// PaymentProviderInstance is the client for interacting with the PaymentProviderInstance builders.
 	PaymentProviderInstance *PaymentProviderInstanceClient
+	// PaymentTransactionClaim is the client for interacting with the PaymentTransactionClaim builders.
+	PaymentTransactionClaim *PaymentTransactionClaimClient
 	// PendingAuthSession is the client for interacting with the PendingAuthSession builders.
 	PendingAuthSession *PendingAuthSessionClient
 	// PromoCode is the client for interacting with the PromoCode builders.
@@ -174,6 +177,7 @@ func (c *Client) init() {
 	c.PaymentAuditLog = NewPaymentAuditLogClient(c.config)
 	c.PaymentOrder = NewPaymentOrderClient(c.config)
 	c.PaymentProviderInstance = NewPaymentProviderInstanceClient(c.config)
+	c.PaymentTransactionClaim = NewPaymentTransactionClaimClient(c.config)
 	c.PendingAuthSession = NewPendingAuthSessionClient(c.config)
 	c.PromoCode = NewPromoCodeClient(c.config)
 	c.PromoCodeUsage = NewPromoCodeUsageClient(c.config)
@@ -305,6 +309,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		PaymentAuditLog:               NewPaymentAuditLogClient(cfg),
 		PaymentOrder:                  NewPaymentOrderClient(cfg),
 		PaymentProviderInstance:       NewPaymentProviderInstanceClient(cfg),
+		PaymentTransactionClaim:       NewPaymentTransactionClaimClient(cfg),
 		PendingAuthSession:            NewPendingAuthSessionClient(cfg),
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
@@ -363,6 +368,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		PaymentAuditLog:               NewPaymentAuditLogClient(cfg),
 		PaymentOrder:                  NewPaymentOrderClient(cfg),
 		PaymentProviderInstance:       NewPaymentProviderInstanceClient(cfg),
+		PaymentTransactionClaim:       NewPaymentTransactionClaimClient(cfg),
 		PendingAuthSession:            NewPendingAuthSessionClient(cfg),
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
@@ -415,11 +421,11 @@ func (c *Client) Use(hooks ...Hook) {
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
 		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.PaymentProviderInstance, c.PaymentTransactionClaim, c.PendingAuthSession,
+		c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret,
+		c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask,
+		c.UsageLog, c.User, c.UserAllowedGroup, c.UserAttributeDefinition,
+		c.UserAttributeValue, c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -435,11 +441,11 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
 		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.PaymentProviderInstance, c.PaymentTransactionClaim, c.PendingAuthSession,
+		c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret,
+		c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask,
+		c.UsageLog, c.User, c.UserAllowedGroup, c.UserAttributeDefinition,
+		c.UserAttributeValue, c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -492,6 +498,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.PaymentOrder.mutate(ctx, m)
 	case *PaymentProviderInstanceMutation:
 		return c.PaymentProviderInstance.mutate(ctx, m)
+	case *PaymentTransactionClaimMutation:
+		return c.PaymentTransactionClaim.mutate(ctx, m)
 	case *PendingAuthSessionMutation:
 		return c.PendingAuthSession.mutate(ctx, m)
 	case *PromoCodeMutation:
@@ -3992,6 +4000,139 @@ func (c *PaymentProviderInstanceClient) mutate(ctx context.Context, m *PaymentPr
 	}
 }
 
+// PaymentTransactionClaimClient is a client for the PaymentTransactionClaim schema.
+type PaymentTransactionClaimClient struct {
+	config
+}
+
+// NewPaymentTransactionClaimClient returns a client for the PaymentTransactionClaim from the given config.
+func NewPaymentTransactionClaimClient(c config) *PaymentTransactionClaimClient {
+	return &PaymentTransactionClaimClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `paymenttransactionclaim.Hooks(f(g(h())))`.
+func (c *PaymentTransactionClaimClient) Use(hooks ...Hook) {
+	c.hooks.PaymentTransactionClaim = append(c.hooks.PaymentTransactionClaim, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `paymenttransactionclaim.Intercept(f(g(h())))`.
+func (c *PaymentTransactionClaimClient) Intercept(interceptors ...Interceptor) {
+	c.inters.PaymentTransactionClaim = append(c.inters.PaymentTransactionClaim, interceptors...)
+}
+
+// Create returns a builder for creating a PaymentTransactionClaim entity.
+func (c *PaymentTransactionClaimClient) Create() *PaymentTransactionClaimCreate {
+	mutation := newPaymentTransactionClaimMutation(c.config, OpCreate)
+	return &PaymentTransactionClaimCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of PaymentTransactionClaim entities.
+func (c *PaymentTransactionClaimClient) CreateBulk(builders ...*PaymentTransactionClaimCreate) *PaymentTransactionClaimCreateBulk {
+	return &PaymentTransactionClaimCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *PaymentTransactionClaimClient) MapCreateBulk(slice any, setFunc func(*PaymentTransactionClaimCreate, int)) *PaymentTransactionClaimCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &PaymentTransactionClaimCreateBulk{err: fmt.Errorf("calling to PaymentTransactionClaimClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*PaymentTransactionClaimCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &PaymentTransactionClaimCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for PaymentTransactionClaim.
+func (c *PaymentTransactionClaimClient) Update() *PaymentTransactionClaimUpdate {
+	mutation := newPaymentTransactionClaimMutation(c.config, OpUpdate)
+	return &PaymentTransactionClaimUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *PaymentTransactionClaimClient) UpdateOne(_m *PaymentTransactionClaim) *PaymentTransactionClaimUpdateOne {
+	mutation := newPaymentTransactionClaimMutation(c.config, OpUpdateOne, withPaymentTransactionClaim(_m))
+	return &PaymentTransactionClaimUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *PaymentTransactionClaimClient) UpdateOneID(id int64) *PaymentTransactionClaimUpdateOne {
+	mutation := newPaymentTransactionClaimMutation(c.config, OpUpdateOne, withPaymentTransactionClaimID(id))
+	return &PaymentTransactionClaimUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for PaymentTransactionClaim.
+func (c *PaymentTransactionClaimClient) Delete() *PaymentTransactionClaimDelete {
+	mutation := newPaymentTransactionClaimMutation(c.config, OpDelete)
+	return &PaymentTransactionClaimDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *PaymentTransactionClaimClient) DeleteOne(_m *PaymentTransactionClaim) *PaymentTransactionClaimDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *PaymentTransactionClaimClient) DeleteOneID(id int64) *PaymentTransactionClaimDeleteOne {
+	builder := c.Delete().Where(paymenttransactionclaim.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &PaymentTransactionClaimDeleteOne{builder}
+}
+
+// Query returns a query builder for PaymentTransactionClaim.
+func (c *PaymentTransactionClaimClient) Query() *PaymentTransactionClaimQuery {
+	return &PaymentTransactionClaimQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypePaymentTransactionClaim},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a PaymentTransactionClaim entity by its id.
+func (c *PaymentTransactionClaimClient) Get(ctx context.Context, id int64) (*PaymentTransactionClaim, error) {
+	return c.Query().Where(paymenttransactionclaim.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *PaymentTransactionClaimClient) GetX(ctx context.Context, id int64) *PaymentTransactionClaim {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *PaymentTransactionClaimClient) Hooks() []Hook {
+	return c.hooks.PaymentTransactionClaim
+}
+
+// Interceptors returns the client interceptors.
+func (c *PaymentTransactionClaimClient) Interceptors() []Interceptor {
+	return c.inters.PaymentTransactionClaim
+}
+
+func (c *PaymentTransactionClaimClient) mutate(ctx context.Context, m *PaymentTransactionClaimMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&PaymentTransactionClaimCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&PaymentTransactionClaimUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&PaymentTransactionClaimUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&PaymentTransactionClaimDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown PaymentTransactionClaim mutation op: %q", m.Op())
+	}
+}
+
 // PendingAuthSessionClient is a client for the PendingAuthSession schema.
 type PendingAuthSessionClient struct {
 	config
@@ -6846,11 +6987,11 @@ type (
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
 		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Hook
+		PaymentOrder, PaymentProviderInstance, PaymentTransactionClaim,
+		PendingAuthSession, PromoCode, PromoCodeUsage, Proxy, RedeemCode,
+		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
+		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -6858,11 +6999,11 @@ type (
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
 		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Interceptor
+		PaymentOrder, PaymentProviderInstance, PaymentTransactionClaim,
+		PendingAuthSession, PromoCode, PromoCodeUsage, Proxy, RedeemCode,
+		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
+		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

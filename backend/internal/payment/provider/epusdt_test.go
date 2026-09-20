@@ -573,3 +573,29 @@ func TestNormalizeEpusdtConfigRejectsBadChainRPC(t *testing.T) {
 		t.Fatalf("expected chainRpc validation error, got %v", err)
 	}
 }
+
+func TestEpusdtQueryOrderCarriesAvailableTransactionReference(t *testing.T) {
+	t.Parallel()
+	for _, source := range []string{"status", "checkout"} {
+		t.Run(source, func(t *testing.T) {
+			hash := "0x" + strings.Repeat("a", 64)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				data := map[string]any{"trade_id": "trade-1", "status": 2}
+				isStatus := strings.HasPrefix(r.URL.Path, epusdtCheckStatusPath)
+				if !isStatus {
+					data["amount"] = 100
+				}
+				if (isStatus && source == "status") || (!isStatus && source == "checkout") {
+					data["block_transaction_id"] = hash
+				}
+				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"status_code": 200, "data": data}))
+			}))
+			defer server.Close()
+			prov, err := NewEpusdt("1", epusdtTestConfig(server.URL))
+			require.NoError(t, err)
+			result, err := prov.QueryOrder(context.Background(), "trade-1")
+			require.NoError(t, err)
+			require.Equal(t, hash, result.Metadata["block_transaction_id"])
+		})
+	}
+}

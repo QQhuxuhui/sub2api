@@ -27,6 +27,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
+	"github.com/Wei-Shaw/sub2api/ent/paymenttransactionclaim"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
@@ -1459,6 +1460,30 @@ func init() {
 	paymentproviderinstance.DefaultUpdatedAt = paymentproviderinstanceDescUpdatedAt.Default.(func() time.Time)
 	// paymentproviderinstance.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	paymentproviderinstance.UpdateDefaultUpdatedAt = paymentproviderinstanceDescUpdatedAt.UpdateDefault.(func() time.Time)
+	paymenttransactionclaimFields := schema.PaymentTransactionClaim{}.Fields()
+	_ = paymenttransactionclaimFields
+	// paymenttransactionclaimDescTxHash is the schema descriptor for tx_hash field.
+	paymenttransactionclaimDescTxHash := paymenttransactionclaimFields[0].Descriptor()
+	// paymenttransactionclaim.TxHashValidator is a validator for the "tx_hash" field. It is called by the builders before save.
+	paymenttransactionclaim.TxHashValidator = func() func(string) error {
+		validators := paymenttransactionclaimDescTxHash.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tx_hash string) error {
+			for _, fn := range fns {
+				if err := fn(tx_hash); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// paymenttransactionclaimDescCreatedAt is the schema descriptor for created_at field.
+	paymenttransactionclaimDescCreatedAt := paymenttransactionclaimFields[2].Descriptor()
+	// paymenttransactionclaim.DefaultCreatedAt holds the default value on creation for the created_at field.
+	paymenttransactionclaim.DefaultCreatedAt = paymenttransactionclaimDescCreatedAt.Default.(func() time.Time)
 	pendingauthsessionMixin := schema.PendingAuthSession{}.Mixin()
 	pendingauthsessionMixinFields0 := pendingauthsessionMixin[0].Fields()
 	_ = pendingauthsessionMixinFields0

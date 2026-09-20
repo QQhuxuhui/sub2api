@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -318,4 +319,250 @@ func TestConfirmPaymentAuditsGatewayTxHash(t *testing.T) {
 	usedBy, err := f.svc.orderUsingTxHash(ctx, "2a003b114b896199d75998e3712f8cc1f32118ed62ff38419d397282b183c404")
 	require.NoError(t, err)
 	require.Equal(t, strconv.FormatInt(f.order.ID, 10), usedBy)
+}
+
+// Regression coverage for cross-order settlement and quote currency invariants.
+type settlementControlledFetcher func(context.Context, string, string) ([]chainverify.Transfer, error)
+
+func (fn settlementControlledFetcher) Transfers(ctx context.Context, network, hash string) ([]chainverify.Transfer, error) {
+	return fn(ctx, network, hash)
+}
+
+func newSecondSettlementOrder(t *testing.T, f *manualSettleFixture) *dbent.PaymentOrder {
+	t.Helper()
+	o, err := f.client.PaymentOrder.Create().
+		SetUserID(f.order.UserID).SetUserEmail(f.order.UserEmail).SetUserName(f.order.UserName).
+		SetAmount(30).SetPayAmount(30).SetFeeRate(0).
+		SetRechargeCode("REVIEW-SECOND-CODE").SetOutTradeNo("sub2_review_second").
+		SetPaymentType(payment.TypeUSDT).SetPaymentTradeNo("gateway-trade-2").
+		SetOrderType(payment.OrderTypeBalance).SetStatus(OrderStatusPending).
+		SetExpiresAt(time.Now().Add(time.Hour)).SetClientIP("127.0.0.1").SetSrcHost("api.example.com").Save(context.Background())
+	require.NoError(t, err)
+	repo := f.svc.redeemService.redeemRepo.(*paymentOrderLifecycleRedeemRepo)
+	repo.codesByCode[o.RechargeCode] = &RedeemCode{ID: 2, Code: o.RechargeCode, Type: RedeemTypeBalance, Value: o.Amount, Status: StatusUnused}
+	return o
+}
+
+func TestPaymentConcurrentManualSettleMustConsumeHashOnce(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	second := newSecondSettlementOrder(t, f)
+	arrived := make(chan chan struct{}, 2)
+	transfers := f.fetcher.byNetwork["binance"]
+	newTransferFetcher = func(map[string][]string) transferFetcher {
+		return settlementControlledFetcher(func(_ context.Context, _, _ string) ([]chainverify.Transfer, error) {
+			gate := make(chan struct{})
+			arrived <- gate
+			<-gate
+			return transfers, nil
+		})
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+		firstDone <- err
+	}()
+	firstGate := <-arrived
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+		secondDone <- err
+	}()
+	secondGate := <-arrived
+	// Both requests have already passed the lookup, before either writes a claim.
+	// Serialize actual fulfillment to avoid involving unrelated mock/data races.
+	close(firstGate)
+	require.NoError(t, <-firstDone)
+	close(secondGate)
+	secondErr := <-secondDone
+	requireManualSettleReason(t, secondErr, "TX_ALREADY_USED")
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance, "one on-chain transfer must credit at most one order")
+}
+
+func TestPaymentCallbackAfterManualSettleMustConsumeHashOnce(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	second := newSecondSettlementOrder(t, f)
+	_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	require.NoError(t, err)
+	err = f.svc.confirmPayment(ctx, second.ID, "gateway-trade-2", 30, payment.TypeEpusdt, map[string]string{"block_transaction_id": manualSettleTxHash})
+	requireManualSettleReason(t, err, "TX_ALREADY_USED")
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance, "callback must respect a hash already consumed by manual settlement")
+}
+
+func TestPaymentQueryThenCallbackMustPreserveHashClaim(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	second := newSecondSettlementOrder(t, f)
+	// Epusdt.QueryOrder emits these fields but has no block_transaction_id.
+	f.provider.resp = &payment.QueryOrderResponse{TradeNo: "gateway-trade-1", Amount: 30, Status: payment.ProviderStatusPaid,
+		Metadata: map[string]string{"token": "USDT", "network": "binance", "actual_amount": "4.48"}}
+	f.svc.reconcilePaid(ctx, f.order)
+	require.Zero(t, f.userRepo.getByIDUser.Balance, "polling without a hash waits for the signed callback")
+	// The real signed webhook arrives after the periodic query completed the order.
+	require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt,
+		map[string]string{"block_transaction_id": manualSettleTxHash}))
+	_, err := f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	requireManualSettleReason(t, err, "TX_ALREADY_USED")
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance, "a queried payment's hash must remain unavailable for another order")
+}
+
+func TestPaymentNativeCoinQuoteMustNotBeComparedOneToOneWithStablecoin(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "0.2")
+	// SOL is a selectable native asset in the gateway; the trusted BSC wallet
+	// is configured for settling cases where a payer switches networks.
+	f.provider.target.Token = "SOL"
+	f.provider.target.Network = "solana"
+	f.provider.target.ExpectedAmount = "0.2"
+	f.provider.target.ReceiveAddress = "solana-order-receiving-address"
+	f.provider.target.TrustedAddresses = []string{manualSettleAddress}
+	result, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	if result != nil {
+		t.Logf("expected=%s %s; received=%s %s; settled=%v; credited balance=%v", result.ExpectedAmount, result.ExpectedToken, result.ReceivedAmount, result.Token, result.Settled, f.userRepo.getByIDUser.Balance)
+	}
+	requireManualSettleReason(t, err, "UNSUPPORTED_QUOTE_TOKEN")
+	require.Zero(t, f.userRepo.getByIDUser.Balance)
+}
+
+func TestPaymentLateCallbackRegistersHashForCompletedOrder(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusCompleted, "4.48")
+	second := newSecondSettlementOrder(t, f)
+	require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt,
+		map[string]string{"block_transaction_id": manualSettleTxHash}))
+	require.Zero(t, f.userRepo.getByIDUser.Balance, "a completed order is not fulfilled again")
+	_, err := f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	requireManualSettleReason(t, err, "TX_ALREADY_USED")
+	require.Zero(t, f.userRepo.getByIDUser.Balance)
+}
+
+func TestPaymentEpusdtConfirmationNeedsTransactionReference(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	err := f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt, map[string]string{"token": "USDT"})
+	requireManualSettleReason(t, err, "MISSING_TX_HASH")
+	order, err := f.client.PaymentOrder.Get(ctx, f.order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusPending, order.Status)
+	require.Zero(t, f.userRepo.getByIDUser.Balance)
+}
+
+func TestPaymentManualSettlementRollsBackWhenAuditFails(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	second := newSecondSettlementOrder(t, f)
+	failAudit := true
+	f.client.PaymentAuditLog.Use(func(next dbent.Mutator) dbent.Mutator {
+		return dbent.MutateFunc(func(ctx context.Context, m dbent.Mutation) (dbent.Value, error) {
+			if failAudit {
+				return nil, fmt.Errorf("injected audit failure")
+			}
+			return next.Mutate(ctx, m)
+		})
+	})
+	_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	require.ErrorContains(t, err, "injected audit failure")
+	current, err := f.client.PaymentOrder.Get(ctx, f.order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusPending, current.Status)
+	require.Zero(t, f.userRepo.getByIDUser.Balance)
+	// A rolled-back transaction must release its hash claim.
+	failAudit = false
+	_, err = f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	require.NoError(t, err)
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance)
+}
+
+func TestPaymentEpusdtPaidQueryWaitsWithoutExpiringOrCancelling(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	f.provider.resp = &payment.QueryOrderResponse{TradeNo: f.order.PaymentTradeNo, Amount: 30, Status: payment.ProviderStatusPaid}
+	require.Equal(t, checkPaidResultAwaitingTx, f.svc.reconcilePaid(ctx, f.order))
+	outcome, err := f.svc.CancelOrder(ctx, f.order.ID, f.order.UserID)
+	require.NoError(t, err)
+	require.Equal(t, checkPaidResultAlreadyPaid, outcome)
+	expired, err := f.svc.ExpireTimedOutOrders(ctx)
+	require.NoError(t, err)
+	require.Zero(t, expired)
+	current, err := f.client.PaymentOrder.Get(ctx, f.order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusPending, current.Status)
+	require.Zero(t, f.userRepo.getByIDUser.Balance)
+	require.Zero(t, f.provider.cancelCalls)
+}
+
+func TestPaymentRepeatedAndAdditionalCallbacksClaimWithoutExtraCredit(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	second := newSecondSettlementOrder(t, f)
+	otherHash := strings.Repeat("a", 64)
+	for _, hash := range []string{manualSettleTxHash, manualSettleTxHash, otherHash} {
+		require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, f.order.PaymentTradeNo, 30, payment.TypeEpusdt,
+			map[string]string{"block_transaction_id": hash}))
+	}
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance)
+	_, err := f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: otherHash})
+	requireManualSettleReason(t, err, "TX_ALREADY_USED")
+}
+
+func TestPaymentOpaqueTransactionReferencesPreserveCase(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	for _, ref := range []string{"SolanaSignatureAbC", "SolanaSignatureabc"} {
+		require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, f.order.PaymentTradeNo, 30, payment.TypeEpusdt,
+			map[string]string{"block_transaction_id": ref}))
+		usedBy, err := f.svc.orderUsingTxHash(ctx, "epusdt:"+ref)
+		require.NoError(t, err)
+		require.Equal(t, strconv.FormatInt(f.order.ID, 10), usedBy)
+	}
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance)
+}
+
+func TestPaymentCallbackRollsBackTransactionClaimOnAuditFailure(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	f.client.PaymentAuditLog.Use(func(next dbent.Mutator) dbent.Mutator {
+		return dbent.MutateFunc(func(context.Context, dbent.Mutation) (dbent.Value, error) {
+			return nil, fmt.Errorf("injected callback audit failure")
+		})
+	})
+	err := f.svc.confirmPayment(ctx, f.order.ID, f.order.PaymentTradeNo, 30, payment.TypeEpusdt,
+		map[string]string{"block_transaction_id": manualSettleTxHash})
+	require.ErrorContains(t, err, "injected callback audit failure")
+	current, err := f.client.PaymentOrder.Get(ctx, f.order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusPending, current.Status)
+	hash, err := chainverify.NormalizeTxHash(manualSettleTxHash)
+	require.NoError(t, err)
+	usedBy, err := f.svc.orderUsingTxHash(ctx, hash)
+	require.NoError(t, err)
+	require.Empty(t, usedBy)
+	require.Zero(t, f.userRepo.getByIDUser.Balance)
+}
+
+func TestPaymentLegacyAuditPreventsCallbackReuse(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	// A current-order audit must not mask an older, conflicting order's claim.
+	f.svc.writeAuditLog(ctx, f.order.ID, "ORDER_PAID", payment.TypeEpusdt, map[string]any{"txHash": manualSettleTxHash})
+	f.svc.writeAuditLog(ctx, 999, "ORDER_PAID", payment.TypeEpusdt, map[string]any{"txHash": strings.ToUpper(manualSettleTxHash)})
+	err := f.svc.confirmPayment(ctx, f.order.ID, f.order.PaymentTradeNo, 30, payment.TypeEpusdt,
+		map[string]string{"block_transaction_id": manualSettleTxHash})
+	requireManualSettleReason(t, err, "TX_ALREADY_USED")
+	require.Zero(t, f.userRepo.getByIDUser.Balance)
+}
+
+func TestPaymentOldExpiredCallbackLeavesHashForManualSettlement(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusExpired, "4.48")
+	_, err := f.client.PaymentOrder.UpdateOneID(f.order.ID).SetUpdatedAt(time.Now().Add(-time.Hour)).Save(ctx)
+	require.NoError(t, err)
+	err = f.svc.confirmPayment(ctx, f.order.ID, f.order.PaymentTradeNo, 30, payment.TypeEpusdt,
+		map[string]string{"block_transaction_id": manualSettleTxHash})
+	require.NoError(t, err)
+	require.Zero(t, f.userRepo.getByIDUser.Balance)
+	_, err = f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	require.NoError(t, err)
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance)
 }
