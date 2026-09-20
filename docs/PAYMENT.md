@@ -165,7 +165,7 @@ Integrates a self-hosted [Epusdt / GM Pay](https://github.com/GMWalletApp/epusdt
 | **Secret Key** | The `secret_key` of that PID | Yes |
 | **API Base URL** | Epusdt site origin such as `https://pay.example.com`, without the `/payments/...` path | Yes |
 | **Receiving token** | Pinned token such as `usdt`; set together with the network or leave both empty | No |
-| **Receiving network** | Pinned network such as `tron`, `bsc`, `solana`; set together with the token or leave both empty | No |
+| **Receiving network** | Pinned network such as `tron`, `binance` (BSC), `solana` — use the network id from the gateway `/payments/gmpay/v1/config`; set together with the token or leave both empty | No |
 | **Payment currency** | Fiat currency of the order, CNY by default; the gateway converts it into the token amount | Yes |
 | **Cashier domain** | Optional. If the same gateway is also reverse-proxied under your own domain (e.g. `https://pay.example.com`, exposing `/pay`, `/cashier`, `/assets`), the cashier link payers are redirected to is rewritten to that origin; leave empty to keep the gateway's own address | No |
 
