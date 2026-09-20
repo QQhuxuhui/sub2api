@@ -224,6 +224,32 @@ describe('PaymentStatusPanel', () => {
     wrapper.unmount()
   })
 
+  it('shows the exact-amount notice only while a USDT order is waiting', async () => {
+    pollOrderStatus.mockResolvedValue({ ...orderFactory('PENDING'), payment_type: 'usdt' })
+    const mountPanel = (paymentType: string) => mount(PaymentStatusPanel, {
+      props: {
+        orderId: 42,
+        qrCode: '',
+        payUrl: 'https://pay.example.com/pay/checkout-counter/trade-1',
+        expiresAt: '2099-01-01T12:30:00Z',
+        paymentType,
+        orderType: 'balance',
+      },
+      global: { stubs: { Icon: true } },
+    })
+
+    const usdt = mountPanel('usdt')
+    await flushPromises()
+    expect(usdt.find('[data-test="usdt-payment-notice"]').exists()).toBe(true)
+    expect(usdt.text()).toContain('payment.usdtNotice.exactAmount')
+    usdt.unmount()
+
+    const stripe = mountPanel('stripe')
+    await flushPromises()
+    expect(stripe.find('[data-test="usdt-payment-notice"]').exists()).toBe(false)
+    stripe.unmount()
+  })
+
   it('actively verifies a pending mobile Alipay precreate order', async () => {
     const originalLocation = window.location
     const originalHidden = Object.getOwnPropertyDescriptor(document, 'hidden')

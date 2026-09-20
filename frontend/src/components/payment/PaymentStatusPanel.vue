@@ -167,6 +167,7 @@
 
     <!-- QR Code Mode -->
     <template v-else-if="showQRCode">
+      <UsdtPaymentNotice v-if="isUsdt" />
       <div class="card p-6">
         <div class="flex flex-col items-center space-y-4">
           <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ scanTitle }}</p>
@@ -197,6 +198,7 @@
 
     <!-- Waiting for Popup/Redirect Mode -->
     <template v-else>
+      <UsdtPaymentNotice v-if="isUsdt" />
       <div class="card p-6">
         <div class="flex flex-col items-center space-y-4 py-4">
           <div class="h-10 w-10 animate-spin rounded-full border-4 border-primary-500 border-t-transparent"></div>
@@ -228,6 +230,7 @@ import { getPaymentPopupFeatures, isBuiltInAlipayMethod, isBuiltInWxpayMethod } 
 import { currencySymbol, formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
 import type { PaymentOrder } from '@/types/payment'
 import Icon from '@/components/icons/Icon.vue'
+import UsdtPaymentNotice from '@/components/payment/UsdtPaymentNotice.vue'
 import QRCode from 'qrcode'
 import alipayIcon from '@/assets/icons/alipay.svg'
 import wxpayIcon from '@/assets/icons/wxpay.svg'
@@ -293,9 +296,8 @@ const VERIFY_RETRY_MAX_ATTEMPTS = 6
 
 const isAlipay = computed(() => isBuiltInAlipayMethod(props.paymentType))
 const isWxpay = computed(() => isBuiltInWxpayMethod(props.paymentType))
-const supportsActiveRecovery = computed(() =>
-  isWxpay.value || isAlipay.value || props.paymentType.trim().toLowerCase() === 'usdt',
-)
+const isUsdt = computed(() => props.paymentType.trim().toLowerCase() === 'usdt')
+const supportsActiveRecovery = computed(() => isWxpay.value || isAlipay.value || isUsdt.value)
 const isMobileAlipayDeepLink = computed(() => props.mobileAlipayDeepLink === true && isAlipay.value && !!qrUrl.value)
 const showQRCode = computed(() => !!qrUrl.value && (!isMobileAlipayDeepLink.value || deepLinkFallbackVisible.value))
 

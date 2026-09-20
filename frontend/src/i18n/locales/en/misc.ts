@@ -298,6 +298,13 @@ export default {
     fee: 'Fee',
     actualPay: 'Actual Payment',
     createOrder: 'Confirm Payment',
+    usdtNotice: {
+      title: 'Read before sending USDT',
+      exactAmount: 'The amount received must exactly match the amount shown at checkout — being short by even 0.01 will not be credited automatically.',
+      exchangeFee: 'When withdrawing from an exchange, the fee is deducted from the withdrawal amount: make sure the amount RECEIVED equals the order amount and add the fee on top.',
+      network: 'Send on the same network you selected at checkout. Funds sent on the wrong network or token cannot be recovered.',
+      support: 'If the payment is not credited after a while, contact support with your transaction hash (TxID).',
+    },
     methods: {
       easypay: 'EasyPay',
       alipay: 'Alipay',
