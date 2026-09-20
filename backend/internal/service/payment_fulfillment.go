@@ -113,11 +113,17 @@ func (s *PaymentService) confirmPayment(ctx context.Context, oid int64, tradeNo 
 		s.writeAuditLog(ctx, o.ID, "PAYMENT_AMOUNT_MISMATCH", pk, map[string]any{"expected": o.PayAmount, "paid": paid, "tradeNo": tradeNo})
 		return fmt.Errorf("amount mismatch: expected %s, got %s", strconv.FormatFloat(o.PayAmount, 'f', -1, 64), strconv.FormatFloat(paid, 'f', -1, 64))
 	}
-	txHash := paymentTxHashFromMetadata(metadata)
-	if strings.EqualFold(pk, payment.TypeEpusdt) && txHash == "" {
-		return infraerrors.BadRequest("MISSING_TX_HASH", "Epusdt payment is awaiting a transaction reference; retry its signed notification or settle by verified transaction hash")
+	claimKey := paymentTxHashFromMetadata(metadata)
+	if strings.EqualFold(pk, payment.TypeEpusdt) && claimKey == "" {
+		// No chain hash: the gateway query API never reports one, and neither
+		// does the callback of an order paid through a sub-order. The gateway
+		// still vouches for the payment, so fulfill it under a per-trade claim
+		// rather than leaving a paid order uncredited.
+		if claimKey = paymentGatewayTradeClaimKey(tradeNo); claimKey == "" {
+			return infraerrors.BadRequest("MISSING_TRADE_NO", "Epusdt payment confirmation carries neither a transaction hash nor a trade number")
+		}
 	}
-	return s.toPaid(ctx, o, tradeNo, paid, pk, txHash)
+	return s.toPaid(ctx, o, tradeNo, paid, pk, claimKey)
 }
 
 func paymentAmountToleranceForCurrency(currency string) float64 {
@@ -156,6 +162,7 @@ func expectedNotificationProviderKey(registry *payment.Registry, orderPaymentTyp
 func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, tradeNo string, paid float64, pk string, txHash string) error {
 	client := s.entClient
 	var tx *dbent.Tx
+	claimCreated := false
 	if txHash != "" {
 		var err error
 		tx, err = s.entClient.Tx(ctx)
@@ -164,9 +171,11 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 		}
 		defer func() { _ = tx.Rollback() }()
 		client = tx.Client()
-		if err := claimPaymentTransaction(ctx, client, o.ID, txHash); err != nil {
+		created, err := claimPaymentTransaction(ctx, client, o.ID, txHash)
+		if err != nil {
 			return err
 		}
+		claimCreated = created
 	}
 	previousStatus := o.Status
 	now := time.Now()
@@ -192,10 +201,14 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 				return fmt.Errorf("reload payment confirmation: %w", err)
 			}
 			if !manualSettleAllowedStatus(current.Status) {
-				// Backfill transaction ownership even when a legacy query or an
-				// earlier payment already fulfilled this order.
-				if err := writePaymentAudit(ctx, client, o.ID, "ORDER_TX_LINKED", pk, map[string]any{"tradeNo": tradeNo, "txHash": txHash}); err != nil {
-					return err
+				// Backfill transaction ownership even when a query or an earlier
+				// payment already fulfilled this order. Only a newly learned chain
+				// hash is worth an audit row: gateway retries and the per-trade
+				// key of an already linked order would only add noise.
+				if claimCreated && !isGatewayTradeClaimKey(txHash) {
+					if err := writePaymentAudit(ctx, client, o.ID, "ORDER_TX_LINKED", pk, map[string]any{"tradeNo": tradeNo, "txHash": txHash}); err != nil {
+						return err
+					}
 				}
 				if err := tx.Commit(); err != nil {
 					return fmt.Errorf("commit late payment transaction: %w", err)
@@ -208,7 +221,11 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 	}
 	paidDetail := map[string]any{"tradeNo": tradeNo, "paidAmount": paid}
 	if tx != nil {
-		paidDetail["txHash"] = txHash
+		if isGatewayTradeClaimKey(txHash) {
+			paidDetail["claimKey"] = txHash
+		} else {
+			paidDetail["txHash"] = txHash
+		}
 		if err := writePaymentAudit(ctx, client, o.ID, "ORDER_PAID", pk, paidDetail); err != nil {
 			return err
 		}

@@ -415,7 +415,7 @@ export default {
       GATEWAY_UNAVAILABLE: 'Could not read the order from the gateway, try again later',
       NO_CHAIN_QUOTE: 'The payer never picked a network at checkout, so there is no expected amount to verify against',
       UNSUPPORTED_QUOTE_TOKEN: 'Settlement by hash requires a USDT or USDC quote; native coin amounts use a different unit',
-      MISSING_TX_HASH: 'Awaiting the gateway transaction reference; retry its signed notification or verify a transaction hash',
+      HASHLESS_PAYMENT_NEARBY: 'Order #{order_id} was credited around the time of this transfer without a transaction hash from the gateway, so this transfer may already have paid it. Check in the gateway admin which order holds this hash; if it really belongs to this order, adjust the balance manually.',
       TX_ALREADY_USED: 'This transaction has already been used to credit another order',
       TX_NOT_FOUND: 'Transaction not found on chain, check the hash and network',
       TX_FAILED: 'The transaction failed on chain, no funds were transferred',

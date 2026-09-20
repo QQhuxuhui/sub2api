@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -148,6 +149,15 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 			first.BlockTime.UTC().Format(time.RFC3339), o.CreatedAt.UTC().Format(time.RFC3339)))
 	}
 
+	// A payment fulfilled without a known chain hash may be this very transfer.
+	if paidBy, err := hashlessPaidOrderNear(ctx, s.entClient, first.BlockTime, o.ID); err != nil {
+		return nil, fmt.Errorf("check hashless payments: %w", err)
+	} else if paidBy != 0 {
+		return nil, infraerrors.Conflict("HASHLESS_PAYMENT_NEARBY", fmt.Sprintf(
+			"order %d was credited around this transfer's time without a recorded transaction hash, so this transfer may already have paid it; check in the gateway admin which order holds this hash, and adjust the balance manually if it really belongs to this order",
+			paidBy)).WithMetadata(map[string]string{"order_id": strconv.FormatInt(paidBy, 10)})
+	}
+
 	shortfall := decimal.Max(expected.Sub(received), decimal.Zero)
 	allowed := manualSettleAllowedShortfall(expected)
 	result := &ManualSettleResult{
@@ -188,7 +198,7 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 	}
 	defer func() { _ = tx.Rollback() }()
 	client := tx.Client()
-	if err := claimPaymentTransaction(ctx, client, o.ID, normalizedHash); err != nil {
+	if _, err := claimPaymentTransaction(ctx, client, o.ID, normalizedHash); err != nil {
 		return nil, err
 	}
 	updated, err := client.PaymentOrder.Update().Where(

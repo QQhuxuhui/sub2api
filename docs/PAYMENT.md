@@ -172,7 +172,7 @@ Integrates a self-hosted [Epusdt / GM Pay](https://github.com/GMWalletApp/epusdt
 > - With both token and network empty the gateway creates a placeholder order and the payer picks any chain enabled on the gateway in the cashier. Filling only one of them is rejected.
 > - The notify and return URLs are submitted with every order, so nothing needs configuring in the Epusdt admin, but the gateway must be able to reach this site's webhook URL.
 > - Callbacks are verified with the secret of the `pid` they carry and matched against the PID snapshotted on the order; the fiat amount is checked against the order.
-> - On-chain transfers are irreversible and the gateway has no refund API, so keep refunds disabled. Admin order queries read the gateway status first and, once paid, the cashier info to recover the amount. A paid Epusdt query without `block_transaction_id` keeps the local order pending and prevents cancellation/expiry; credit waits for the signed callback with its transaction reference or a verified manual settlement. Retry the gateway notification if delivery failed.
+> - On-chain transfers are irreversible and the gateway has no refund API, so keep refunds disabled. Admin order queries read the gateway status first and, once paid, the cashier info to recover the amount. Epusdt reports no chain hash in two cases: its query API never returns one, and when the payer switches network inside the cashier the payment lands on a sub-order while the callback is sent for the parent order with an empty `block_transaction_id`. The gateway has confirmed the payment in both cases, so the order is credited as usual under a per-trade claim (`epusdt-trade:<trade_id>`) that prevents double crediting; a later signed callback carrying the hash links it as well. The gateway retries a failed callback only `order_notice_max_retry` times — raise it.
 
 #### Settling by transaction hash
 
@@ -187,6 +187,7 @@ Every rule must hold:
 | Quote unit | The gateway quote must be USDT, USDC or USDC.E. Native-coin quotes such as SOL/TRX are not compared numerically with stablecoins |
 | Supported token | TRON USDT; BSC USDT/USDC; Polygon USDT/USDC/USDC.E; Ethereum USDT/USDC |
 | Transaction time belongs to the order | No earlier than 2 minutes before the order, no later than 24 hours after |
+| No hashless payment nearby | Refused when an order was credited without a chain hash (and none has been linked since) between 2 minutes before and 2 hours after the transfer: that transfer may be its payment. This blocks leaving one order unpaid, paying another through a switched network, then presenting the same transfer for the first |
 | Hash not used before | Gateway callbacks and manual settlement share a database-unique claim committed atomically with the paid order and audit. Refunds do not release it; concurrent attempts for other orders are rejected |
 | Amount within tolerance | Short or over by at most `max(expected × 20%, 1.5)`, never more than 50% of the expected amount; beyond that adjust the balance manually |
 
