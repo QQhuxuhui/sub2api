@@ -185,16 +185,18 @@ Every rule must hold:
 | Transaction succeeded and is final enough | 20 blocks on TRON, 5 on BSC / Ethereum, 30 on Polygon |
 | Recipient belongs to the order | The address the gateway recorded for the order, or one of the instance's trusted receiving addresses |
 | Supported token | TRON USDT; BSC USDT/USDC; Polygon USDT/USDC/USDC.E; Ethereum USDT/USDC |
-| Transaction time belongs to the order | No earlier than 10 minutes before the order, no later than 7 days after |
+| Transaction time belongs to the order | No earlier than 2 minutes before the order, no later than 24 hours after |
 | Hash not used before | Hashes credited through a gateway callback or a previous settlement are rejected |
-| Shortfall within tolerance | At most `max(expected × 20%, 1.5)` and never above 50% of the expected amount; beyond that adjust the balance manually |
+| Amount within tolerance | Short or over by at most `max(expected × 20%, 1.5)`, never more than 50% of the expected amount; beyond that adjust the balance manually |
 
 | Optional parameter | Description |
 |------|------|
 | **Trusted receiving addresses** | Comma separated. When the payer switches network inside the cashier the gateway tracks it in a sub-order, while Sub2API only knows the parent order's address; list the receiving addresses you configured on the gateway for every chain |
 | **Chain RPC endpoints** | Public RPC nodes are used by default; override with `binance=https://node,tron=https://node` (tron / binance / polygon / ethereum, https only) |
 
-> Overpayments are credited at the order amount. Orders credited by gateway callback before this feature shipped have no hash in their audit log, so the reuse check does not cover them.
+> **Claim fraud**: chain data is public and receiving addresses are shared by every order (and every site using the same gateway wallet). Someone can open an order for a common amount and present a stranger's transfer of a similar amount. Hashes already credited on this site are rejected, but **sites sharing one gateway wallet are not covered** — before confirming, check the sender / withdrawal record belongs to the user and that the gateway has not attached the hash to another order.
+>
+> Overpayments within tolerance are credited at the order amount. Orders credited by gateway callback before this feature shipped have no hash in their audit log, so the reuse check does not cover them.
 
 ---
 
