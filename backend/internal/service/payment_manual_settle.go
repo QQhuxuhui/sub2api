@@ -21,11 +21,13 @@ import (
 const (
 	auditActionManualSettled = "ORDER_MANUAL_SETTLED"
 
-	// The transfer must belong to this order's lifetime: exchanges can take a
-	// while to broadcast, but a transaction older than the order is someone
-	// else's payment.
-	manualSettleClockSkew = 10 * time.Minute
-	manualSettleMaxAge    = 7 * 24 * time.Hour
+	// The transfer must belong to this order's lifetime. Chain data is public
+	// and receiving addresses are shared by every order (and by every site
+	// using the same gateway wallet), so a loose window would let someone open
+	// an order and claim a stranger's transfer of a similar amount. Exchanges
+	// may take a while to broadcast, hence the day; the skew only covers clocks.
+	manualSettleClockSkew = 2 * time.Minute
+	manualSettleMaxAge    = 24 * time.Hour
 )
 
 var (
@@ -33,6 +35,8 @@ var (
 	// enough for a TRC20 exchange withdrawal fee on a small order — but never
 	// more than half of the quote. Anything beyond that is not "a fee got
 	// deducted" any more and must be handled by adjusting the balance by hand.
+	// The same band applies upwards: a transfer far above the quote is most
+	// likely somebody else's payment to the shared address, not this order's.
 	manualSettleShortfallRatio = decimal.RequireFromString("0.2")
 	manualSettleShortfallFloor = decimal.RequireFromString("1.5")
 	manualSettleShortfallCap   = decimal.RequireFromString("0.5")
@@ -161,6 +165,11 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 		AllowedShortfall: allowed.String(),
 		BlockTime:        first.BlockTime,
 		Confirmations:    first.Confirmations,
+	}
+	if received.Sub(expected).GreaterThan(allowed) {
+		return nil, infraerrors.BadRequest("AMOUNT_MISMATCH", fmt.Sprintf(
+			"received %s %s but the order expects %s; a transfer this far above the quote is probably not this order's payment — adjust the balance manually if it is",
+			received.String(), first.Token, expected.String()))
 	}
 	if shortfall.GreaterThan(allowed) {
 		return nil, infraerrors.BadRequest("SHORTFALL_TOO_LARGE", fmt.Sprintf(

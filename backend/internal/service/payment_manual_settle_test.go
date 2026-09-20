@@ -247,7 +247,28 @@ func TestAdminSettleOrderByTxHashGuards(t *testing.T) {
 
 	t.Run("transaction older than the order", func(t *testing.T) {
 		f := newManualSettleFixture(t, OrderStatusExpired, "4.48")
-		f.fetcher.byNetwork["binance"][0].BlockTime = f.order.CreatedAt.Add(-2 * time.Hour)
+		f.fetcher.byNetwork["binance"][0].BlockTime = f.order.CreatedAt.Add(-5 * time.Minute)
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+		requireManualSettleReason(t, err, "TX_OUTSIDE_ORDER_WINDOW")
+	})
+
+	t.Run("far above the quote is someone else's payment", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusExpired, "50")
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+		requireManualSettleReason(t, err, "AMOUNT_MISMATCH")
+		require.Zero(t, f.userRepo.getByIDUser.Balance)
+	})
+
+	t.Run("small overpayment is fine", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusExpired, "5")
+		result, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash, DryRun: true})
+		require.NoError(t, err)
+		require.Equal(t, "0", result.Shortfall)
+	})
+
+	t.Run("transaction a day after the order", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusExpired, "4.48")
+		f.fetcher.byNetwork["binance"][0].BlockTime = f.order.CreatedAt.Add(25 * time.Hour)
 		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
 		requireManualSettleReason(t, err, "TX_OUTSIDE_ORDER_WINDOW")
 	})

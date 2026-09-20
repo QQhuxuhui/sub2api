@@ -63,6 +63,7 @@
           <span class="flex-shrink-0 text-gray-500 dark:text-gray-400">{{ row.label }}</span>
           <span class="break-all text-right font-mono text-xs text-gray-900 dark:text-white">{{ row.value }}</span>
         </div>
+        <p class="pt-1 text-xs leading-5 text-gray-600 dark:text-gray-300">{{ t('payment.admin.settleByTx.fraudWarning') }}</p>
         <p v-if="hasShortfall" class="pt-1 font-medium text-amber-800 dark:text-amber-200">
           {{ t('payment.admin.settleByTx.shortfallWarning', { shortfall: preview.shortfall, token: preview.token, amount: `${creditedAmountSymbol}${order?.amount?.toFixed(2)}` }) }}
         </p>
