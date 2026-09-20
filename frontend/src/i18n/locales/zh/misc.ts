@@ -320,6 +320,13 @@ export default {
     fee: '手续费',
     actualPay: '实付金额',
     createOrder: '确认支付',
+    usdtNotice: {
+      title: 'USDT 转账前必读',
+      exactAmount: '到账金额必须与收银台显示的金额完全一致，少 0.01 也无法自动入账。',
+      exchangeFee: '从交易所提币时，手续费会从提币数量中扣除：请让「到账数量」等于订单金额，手续费需另外加上。',
+      network: '转账网络必须与收银台所选网络一致，转错网络或币种无法找回。',
+      support: '转账后长时间未到账，请联系客服并提供交易哈希（TxID）。',
+    },
     methods: {
       easypay: '易支付',
       alipay: '支付宝',

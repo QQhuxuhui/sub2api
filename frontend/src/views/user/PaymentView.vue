@@ -84,6 +84,7 @@
                 </p>
               </div>
             </div>
+            <UsdtPaymentNotice v-if="selectedMethod === 'usdt'" />
             <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmit || submitting" @click="handleSubmitRecharge">
               <span v-if="submitting" class="flex items-center justify-center gap-2">
                 <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
@@ -172,6 +173,7 @@
                   </div>
                 </div>
               </div>
+              <UsdtPaymentNotice v-if="selectedMethod === 'usdt'" />
               <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmitSubscription || submitting" @click="confirmSubscribe">
                 <span v-if="submitting" class="flex items-center justify-center gap-2">
                   <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
@@ -271,6 +273,7 @@ import type { SubscriptionPlan, CheckoutInfoResponse, CreateOrderResult, OrderTy
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AmountInput from '@/components/payment/AmountInput.vue'
 import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vue'
+import UsdtPaymentNotice from '@/components/payment/UsdtPaymentNotice.vue'
 import { METHOD_ORDER, getPaymentPopupFeatures, isBuiltInAlipayMethod, isBuiltInWxpayMethod } from '@/components/payment/providerConfig'
 import {
   PAYMENT_RECOVERY_STORAGE_KEY,
