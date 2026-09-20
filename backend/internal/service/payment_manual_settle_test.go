@@ -398,7 +398,7 @@ func TestPaymentQueryThenCallbackMustPreserveHashClaim(t *testing.T) {
 	f.provider.resp = &payment.QueryOrderResponse{TradeNo: "gateway-trade-1", Amount: 30, Status: payment.ProviderStatusPaid,
 		Metadata: map[string]string{"token": "USDT", "network": "binance", "actual_amount": "4.48"}}
 	f.svc.reconcilePaid(ctx, f.order)
-	require.Zero(t, f.userRepo.getByIDUser.Balance, "polling without a hash waits for the signed callback")
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance, "a payment the gateway confirms is credited even without a hash")
 	// The real signed webhook arrives after the periodic query completed the order.
 	require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt,
 		map[string]string{"block_transaction_id": manualSettleTxHash}))
@@ -437,15 +437,104 @@ func TestPaymentLateCallbackRegistersHashForCompletedOrder(t *testing.T) {
 	require.Zero(t, f.userRepo.getByIDUser.Balance)
 }
 
-func TestPaymentEpusdtConfirmationNeedsTransactionReference(t *testing.T) {
+// A parent order paid through a sub-order (the payer switched network in the
+// cashier) is notified with the parent row, which carries no chain hash.
+func TestPaymentEpusdtHashlessCallbackIsCreditedOncePerTrade(t *testing.T) {
 	ctx := context.Background()
 	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
-	err := f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt, map[string]string{"token": "USDT"})
-	requireManualSettleReason(t, err, "MISSING_TX_HASH")
+	hashless := map[string]string{"token": "USDT"}
+	for i := 0; i < 3; i++ { // the gateway retries its callback
+		require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt, hashless))
+	}
 	order, err := f.client.PaymentOrder.Get(ctx, f.order.ID)
 	require.NoError(t, err)
-	require.Equal(t, OrderStatusPending, order.Status)
-	require.Zero(t, f.userRepo.getByIDUser.Balance)
+	require.Equal(t, OrderStatusCompleted, order.Status)
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance, "credited exactly once")
+
+	claims, err := f.client.PaymentTransactionClaim.Query().All(ctx)
+	require.NoError(t, err)
+	require.Len(t, claims, 1)
+	require.Equal(t, "epusdt-trade:gateway-trade-1", claims[0].TxHash)
+	paid, err := f.client.PaymentAuditLog.Query().Where(paymentauditlog.ActionEQ("ORDER_PAID")).Only(ctx)
+	require.NoError(t, err)
+	require.Contains(t, paid.Detail, `"claimKey":"epusdt-trade:gateway-trade-1"`)
+	require.NotContains(t, paid.Detail, "txHash", "a trade key must not pose as a chain hash")
+	linked, err := f.client.PaymentAuditLog.Query().Where(paymentauditlog.ActionEQ("ORDER_TX_LINKED")).Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, linked, "callback retries add no audit noise")
+
+	// A confirmation with neither hash nor trade number has nothing to key on.
+	err = f.svc.confirmPayment(ctx, f.order.ID, " ", 30, payment.TypeEpusdt, hashless)
+	requireManualSettleReason(t, err, "MISSING_TRADE_NO")
+}
+
+// The gateway query API never reports a hash; it is the only safety net when
+// a callback is lost (the gateway retries once), so it must still credit.
+func TestPaymentEpusdtPaidQueryCreditsThenCallbackLinksHash(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	second := newSecondSettlementOrder(t, f)
+	f.provider.resp = &payment.QueryOrderResponse{TradeNo: f.order.PaymentTradeNo, Amount: 30, Status: payment.ProviderStatusPaid}
+
+	require.Equal(t, checkPaidResultAlreadyPaid, f.svc.reconcilePaid(ctx, f.order))
+	current, err := f.client.PaymentOrder.Get(ctx, f.order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusCompleted, current.Status)
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance)
+
+	// The signed callback arrives afterwards, twice, with the real hash.
+	withHash := map[string]string{"block_transaction_id": manualSettleTxHash}
+	for i := 0; i < 2; i++ {
+		require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt, withHash))
+	}
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance, "linking the hash never credits again")
+	linked, err := f.client.PaymentAuditLog.Query().Where(paymentauditlog.ActionEQ("ORDER_TX_LINKED")).Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, linked, "the hash is audited once, not per retry")
+
+	_, err = f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	requireManualSettleReason(t, err, "TX_ALREADY_USED")
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance)
+}
+
+// The abuse this guards against: leave order B unpaid, pay order A through a
+// switched network (credited, but its hash is never reported), then present
+// A's transfer as the payment of B.
+func TestPaymentManualSettleRefusesTransferNearHashlessPayment(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	second := newSecondSettlementOrder(t, f)
+	require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt, map[string]string{"token": "USDT"}))
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance)
+
+	f.fetcher.byNetwork["binance"][0].BlockTime = time.Now().Add(-time.Minute)
+	for _, dryRun := range []bool{true, false} {
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: manualSettleTxHash, DryRun: dryRun})
+		requireManualSettleReason(t, err, "HASHLESS_PAYMENT_NEARBY")
+		require.ErrorContains(t, err, fmt.Sprintf("order %d ", f.order.ID))
+	}
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance, "the transfer is not credited a second time")
+
+	// Once the first order's own hash is known, it no longer casts doubt.
+	otherHash := strings.Repeat("b", 64)
+	require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt, map[string]string{"block_transaction_id": otherHash}))
+	_, err := f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	require.NoError(t, err)
+	require.Equal(t, 60.0, f.userRepo.getByIDUser.Balance)
+}
+
+func TestPaymentManualSettleIgnoresHashlessPaymentFromAnotherTime(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	second := newSecondSettlementOrder(t, f)
+	require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt, map[string]string{"token": "USDT"}))
+	_, err := f.client.PaymentOrder.UpdateOneID(f.order.ID).SetPaidAt(time.Now().Add(-6 * time.Hour)).Save(ctx)
+	require.NoError(t, err)
+
+	f.fetcher.byNetwork["binance"][0].BlockTime = time.Now().Add(-time.Minute)
+	_, err = f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	require.NoError(t, err)
+	require.Equal(t, 60.0, f.userRepo.getByIDUser.Balance)
 }
 
 func TestPaymentManualSettlementRollsBackWhenAuditFails(t *testing.T) {
@@ -474,21 +563,17 @@ func TestPaymentManualSettlementRollsBackWhenAuditFails(t *testing.T) {
 	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance)
 }
 
-func TestPaymentEpusdtPaidQueryWaitsWithoutExpiringOrCancelling(t *testing.T) {
+func TestPaymentEpusdtPaidQueryBlocksCancelAndExpiryByCrediting(t *testing.T) {
 	ctx := context.Background()
 	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
 	f.provider.resp = &payment.QueryOrderResponse{TradeNo: f.order.PaymentTradeNo, Amount: 30, Status: payment.ProviderStatusPaid}
-	require.Equal(t, checkPaidResultAwaitingTx, f.svc.reconcilePaid(ctx, f.order))
 	outcome, err := f.svc.CancelOrder(ctx, f.order.ID, f.order.UserID)
 	require.NoError(t, err)
 	require.Equal(t, checkPaidResultAlreadyPaid, outcome)
-	expired, err := f.svc.ExpireTimedOutOrders(ctx)
-	require.NoError(t, err)
-	require.Zero(t, expired)
 	current, err := f.client.PaymentOrder.Get(ctx, f.order.ID)
 	require.NoError(t, err)
-	require.Equal(t, OrderStatusPending, current.Status)
-	require.Zero(t, f.userRepo.getByIDUser.Balance)
+	require.Equal(t, OrderStatusCompleted, current.Status, "a paid order is credited, not left pending forever")
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance)
 	require.Zero(t, f.provider.cancelCalls)
 }
 

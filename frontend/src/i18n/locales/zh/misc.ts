@@ -442,7 +442,7 @@ export default {
       GATEWAY_UNAVAILABLE: '读取网关订单失败，请稍后重试',
       NO_CHAIN_QUOTE: '用户没有在收银台选择网络，网关没有应付数量可供核对',
       UNSUPPORTED_QUOTE_TOKEN: '哈希补单仅适用于 USDT 或 USDC 报价，请先核对原生币与稳定币的金额单位',
-      MISSING_TX_HASH: '等待网关交易凭据，请重发网关签名回调或使用交易哈希核对补单',
+      HASHLESS_PAYMENT_NEARBY: '订单 #{order_id} 在这笔转账的时间前后入账，但当时网关没有给出交易哈希，这笔转账可能就是它的付款。请先到网关后台确认该哈希挂在哪张订单上；确认属于本订单的话，请手动调整余额。',
       TX_ALREADY_USED: '这笔交易已经用于其它订单入账，不能重复使用',
       TX_NOT_FOUND: '链上找不到这笔交易，请检查哈希和网络',
       TX_FAILED: '这笔交易在链上执行失败，没有实际转账',

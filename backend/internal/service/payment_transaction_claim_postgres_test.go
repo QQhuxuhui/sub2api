@@ -74,7 +74,7 @@ func TestPaymentTransactionClaimsPostgres(t *testing.T) {
 			return err
 		}
 		defer func() { _ = tx.Rollback() }()
-		if err := claimPaymentTransaction(ctx, tx.Client(), orderID, hash); err != nil {
+		if _, err := claimPaymentTransaction(ctx, tx.Client(), orderID, hash); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -126,7 +126,9 @@ func TestPaymentTransactionClaimsPostgres(t *testing.T) {
 		hash := strings.Repeat("c", 64)
 		tx, err := client.Tx(ctx)
 		require.NoError(t, err)
-		require.NoError(t, claimPaymentTransaction(ctx, tx.Client(), 1, hash))
+		created, err := claimPaymentTransaction(ctx, tx.Client(), 1, hash)
+		require.NoError(t, err)
+		require.True(t, created)
 		require.NoError(t, tx.Rollback())
 		require.NoError(t, claim(2, hash))
 	})
