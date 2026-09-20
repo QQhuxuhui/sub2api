@@ -31,6 +31,20 @@
         <div class="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
           <LocaleSwitcher />
           <a
+            v-if="telegramUrl"
+            data-test="home-telegram-compact"
+            :href="telegramUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-dark-800"
+            :title="t('home.contactTelegram')"
+            :aria-label="t('home.contactTelegram')"
+          >
+            <svg class="h-5 w-5 text-[#26A5E4]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path :d="TELEGRAM_PATH" />
+            </svg>
+          </a>
+          <a
             v-if="docUrl"
             :href="docUrl"
             target="_blank"
@@ -128,6 +142,22 @@
         <div class="flex items-center gap-3">
           <!-- Language Switcher -->
           <LocaleSwitcher />
+
+          <!-- Telegram contact -->
+          <a
+            v-if="telegramUrl"
+            data-test="home-telegram"
+            :href="telegramUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center gap-2 rounded-full border border-gray-200/90 bg-white/75 px-3 py-1.5 text-sm font-medium text-gray-700 backdrop-blur-sm transition-colors hover:border-[#26A5E4]/60 hover:text-gray-900 dark:border-dark-700/80 dark:bg-dark-800/75 dark:text-gray-200 dark:hover:border-[#26A5E4]/50 dark:hover:text-white"
+            :title="t('home.contactTelegram')"
+          >
+            <svg class="h-4 w-4 text-[#26A5E4]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path :d="TELEGRAM_PATH" />
+            </svg>
+            <span class="hidden sm:inline">Telegram</span>
+          </a>
 
           <!-- Doc Link -->
           <a
@@ -471,6 +501,16 @@
         </p>
         <div class="flex items-center gap-4">
           <a
+            v-if="telegramUrl"
+            data-test="home-telegram-footer"
+            :href="telegramUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-dark-400 dark:hover:text-white"
+          >
+            Telegram
+          </a>
+          <a
             v-if="docUrl"
             :href="docUrl"
             target="_blank"
@@ -512,6 +552,7 @@ const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appS
 const siteLogo = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
 const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || 'AI API Gateway Platform')
 const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
+const telegramUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.telegram_url || appStore.telegramUrl || ''))
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
 const hasHomeContent = computed(() => homeContent.value.trim().length > 0)
 const compactHomeEnabled = computed(() => appStore.cachedPublicSettings?.compact_home_enabled === true)
@@ -528,6 +569,10 @@ const isDark = ref(document.documentElement.classList.contains('dark'))
 
 // GitHub URL
 const githubUrl = 'https://github.com/Wei-Shaw/sub2api'
+
+// Official brand mark from Simple Icons
+const TELEGRAM_PATH =
+  'M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z'
 
 // Auth state
 const isAuthenticated = computed(() => authStore.isAuthenticated)
