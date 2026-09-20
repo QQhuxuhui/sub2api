@@ -6,6 +6,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -114,6 +115,44 @@ func (h *PaymentHandler) RetryFulfillment(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"message": "fulfillment retried"})
+}
+
+// SettleByTxHashRequest is the request body for settling a crypto order by
+// its on-chain transaction hash.
+type SettleByTxHashRequest struct {
+	TxHash  string `json:"tx_hash" binding:"required"`
+	Network string `json:"network"`
+	DryRun  bool   `json:"dry_run"`
+}
+
+// SettleByTxHash verifies an on-chain transfer against an unpaid crypto order
+// and, unless dry_run, marks it paid and fulfills it.
+// POST /api/v1/admin/payment/orders/:id/settle-by-tx
+func (h *PaymentHandler) SettleByTxHash(c *gin.Context) {
+	orderID, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+	var req SettleByTxHashRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	operator := "admin"
+	if subject, ok := middleware2.GetAuthSubjectFromContext(c); ok && subject.UserID > 0 {
+		operator = "admin:" + strconv.FormatInt(subject.UserID, 10)
+	}
+	result, err := h.paymentService.AdminSettleOrderByTxHash(c.Request.Context(), orderID, service.ManualSettleRequest{
+		TxHash:   req.TxHash,
+		Network:  req.Network,
+		DryRun:   req.DryRun,
+		Operator: operator,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 type AdminPaymentOrderResult struct {

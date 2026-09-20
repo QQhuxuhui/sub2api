@@ -1,0 +1,300 @@
+//go:build unit
+
+package service
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/shopspring/decimal"
+	"github.com/stretchr/testify/require"
+
+	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
+	"github.com/Wei-Shaw/sub2api/internal/payment"
+	"github.com/Wei-Shaw/sub2api/internal/payment/chainverify"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+)
+
+const (
+	manualSettleTxHash  = "0x2a003b114b896199d75998e3712f8cc1f32118ed62ff38419d397282b183c404"
+	manualSettleAddress = "0x4c1349a30c3a91d2cd69329c48dfb02c10d812c7"
+)
+
+type manualSettleProvider struct {
+	paymentOrderLifecycleQueryProvider
+	target *payment.OnChainSettlementTarget
+}
+
+func (p *manualSettleProvider) OnChainSettlementTarget(context.Context, string) (*payment.OnChainSettlementTarget, error) {
+	return p.target, nil
+}
+
+type manualSettleFetcher struct {
+	byNetwork map[string][]chainverify.Transfer
+	errs      map[string]error
+	probed    []string
+}
+
+func (f *manualSettleFetcher) Transfers(_ context.Context, network, _ string) ([]chainverify.Transfer, error) {
+	f.probed = append(f.probed, network)
+	if err := f.errs[network]; err != nil {
+		return nil, err
+	}
+	if trs, ok := f.byNetwork[network]; ok {
+		return trs, nil
+	}
+	return nil, chainverify.ErrTxNotFound
+}
+
+type manualSettleFixture struct {
+	svc      *PaymentService
+	client   *dbent.Client
+	order    *dbent.PaymentOrder
+	userRepo *mockUserRepo
+	fetcher  *manualSettleFetcher
+	provider *manualSettleProvider
+}
+
+func newManualSettleFixture(t *testing.T, status string, received string) *manualSettleFixture {
+	t.Helper()
+	ctx := context.Background()
+	client := newPaymentOrderLifecycleTestClient(t)
+
+	user, err := client.User.Create().SetEmail("settle@example.com").SetPasswordHash("hash").SetUsername("settle-user").Save(ctx)
+	require.NoError(t, err)
+	order, err := client.PaymentOrder.Create().
+		SetUserID(user.ID).SetUserEmail(user.Email).SetUserName(user.Username).
+		SetAmount(30).SetPayAmount(30).SetFeeRate(0).
+		SetRechargeCode("MANUAL-SETTLE-CODE").
+		SetOutTradeNo("sub2_manual_settle").
+		SetPaymentType(payment.TypeUSDT).
+		SetPaymentTradeNo("gateway-trade-1").
+		SetOrderType(payment.OrderTypeBalance).
+		SetStatus(status).
+		SetExpiresAt(time.Now().Add(-time.Hour)).
+		SetClientIP("127.0.0.1").SetSrcHost("api.example.com").
+		Save(ctx)
+	require.NoError(t, err)
+
+	userRepo := &mockUserRepo{getByIDUser: &User{ID: user.ID, Email: user.Email, Username: user.Username}}
+	userRepo.updateBalanceFn = func(_ context.Context, _ int64, amount float64) error {
+		userRepo.getByIDUser.Balance += amount
+		return nil
+	}
+	redeemRepo := &paymentOrderLifecycleRedeemRepo{codesByCode: map[string]*RedeemCode{
+		order.RechargeCode: {ID: 1, Code: order.RechargeCode, Type: RedeemTypeBalance, Value: order.Amount, Status: StatusUnused},
+	}}
+	provider := &manualSettleProvider{
+		paymentOrderLifecycleQueryProvider: paymentOrderLifecycleQueryProvider{key: payment.TypeEpusdt},
+		target: &payment.OnChainSettlementTarget{
+			Network: "binance", Token: "USDT", ReceiveAddress: manualSettleAddress, ExpectedAmount: "4.48",
+		},
+	}
+	registry := payment.NewRegistry()
+	registry.Register(provider)
+
+	fetcher := &manualSettleFetcher{byNetwork: map[string][]chainverify.Transfer{
+		"binance": {{
+			Network: "binance", TxHash: manualSettleTxHash, Token: "USDT",
+			From: "0xeb2d2f1b8c558a40207669291fda468e50c8a0bb", To: manualSettleAddress,
+			Amount: decimal.RequireFromString(received), BlockTime: order.CreatedAt.Add(3 * time.Minute), Confirmations: 100,
+		}},
+	}}
+	previous := newTransferFetcher
+	newTransferFetcher = func(map[string][]string) transferFetcher { return fetcher }
+	t.Cleanup(func() { newTransferFetcher = previous })
+
+	return &manualSettleFixture{
+		svc: &PaymentService{
+			entClient:       client,
+			registry:        registry,
+			redeemService:   NewRedeemService(redeemRepo, userRepo, nil, nil, nil, client, nil, nil),
+			userRepo:        userRepo,
+			providersLoaded: true,
+		},
+		client: client, order: order, userRepo: userRepo, fetcher: fetcher, provider: provider,
+	}
+}
+
+func requireManualSettleReason(t *testing.T, err error, reason string) {
+	t.Helper()
+	require.Error(t, err)
+	require.Equal(t, reason, infraerrors.Reason(err), err.Error())
+}
+
+func TestAdminSettleOrderByTxHashSettlesShortPaidExpiredOrder(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusExpired, "4.47")
+
+	preview, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash, DryRun: true})
+	require.NoError(t, err)
+	require.False(t, preview.Settled)
+	require.Equal(t, "4.47", preview.ReceivedAmount)
+	require.Equal(t, "0.01", preview.Shortfall)
+	require.Equal(t, "binance", preview.Network)
+	reloaded, err := f.client.PaymentOrder.Get(ctx, f.order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusExpired, reloaded.Status, "dry run must not touch the order")
+	require.Zero(t, f.userRepo.getByIDUser.Balance)
+
+	result, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash, Operator: "admin:7"})
+	require.NoError(t, err)
+	require.True(t, result.Settled)
+	require.Equal(t, OrderStatusCompleted, result.OrderStatus)
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance, "the order is credited in full")
+
+	reloaded, err = f.client.PaymentOrder.Get(ctx, f.order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusCompleted, reloaded.Status)
+	require.Equal(t, 30.0, reloaded.PayAmount)
+	require.Equal(t, "gateway-trade-1", reloaded.PaymentTradeNo)
+
+	audit, err := f.client.PaymentAuditLog.Query().Where(
+		paymentauditlog.OrderIDEQ(strconv.FormatInt(f.order.ID, 10)),
+		paymentauditlog.ActionEQ(auditActionManualSettled),
+	).Only(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "admin:7", audit.Operator)
+	require.Contains(t, audit.Detail, "2a003b114b896199d75998e3712f8cc1f32118ed62ff38419d397282b183c404")
+	require.Contains(t, audit.Detail, `"shortfall":"0.01"`)
+}
+
+func TestAdminSettleOrderByTxHashRejectsReusedHash(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	// Another order was already paid by this transaction through the gateway callback.
+	f.svc.writeAuditLog(ctx, 999, "ORDER_PAID", payment.TypeEpusdt, map[string]any{
+		"tradeNo": "other", "txHash": "2A003B114B896199D75998E3712F8CC1F32118ED62FF38419D397282B183C404",
+	})
+
+	_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	requireManualSettleReason(t, err, "TX_ALREADY_USED")
+	require.Empty(t, f.fetcher.probed, "reuse is rejected before touching the chain")
+
+}
+
+func TestAdminSettleOrderByTxHashCannotSettleTwoOrdersWithOneHash(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	second, err := f.client.PaymentOrder.Create().
+		SetUserID(f.order.UserID).SetUserEmail(f.order.UserEmail).SetUserName(f.order.UserName).
+		SetAmount(30).SetPayAmount(30).SetFeeRate(0).
+		SetRechargeCode("MANUAL-SETTLE-CODE-2").SetOutTradeNo("sub2_manual_settle_2").
+		SetPaymentType(payment.TypeUSDT).SetPaymentTradeNo("gateway-trade-2").
+		SetOrderType(payment.OrderTypeBalance).SetStatus(OrderStatusExpired).
+		SetExpiresAt(time.Now().Add(-time.Hour)).SetClientIP("127.0.0.1").SetSrcHost("api.example.com").
+		Save(ctx)
+	require.NoError(t, err)
+
+	_, err = f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	require.NoError(t, err)
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance)
+
+	_, err = f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	requireManualSettleReason(t, err, "INVALID_STATUS")
+	_, err = f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	requireManualSettleReason(t, err, "TX_ALREADY_USED")
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance, "the same transfer is never credited twice")
+}
+
+func TestAdminSettleOrderByTxHashGuards(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("completed order", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusCompleted, "4.48")
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+		requireManualSettleReason(t, err, "INVALID_STATUS")
+	})
+
+	t.Run("malformed hash", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: "0x1234"})
+		requireManualSettleReason(t, err, "INVALID_TX_HASH")
+	})
+
+	t.Run("payer never picked a chain", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusExpired, "4.48")
+		f.provider.target = &payment.OnChainSettlementTarget{}
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+		requireManualSettleReason(t, err, "NO_CHAIN_QUOTE")
+	})
+
+	t.Run("paid to someone else", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusExpired, "4.48")
+		f.fetcher.byNetwork["binance"][0].To = "0x000000000000000000000000000000000000dead"
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+		requireManualSettleReason(t, err, "ADDRESS_MISMATCH")
+		require.Zero(t, f.userRepo.getByIDUser.Balance)
+	})
+
+	t.Run("trusted address after network switch", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusExpired, "4.48")
+		switched := "0x1111111111111111111111111111111111111111"
+		f.fetcher.byNetwork = map[string][]chainverify.Transfer{"polygon": {{
+			Network: "polygon", TxHash: manualSettleTxHash, Token: "USDC", To: switched,
+			Amount: decimal.RequireFromString("4.48"), BlockTime: f.order.CreatedAt.Add(time.Minute), Confirmations: 99,
+		}}}
+		f.provider.target.TrustedAddresses = []string{switched}
+		result, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash, DryRun: true})
+		require.NoError(t, err)
+		require.Equal(t, "polygon", result.Network)
+		require.Equal(t, []string{"binance", "polygon"}, f.fetcher.probed, "gateway network is probed first")
+	})
+
+	t.Run("transaction older than the order", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusExpired, "4.48")
+		f.fetcher.byNetwork["binance"][0].BlockTime = f.order.CreatedAt.Add(-2 * time.Hour)
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+		requireManualSettleReason(t, err, "TX_OUTSIDE_ORDER_WINDOW")
+	})
+
+	t.Run("shortfall too large", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusExpired, "2.9")
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+		requireManualSettleReason(t, err, "SHORTFALL_TOO_LARGE")
+		require.Zero(t, f.userRepo.getByIDUser.Balance)
+	})
+
+	t.Run("not final yet", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+		f.fetcher.errs = map[string]error{"binance": fmt.Errorf("%w: 2 of 5 on binance", chainverify.ErrUnconfirmed)}
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+		requireManualSettleReason(t, err, "TX_UNCONFIRMED")
+	})
+
+	t.Run("unknown everywhere", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+		f.fetcher.byNetwork = nil
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+		requireManualSettleReason(t, err, "TX_NOT_FOUND")
+		require.Equal(t, []string{"binance", "polygon", "ethereum"}, f.fetcher.probed, "a 0x hash is never probed on tron")
+	})
+}
+
+func TestManualSettleAllowedShortfall(t *testing.T) {
+	for expected, want := range map[string]string{
+		"4.48": "1.5",  // floor of 1.5 tokens covers a TRC20 exchange fee
+		"1":    "0.5",  // ...but never more than half the quote
+		"100":  "20",   // 20% on larger orders
+		"2.5":  "1.25", // cap wins over the floor
+	} {
+		got := manualSettleAllowedShortfall(decimal.RequireFromString(expected))
+		require.True(t, got.Equal(decimal.RequireFromString(want)), "expected %s: got %s want %s", expected, got, want)
+	}
+}
+
+func TestConfirmPaymentAuditsGatewayTxHash(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	err := f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt, map[string]string{
+		"block_transaction_id": manualSettleTxHash,
+	})
+	require.NoError(t, err)
+	usedBy, err := f.svc.orderUsingTxHash(ctx, "2a003b114b896199d75998e3712f8cc1f32118ed62ff38419d397282b183c404")
+	require.NoError(t, err)
+	require.Equal(t, strconv.FormatInt(f.order.ID, 10), usedBy)
+}

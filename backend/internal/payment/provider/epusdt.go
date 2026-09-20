@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/payment"
+	"github.com/Wei-Shaw/sub2api/internal/payment/chainverify"
 )
 
 // Epusdt 常量。接口契约来自 GMWalletApp/epusdt v2 的 wiki/API.md（GMPay 协议）。
@@ -110,6 +111,12 @@ func NormalizeEpusdtConfig(config map[string]string) (map[string]string, error) 
 			return nil, err
 		}
 		cfg["cashierBase"] = cashierBase
+	}
+
+	if cfg["chainRpc"] != "" {
+		if _, err := chainverify.ParseEndpointOverrides(cfg["chainRpc"]); err != nil {
+			return nil, fmt.Errorf("epusdt config chainRpc: %w", err)
+		}
 	}
 
 	return cfg, nil
@@ -384,6 +391,46 @@ func (e *Epusdt) QueryOrder(ctx context.Context, tradeNo string) (*payment.Query
 		result.Metadata["actual_amount"] = strconv.FormatFloat(info.ActualAmount, 'f', -1, 64)
 	}
 	return result, nil
+}
+
+// OnChainSettlementTarget reports where and how much the gateway expected for
+// an order so an admin can settle it by transaction hash. The checkout info
+// endpoint keeps answering after the order expired. Only the parent order is
+// known here: when the payer switched chains inside the cashier the gateway
+// tracks that in a sub-order, which is why TrustedAddresses exists.
+func (e *Epusdt) OnChainSettlementTarget(ctx context.Context, tradeNo string) (*payment.OnChainSettlementTarget, error) {
+	tradeNo = strings.TrimSpace(tradeNo)
+	if tradeNo == "" {
+		return nil, fmt.Errorf("epusdt settlement target: missing trade_id")
+	}
+	body, status, err := e.get(ctx, e.apiBase()+epusdtCheckoutInfoPath+url.PathEscape(tradeNo))
+	if err != nil {
+		return nil, fmt.Errorf("epusdt settlement target: %w", err)
+	}
+	var info epusdtCheckoutInfoData
+	if err := decodeEpusdtEnvelope(body, status, &info); err != nil {
+		return nil, fmt.Errorf("epusdt settlement target: %w", err)
+	}
+	target := &payment.OnChainSettlementTarget{
+		Network:        strings.ToLower(strings.TrimSpace(info.Network)),
+		Token:          strings.ToUpper(strings.TrimSpace(info.Token)),
+		ReceiveAddress: strings.TrimSpace(info.ReceiveAddress),
+	}
+	if info.ActualAmount > 0 {
+		target.ExpectedAmount = strconv.FormatFloat(info.ActualAmount, 'f', -1, 64)
+	}
+	for _, addr := range strings.FieldsFunc(e.config["receiveAddresses"], func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == ' '
+	}) {
+		if addr = strings.TrimSpace(addr); addr != "" {
+			target.TrustedAddresses = append(target.TrustedAddresses, addr)
+		}
+	}
+	if raw := e.config["chainRpc"]; raw != "" {
+		// Validated at save time; a parse error here just means "use defaults".
+		target.ChainRPC, _ = chainverify.ParseEndpointOverrides(raw)
+	}
+	return target, nil
 }
 
 // VerifyNotification verifies the GMPay JSON callback. The signature covers

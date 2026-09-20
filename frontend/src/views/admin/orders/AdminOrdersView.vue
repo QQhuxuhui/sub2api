@@ -30,6 +30,10 @@
               <Icon name="x" size="sm" />
               {{ t('payment.orders.cancel') }}
             </button>
+            <button v-if="canSettleByTx(row)" data-test="settle-by-tx" @click="openSettleDialog(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20">
+              <Icon name="check" size="sm" />
+              {{ t('payment.admin.settleByTx.action') }}
+            </button>
             <button v-if="row.status === 'FAILED'" @click="handleRetryOrder(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20">
               <Icon name="refresh" size="sm" />
               {{ t('payment.admin.retry') }}
@@ -111,6 +115,7 @@
       </div>
     </BaseDialog>
 
+    <AdminSettleByTxDialog :show="showSettleDialog" :order="settleOrder" @cancel="showSettleDialog = false" @settled="handleSettled" />
     <AdminRefundDialog :show="showRefundDialog" :order="selectedOrder" :submitting="refundSubmitting" :require-force="refundRequireForce" :warning="refundWarning" @confirm="handleRefund" @cancel="closeRefundDialog" />
   </AppLayout>
 </template>
@@ -129,6 +134,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import AdminRefundDialog from '@/components/admin/payment/AdminRefundDialog.vue'
+import AdminSettleByTxDialog from '@/components/admin/payment/AdminSettleByTxDialog.vue'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
 import OrderTable from '@/components/payment/OrderTable.vue'
 import { currencySymbol } from '@/components/payment/currency'
@@ -231,6 +237,23 @@ async function showOrderDetail(order: PaymentOrder) {
 async function handleCancelOrder(order: PaymentOrder) {
   try { await adminPaymentAPI.cancelOrder(order.id); appStore.showSuccess(t('payment.admin.orderCancelled')); loadOrders() }
   catch (err: unknown) { appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error'))) }
+}
+
+// Crypto orders the gateway never matched (short by a withdrawal fee, paid
+// after expiry) can be settled against the on-chain transaction.
+const showSettleDialog = ref(false)
+const settleOrder = ref<PaymentOrder | null>(null)
+function canSettleByTx(order: PaymentOrder) {
+  return order.payment_type === 'usdt' && ['PENDING', 'EXPIRED', 'CANCELLED'].includes(order.status)
+}
+function openSettleDialog(order: PaymentOrder) {
+  settleOrder.value = order
+  showSettleDialog.value = true
+}
+function handleSettled() {
+  showSettleDialog.value = false
+  appStore.showSuccess(t('payment.admin.settleByTx.success'))
+  loadOrders()
 }
 
 async function handleRetryOrder(order: PaymentOrder) {

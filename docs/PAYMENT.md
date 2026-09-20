@@ -174,6 +174,28 @@ Integrates a self-hosted [Epusdt / GM Pay](https://github.com/GMWalletApp/epusdt
 > - Callbacks are verified with the secret of the `pid` they carry and matched against the PID snapshotted on the order; the fiat amount is checked against the order.
 > - On-chain transfers are irreversible and the gateway has no refund API, so keep refunds disabled. Admin order queries read the gateway status first and, once paid, the cashier info to recover the amount.
 
+#### Settling by transaction hash
+
+The gateway matches transfers by receiving address plus the exact amount. Exchange withdrawals often deduct the fee from the withdrawn amount, and a transfer that arrives even 0.01 short is never matched, so the order is not credited. For USDT orders in `PENDING / EXPIRED / CANCELLED`, an admin can use **Settle by hash** in **Orders**: paste the hash, **Verify on chain** (read-only: amount received vs expected, sender, recipient, block time), then **Confirm and credit** (the order completes in full and the hash is written to the audit log).
+
+Every rule must hold:
+
+| Rule | Detail |
+|------|--------|
+| Transaction succeeded and is final enough | 20 blocks on TRON, 5 on BSC / Ethereum, 30 on Polygon |
+| Recipient belongs to the order | The address the gateway recorded for the order, or one of the instance's trusted receiving addresses |
+| Supported token | TRON USDT; BSC USDT/USDC; Polygon USDT/USDC/USDC.E; Ethereum USDT/USDC |
+| Transaction time belongs to the order | No earlier than 10 minutes before the order, no later than 7 days after |
+| Hash not used before | Hashes credited through a gateway callback or a previous settlement are rejected |
+| Shortfall within tolerance | At most `max(expected × 20%, 1.5)` and never above 50% of the expected amount; beyond that adjust the balance manually |
+
+| Optional parameter | Description |
+|------|------|
+| **Trusted receiving addresses** | Comma separated. When the payer switches network inside the cashier the gateway tracks it in a sub-order, while Sub2API only knows the parent order's address; list the receiving addresses you configured on the gateway for every chain |
+| **Chain RPC endpoints** | Public RPC nodes are used by default; override with `binance=https://node,tron=https://node` (tron / binance / polygon / ethereum, https only) |
+
+> Overpayments are credited at the order amount. Orders credited by gateway callback before this feature shipped have no hash in their audit log, so the reuse check does not cover them.
+
 ---
 
 ## Provider Instance Management
