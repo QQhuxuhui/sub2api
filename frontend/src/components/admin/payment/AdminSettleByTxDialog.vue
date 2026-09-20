@@ -127,6 +127,16 @@ const preview = ref<SettleByTxResult | null>(null)
 const errorMessage = ref('')
 const errorDetail = ref('')
 
+type RequestSnapshot = {
+  orderId: number
+  txHash: string
+  network: string
+  generation: number
+}
+
+let generation = 0
+let verifiedInput: RequestSnapshot | null = null
+
 const creditedAmountSymbol = computed(() => currencySymbol('USD'))
 const paymentAmountSymbol = computed(() => currencySymbol(props.order?.currency))
 const hasShortfall = computed(() => !!preview.value && Number(preview.value.shortfall) > 0)
@@ -145,17 +155,28 @@ const previewRows = computed(() => {
   ]
 })
 
-// A verified preview only stands for the exact input it was made from.
-watch(() => [form.txHash, form.network], () => { preview.value = null })
-
-watch(() => props.show, (open) => {
-  if (!open) return
-  form.txHash = ''
-  form.network = ''
+function invalidateRequests() {
+  generation++
+  verifiedInput = null
   preview.value = null
+  busy.value = false
   errorMessage.value = ''
   errorDetail.value = ''
-})
+}
+
+// Invalidate synchronously, including edits restored before the next render.
+watch(() => [form.txHash, form.network], invalidateRequests, { flush: 'sync' })
+watch([() => props.show, () => props.order?.id], () => {
+  invalidateRequests()
+  form.txHash = ''
+  form.network = ''
+}, { flush: 'sync' })
+
+function isCurrent(snapshot: RequestSnapshot) {
+  return props.show && snapshot.generation === generation &&
+    snapshot.orderId === props.order?.id &&
+    snapshot.txHash === form.txHash && snapshot.network === form.network
+}
 
 function showError(err: unknown) {
   const raw = extractApiErrorMessage(err, '')
@@ -163,33 +184,45 @@ function showError(err: unknown) {
   errorDetail.value = raw && raw !== errorMessage.value ? raw : ''
 }
 
-async function run(dryRun: boolean) {
-  if (!props.order || busy.value) return null
+async function run(dryRun: boolean, input: Omit<RequestSnapshot, 'generation'>) {
+  const snapshot: RequestSnapshot = { ...input, generation: ++generation }
   busy.value = true
   errorMessage.value = ''
   errorDetail.value = ''
+  if (dryRun) {
+    verifiedInput = null
+    preview.value = null
+  }
   try {
-    const res = await adminPaymentAPI.settleByTx(props.order.id, {
-      tx_hash: form.txHash,
-      network: form.network || undefined,
+    const res = await adminPaymentAPI.settleByTx(snapshot.orderId, {
+      tx_hash: snapshot.txHash,
+      network: snapshot.network || undefined,
       dry_run: dryRun,
     })
-    return res.data
+    if (!isCurrent(snapshot)) return
+    if (dryRun) {
+      verifiedInput = snapshot
+      preview.value = res.data
+    } else {
+      emit('settled', res.data)
+    }
   } catch (err) {
+    if (!isCurrent(snapshot)) return
+    verifiedInput = null
     preview.value = null
     showError(err)
-    return null
   } finally {
-    busy.value = false
+    if (isCurrent(snapshot)) busy.value = false
   }
 }
 
-async function verify() {
-  preview.value = await run(true)
+function verify() {
+  if (!props.show || !props.order || busy.value || !form.txHash) return
+  return run(true, { orderId: props.order.id, txHash: form.txHash, network: form.network })
 }
 
-async function settle() {
-  const result = await run(false)
-  if (result) emit('settled', result)
+function settle() {
+  if (busy.value || !preview.value || !verifiedInput || !isCurrent(verifiedInput)) return
+  return run(false, verifiedInput)
 }
 </script>

@@ -1257,6 +1257,31 @@ var (
 			},
 		},
 	}
+	// PaymentTransactionClaimsColumns holds the columns for the "payment_transaction_claims" table.
+	PaymentTransactionClaimsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "tx_hash", Type: field.TypeString, Size: 512},
+		{Name: "order_id", Type: field.TypeInt64},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// PaymentTransactionClaimsTable holds the schema information for the "payment_transaction_claims" table.
+	PaymentTransactionClaimsTable = &schema.Table{
+		Name:       "payment_transaction_claims",
+		Columns:    PaymentTransactionClaimsColumns,
+		PrimaryKey: []*schema.Column{PaymentTransactionClaimsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "paymenttransactionclaim_tx_hash",
+				Unique:  true,
+				Columns: []*schema.Column{PaymentTransactionClaimsColumns[1]},
+			},
+			{
+				Name:    "paymenttransactionclaim_order_id",
+				Unique:  false,
+				Columns: []*schema.Column{PaymentTransactionClaimsColumns[2]},
+			},
+		},
+	}
 	// PendingAuthSessionsColumns holds the columns for the "pending_auth_sessions" table.
 	PendingAuthSessionsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2116,6 +2141,7 @@ var (
 		PaymentAuditLogsTable,
 		PaymentOrdersTable,
 		PaymentProviderInstancesTable,
+		PaymentTransactionClaimsTable,
 		PendingAuthSessionsTable,
 		PromoCodesTable,
 		PromoCodeUsagesTable,
@@ -2219,6 +2245,9 @@ func init() {
 	}
 	PaymentProviderInstancesTable.Annotation = &entsql.Annotation{
 		Table: "payment_provider_instances",
+	}
+	PaymentTransactionClaimsTable.Annotation = &entsql.Annotation{
+		Table: "payment_transaction_claims",
 	}
 	PendingAuthSessionsTable.ForeignKeys[0].RefTable = UsersTable
 	PendingAuthSessionsTable.Annotation = &entsql.Annotation{

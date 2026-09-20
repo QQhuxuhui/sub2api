@@ -72,6 +72,9 @@ type PaymentOrder func(*sql.Selector)
 // PaymentProviderInstance is the predicate function for paymentproviderinstance builders.
 type PaymentProviderInstance func(*sql.Selector)
 
+// PaymentTransactionClaim is the predicate function for paymenttransactionclaim builders.
+type PaymentTransactionClaim func(*sql.Selector)
+
 // PendingAuthSession is the predicate function for pendingauthsession builders.
 type PendingAuthSession func(*sql.Selector)
 

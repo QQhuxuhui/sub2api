@@ -172,7 +172,7 @@ Integrates a self-hosted [Epusdt / GM Pay](https://github.com/GMWalletApp/epusdt
 > - With both token and network empty the gateway creates a placeholder order and the payer picks any chain enabled on the gateway in the cashier. Filling only one of them is rejected.
 > - The notify and return URLs are submitted with every order, so nothing needs configuring in the Epusdt admin, but the gateway must be able to reach this site's webhook URL.
 > - Callbacks are verified with the secret of the `pid` they carry and matched against the PID snapshotted on the order; the fiat amount is checked against the order.
-> - On-chain transfers are irreversible and the gateway has no refund API, so keep refunds disabled. Admin order queries read the gateway status first and, once paid, the cashier info to recover the amount.
+> - On-chain transfers are irreversible and the gateway has no refund API, so keep refunds disabled. Admin order queries read the gateway status first and, once paid, the cashier info to recover the amount. A paid Epusdt query without `block_transaction_id` keeps the local order pending and prevents cancellation/expiry; credit waits for the signed callback with its transaction reference or a verified manual settlement. Retry the gateway notification if delivery failed.
 
 #### Settling by transaction hash
 
@@ -184,9 +184,10 @@ Every rule must hold:
 |------|--------|
 | Transaction succeeded and is final enough | 20 blocks on TRON, 5 on BSC / Ethereum, 30 on Polygon |
 | Recipient belongs to the order | The address the gateway recorded for the order, or one of the instance's trusted receiving addresses |
+| Quote unit | The gateway quote must be USDT, USDC or USDC.E. Native-coin quotes such as SOL/TRX are not compared numerically with stablecoins |
 | Supported token | TRON USDT; BSC USDT/USDC; Polygon USDT/USDC/USDC.E; Ethereum USDT/USDC |
 | Transaction time belongs to the order | No earlier than 2 minutes before the order, no later than 24 hours after |
-| Hash not used before | Hashes credited through a gateway callback or a previous settlement are rejected |
+| Hash not used before | Gateway callbacks and manual settlement share a database-unique claim committed atomically with the paid order and audit. Refunds do not release it; concurrent attempts for other orders are rejected |
 | Amount within tolerance | Short or over by at most `max(expected × 20%, 1.5)`, never more than 50% of the expected amount; beyond that adjust the balance manually |
 
 | Optional parameter | Description |
@@ -196,7 +197,7 @@ Every rule must hold:
 
 > **Claim fraud**: chain data is public and receiving addresses are shared by every order (and every site using the same gateway wallet). Someone can open an order for a common amount and present a stranger's transfer of a similar amount. Hashes already credited on this site are rejected, but **sites sharing one gateway wallet are not covered** — before confirming, check the sender / withdrawal record belongs to the user and that the gateway has not attached the hash to another order.
 >
-> Overpayments within tolerance are credited at the order amount. Orders credited by gateway callback before this feature shipped have no hash in their audit log, so the reuse check does not cover them.
+> Overpayments within tolerance are credited at the order amount. Existing audit hashes remain protected after migration 239. Older orders without a recorded hash stay outside the reuse check until a signed callback supplies it; late callbacks register the hash without crediting the order again. Preserve legacy payment audit records. Upgrade all application replicas together so every writer uses transaction claims.
 
 ---
 

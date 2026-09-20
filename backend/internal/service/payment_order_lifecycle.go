@@ -26,6 +26,7 @@ const (
 	rateLimitModeFixed         = "fixed"
 	checkPaidResultAlreadyPaid = "already_paid"
 	checkPaidResultCancelled   = "cancelled"
+	checkPaidResultAwaitingTx  = "awaiting_transaction"
 
 	pendingPaymentReconcileLimit = 20
 )
@@ -123,7 +124,8 @@ func (s *PaymentService) AdminCancelOrder(ctx context.Context, orderID int64) (s
 
 func (s *PaymentService) cancelCore(ctx context.Context, o *dbent.PaymentOrder, fs, op, ad string) (string, error) {
 	if o.PaymentTradeNo != "" || o.PaymentType != "" {
-		if s.checkPaid(ctx, o) == checkPaidResultAlreadyPaid {
+		switch s.checkPaid(ctx, o) {
+		case checkPaidResultAlreadyPaid, checkPaidResultAwaitingTx:
 			return checkPaidResultAlreadyPaid, nil
 		}
 	}
@@ -179,6 +181,12 @@ func (s *PaymentService) checkPaidWithOptions(ctx context.Context, o *dbent.Paym
 				return ""
 			}
 			resp = retriedResp
+		}
+		if prov.ProviderKey() == payment.TypeEpusdt && paymentTxHashFromMetadata(resp.Metadata) == "" {
+			// The public gateway query reports payment status without its chain
+			// hash. Keep the order open for the signed callback; a hashless
+			// payment cannot participate in cross-order deduplication.
+			return checkPaidResultAwaitingTx
 		}
 		notificationTradeNo := o.PaymentTradeNo
 		if upstreamTradeNo := strings.TrimSpace(resp.TradeNo); paymentOrderShouldPersistUpstreamTradeNo(queryRef, upstreamTradeNo, notificationTradeNo) {

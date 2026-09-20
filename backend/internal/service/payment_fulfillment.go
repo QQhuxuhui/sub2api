@@ -113,7 +113,11 @@ func (s *PaymentService) confirmPayment(ctx context.Context, oid int64, tradeNo 
 		s.writeAuditLog(ctx, o.ID, "PAYMENT_AMOUNT_MISMATCH", pk, map[string]any{"expected": o.PayAmount, "paid": paid, "tradeNo": tradeNo})
 		return fmt.Errorf("amount mismatch: expected %s, got %s", strconv.FormatFloat(o.PayAmount, 'f', -1, 64), strconv.FormatFloat(paid, 'f', -1, 64))
 	}
-	return s.toPaid(ctx, o, tradeNo, paid, pk, paymentTxHashFromMetadata(metadata))
+	txHash := paymentTxHashFromMetadata(metadata)
+	if strings.EqualFold(pk, payment.TypeEpusdt) && txHash == "" {
+		return infraerrors.BadRequest("MISSING_TX_HASH", "Epusdt payment is awaiting a transaction reference; retry its signed notification or settle by verified transaction hash")
+	}
+	return s.toPaid(ctx, o, tradeNo, paid, pk, txHash)
 }
 
 func paymentAmountToleranceForCurrency(currency string) float64 {
@@ -147,14 +151,27 @@ func expectedNotificationProviderKey(registry *payment.Registry, orderPaymentTyp
 	return strings.TrimSpace(orderPaymentType)
 }
 
-// toPaid marks the order paid and runs fulfillment. txHash is the on-chain
-// hash reported by crypto gateways (empty otherwise); it is audited so a manual
-// settle-by-hash cannot reuse a transaction the gateway already matched.
+// toPaid commits a crypto transaction's ownership together with the PAID
+// transition, then runs the independently idempotent fulfillment step.
 func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, tradeNo string, paid float64, pk string, txHash string) error {
+	client := s.entClient
+	var tx *dbent.Tx
+	if txHash != "" {
+		var err error
+		tx, err = s.entClient.Tx(ctx)
+		if err != nil {
+			return fmt.Errorf("begin payment confirmation: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		client = tx.Client()
+		if err := claimPaymentTransaction(ctx, client, o.ID, txHash); err != nil {
+			return err
+		}
+	}
 	previousStatus := o.Status
 	now := time.Now()
 	grace := now.Add(-paymentGraceMinutes * time.Minute)
-	c, err := s.entClient.PaymentOrder.Update().Where(
+	c, err := client.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),
 		paymentorder.Or(
 			paymentorder.StatusEQ(OrderStatusPending),
@@ -169,7 +186,37 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 		return fmt.Errorf("update to PAID: %w", err)
 	}
 	if c == 0 {
+		if tx != nil {
+			current, err := client.PaymentOrder.Get(ctx, o.ID)
+			if err != nil {
+				return fmt.Errorf("reload payment confirmation: %w", err)
+			}
+			if !manualSettleAllowedStatus(current.Status) {
+				// Backfill transaction ownership even when a legacy query or an
+				// earlier payment already fulfilled this order.
+				if err := writePaymentAudit(ctx, client, o.ID, "ORDER_TX_LINKED", pk, map[string]any{"tradeNo": tradeNo, "txHash": txHash}); err != nil {
+					return err
+				}
+				if err := tx.Commit(); err != nil {
+					return fmt.Errorf("commit late payment transaction: %w", err)
+				}
+			} else if err := tx.Rollback(); err != nil {
+				return fmt.Errorf("rollback unaccepted payment: %w", err)
+			}
+		}
 		return s.alreadyProcessed(ctx, o)
+	}
+	paidDetail := map[string]any{"tradeNo": tradeNo, "paidAmount": paid}
+	if tx != nil {
+		paidDetail["txHash"] = txHash
+		if err := writePaymentAudit(ctx, client, o.ID, "ORDER_PAID", pk, paidDetail); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit payment confirmation: %w", err)
+		}
+	} else {
+		s.writeAuditLog(ctx, o.ID, "ORDER_PAID", pk, paidDetail)
 	}
 	if previousStatus == OrderStatusCancelled || previousStatus == OrderStatusExpired {
 		slog.Info("order recovered from webhook payment success",
@@ -185,11 +232,6 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 			"reason":          "webhook payment success received after order " + previousStatus,
 		})
 	}
-	paidDetail := map[string]any{"tradeNo": tradeNo, "paidAmount": paid}
-	if txHash != "" {
-		paidDetail["txHash"] = txHash
-	}
-	s.writeAuditLog(ctx, o.ID, "ORDER_PAID", pk, paidDetail)
 	return s.executeFulfillment(ctx, o.ID)
 }
 

@@ -327,19 +327,21 @@ func resolveEpusdtReturnedRef(apiBase, ref string) string {
 }
 
 type epusdtCheckStatusData struct {
-	TradeID string `json:"trade_id"`
-	Status  int    `json:"status"`
+	TradeID            string `json:"trade_id"`
+	Status             int    `json:"status"`
+	BlockTransactionID string `json:"block_transaction_id"`
 }
 
 type epusdtCheckoutInfoData struct {
-	TradeID        string  `json:"trade_id"`
-	Amount         float64 `json:"amount"`
-	ActualAmount   float64 `json:"actual_amount"`
-	Token          string  `json:"token"`
-	Currency       string  `json:"currency"`
-	ReceiveAddress string  `json:"receive_address"`
-	Network        string  `json:"network"`
-	Status         int     `json:"status"`
+	TradeID            string  `json:"trade_id"`
+	Amount             float64 `json:"amount"`
+	ActualAmount       float64 `json:"actual_amount"`
+	Token              string  `json:"token"`
+	Currency           string  `json:"currency"`
+	ReceiveAddress     string  `json:"receive_address"`
+	Network            string  `json:"network"`
+	Status             int     `json:"status"`
+	BlockTransactionID string  `json:"block_transaction_id"`
 }
 
 // QueryOrder polls the gateway by trade_id. check-status only carries the
@@ -389,6 +391,16 @@ func (e *Epusdt) QueryOrder(ctx context.Context, tradeNo string) (*payment.Query
 	}
 	if info.ActualAmount > 0 {
 		result.Metadata["actual_amount"] = strconv.FormatFloat(info.ActualAmount, 'f', -1, 64)
+	}
+	// Public Epusdt APIs currently omit the chain hash. Carry it when a
+	// gateway version supplies it; otherwise the service waits for the signed
+	// notification rather than fulfilling a payment with no deduplication key.
+	hash := strings.TrimSpace(statusData.BlockTransactionID)
+	if hash == "" {
+		hash = strings.TrimSpace(info.BlockTransactionID)
+	}
+	if hash != "" {
+		result.Metadata["block_transaction_id"] = hash
 	}
 	return result, nil
 }
