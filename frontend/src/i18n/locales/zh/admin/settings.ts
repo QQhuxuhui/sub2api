@@ -793,7 +793,7 @@ export default {
         field_epusdtCashierBaseHint: '可选。网关返回的收银台链接固定使用它自己的站点地址；若你把同一个网关另外反代到本站域名（如 https://pay.example.com），填在这里后用户跳转的收银台链接会改写到该域名。该域名需放行网关的 /pay、/cashier、/assets 路径。留空则使用网关原始地址。',
         field_epusdtPidHint: 'Epusdt 后台「API 密钥」中的商户 PID，默认安装为 1000；密钥填该 PID 对应的 secret_key。',
         field_epusdtApiBaseHint: 'Epusdt 站点地址（如 https://pay.example.com），不要带 /payments/... 路径；Sub2API 会自行拼接 GMPay 接口和收银台地址。',
-        field_epusdtChainHint: '固定收款链时同时填写币种和网络（如 usdt / tron、usdt / bsc）；两项都留空则由用户在收银台自行选择网关已启用的链。只填其中一项会被拒绝。',
+        field_epusdtChainHint: '固定收款链时同时填写币种和网络（如 usdt / tron、usdt / binance；网络名以网关 /payments/gmpay/v1/config 返回的 network 为准，BSC 要写 binance）；两项都留空则由用户在收银台自行选择网关已启用的链。只填其中一项会被拒绝。',
         epusdtGuideSummary: '接入自托管 Epusdt（GM Pay）加密货币网关：按法币金额下单，用户跳转到网关收银台转账，链上到账后网关回调 Sub2API 自动完成充值。',
         epusdtGuideNote: '异步通知地址和同步跳转地址随每笔订单提交给网关，无需在 Epusdt 后台配置；Epusdt 需要能访问本站的回调地址。链上转账不可撤销，该服务商不支持网关退款，请勿开启退款。',
         field_accountIdHint: '不涉及多账户、组织级密钥或连接账户收款时可以不填；单账户 Scoped API Key 会默认使用所选账户。',

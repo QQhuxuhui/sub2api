@@ -173,7 +173,7 @@ Sub2API 内置支付系统，支持用户自助充值，无需部署独立的支
 | **密钥** | 该 PID 对应的 `secret_key` | 是 |
 | **API 基础地址** | Epusdt 站点地址，如 `https://pay.example.com`，不带 `/payments/...` 路径 | 是 |
 | **收款币种（token）** | 固定收款代币，如 `usdt`；与网络同填或同空 | 否 |
-| **收款网络（network）** | 固定收款网络，如 `tron`、`bsc`、`solana`；与币种同填或同空 | 否 |
+| **收款网络（network）** | 固定收款网络，如 `tron`、`binance`（即 BSC）、`solana`，以网关 `/payments/gmpay/v1/config` 返回的 network 为准；与币种同填或同空 | 否 |
 | **支付币种** | 下单法币币种，默认 CNY；网关按自身汇率换算成代币数量 | 是 |
 | **收银台域名** | 可选。把同一网关另外反代到本站域名（如 `https://pay.example.com`，放行 `/pay`、`/cashier`、`/assets`）后填写，用户跳转的收银台链接会改写到该域名；留空使用网关原始地址 | 否 |
 
