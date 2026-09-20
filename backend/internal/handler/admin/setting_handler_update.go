@@ -2115,14 +2115,20 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 	}
 
-	h.auditSettingsUpdate(c, previousSettings, settings, previousAuthSourceDefaults, authSourceDefaults, auditReq)
-
 	// 重新获取设置返回
 	updatedSettings, err := h.settingService.GetAllSettings(c.Request.Context())
 	if err != nil {
+		// The write already landed, so it must still be audited; the request-built
+		// value is the best "after" state left.
+		h.auditSettingsUpdate(c, previousSettings, settings, previousAuthSourceDefaults, authSourceDefaults, auditReq)
 		response.ErrorFrom(c, err)
 		return
 	}
+	// Audit against what was actually stored. The request-built settings carry
+	// zero values for every field a partial payload omitted, while the write
+	// keeps those fields untouched, so diffing against them reports changes
+	// (e.g. telegram_url, doc_url) that never happened.
+	h.auditSettingsUpdate(c, previousSettings, updatedSettings, previousAuthSourceDefaults, authSourceDefaults, auditReq)
 	h.ensureDingTalkSyncAttributes(c.Request.Context(), updatedSettings)
 	updatedAuthSourceDefaults, err := h.settingService.GetAuthSourceDefaultSettings(c.Request.Context())
 	if err != nil {

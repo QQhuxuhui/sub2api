@@ -648,7 +648,7 @@ export default {
         docUrlHint: '文档网站的链接。留空则隐藏文档链接。',
         docUrlPlaceholder: 'https://docs.example.com',
         telegramUrl: 'Telegram 链接',
-        telegramUrlPlaceholder: 'https://t.me/xxx（留空则登录页不显示入口）',
+        telegramUrlPlaceholder: 'https://t.me/xxx（留空则首页不显示 Telegram 入口）',
         qqGroupUrl: 'QQ 群链接',
         qqGroupUrlPlaceholder: 'QQ 群加群链接或群号页面 URL（留空则不显示）',
         siteLogo: '站点Logo',

@@ -656,7 +656,7 @@ export default {
         docUrlPlaceholder: 'https://docs.example.com',
         docUrlHint: 'Link to your documentation site. Leave empty to hide the documentation link.',
         telegramUrl: 'Telegram Link',
-        telegramUrlPlaceholder: 'https://t.me/xxx (leave empty to hide the entry on the login page)',
+        telegramUrlPlaceholder: 'https://t.me/xxx (leave empty to hide the Telegram entry on the home page)',
         qqGroupUrl: 'QQ Group Link',
         qqGroupUrlPlaceholder: 'QQ group join link or group page URL (leave empty to hide)',
         siteLogo: 'Site Logo',

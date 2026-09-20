@@ -84,6 +84,23 @@ describe('HomeView Telegram contact link', () => {
     expect(wrapper.get('[data-test="home-telegram"]').attributes('href')).toBe(TG)
   })
 
+  // jsdom has no layout, so this guards the classes the fix relies on; the real
+  // check was done in Chrome at 320-1280px across every entry combination.
+  it('keeps the header wrap-safe so optional entries cannot push Login off a 320px screen', () => {
+    const wrapper = mountHome({ telegram_url: TG, doc_url: 'https://docs.example.com', model_plaza_enabled: true })
+    const link = wrapper.get('[data-test="home-telegram"]')
+    const actions = link.element.parentElement as HTMLElement
+    const nav = actions.parentElement as HTMLElement
+
+    expect(nav.tagName).toBe('NAV')
+    expect(nav.classList.contains('flex-wrap')).toBe(true)
+    expect(actions.classList.contains('flex-wrap')).toBe(true)
+    expect(actions.classList.contains('min-w-0')).toBe(true)
+    // Icon-only on small screens: the label appears from the sm breakpoint up.
+    expect(link.get('span').classes()).toEqual(expect.arrayContaining(['hidden', 'sm:inline']))
+    expect(link.attributes('aria-label')).toBe('home.contactTelegram')
+  })
+
   it('renders nothing when unset or when the URL is not safe', () => {
     expect(mountHome().find('[data-test="home-telegram"]').exists()).toBe(false)
 

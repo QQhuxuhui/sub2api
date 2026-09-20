@@ -129,8 +129,10 @@
     </div>
 
     <!-- Header -->
-    <header class="relative z-20 px-6 py-4">
-      <nav class="mx-auto flex max-w-6xl items-center justify-between">
+    <header class="relative z-20 px-4 py-4 sm:px-6">
+      <!-- Wraps instead of clipping: on a 320px screen the optional entries
+           (docs, model plaza, Telegram) must never push Login off-screen. -->
+      <nav class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-2 gap-y-2">
         <!-- Logo -->
         <div class="flex items-center">
           <div class="h-10 w-10 overflow-hidden rounded-xl shadow-md">
@@ -139,7 +141,7 @@
         </div>
 
         <!-- Nav Actions -->
-        <div class="flex items-center gap-3">
+        <div class="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-x-1 gap-y-2 sm:gap-x-3">
           <!-- Language Switcher -->
           <LocaleSwitcher />
 
@@ -150,10 +152,11 @@
             :href="telegramUrl"
             target="_blank"
             rel="noopener noreferrer"
-            class="inline-flex items-center gap-2 rounded-full border border-gray-200/90 bg-white/75 px-3 py-1.5 text-sm font-medium text-gray-700 backdrop-blur-sm transition-colors hover:border-[#26A5E4]/60 hover:text-gray-900 dark:border-dark-700/80 dark:bg-dark-800/75 dark:text-gray-200 dark:hover:border-[#26A5E4]/50 dark:hover:text-white"
+            class="inline-flex shrink-0 items-center gap-2 rounded-lg p-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-dark-800 dark:hover:text-white sm:rounded-full sm:border sm:border-gray-200/90 sm:bg-white/75 sm:px-3 sm:py-1.5 sm:backdrop-blur-sm sm:hover:border-[#26A5E4]/60 sm:hover:bg-white/75 sm:dark:border-dark-700/80 sm:dark:bg-dark-800/75 sm:dark:hover:border-[#26A5E4]/50 sm:dark:hover:bg-dark-800/75"
             :title="t('home.contactTelegram')"
+            :aria-label="t('home.contactTelegram')"
           >
-            <svg class="h-4 w-4 text-[#26A5E4]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <svg class="h-5 w-5 text-[#26A5E4] sm:h-4 sm:w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path :d="TELEGRAM_PATH" />
             </svg>
             <span class="hidden sm:inline">Telegram</span>
