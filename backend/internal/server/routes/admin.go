@@ -121,6 +121,7 @@ func RegisterAdminRoutes(
 
 		// 风控中心
 		registerContentModerationRoutes(admin, h)
+		registerIntentRouterRoutes(admin, h)
 
 		// 独立提示词输入审计
 		registerPromptAuditRoutes(admin, h)
@@ -164,6 +165,20 @@ func registerAdminComplianceRoutes(admin *gin.RouterGroup, h *handler.Handlers) 
 	{
 		compliance.GET("", h.Admin.Compliance.GetStatus)
 		compliance.POST("/accept", h.Admin.Compliance.Accept)
+	}
+}
+
+// registerIntentRouterRoutes：按分组配置的意图识别路由。
+func registerIntentRouterRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	routers := admin.Group("/intent-routers")
+	{
+		routers.GET("", h.Admin.IntentRouter.List)
+		routers.GET("/events", h.Admin.IntentRouter.Events)
+		routers.GET("/:group_id", h.Admin.IntentRouter.Get)
+		routers.PUT("/:group_id", h.Admin.IntentRouter.Save)
+		routers.DELETE("/:group_id", h.Admin.IntentRouter.Delete)
+		routers.POST("/:group_id/test", h.Admin.IntentRouter.Test)
+		routers.POST("/:group_id/clear-cache", h.Admin.IntentRouter.ClearCache)
 	}
 }
 

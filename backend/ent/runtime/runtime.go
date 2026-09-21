@@ -24,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/intentrouter"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -1286,6 +1287,61 @@ func init() {
 	identityadoptiondecisionDescDecidedAt := identityadoptiondecisionFields[4].Descriptor()
 	// identityadoptiondecision.DefaultDecidedAt holds the default value on creation for the decided_at field.
 	identityadoptiondecision.DefaultDecidedAt = identityadoptiondecisionDescDecidedAt.Default.(func() time.Time)
+	intentrouterMixin := schema.IntentRouter{}.Mixin()
+	intentrouterMixinFields0 := intentrouterMixin[0].Fields()
+	_ = intentrouterMixinFields0
+	intentrouterFields := schema.IntentRouter{}.Fields()
+	_ = intentrouterFields
+	// intentrouterDescCreatedAt is the schema descriptor for created_at field.
+	intentrouterDescCreatedAt := intentrouterMixinFields0[0].Descriptor()
+	// intentrouter.DefaultCreatedAt holds the default value on creation for the created_at field.
+	intentrouter.DefaultCreatedAt = intentrouterDescCreatedAt.Default.(func() time.Time)
+	// intentrouterDescUpdatedAt is the schema descriptor for updated_at field.
+	intentrouterDescUpdatedAt := intentrouterMixinFields0[1].Descriptor()
+	// intentrouter.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	intentrouter.DefaultUpdatedAt = intentrouterDescUpdatedAt.Default.(func() time.Time)
+	// intentrouter.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	intentrouter.UpdateDefaultUpdatedAt = intentrouterDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// intentrouterDescEnabled is the schema descriptor for enabled field.
+	intentrouterDescEnabled := intentrouterFields[1].Descriptor()
+	// intentrouter.DefaultEnabled holds the default value on creation for the enabled field.
+	intentrouter.DefaultEnabled = intentrouterDescEnabled.Default.(bool)
+	// intentrouterDescClassifierBaseURL is the schema descriptor for classifier_base_url field.
+	intentrouterDescClassifierBaseURL := intentrouterFields[2].Descriptor()
+	// intentrouter.DefaultClassifierBaseURL holds the default value on creation for the classifier_base_url field.
+	intentrouter.DefaultClassifierBaseURL = intentrouterDescClassifierBaseURL.Default.(string)
+	// intentrouter.ClassifierBaseURLValidator is a validator for the "classifier_base_url" field. It is called by the builders before save.
+	intentrouter.ClassifierBaseURLValidator = intentrouterDescClassifierBaseURL.Validators[0].(func(string) error)
+	// intentrouterDescClassifierAPIKey is the schema descriptor for classifier_api_key field.
+	intentrouterDescClassifierAPIKey := intentrouterFields[3].Descriptor()
+	// intentrouter.DefaultClassifierAPIKey holds the default value on creation for the classifier_api_key field.
+	intentrouter.DefaultClassifierAPIKey = intentrouterDescClassifierAPIKey.Default.(string)
+	// intentrouter.ClassifierAPIKeyValidator is a validator for the "classifier_api_key" field. It is called by the builders before save.
+	intentrouter.ClassifierAPIKeyValidator = intentrouterDescClassifierAPIKey.Validators[0].(func(string) error)
+	// intentrouterDescClassifierProtocol is the schema descriptor for classifier_protocol field.
+	intentrouterDescClassifierProtocol := intentrouterFields[4].Descriptor()
+	// intentrouter.DefaultClassifierProtocol holds the default value on creation for the classifier_protocol field.
+	intentrouter.DefaultClassifierProtocol = intentrouterDescClassifierProtocol.Default.(string)
+	// intentrouter.ClassifierProtocolValidator is a validator for the "classifier_protocol" field. It is called by the builders before save.
+	intentrouter.ClassifierProtocolValidator = intentrouterDescClassifierProtocol.Validators[0].(func(string) error)
+	// intentrouterDescClassifierModel is the schema descriptor for classifier_model field.
+	intentrouterDescClassifierModel := intentrouterFields[5].Descriptor()
+	// intentrouter.DefaultClassifierModel holds the default value on creation for the classifier_model field.
+	intentrouter.DefaultClassifierModel = intentrouterDescClassifierModel.Default.(string)
+	// intentrouter.ClassifierModelValidator is a validator for the "classifier_model" field. It is called by the builders before save.
+	intentrouter.ClassifierModelValidator = intentrouterDescClassifierModel.Validators[0].(func(string) error)
+	// intentrouterDescClassifierTimeoutMs is the schema descriptor for classifier_timeout_ms field.
+	intentrouterDescClassifierTimeoutMs := intentrouterFields[6].Descriptor()
+	// intentrouter.DefaultClassifierTimeoutMs holds the default value on creation for the classifier_timeout_ms field.
+	intentrouter.DefaultClassifierTimeoutMs = intentrouterDescClassifierTimeoutMs.Default.(int)
+	// intentrouterDescCacheTTLSeconds is the schema descriptor for cache_ttl_seconds field.
+	intentrouterDescCacheTTLSeconds := intentrouterFields[7].Descriptor()
+	// intentrouter.DefaultCacheTTLSeconds holds the default value on creation for the cache_ttl_seconds field.
+	intentrouter.DefaultCacheTTLSeconds = intentrouterDescCacheTTLSeconds.Default.(int)
+	// intentrouterDescMaxInputChars is the schema descriptor for max_input_chars field.
+	intentrouterDescMaxInputChars := intentrouterFields[8].Descriptor()
+	// intentrouter.DefaultMaxInputChars holds the default value on creation for the max_input_chars field.
+	intentrouter.DefaultMaxInputChars = intentrouterDescMaxInputChars.Default.(int)
 	paymentauditlogFields := schema.PaymentAuditLog{}.Fields()
 	_ = paymentauditlogFields
 	// paymentauditlogDescOrderID is the schema descriptor for order_id field.

@@ -31,6 +31,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/intentrouter"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -84,6 +85,7 @@ const (
 	TypeGroup                         = "Group"
 	TypeIdempotencyRecord             = "IdempotencyRecord"
 	TypeIdentityAdoptionDecision      = "IdentityAdoptionDecision"
+	TypeIntentRouter                  = "IntentRouter"
 	TypePaymentAuditLog               = "PaymentAuditLog"
 	TypePaymentOrder                  = "PaymentOrder"
 	TypePaymentProviderInstance       = "PaymentProviderInstance"
@@ -29556,6 +29558,1100 @@ func (m *IdentityAdoptionDecisionMutation) ResetEdge(name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown IdentityAdoptionDecision edge %s", name)
+}
+
+// IntentRouterMutation represents an operation that mutates the IntentRouter nodes in the graph.
+type IntentRouterMutation struct {
+	config
+	op                       Op
+	typ                      string
+	id                       *int64
+	created_at               *time.Time
+	updated_at               *time.Time
+	group_id                 *int64
+	addgroup_id              *int64
+	enabled                  *bool
+	classifier_base_url      *string
+	classifier_api_key       *string
+	classifier_protocol      *string
+	classifier_model         *string
+	classifier_timeout_ms    *int
+	addclassifier_timeout_ms *int
+	cache_ttl_seconds        *int
+	addcache_ttl_seconds     *int
+	max_input_chars          *int
+	addmax_input_chars       *int
+	rules                    *[]domain.IntentRule
+	appendrules              []domain.IntentRule
+	clearedFields            map[string]struct{}
+	done                     bool
+	oldValue                 func(context.Context) (*IntentRouter, error)
+	predicates               []predicate.IntentRouter
+}
+
+var _ ent.Mutation = (*IntentRouterMutation)(nil)
+
+// intentrouterOption allows management of the mutation configuration using functional options.
+type intentrouterOption func(*IntentRouterMutation)
+
+// newIntentRouterMutation creates new mutation for the IntentRouter entity.
+func newIntentRouterMutation(c config, op Op, opts ...intentrouterOption) *IntentRouterMutation {
+	m := &IntentRouterMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeIntentRouter,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withIntentRouterID sets the ID field of the mutation.
+func withIntentRouterID(id int64) intentrouterOption {
+	return func(m *IntentRouterMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *IntentRouter
+		)
+		m.oldValue = func(ctx context.Context) (*IntentRouter, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().IntentRouter.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withIntentRouter sets the old IntentRouter of the mutation.
+func withIntentRouter(node *IntentRouter) intentrouterOption {
+	return func(m *IntentRouterMutation) {
+		m.oldValue = func(context.Context) (*IntentRouter, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m IntentRouterMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m IntentRouterMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *IntentRouterMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *IntentRouterMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().IntentRouter.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *IntentRouterMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *IntentRouterMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *IntentRouterMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *IntentRouterMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *IntentRouterMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *IntentRouterMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetGroupID sets the "group_id" field.
+func (m *IntentRouterMutation) SetGroupID(i int64) {
+	m.group_id = &i
+	m.addgroup_id = nil
+}
+
+// GroupID returns the value of the "group_id" field in the mutation.
+func (m *IntentRouterMutation) GroupID() (r int64, exists bool) {
+	v := m.group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGroupID returns the old "group_id" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldGroupID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGroupID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGroupID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGroupID: %w", err)
+	}
+	return oldValue.GroupID, nil
+}
+
+// AddGroupID adds i to the "group_id" field.
+func (m *IntentRouterMutation) AddGroupID(i int64) {
+	if m.addgroup_id != nil {
+		*m.addgroup_id += i
+	} else {
+		m.addgroup_id = &i
+	}
+}
+
+// AddedGroupID returns the value that was added to the "group_id" field in this mutation.
+func (m *IntentRouterMutation) AddedGroupID() (r int64, exists bool) {
+	v := m.addgroup_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetGroupID resets all changes to the "group_id" field.
+func (m *IntentRouterMutation) ResetGroupID() {
+	m.group_id = nil
+	m.addgroup_id = nil
+}
+
+// SetEnabled sets the "enabled" field.
+func (m *IntentRouterMutation) SetEnabled(b bool) {
+	m.enabled = &b
+}
+
+// Enabled returns the value of the "enabled" field in the mutation.
+func (m *IntentRouterMutation) Enabled() (r bool, exists bool) {
+	v := m.enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEnabled returns the old "enabled" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEnabled: %w", err)
+	}
+	return oldValue.Enabled, nil
+}
+
+// ResetEnabled resets all changes to the "enabled" field.
+func (m *IntentRouterMutation) ResetEnabled() {
+	m.enabled = nil
+}
+
+// SetClassifierBaseURL sets the "classifier_base_url" field.
+func (m *IntentRouterMutation) SetClassifierBaseURL(s string) {
+	m.classifier_base_url = &s
+}
+
+// ClassifierBaseURL returns the value of the "classifier_base_url" field in the mutation.
+func (m *IntentRouterMutation) ClassifierBaseURL() (r string, exists bool) {
+	v := m.classifier_base_url
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClassifierBaseURL returns the old "classifier_base_url" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldClassifierBaseURL(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClassifierBaseURL is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClassifierBaseURL requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClassifierBaseURL: %w", err)
+	}
+	return oldValue.ClassifierBaseURL, nil
+}
+
+// ResetClassifierBaseURL resets all changes to the "classifier_base_url" field.
+func (m *IntentRouterMutation) ResetClassifierBaseURL() {
+	m.classifier_base_url = nil
+}
+
+// SetClassifierAPIKey sets the "classifier_api_key" field.
+func (m *IntentRouterMutation) SetClassifierAPIKey(s string) {
+	m.classifier_api_key = &s
+}
+
+// ClassifierAPIKey returns the value of the "classifier_api_key" field in the mutation.
+func (m *IntentRouterMutation) ClassifierAPIKey() (r string, exists bool) {
+	v := m.classifier_api_key
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClassifierAPIKey returns the old "classifier_api_key" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldClassifierAPIKey(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClassifierAPIKey is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClassifierAPIKey requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClassifierAPIKey: %w", err)
+	}
+	return oldValue.ClassifierAPIKey, nil
+}
+
+// ResetClassifierAPIKey resets all changes to the "classifier_api_key" field.
+func (m *IntentRouterMutation) ResetClassifierAPIKey() {
+	m.classifier_api_key = nil
+}
+
+// SetClassifierProtocol sets the "classifier_protocol" field.
+func (m *IntentRouterMutation) SetClassifierProtocol(s string) {
+	m.classifier_protocol = &s
+}
+
+// ClassifierProtocol returns the value of the "classifier_protocol" field in the mutation.
+func (m *IntentRouterMutation) ClassifierProtocol() (r string, exists bool) {
+	v := m.classifier_protocol
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClassifierProtocol returns the old "classifier_protocol" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldClassifierProtocol(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClassifierProtocol is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClassifierProtocol requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClassifierProtocol: %w", err)
+	}
+	return oldValue.ClassifierProtocol, nil
+}
+
+// ResetClassifierProtocol resets all changes to the "classifier_protocol" field.
+func (m *IntentRouterMutation) ResetClassifierProtocol() {
+	m.classifier_protocol = nil
+}
+
+// SetClassifierModel sets the "classifier_model" field.
+func (m *IntentRouterMutation) SetClassifierModel(s string) {
+	m.classifier_model = &s
+}
+
+// ClassifierModel returns the value of the "classifier_model" field in the mutation.
+func (m *IntentRouterMutation) ClassifierModel() (r string, exists bool) {
+	v := m.classifier_model
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClassifierModel returns the old "classifier_model" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldClassifierModel(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClassifierModel is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClassifierModel requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClassifierModel: %w", err)
+	}
+	return oldValue.ClassifierModel, nil
+}
+
+// ResetClassifierModel resets all changes to the "classifier_model" field.
+func (m *IntentRouterMutation) ResetClassifierModel() {
+	m.classifier_model = nil
+}
+
+// SetClassifierTimeoutMs sets the "classifier_timeout_ms" field.
+func (m *IntentRouterMutation) SetClassifierTimeoutMs(i int) {
+	m.classifier_timeout_ms = &i
+	m.addclassifier_timeout_ms = nil
+}
+
+// ClassifierTimeoutMs returns the value of the "classifier_timeout_ms" field in the mutation.
+func (m *IntentRouterMutation) ClassifierTimeoutMs() (r int, exists bool) {
+	v := m.classifier_timeout_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClassifierTimeoutMs returns the old "classifier_timeout_ms" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldClassifierTimeoutMs(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClassifierTimeoutMs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClassifierTimeoutMs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClassifierTimeoutMs: %w", err)
+	}
+	return oldValue.ClassifierTimeoutMs, nil
+}
+
+// AddClassifierTimeoutMs adds i to the "classifier_timeout_ms" field.
+func (m *IntentRouterMutation) AddClassifierTimeoutMs(i int) {
+	if m.addclassifier_timeout_ms != nil {
+		*m.addclassifier_timeout_ms += i
+	} else {
+		m.addclassifier_timeout_ms = &i
+	}
+}
+
+// AddedClassifierTimeoutMs returns the value that was added to the "classifier_timeout_ms" field in this mutation.
+func (m *IntentRouterMutation) AddedClassifierTimeoutMs() (r int, exists bool) {
+	v := m.addclassifier_timeout_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetClassifierTimeoutMs resets all changes to the "classifier_timeout_ms" field.
+func (m *IntentRouterMutation) ResetClassifierTimeoutMs() {
+	m.classifier_timeout_ms = nil
+	m.addclassifier_timeout_ms = nil
+}
+
+// SetCacheTTLSeconds sets the "cache_ttl_seconds" field.
+func (m *IntentRouterMutation) SetCacheTTLSeconds(i int) {
+	m.cache_ttl_seconds = &i
+	m.addcache_ttl_seconds = nil
+}
+
+// CacheTTLSeconds returns the value of the "cache_ttl_seconds" field in the mutation.
+func (m *IntentRouterMutation) CacheTTLSeconds() (r int, exists bool) {
+	v := m.cache_ttl_seconds
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCacheTTLSeconds returns the old "cache_ttl_seconds" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldCacheTTLSeconds(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCacheTTLSeconds is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCacheTTLSeconds requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCacheTTLSeconds: %w", err)
+	}
+	return oldValue.CacheTTLSeconds, nil
+}
+
+// AddCacheTTLSeconds adds i to the "cache_ttl_seconds" field.
+func (m *IntentRouterMutation) AddCacheTTLSeconds(i int) {
+	if m.addcache_ttl_seconds != nil {
+		*m.addcache_ttl_seconds += i
+	} else {
+		m.addcache_ttl_seconds = &i
+	}
+}
+
+// AddedCacheTTLSeconds returns the value that was added to the "cache_ttl_seconds" field in this mutation.
+func (m *IntentRouterMutation) AddedCacheTTLSeconds() (r int, exists bool) {
+	v := m.addcache_ttl_seconds
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetCacheTTLSeconds resets all changes to the "cache_ttl_seconds" field.
+func (m *IntentRouterMutation) ResetCacheTTLSeconds() {
+	m.cache_ttl_seconds = nil
+	m.addcache_ttl_seconds = nil
+}
+
+// SetMaxInputChars sets the "max_input_chars" field.
+func (m *IntentRouterMutation) SetMaxInputChars(i int) {
+	m.max_input_chars = &i
+	m.addmax_input_chars = nil
+}
+
+// MaxInputChars returns the value of the "max_input_chars" field in the mutation.
+func (m *IntentRouterMutation) MaxInputChars() (r int, exists bool) {
+	v := m.max_input_chars
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMaxInputChars returns the old "max_input_chars" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldMaxInputChars(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMaxInputChars is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMaxInputChars requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMaxInputChars: %w", err)
+	}
+	return oldValue.MaxInputChars, nil
+}
+
+// AddMaxInputChars adds i to the "max_input_chars" field.
+func (m *IntentRouterMutation) AddMaxInputChars(i int) {
+	if m.addmax_input_chars != nil {
+		*m.addmax_input_chars += i
+	} else {
+		m.addmax_input_chars = &i
+	}
+}
+
+// AddedMaxInputChars returns the value that was added to the "max_input_chars" field in this mutation.
+func (m *IntentRouterMutation) AddedMaxInputChars() (r int, exists bool) {
+	v := m.addmax_input_chars
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetMaxInputChars resets all changes to the "max_input_chars" field.
+func (m *IntentRouterMutation) ResetMaxInputChars() {
+	m.max_input_chars = nil
+	m.addmax_input_chars = nil
+}
+
+// SetRules sets the "rules" field.
+func (m *IntentRouterMutation) SetRules(dr []domain.IntentRule) {
+	m.rules = &dr
+	m.appendrules = nil
+}
+
+// Rules returns the value of the "rules" field in the mutation.
+func (m *IntentRouterMutation) Rules() (r []domain.IntentRule, exists bool) {
+	v := m.rules
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRules returns the old "rules" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldRules(ctx context.Context) (v []domain.IntentRule, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRules is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRules requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRules: %w", err)
+	}
+	return oldValue.Rules, nil
+}
+
+// AppendRules adds dr to the "rules" field.
+func (m *IntentRouterMutation) AppendRules(dr []domain.IntentRule) {
+	m.appendrules = append(m.appendrules, dr...)
+}
+
+// AppendedRules returns the list of values that were appended to the "rules" field in this mutation.
+func (m *IntentRouterMutation) AppendedRules() ([]domain.IntentRule, bool) {
+	if len(m.appendrules) == 0 {
+		return nil, false
+	}
+	return m.appendrules, true
+}
+
+// ClearRules clears the value of the "rules" field.
+func (m *IntentRouterMutation) ClearRules() {
+	m.rules = nil
+	m.appendrules = nil
+	m.clearedFields[intentrouter.FieldRules] = struct{}{}
+}
+
+// RulesCleared returns if the "rules" field was cleared in this mutation.
+func (m *IntentRouterMutation) RulesCleared() bool {
+	_, ok := m.clearedFields[intentrouter.FieldRules]
+	return ok
+}
+
+// ResetRules resets all changes to the "rules" field.
+func (m *IntentRouterMutation) ResetRules() {
+	m.rules = nil
+	m.appendrules = nil
+	delete(m.clearedFields, intentrouter.FieldRules)
+}
+
+// Where appends a list predicates to the IntentRouterMutation builder.
+func (m *IntentRouterMutation) Where(ps ...predicate.IntentRouter) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the IntentRouterMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *IntentRouterMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.IntentRouter, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *IntentRouterMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *IntentRouterMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (IntentRouter).
+func (m *IntentRouterMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *IntentRouterMutation) Fields() []string {
+	fields := make([]string, 0, 12)
+	if m.created_at != nil {
+		fields = append(fields, intentrouter.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, intentrouter.FieldUpdatedAt)
+	}
+	if m.group_id != nil {
+		fields = append(fields, intentrouter.FieldGroupID)
+	}
+	if m.enabled != nil {
+		fields = append(fields, intentrouter.FieldEnabled)
+	}
+	if m.classifier_base_url != nil {
+		fields = append(fields, intentrouter.FieldClassifierBaseURL)
+	}
+	if m.classifier_api_key != nil {
+		fields = append(fields, intentrouter.FieldClassifierAPIKey)
+	}
+	if m.classifier_protocol != nil {
+		fields = append(fields, intentrouter.FieldClassifierProtocol)
+	}
+	if m.classifier_model != nil {
+		fields = append(fields, intentrouter.FieldClassifierModel)
+	}
+	if m.classifier_timeout_ms != nil {
+		fields = append(fields, intentrouter.FieldClassifierTimeoutMs)
+	}
+	if m.cache_ttl_seconds != nil {
+		fields = append(fields, intentrouter.FieldCacheTTLSeconds)
+	}
+	if m.max_input_chars != nil {
+		fields = append(fields, intentrouter.FieldMaxInputChars)
+	}
+	if m.rules != nil {
+		fields = append(fields, intentrouter.FieldRules)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *IntentRouterMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case intentrouter.FieldCreatedAt:
+		return m.CreatedAt()
+	case intentrouter.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case intentrouter.FieldGroupID:
+		return m.GroupID()
+	case intentrouter.FieldEnabled:
+		return m.Enabled()
+	case intentrouter.FieldClassifierBaseURL:
+		return m.ClassifierBaseURL()
+	case intentrouter.FieldClassifierAPIKey:
+		return m.ClassifierAPIKey()
+	case intentrouter.FieldClassifierProtocol:
+		return m.ClassifierProtocol()
+	case intentrouter.FieldClassifierModel:
+		return m.ClassifierModel()
+	case intentrouter.FieldClassifierTimeoutMs:
+		return m.ClassifierTimeoutMs()
+	case intentrouter.FieldCacheTTLSeconds:
+		return m.CacheTTLSeconds()
+	case intentrouter.FieldMaxInputChars:
+		return m.MaxInputChars()
+	case intentrouter.FieldRules:
+		return m.Rules()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *IntentRouterMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case intentrouter.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case intentrouter.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case intentrouter.FieldGroupID:
+		return m.OldGroupID(ctx)
+	case intentrouter.FieldEnabled:
+		return m.OldEnabled(ctx)
+	case intentrouter.FieldClassifierBaseURL:
+		return m.OldClassifierBaseURL(ctx)
+	case intentrouter.FieldClassifierAPIKey:
+		return m.OldClassifierAPIKey(ctx)
+	case intentrouter.FieldClassifierProtocol:
+		return m.OldClassifierProtocol(ctx)
+	case intentrouter.FieldClassifierModel:
+		return m.OldClassifierModel(ctx)
+	case intentrouter.FieldClassifierTimeoutMs:
+		return m.OldClassifierTimeoutMs(ctx)
+	case intentrouter.FieldCacheTTLSeconds:
+		return m.OldCacheTTLSeconds(ctx)
+	case intentrouter.FieldMaxInputChars:
+		return m.OldMaxInputChars(ctx)
+	case intentrouter.FieldRules:
+		return m.OldRules(ctx)
+	}
+	return nil, fmt.Errorf("unknown IntentRouter field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *IntentRouterMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case intentrouter.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case intentrouter.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case intentrouter.FieldGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGroupID(v)
+		return nil
+	case intentrouter.FieldEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEnabled(v)
+		return nil
+	case intentrouter.FieldClassifierBaseURL:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClassifierBaseURL(v)
+		return nil
+	case intentrouter.FieldClassifierAPIKey:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClassifierAPIKey(v)
+		return nil
+	case intentrouter.FieldClassifierProtocol:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClassifierProtocol(v)
+		return nil
+	case intentrouter.FieldClassifierModel:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClassifierModel(v)
+		return nil
+	case intentrouter.FieldClassifierTimeoutMs:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClassifierTimeoutMs(v)
+		return nil
+	case intentrouter.FieldCacheTTLSeconds:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCacheTTLSeconds(v)
+		return nil
+	case intentrouter.FieldMaxInputChars:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMaxInputChars(v)
+		return nil
+	case intentrouter.FieldRules:
+		v, ok := value.([]domain.IntentRule)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRules(v)
+		return nil
+	}
+	return fmt.Errorf("unknown IntentRouter field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *IntentRouterMutation) AddedFields() []string {
+	var fields []string
+	if m.addgroup_id != nil {
+		fields = append(fields, intentrouter.FieldGroupID)
+	}
+	if m.addclassifier_timeout_ms != nil {
+		fields = append(fields, intentrouter.FieldClassifierTimeoutMs)
+	}
+	if m.addcache_ttl_seconds != nil {
+		fields = append(fields, intentrouter.FieldCacheTTLSeconds)
+	}
+	if m.addmax_input_chars != nil {
+		fields = append(fields, intentrouter.FieldMaxInputChars)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *IntentRouterMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case intentrouter.FieldGroupID:
+		return m.AddedGroupID()
+	case intentrouter.FieldClassifierTimeoutMs:
+		return m.AddedClassifierTimeoutMs()
+	case intentrouter.FieldCacheTTLSeconds:
+		return m.AddedCacheTTLSeconds()
+	case intentrouter.FieldMaxInputChars:
+		return m.AddedMaxInputChars()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *IntentRouterMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case intentrouter.FieldGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddGroupID(v)
+		return nil
+	case intentrouter.FieldClassifierTimeoutMs:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddClassifierTimeoutMs(v)
+		return nil
+	case intentrouter.FieldCacheTTLSeconds:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddCacheTTLSeconds(v)
+		return nil
+	case intentrouter.FieldMaxInputChars:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMaxInputChars(v)
+		return nil
+	}
+	return fmt.Errorf("unknown IntentRouter numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *IntentRouterMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(intentrouter.FieldRules) {
+		fields = append(fields, intentrouter.FieldRules)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *IntentRouterMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *IntentRouterMutation) ClearField(name string) error {
+	switch name {
+	case intentrouter.FieldRules:
+		m.ClearRules()
+		return nil
+	}
+	return fmt.Errorf("unknown IntentRouter nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *IntentRouterMutation) ResetField(name string) error {
+	switch name {
+	case intentrouter.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case intentrouter.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case intentrouter.FieldGroupID:
+		m.ResetGroupID()
+		return nil
+	case intentrouter.FieldEnabled:
+		m.ResetEnabled()
+		return nil
+	case intentrouter.FieldClassifierBaseURL:
+		m.ResetClassifierBaseURL()
+		return nil
+	case intentrouter.FieldClassifierAPIKey:
+		m.ResetClassifierAPIKey()
+		return nil
+	case intentrouter.FieldClassifierProtocol:
+		m.ResetClassifierProtocol()
+		return nil
+	case intentrouter.FieldClassifierModel:
+		m.ResetClassifierModel()
+		return nil
+	case intentrouter.FieldClassifierTimeoutMs:
+		m.ResetClassifierTimeoutMs()
+		return nil
+	case intentrouter.FieldCacheTTLSeconds:
+		m.ResetCacheTTLSeconds()
+		return nil
+	case intentrouter.FieldMaxInputChars:
+		m.ResetMaxInputChars()
+		return nil
+	case intentrouter.FieldRules:
+		m.ResetRules()
+		return nil
+	}
+	return fmt.Errorf("unknown IntentRouter field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *IntentRouterMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *IntentRouterMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *IntentRouterMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *IntentRouterMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *IntentRouterMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *IntentRouterMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *IntentRouterMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown IntentRouter unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *IntentRouterMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown IntentRouter edge %s", name)
 }
 
 // PaymentAuditLogMutation represents an operation that mutates the PaymentAuditLog nodes in the graph.

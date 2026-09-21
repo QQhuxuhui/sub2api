@@ -1097,6 +1097,35 @@ var (
 			},
 		},
 	}
+	// IntentRoutersColumns holds the columns for the "intent_routers" table.
+	IntentRoutersColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "group_id", Type: field.TypeInt64},
+		{Name: "enabled", Type: field.TypeBool, Default: false},
+		{Name: "classifier_base_url", Type: field.TypeString, Size: 512, Default: ""},
+		{Name: "classifier_api_key", Type: field.TypeString, Size: 512, Default: ""},
+		{Name: "classifier_protocol", Type: field.TypeString, Size: 32, Default: "openai_chat"},
+		{Name: "classifier_model", Type: field.TypeString, Size: 128, Default: ""},
+		{Name: "classifier_timeout_ms", Type: field.TypeInt, Default: 3000},
+		{Name: "cache_ttl_seconds", Type: field.TypeInt, Default: 7200},
+		{Name: "max_input_chars", Type: field.TypeInt, Default: 2000},
+		{Name: "rules", Type: field.TypeJSON, Nullable: true, SchemaType: map[string]string{"postgres": "jsonb"}},
+	}
+	// IntentRoutersTable holds the schema information for the "intent_routers" table.
+	IntentRoutersTable = &schema.Table{
+		Name:       "intent_routers",
+		Columns:    IntentRoutersColumns,
+		PrimaryKey: []*schema.Column{IntentRoutersColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "intentrouter_group_id",
+				Unique:  true,
+				Columns: []*schema.Column{IntentRoutersColumns[3]},
+			},
+		},
+	}
 	// PaymentAuditLogsColumns holds the columns for the "payment_audit_logs" table.
 	PaymentAuditLogsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2153,6 +2182,7 @@ var (
 		GroupsTable,
 		IdempotencyRecordsTable,
 		IdentityAdoptionDecisionsTable,
+		IntentRoutersTable,
 		PaymentAuditLogsTable,
 		PaymentOrdersTable,
 		PaymentProviderInstancesTable,
@@ -2250,6 +2280,9 @@ func init() {
 	IdentityAdoptionDecisionsTable.ForeignKeys[1].RefTable = PendingAuthSessionsTable
 	IdentityAdoptionDecisionsTable.Annotation = &entsql.Annotation{
 		Table: "identity_adoption_decisions",
+	}
+	IntentRoutersTable.Annotation = &entsql.Annotation{
+		Table: "intent_routers",
 	}
 	PaymentAuditLogsTable.Annotation = &entsql.Annotation{
 		Table: "payment_audit_logs",

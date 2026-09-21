@@ -937,6 +937,7 @@ var ProviderSet = wire.NewSet(
 	NewModelPricingResolver,
 	NewModelPlazaService,
 	NewContentModerationService,
+	NewIntentRouterService,
 	NewAffiliateService,
 	ProvidePaymentConfigService,
 	ProvidePaymentService,

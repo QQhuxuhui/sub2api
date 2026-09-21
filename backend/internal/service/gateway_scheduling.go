@@ -128,6 +128,12 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
 	}
 
+	// 意图路由：请求已被识别并指向了具体账号（可能属于其它分组）时先在其中预选；
+	// 选不到则与未启用该功能时完全一致地继续往下走。
+	if routed, ok := s.selectIntentRoutedAccount(ctx, groupID, group, sessionHash, requestedModel, excludedIDs); ok {
+		return routed, nil
+	}
+
 	var stickyAccountID int64
 	var stickySource string
 	if prefetch := prefetchedStickyAccountIDFromContext(ctx, groupID); prefetch > 0 {
