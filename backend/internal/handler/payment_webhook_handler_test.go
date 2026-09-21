@@ -154,6 +154,27 @@ func TestWebhookConstants(t *testing.T) {
 	})
 }
 
+func TestPersistedPaymentReviewWebhookAcknowledged(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+		body   string
+	}{
+		{"persisted_review", fmt.Errorf("payment: %w", service.ErrPaymentReviewRequired), http.StatusOK, "success"},
+		{"database_failure", errors.New("commit failed"), http.StatusInternalServerError, "handle failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			writePaymentNotificationFailure(c, payment.TypeEpusdt, &payment.PaymentNotification{OrderID: "review-order"}, tc.err)
+			require.Equal(t, tc.status, w.Code)
+			require.Equal(t, tc.body, w.Body.String())
+		})
+	}
+}
+
 func TestExtractOutTradeNo(t *testing.T) {
 	tests := []struct {
 		name        string

@@ -16,6 +16,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
+	"github.com/Wei-Shaw/sub2api/ent/paymenttransactionclaim"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -123,7 +124,7 @@ func (s *PaymentService) confirmPayment(ctx context.Context, oid int64, tradeNo 
 			return infraerrors.BadRequest("MISSING_TRADE_NO", "Epusdt payment confirmation carries neither a transaction hash nor a trade number")
 		}
 	}
-	return s.toPaid(ctx, o, tradeNo, paid, pk, claimKey)
+	return s.toPaid(ctx, o, tradeNo, paid, pk, claimKey, metadata)
 }
 
 func paymentAmountToleranceForCurrency(currency string) float64 {
@@ -159,27 +160,121 @@ func expectedNotificationProviderKey(registry *payment.Registry, orderPaymentTyp
 
 // toPaid commits a crypto transaction's ownership together with the PAID
 // transition, then runs the independently idempotent fulfillment step.
-func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, tradeNo string, paid float64, pk string, txHash string) error {
+func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, tradeNo string, paid float64, pk string, txHash string, metadata map[string]string) error {
 	client := s.entClient
 	var tx *dbent.Tx
 	claimCreated := false
+	finish := func() {}
+	resolvingReview := false
 	if txHash != "" {
 		var err error
-		tx, err = s.entClient.Tx(ctx)
+		tx, finish, err = beginPaymentSettlement(ctx, s.entClient)
 		if err != nil {
 			return fmt.Errorf("begin payment confirmation: %w", err)
 		}
-		defer func() { _ = tx.Rollback() }()
+		defer finish()
 		client = tx.Client()
+		// The caller's order may predate another confirmation that held the lock.
+		o, err = client.PaymentOrder.Get(ctx, o.ID)
+		if err != nil {
+			return err
+		}
+		resolvingReview, err = client.PaymentTransactionClaim.Query().Where(
+			paymenttransactionclaim.OrderIDEQ(o.ID), paymenttransactionclaim.ReviewPendingEQ(true),
+		).Exist(ctx)
+		if err != nil {
+			return err
+		}
 		created, err := claimPaymentTransaction(ctx, client, o.ID, txHash)
 		if err != nil {
 			return err
 		}
 		claimCreated = created
+		if created {
+			source := claimSourceGateway
+			if isGatewayTradeClaimKey(txHash) {
+				source = claimSourceHashless
+			}
+			if err := recordSettlementClaim(ctx, client, o, txHash, source, nil, map[string]any{
+				"trade_no": tradeNo, "paid_amount": paid, "provider": pk, "metadata": metadata,
+			}); err != nil {
+				return err
+			}
+		} else if !isGatewayTradeClaimKey(txHash) {
+			// Add authoritative callback evidence without replacing the original
+			// manual proof, its source, or the transfer timestamp.
+			claim, err := client.PaymentTransactionClaim.Query().Where(paymenttransactionclaim.TxHashEQ(txHash)).Only(ctx)
+			if err != nil {
+				return err
+			}
+			evidence := claim.Evidence
+			if evidence == nil {
+				evidence = map[string]any{}
+			}
+			evidence["gateway_confirmation"] = map[string]any{"trade_no": tradeNo, "paid_amount": paid, "provider": pk, "metadata": metadata}
+			if _, err := client.PaymentTransactionClaim.UpdateOneID(claim.ID).SetEvidence(evidence).Save(ctx); err != nil {
+				return err
+			}
+		}
+		if isGatewayTradeClaimKey(txHash) && manualSettleAllowedStatus(o.Status) {
+			linked, err := client.PaymentTransactionClaim.Query().Where(
+				paymenttransactionclaim.OrderIDEQ(o.ID),
+				paymenttransactionclaim.Not(paymenttransactionclaim.TxHashHasPrefix(gatewayTradeClaimPrefix)),
+			).Exist(ctx)
+			if err != nil {
+				return err
+			}
+			if !linked {
+				other, err := manualPaymentForHashlessOrder(ctx, client, o)
+				if err != nil {
+					return err
+				}
+				if other != 0 {
+					_, err = client.PaymentTransactionClaim.Update().Where(paymenttransactionclaim.TxHashEQ(txHash)).SetReviewPending(true).Save(ctx)
+					if err != nil {
+						return err
+					}
+					if !resolvingReview {
+						if err := writePaymentAudit(ctx, client, o.ID, "PAYMENT_REVIEW_REQUIRED", pk, map[string]any{
+							"claimKey": txHash, "tradeNo": tradeNo, "paidAmount": paid, "conflictingOrderID": other,
+						}); err != nil {
+							return err
+						}
+					}
+					if err := tx.Commit(); err != nil {
+						return err
+					}
+					finish()
+					return paymentReviewRequired(other)
+				}
+			}
+		}
+		if resolvingReview {
+			if _, err := client.PaymentTransactionClaim.Update().Where(paymenttransactionclaim.OrderIDEQ(o.ID)).SetReviewPending(false).Save(ctx); err != nil {
+				return err
+			}
+			if err := writePaymentAudit(ctx, client, o.ID, "PAYMENT_REVIEW_RESOLVED", pk, map[string]any{"txHash": txHash, "tradeNo": tradeNo}); err != nil {
+				return err
+			}
+		}
+	} else if o.PaymentType == payment.TypeUSDT {
+		// A legacy EasyPay custom method may be named usdt without a pinned
+		// provider identity. New writers can satisfy the DB protocol fence even
+		// though this provider has no on-chain claim to record.
+		var err error
+		tx, finish, err = beginPaymentSettlement(ctx, s.entClient)
+		if err != nil {
+			return err
+		}
+		defer finish()
+		client = tx.Client()
 	}
 	previousStatus := o.Status
 	now := time.Now()
 	grace := now.Add(-paymentGraceMinutes * time.Minute)
+	if resolvingReview {
+		grace = time.Time{}
+	}
 	c, err := client.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),
 		paymentorder.Or(
@@ -217,13 +312,14 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 				return fmt.Errorf("rollback unaccepted payment: %w", err)
 			}
 		}
+		finish()
 		return s.alreadyProcessed(ctx, o)
 	}
 	paidDetail := map[string]any{"tradeNo": tradeNo, "paidAmount": paid}
 	if tx != nil {
 		if isGatewayTradeClaimKey(txHash) {
 			paidDetail["claimKey"] = txHash
-		} else {
+		} else if txHash != "" {
 			paidDetail["txHash"] = txHash
 		}
 		if err := writePaymentAudit(ctx, client, o.ID, "ORDER_PAID", pk, paidDetail); err != nil {
@@ -232,6 +328,7 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit payment confirmation: %w", err)
 		}
+		finish()
 	} else {
 		s.writeAuditLog(ctx, o.ID, "ORDER_PAID", pk, paidDetail)
 	}

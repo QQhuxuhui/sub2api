@@ -1260,6 +1260,12 @@ var (
 		{Name: "id", Type: field.TypeInt64, Increment: true},
 		{Name: "tx_hash", Type: field.TypeString, Size: 512},
 		{Name: "order_id", Type: field.TypeInt64},
+		{Name: "source", Type: field.TypeString, Default: "legacy"},
+		{Name: "transfer_time", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "order_created_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "order_window_end", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "review_pending", Type: field.TypeBool, Default: false},
+		{Name: "evidence", Type: field.TypeJSON, Nullable: true},
 		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
 	}
 	// PaymentTransactionClaimsTable holds the schema information for the "payment_transaction_claims" table.
@@ -1277,6 +1283,21 @@ var (
 				Name:    "paymenttransactionclaim_order_id",
 				Unique:  false,
 				Columns: []*schema.Column{PaymentTransactionClaimsColumns[2]},
+			},
+			{
+				Name:    "paymenttransactionclaim_source_transfer_time",
+				Unique:  false,
+				Columns: []*schema.Column{PaymentTransactionClaimsColumns[3], PaymentTransactionClaimsColumns[4]},
+			},
+			{
+				Name:    "paymenttransactionclaim_source_order_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{PaymentTransactionClaimsColumns[3], PaymentTransactionClaimsColumns[5]},
+			},
+			{
+				Name:    "paymenttransactionclaim_source_order_window_end",
+				Unique:  false,
+				Columns: []*schema.Column{PaymentTransactionClaimsColumns[3], PaymentTransactionClaimsColumns[6]},
 			},
 		},
 	}

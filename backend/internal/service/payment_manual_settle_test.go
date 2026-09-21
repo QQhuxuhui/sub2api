@@ -171,8 +171,11 @@ func TestAdminSettleOrderByTxHashRejectsReusedHash(t *testing.T) {
 	f.svc.writeAuditLog(ctx, 999, "ORDER_PAID", payment.TypeEpusdt, map[string]any{
 		"tradeNo": "other", "txHash": "2A003B114B896199D75998E3712F8CC1F32118ED62FF38419D397282B183C404",
 	})
+	// Migration 240 has materialized this historical audit before serving traffic.
+	_, err := f.client.PaymentTransactionClaim.Create().SetTxHash(strings.TrimPrefix(manualSettleTxHash, "0x")).SetOrderID(999).Save(ctx)
+	require.NoError(t, err)
 
-	_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	_, err = f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
 	requireManualSettleReason(t, err, "TX_ALREADY_USED")
 	require.Empty(t, f.fetcher.probed, "reuse is rejected before touching the chain")
 
@@ -527,8 +530,11 @@ func TestPaymentManualSettleIgnoresHashlessPaymentFromAnotherTime(t *testing.T) 
 	ctx := context.Background()
 	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
 	second := newSecondSettlementOrder(t, f)
+	// A genuinely disjoint order lifetime, not just an old callback timestamp.
+	_, err := f.client.ExecContext(ctx, "UPDATE payment_orders SET created_at = ?, expires_at = ? WHERE id = ?", time.Now().Add(-72*time.Hour), time.Now().Add(-48*time.Hour), f.order.ID)
+	require.NoError(t, err)
 	require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt, map[string]string{"token": "USDT"}))
-	_, err := f.client.PaymentOrder.UpdateOneID(f.order.ID).SetPaidAt(time.Now().Add(-6 * time.Hour)).Save(ctx)
+	_, err = f.client.PaymentOrder.UpdateOneID(f.order.ID).SetPaidAt(time.Now().Add(-6 * time.Hour)).Save(ctx)
 	require.NoError(t, err)
 
 	f.fetcher.byNetwork["binance"][0].BlockTime = time.Now().Add(-time.Minute)
@@ -626,13 +632,15 @@ func TestPaymentCallbackRollsBackTransactionClaimOnAuditFailure(t *testing.T) {
 	require.Zero(t, f.userRepo.getByIDUser.Balance)
 }
 
-func TestPaymentLegacyAuditPreventsCallbackReuse(t *testing.T) {
+func TestPaymentMigratedLegacyClaimPreventsCallbackReuse(t *testing.T) {
 	ctx := context.Background()
 	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
-	// A current-order audit must not mask an older, conflicting order's claim.
+	// A current-order audit must not mask a migrated conflicting order's claim.
 	f.svc.writeAuditLog(ctx, f.order.ID, "ORDER_PAID", payment.TypeEpusdt, map[string]any{"txHash": manualSettleTxHash})
 	f.svc.writeAuditLog(ctx, 999, "ORDER_PAID", payment.TypeEpusdt, map[string]any{"txHash": strings.ToUpper(manualSettleTxHash)})
-	err := f.svc.confirmPayment(ctx, f.order.ID, f.order.PaymentTradeNo, 30, payment.TypeEpusdt,
+	_, err := f.client.PaymentTransactionClaim.Create().SetTxHash(strings.TrimPrefix(manualSettleTxHash, "0x")).SetOrderID(999).Save(ctx)
+	require.NoError(t, err)
+	err = f.svc.confirmPayment(ctx, f.order.ID, f.order.PaymentTradeNo, 30, payment.TypeEpusdt,
 		map[string]string{"block_transaction_id": manualSettleTxHash})
 	requireManualSettleReason(t, err, "TX_ALREADY_USED")
 	require.Zero(t, f.userRepo.getByIDUser.Balance)

@@ -1480,8 +1480,16 @@ func init() {
 			return nil
 		}
 	}()
+	// paymenttransactionclaimDescSource is the schema descriptor for source field.
+	paymenttransactionclaimDescSource := paymenttransactionclaimFields[2].Descriptor()
+	// paymenttransactionclaim.DefaultSource holds the default value on creation for the source field.
+	paymenttransactionclaim.DefaultSource = paymenttransactionclaimDescSource.Default.(string)
+	// paymenttransactionclaimDescReviewPending is the schema descriptor for review_pending field.
+	paymenttransactionclaimDescReviewPending := paymenttransactionclaimFields[6].Descriptor()
+	// paymenttransactionclaim.DefaultReviewPending holds the default value on creation for the review_pending field.
+	paymenttransactionclaim.DefaultReviewPending = paymenttransactionclaimDescReviewPending.Default.(bool)
 	// paymenttransactionclaimDescCreatedAt is the schema descriptor for created_at field.
-	paymenttransactionclaimDescCreatedAt := paymenttransactionclaimFields[2].Descriptor()
+	paymenttransactionclaimDescCreatedAt := paymenttransactionclaimFields[8].Descriptor()
 	// paymenttransactionclaim.DefaultCreatedAt holds the default value on creation for the created_at field.
 	paymenttransactionclaim.DefaultCreatedAt = paymenttransactionclaimDescCreatedAt.Default.(func() time.Time)
 	pendingauthsessionMixin := schema.PendingAuthSession{}.Mixin()

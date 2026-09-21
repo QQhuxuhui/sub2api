@@ -34,6 +34,82 @@ func (_c *PaymentTransactionClaimCreate) SetOrderID(v int64) *PaymentTransaction
 	return _c
 }
 
+// SetSource sets the "source" field.
+func (_c *PaymentTransactionClaimCreate) SetSource(v string) *PaymentTransactionClaimCreate {
+	_c.mutation.SetSource(v)
+	return _c
+}
+
+// SetNillableSource sets the "source" field if the given value is not nil.
+func (_c *PaymentTransactionClaimCreate) SetNillableSource(v *string) *PaymentTransactionClaimCreate {
+	if v != nil {
+		_c.SetSource(*v)
+	}
+	return _c
+}
+
+// SetTransferTime sets the "transfer_time" field.
+func (_c *PaymentTransactionClaimCreate) SetTransferTime(v time.Time) *PaymentTransactionClaimCreate {
+	_c.mutation.SetTransferTime(v)
+	return _c
+}
+
+// SetNillableTransferTime sets the "transfer_time" field if the given value is not nil.
+func (_c *PaymentTransactionClaimCreate) SetNillableTransferTime(v *time.Time) *PaymentTransactionClaimCreate {
+	if v != nil {
+		_c.SetTransferTime(*v)
+	}
+	return _c
+}
+
+// SetOrderCreatedAt sets the "order_created_at" field.
+func (_c *PaymentTransactionClaimCreate) SetOrderCreatedAt(v time.Time) *PaymentTransactionClaimCreate {
+	_c.mutation.SetOrderCreatedAt(v)
+	return _c
+}
+
+// SetNillableOrderCreatedAt sets the "order_created_at" field if the given value is not nil.
+func (_c *PaymentTransactionClaimCreate) SetNillableOrderCreatedAt(v *time.Time) *PaymentTransactionClaimCreate {
+	if v != nil {
+		_c.SetOrderCreatedAt(*v)
+	}
+	return _c
+}
+
+// SetOrderWindowEnd sets the "order_window_end" field.
+func (_c *PaymentTransactionClaimCreate) SetOrderWindowEnd(v time.Time) *PaymentTransactionClaimCreate {
+	_c.mutation.SetOrderWindowEnd(v)
+	return _c
+}
+
+// SetNillableOrderWindowEnd sets the "order_window_end" field if the given value is not nil.
+func (_c *PaymentTransactionClaimCreate) SetNillableOrderWindowEnd(v *time.Time) *PaymentTransactionClaimCreate {
+	if v != nil {
+		_c.SetOrderWindowEnd(*v)
+	}
+	return _c
+}
+
+// SetReviewPending sets the "review_pending" field.
+func (_c *PaymentTransactionClaimCreate) SetReviewPending(v bool) *PaymentTransactionClaimCreate {
+	_c.mutation.SetReviewPending(v)
+	return _c
+}
+
+// SetNillableReviewPending sets the "review_pending" field if the given value is not nil.
+func (_c *PaymentTransactionClaimCreate) SetNillableReviewPending(v *bool) *PaymentTransactionClaimCreate {
+	if v != nil {
+		_c.SetReviewPending(*v)
+	}
+	return _c
+}
+
+// SetEvidence sets the "evidence" field.
+func (_c *PaymentTransactionClaimCreate) SetEvidence(v map[string]interface{}) *PaymentTransactionClaimCreate {
+	_c.mutation.SetEvidence(v)
+	return _c
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (_c *PaymentTransactionClaimCreate) SetCreatedAt(v time.Time) *PaymentTransactionClaimCreate {
 	_c.mutation.SetCreatedAt(v)
@@ -83,6 +159,14 @@ func (_c *PaymentTransactionClaimCreate) ExecX(ctx context.Context) {
 
 // defaults sets the default values of the builder before save.
 func (_c *PaymentTransactionClaimCreate) defaults() {
+	if _, ok := _c.mutation.Source(); !ok {
+		v := paymenttransactionclaim.DefaultSource
+		_c.mutation.SetSource(v)
+	}
+	if _, ok := _c.mutation.ReviewPending(); !ok {
+		v := paymenttransactionclaim.DefaultReviewPending
+		_c.mutation.SetReviewPending(v)
+	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		v := paymenttransactionclaim.DefaultCreatedAt()
 		_c.mutation.SetCreatedAt(v)
@@ -101,6 +185,12 @@ func (_c *PaymentTransactionClaimCreate) check() error {
 	}
 	if _, ok := _c.mutation.OrderID(); !ok {
 		return &ValidationError{Name: "order_id", err: errors.New(`ent: missing required field "PaymentTransactionClaim.order_id"`)}
+	}
+	if _, ok := _c.mutation.Source(); !ok {
+		return &ValidationError{Name: "source", err: errors.New(`ent: missing required field "PaymentTransactionClaim.source"`)}
+	}
+	if _, ok := _c.mutation.ReviewPending(); !ok {
+		return &ValidationError{Name: "review_pending", err: errors.New(`ent: missing required field "PaymentTransactionClaim.review_pending"`)}
 	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "PaymentTransactionClaim.created_at"`)}
@@ -139,6 +229,30 @@ func (_c *PaymentTransactionClaimCreate) createSpec() (*PaymentTransactionClaim,
 	if value, ok := _c.mutation.OrderID(); ok {
 		_spec.SetField(paymenttransactionclaim.FieldOrderID, field.TypeInt64, value)
 		_node.OrderID = value
+	}
+	if value, ok := _c.mutation.Source(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldSource, field.TypeString, value)
+		_node.Source = value
+	}
+	if value, ok := _c.mutation.TransferTime(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldTransferTime, field.TypeTime, value)
+		_node.TransferTime = &value
+	}
+	if value, ok := _c.mutation.OrderCreatedAt(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldOrderCreatedAt, field.TypeTime, value)
+		_node.OrderCreatedAt = &value
+	}
+	if value, ok := _c.mutation.OrderWindowEnd(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldOrderWindowEnd, field.TypeTime, value)
+		_node.OrderWindowEnd = &value
+	}
+	if value, ok := _c.mutation.ReviewPending(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldReviewPending, field.TypeBool, value)
+		_node.ReviewPending = value
+	}
+	if value, ok := _c.mutation.Evidence(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldEvidence, field.TypeJSON, value)
+		_node.Evidence = value
 	}
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(paymenttransactionclaim.FieldCreatedAt, field.TypeTime, value)
@@ -196,6 +310,102 @@ type (
 	}
 )
 
+// SetSource sets the "source" field.
+func (u *PaymentTransactionClaimUpsert) SetSource(v string) *PaymentTransactionClaimUpsert {
+	u.Set(paymenttransactionclaim.FieldSource, v)
+	return u
+}
+
+// UpdateSource sets the "source" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsert) UpdateSource() *PaymentTransactionClaimUpsert {
+	u.SetExcluded(paymenttransactionclaim.FieldSource)
+	return u
+}
+
+// SetTransferTime sets the "transfer_time" field.
+func (u *PaymentTransactionClaimUpsert) SetTransferTime(v time.Time) *PaymentTransactionClaimUpsert {
+	u.Set(paymenttransactionclaim.FieldTransferTime, v)
+	return u
+}
+
+// UpdateTransferTime sets the "transfer_time" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsert) UpdateTransferTime() *PaymentTransactionClaimUpsert {
+	u.SetExcluded(paymenttransactionclaim.FieldTransferTime)
+	return u
+}
+
+// ClearTransferTime clears the value of the "transfer_time" field.
+func (u *PaymentTransactionClaimUpsert) ClearTransferTime() *PaymentTransactionClaimUpsert {
+	u.SetNull(paymenttransactionclaim.FieldTransferTime)
+	return u
+}
+
+// SetOrderCreatedAt sets the "order_created_at" field.
+func (u *PaymentTransactionClaimUpsert) SetOrderCreatedAt(v time.Time) *PaymentTransactionClaimUpsert {
+	u.Set(paymenttransactionclaim.FieldOrderCreatedAt, v)
+	return u
+}
+
+// UpdateOrderCreatedAt sets the "order_created_at" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsert) UpdateOrderCreatedAt() *PaymentTransactionClaimUpsert {
+	u.SetExcluded(paymenttransactionclaim.FieldOrderCreatedAt)
+	return u
+}
+
+// ClearOrderCreatedAt clears the value of the "order_created_at" field.
+func (u *PaymentTransactionClaimUpsert) ClearOrderCreatedAt() *PaymentTransactionClaimUpsert {
+	u.SetNull(paymenttransactionclaim.FieldOrderCreatedAt)
+	return u
+}
+
+// SetOrderWindowEnd sets the "order_window_end" field.
+func (u *PaymentTransactionClaimUpsert) SetOrderWindowEnd(v time.Time) *PaymentTransactionClaimUpsert {
+	u.Set(paymenttransactionclaim.FieldOrderWindowEnd, v)
+	return u
+}
+
+// UpdateOrderWindowEnd sets the "order_window_end" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsert) UpdateOrderWindowEnd() *PaymentTransactionClaimUpsert {
+	u.SetExcluded(paymenttransactionclaim.FieldOrderWindowEnd)
+	return u
+}
+
+// ClearOrderWindowEnd clears the value of the "order_window_end" field.
+func (u *PaymentTransactionClaimUpsert) ClearOrderWindowEnd() *PaymentTransactionClaimUpsert {
+	u.SetNull(paymenttransactionclaim.FieldOrderWindowEnd)
+	return u
+}
+
+// SetReviewPending sets the "review_pending" field.
+func (u *PaymentTransactionClaimUpsert) SetReviewPending(v bool) *PaymentTransactionClaimUpsert {
+	u.Set(paymenttransactionclaim.FieldReviewPending, v)
+	return u
+}
+
+// UpdateReviewPending sets the "review_pending" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsert) UpdateReviewPending() *PaymentTransactionClaimUpsert {
+	u.SetExcluded(paymenttransactionclaim.FieldReviewPending)
+	return u
+}
+
+// SetEvidence sets the "evidence" field.
+func (u *PaymentTransactionClaimUpsert) SetEvidence(v map[string]interface{}) *PaymentTransactionClaimUpsert {
+	u.Set(paymenttransactionclaim.FieldEvidence, v)
+	return u
+}
+
+// UpdateEvidence sets the "evidence" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsert) UpdateEvidence() *PaymentTransactionClaimUpsert {
+	u.SetExcluded(paymenttransactionclaim.FieldEvidence)
+	return u
+}
+
+// ClearEvidence clears the value of the "evidence" field.
+func (u *PaymentTransactionClaimUpsert) ClearEvidence() *PaymentTransactionClaimUpsert {
+	u.SetNull(paymenttransactionclaim.FieldEvidence)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -245,6 +455,118 @@ func (u *PaymentTransactionClaimUpsertOne) Update(set func(*PaymentTransactionCl
 		set(&PaymentTransactionClaimUpsert{UpdateSet: update})
 	}))
 	return u
+}
+
+// SetSource sets the "source" field.
+func (u *PaymentTransactionClaimUpsertOne) SetSource(v string) *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.SetSource(v)
+	})
+}
+
+// UpdateSource sets the "source" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsertOne) UpdateSource() *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.UpdateSource()
+	})
+}
+
+// SetTransferTime sets the "transfer_time" field.
+func (u *PaymentTransactionClaimUpsertOne) SetTransferTime(v time.Time) *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.SetTransferTime(v)
+	})
+}
+
+// UpdateTransferTime sets the "transfer_time" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsertOne) UpdateTransferTime() *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.UpdateTransferTime()
+	})
+}
+
+// ClearTransferTime clears the value of the "transfer_time" field.
+func (u *PaymentTransactionClaimUpsertOne) ClearTransferTime() *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.ClearTransferTime()
+	})
+}
+
+// SetOrderCreatedAt sets the "order_created_at" field.
+func (u *PaymentTransactionClaimUpsertOne) SetOrderCreatedAt(v time.Time) *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.SetOrderCreatedAt(v)
+	})
+}
+
+// UpdateOrderCreatedAt sets the "order_created_at" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsertOne) UpdateOrderCreatedAt() *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.UpdateOrderCreatedAt()
+	})
+}
+
+// ClearOrderCreatedAt clears the value of the "order_created_at" field.
+func (u *PaymentTransactionClaimUpsertOne) ClearOrderCreatedAt() *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.ClearOrderCreatedAt()
+	})
+}
+
+// SetOrderWindowEnd sets the "order_window_end" field.
+func (u *PaymentTransactionClaimUpsertOne) SetOrderWindowEnd(v time.Time) *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.SetOrderWindowEnd(v)
+	})
+}
+
+// UpdateOrderWindowEnd sets the "order_window_end" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsertOne) UpdateOrderWindowEnd() *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.UpdateOrderWindowEnd()
+	})
+}
+
+// ClearOrderWindowEnd clears the value of the "order_window_end" field.
+func (u *PaymentTransactionClaimUpsertOne) ClearOrderWindowEnd() *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.ClearOrderWindowEnd()
+	})
+}
+
+// SetReviewPending sets the "review_pending" field.
+func (u *PaymentTransactionClaimUpsertOne) SetReviewPending(v bool) *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.SetReviewPending(v)
+	})
+}
+
+// UpdateReviewPending sets the "review_pending" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsertOne) UpdateReviewPending() *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.UpdateReviewPending()
+	})
+}
+
+// SetEvidence sets the "evidence" field.
+func (u *PaymentTransactionClaimUpsertOne) SetEvidence(v map[string]interface{}) *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.SetEvidence(v)
+	})
+}
+
+// UpdateEvidence sets the "evidence" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsertOne) UpdateEvidence() *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.UpdateEvidence()
+	})
+}
+
+// ClearEvidence clears the value of the "evidence" field.
+func (u *PaymentTransactionClaimUpsertOne) ClearEvidence() *PaymentTransactionClaimUpsertOne {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.ClearEvidence()
+	})
 }
 
 // Exec executes the query.
@@ -462,6 +784,118 @@ func (u *PaymentTransactionClaimUpsertBulk) Update(set func(*PaymentTransactionC
 		set(&PaymentTransactionClaimUpsert{UpdateSet: update})
 	}))
 	return u
+}
+
+// SetSource sets the "source" field.
+func (u *PaymentTransactionClaimUpsertBulk) SetSource(v string) *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.SetSource(v)
+	})
+}
+
+// UpdateSource sets the "source" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsertBulk) UpdateSource() *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.UpdateSource()
+	})
+}
+
+// SetTransferTime sets the "transfer_time" field.
+func (u *PaymentTransactionClaimUpsertBulk) SetTransferTime(v time.Time) *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.SetTransferTime(v)
+	})
+}
+
+// UpdateTransferTime sets the "transfer_time" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsertBulk) UpdateTransferTime() *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.UpdateTransferTime()
+	})
+}
+
+// ClearTransferTime clears the value of the "transfer_time" field.
+func (u *PaymentTransactionClaimUpsertBulk) ClearTransferTime() *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.ClearTransferTime()
+	})
+}
+
+// SetOrderCreatedAt sets the "order_created_at" field.
+func (u *PaymentTransactionClaimUpsertBulk) SetOrderCreatedAt(v time.Time) *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.SetOrderCreatedAt(v)
+	})
+}
+
+// UpdateOrderCreatedAt sets the "order_created_at" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsertBulk) UpdateOrderCreatedAt() *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.UpdateOrderCreatedAt()
+	})
+}
+
+// ClearOrderCreatedAt clears the value of the "order_created_at" field.
+func (u *PaymentTransactionClaimUpsertBulk) ClearOrderCreatedAt() *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.ClearOrderCreatedAt()
+	})
+}
+
+// SetOrderWindowEnd sets the "order_window_end" field.
+func (u *PaymentTransactionClaimUpsertBulk) SetOrderWindowEnd(v time.Time) *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.SetOrderWindowEnd(v)
+	})
+}
+
+// UpdateOrderWindowEnd sets the "order_window_end" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsertBulk) UpdateOrderWindowEnd() *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.UpdateOrderWindowEnd()
+	})
+}
+
+// ClearOrderWindowEnd clears the value of the "order_window_end" field.
+func (u *PaymentTransactionClaimUpsertBulk) ClearOrderWindowEnd() *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.ClearOrderWindowEnd()
+	})
+}
+
+// SetReviewPending sets the "review_pending" field.
+func (u *PaymentTransactionClaimUpsertBulk) SetReviewPending(v bool) *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.SetReviewPending(v)
+	})
+}
+
+// UpdateReviewPending sets the "review_pending" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsertBulk) UpdateReviewPending() *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.UpdateReviewPending()
+	})
+}
+
+// SetEvidence sets the "evidence" field.
+func (u *PaymentTransactionClaimUpsertBulk) SetEvidence(v map[string]interface{}) *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.SetEvidence(v)
+	})
+}
+
+// UpdateEvidence sets the "evidence" field to the value that was provided on create.
+func (u *PaymentTransactionClaimUpsertBulk) UpdateEvidence() *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.UpdateEvidence()
+	})
+}
+
+// ClearEvidence clears the value of the "evidence" field.
+func (u *PaymentTransactionClaimUpsertBulk) ClearEvidence() *PaymentTransactionClaimUpsertBulk {
+	return u.Update(func(s *PaymentTransactionClaimUpsert) {
+		s.ClearEvidence()
+	})
 }
 
 // Exec executes the query.
