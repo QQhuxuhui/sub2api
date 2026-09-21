@@ -165,10 +165,15 @@ var intentSessionHeaders = []string{"session_id", "session-id", "conversation_id
 // intentSessionKey identifies the conversation a request belongs to. It is
 // scoped by API key, so two users can never share a routing decision.
 //
-// An explicit identifier wins; otherwise the conversation is recognized by its
-// system prompt and opening user message, which later turns repeat verbatim.
-// Two conversations that open identically therefore share a decision — for
-// routing purposes that is the desired outcome anyway.
+// Only identifiers that really name ONE conversation are trusted on their own:
+// a session header, a conversation id, or the session part of Claude Code's
+// metadata.user_id. A bare user id is not a conversation — the same person
+// starts a coding chat and a small-talk chat — and prompt_cache_key is set per
+// conversation by some clients but per application by others; those two are
+// therefore never used alone. Without a trustworthy identifier the
+// conversation is recognized by its system prompt and opening user message,
+// which later turns repeat verbatim. Two conversations that open identically
+// share a decision, which for routing is the desired outcome anyway.
 func intentSessionKey(apiKeyID int64, header http.Header, view intentRequestView) string {
 	seed := ""
 	for _, name := range intentSessionHeaders {
@@ -178,11 +183,16 @@ func intentSessionKey(apiKeyID int64, header http.Header, view intentRequestView
 		}
 	}
 	if seed == "" {
-		for _, path := range []string{"metadata.user_id", "prompt_cache_key", "conversation.id", "conversation"} {
+		for _, path := range []string{"conversation.id", "conversation"} {
 			if r := gjson.GetBytes(view.body, path); r.Type == gjson.String && strings.TrimSpace(r.String()) != "" {
-				seed = "b:" + path + ":" + strings.TrimSpace(r.String())
+				seed = "b:conversation:" + strings.TrimSpace(r.String())
 				break
 			}
+		}
+	}
+	if seed == "" {
+		if parsed := ParseMetadataUserID(gjson.GetBytes(view.body, "metadata.user_id").String()); parsed != nil && parsed.SessionID != "" {
+			seed = "b:session:" + parsed.SessionID
 		}
 	}
 	if seed == "" {
@@ -191,6 +201,10 @@ func intentSessionKey(apiKeyID int64, header http.Header, view intentRequestView
 			return ""
 		}
 		seed = "c:" + view.systemText() + "\x00" + first
+		// A cache key narrows the match when present, but never widens it.
+		if r := gjson.GetBytes(view.body, "prompt_cache_key"); r.Type == gjson.String {
+			seed += "\x00" + strings.TrimSpace(r.String())
+		}
 	}
 	sum := sha256.Sum256([]byte(strconv.FormatInt(apiKeyID, 10) + "\x00" + seed))
 	return hex.EncodeToString(sum[:16])

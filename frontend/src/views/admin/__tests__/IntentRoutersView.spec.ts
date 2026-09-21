@@ -115,6 +115,40 @@ describe('IntentRoutersView', () => {
     expect(toast.showError).toHaveBeenCalledWith('intentRouter.errors.INTENT_RULE_NAME_DUPLICATE:{"name":"coding"}')
   })
 
+  it('never lets a late answer for one group land in the form of another', async () => {
+    let finishSave: (value: unknown) => void = () => {}
+    api.save.mockImplementation(() => new Promise((resolve) => { finishSave = resolve }))
+    const wrapper = await mountView()
+
+    await wrapper.get('[data-test="intent-model"]').setValue('edited-for-group-1')
+    await wrapper.get('[data-test="intent-save"]').trigger('click') // save of group 1 is in flight…
+    await wrapper.get('[data-test="intent-group-2"]').trigger('click') // …and the admin moves on to group 2
+    expect((wrapper.get('[data-test="intent-model"]').element as HTMLInputElement).value).toBe('')
+
+    finishSave({ data: { ...savedRouter, classifier_model: 'edited-for-group-1' } })
+    await flushPromises()
+
+    // Group 2's blank form is untouched, so saving now cannot write group 1's rules into it.
+    expect((wrapper.get('[data-test="intent-model"]').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.find('[data-test="intent-rule-0"]').exists()).toBe(false)
+    // Group 1 did get its result.
+    await wrapper.get('[data-test="intent-group-1"]').trigger('click')
+    expect((wrapper.get('[data-test="intent-model"]').element as HTMLInputElement).value).toBe('edited-for-group-1')
+  })
+
+  it('drops a try-it result that arrives after switching groups', async () => {
+    let finishTest: (value: unknown) => void = () => {}
+    api.test.mockImplementation(() => new Promise((resolve) => { finishTest = resolve }))
+    api.list.mockResolvedValue({ data: [savedRouter, { ...savedRouter, group_id: 2, rules: [] }] })
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-test-text"]').setValue('fix my go build')
+    await wrapper.get('[data-test="intent-test-run"]').trigger('click')
+    await wrapper.get('[data-test="intent-group-2"]').trigger('click')
+    finishTest({ data: { answer: 'coding', intent: 'coding', understood: true, account_ids: [21], latency_ms: 5 } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="intent-test-result"]').exists()).toBe(false)
+  })
+
   it('starts a blank form for a group that has no router yet', async () => {
     const wrapper = await mountView()
     await wrapper.get('[data-test="intent-group-2"]').trigger('click')

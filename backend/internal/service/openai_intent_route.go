@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -17,6 +18,7 @@ import (
 func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 	ctx context.Context,
 	groupID *int64,
+	previousResponseID string,
 	requestedModel string,
 	excludedIDs map[int64]struct{},
 	requiredTransport OpenAIUpstreamTransport,
@@ -31,6 +33,24 @@ func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 		return nil, none, false
 	}
 	route.clearSelected()
+
+	// A Responses follow-up names the response it continues, and only the
+	// account that produced that response knows it. That binding outranks any
+	// routing preference: serve the turn from the bound account when it is one
+	// of the rule's targets, and otherwise step aside so ordinary scheduling
+	// applies its own previous_response_id handling. An unknown binding (expired,
+	// or a first turn) leaves the preference free to apply.
+	candidates := route.orderedAccountIDs()
+	if prev := strings.TrimSpace(previousResponseID); prev != "" {
+		if store := s.getOpenAIWSStateStore(); store != nil {
+			if bound, err := store.GetResponseAccount(ctx, derefGroupID(groupID), prev); err == nil && bound > 0 {
+				if !containsInt64(candidates, bound) {
+					return nil, none, false
+				}
+				candidates = []int64{bound}
+			}
+		}
+	}
 
 	// Same request-scoped context the ordinary path installs before filtering.
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
@@ -58,7 +78,7 @@ func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 		RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
 	}
 
-	for _, accountID := range route.orderedAccountIDs() {
+	for _, accountID := range candidates {
 		if _, excluded := excludedIDs[accountID]; excluded {
 			continue
 		}

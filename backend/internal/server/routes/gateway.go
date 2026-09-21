@@ -376,7 +376,9 @@ func RegisterGatewayRoutes(
 	rootRoute := func(method, path string, limit gin.HandlerFunc, handler gin.HandlerFunc) {
 		r.Handle(method, path, limit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), groupModelAllowlist, compositeTarget, requireGroupAnthropic, handler)
 	}
-	rootRoute(http.MethodPost, "/responses", bodyLimit, responsesHandler)
+	// 根路径的对话入口与 /v1 下的等价入口一样接入意图路由；处理器包一层而不是改 rootRoute 的链，
+	// 因为那条链被源码级测试逐字核对。
+	rootRoute(http.MethodPost, "/responses", bodyLimit, middleware.WithIntentRoute(intentRouterService, responsesHandler))
 	rootRoute(http.MethodPost, "/responses/*subpath", bodyLimit, guardResponsesSubpath(responsesHandler))
 	rootRoute(http.MethodPost, "/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
 	rootRoute(http.MethodGet, "/responses", bodyLimit, func(c *gin.Context) {
@@ -387,6 +389,7 @@ func RegisterGatewayRoutes(
 	rootRoute(http.MethodPost, "/messages/count_tokens", bodyLimit, countTokensHandler)
 	codexDirect := r.Group("/backend-api/codex")
 	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), groupModelAllowlist, compositeTarget, requireGroupAnthropic)
+	codexDirect.Use(intentRoute)
 	{
 		codexDirect.POST("/realtime/calls", h.OpenAIGateway.Live)
 		codexDirect.GET("/:call_id", h.OpenAIGateway.LiveSideband)
@@ -399,13 +402,13 @@ func RegisterGatewayRoutes(
 		codexDirect.GET("/models", codexModelsHandler)
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
-	rootRoute(http.MethodPost, "/chat/completions", bodyLimit, func(c *gin.Context) {
+	rootRoute(http.MethodPost, "/chat/completions", bodyLimit, middleware.WithIntentRoute(intentRouterService, func(c *gin.Context) {
 		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 			h.OpenAIGateway.ChatCompletions(c)
 			return
 		}
 		h.Gateway.ChatCompletions(c)
-	})
+	}))
 	rootRoute(http.MethodPost, "/embeddings", textBodyLimit, func(c *gin.Context) {
 		if !isOpenAIOnlyEndpointGatewayPlatform(c) {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
@@ -501,6 +504,7 @@ func RegisterGatewayRoutes(
 	antigravityV1.Use(gin.HandlerFunc(apiKeyAuth))
 	antigravityV1.Use(groupModelAllowlist)
 	antigravityV1.Use(requireGroupAnthropic)
+	antigravityV1.Use(intentRoute)
 	{
 		antigravityV1.POST("/messages", h.Gateway.Messages)
 		antigravityV1.POST("/messages/count_tokens", h.Gateway.CountTokens)
@@ -517,6 +521,7 @@ func RegisterGatewayRoutes(
 	antigravityV1Beta.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
 	antigravityV1Beta.Use(groupModelAllowlist)
 	antigravityV1Beta.Use(requireGroupGoogle)
+	antigravityV1Beta.Use(intentRoute)
 	{
 		antigravityV1Beta.GET("/models", h.Gateway.GeminiV1BetaListModels)
 		antigravityV1Beta.GET("/models/:model", h.Gateway.GeminiV1BetaGetModel)

@@ -103,3 +103,28 @@ func (r *erroringReader) Read(p []byte) (int, error) {
 }
 
 func (r *erroringReader) Close() error { r.closed = true; return nil }
+
+// Root aliases wrap their handler instead of joining a route group; the wrapper
+// must hand the request on untouched and run the handler exactly once.
+func TestWithIntentRoute_RunsTheHandlerOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := `{"model":"gpt","input":"hello"}`
+	calls := 0
+	var seen []byte
+	handler := WithIntentRoute(nil, func(c *gin.Context) {
+		calls++
+		seen, _ = io.ReadAll(c.Request.Body)
+		c.Status(http.StatusNoContent)
+	})
+
+	w := httptest.NewRecorder()
+	c, engine := gin.CreateTestContext(w)
+	engine.POST("/responses", handler)
+	c.Request = httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	engine.HandleContext(c)
+
+	require.Equal(t, 1, calls)
+	require.Equal(t, http.StatusNoContent, w.Code)
+	require.Equal(t, body, string(seen))
+}

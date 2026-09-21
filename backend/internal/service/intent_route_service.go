@@ -97,9 +97,21 @@ type IntentRouteEvent struct {
 }
 
 // intentRouteStore keeps conversation decisions and the routing log.
+//
+// Session writes run detached from the request, so they may land in any order,
+// and parallel requests of one conversation write concurrently. The three
+// write kinds are therefore chosen so that no arrival order loses information:
+// only PinSession ever replaces a value, and it always carries the full state.
 type intentRouteStore interface {
 	GetSession(ctx context.Context, groupID int64, sessionKey string) (*intentRouteSession, error)
-	SetSession(ctx context.Context, groupID int64, sessionKey string, session intentRouteSession, ttl time.Duration) error
+	// InitSession records a fresh classification unless the conversation is
+	// already known — it can never erase a pin written a moment earlier.
+	InitSession(ctx context.Context, groupID int64, sessionKey string, session intentRouteSession, ttl time.Duration) error
+	// TouchSession extends the lifetime without rewriting the value.
+	TouchSession(ctx context.Context, groupID int64, sessionKey string, ttl time.Duration) error
+	// PinSession stores the intent together with the account that served it.
+	PinSession(ctx context.Context, groupID int64, sessionKey string, session intentRouteSession, ttl time.Duration) error
+	DeleteSession(ctx context.Context, groupID int64, sessionKey string) error
 	ClearSessions(ctx context.Context, groupID int64) (int64, error)
 	AppendEvent(ctx context.Context, event IntentRouteEvent) error
 	ListEvents(ctx context.Context, limit int) ([]IntentRouteEvent, error)
@@ -207,9 +219,16 @@ func (s *IntentRouterService) Decide(ctx context.Context, in IntentRouteInput) (
 				s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "cached", Intent: rule.Name, AccountID: session.AccountID})
 				// Sliding expiry: a conversation in progress keeps its route; only
 				// one left idle for the whole TTL is classified afresh.
-				s.remember(in.GroupID, sessionKey, *session, cfg.CacheTTL)
+				s.detached(func(ctx context.Context) error {
+					return s.store.TouchSession(ctx, in.GroupID, sessionKey, cfg.CacheTTL)
+				})
 				return s.newDecision(cfg, rule, sessionKey, session.AccountID)
 			}
+			// Stale entry: make room now, so the new classification below is not
+			// rejected as "already known".
+			storeCtx, cancel := context.WithTimeout(ctx, intentRouteStoreTimeout)
+			_ = s.store.DeleteSession(storeCtx, in.GroupID, sessionKey)
+			cancel()
 		}
 	}
 
@@ -242,7 +261,11 @@ func (s *IntentRouterService) Decide(ctx context.Context, in IntentRouteInput) (
 	}
 	s.breakerSuccess(in.GroupID)
 	s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "classified", Intent: intent, LatencyMS: latency})
-	s.remember(in.GroupID, sessionKey, intentRouteSession{Intent: intent}, cfg.CacheTTL)
+	if s.store != nil && sessionKey != "" {
+		s.detached(func(ctx context.Context) error {
+			return s.store.InitSession(ctx, in.GroupID, sessionKey, intentRouteSession{Intent: intent}, cfg.CacheTTL)
+		})
+	}
 	if intent == "" {
 		return nil
 	}
@@ -262,22 +285,24 @@ func (s *IntentRouterService) newDecision(cfg *intentRouterConfig, rule domain.I
 		PinnedAccountID: pinned,
 		onSelect: func(accountID int64) {
 			s.record(IntentRouteEvent{GroupID: groupID, Kind: "routed", Intent: intent, AccountID: accountID})
-			s.remember(groupID, sessionKey, intentRouteSession{Intent: intent, AccountID: accountID}, ttl)
+			if s.store != nil && sessionKey != "" {
+				s.detached(func(ctx context.Context) error {
+					return s.store.PinSession(ctx, groupID, sessionKey, intentRouteSession{Intent: intent, AccountID: accountID}, ttl)
+				})
+			}
 		},
 	}
 }
 
-// remember and record run detached from the request: a slow or failing Redis
-// must not add to request latency, and their failure is not the user's problem.
-func (s *IntentRouterService) remember(groupID int64, sessionKey string, session intentRouteSession, ttl time.Duration) {
-	if s.store == nil || sessionKey == "" || ttl <= 0 {
-		return
-	}
+// detached runs a store write off the request path: a slow or failing Redis
+// must not add to request latency, and its failure is not the user's problem.
+// Writes started this way may complete in any order — see intentRouteStore.
+func (s *IntentRouterService) detached(write func(ctx context.Context) error) {
 	s.spawn(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if err := s.store.SetSession(ctx, groupID, sessionKey, session, ttl); err != nil {
-			slog.Debug("intent_route.remember_failed", "group_id", groupID, "error", err)
+		if err := write(ctx); err != nil {
+			slog.Debug("intent_route.store_write_failed", "error", err)
 		}
 	})
 }
@@ -428,12 +453,28 @@ func (r *redisIntentRouteStore) GetSession(ctx context.Context, groupID int64, s
 	return &session, nil
 }
 
-func (r *redisIntentRouteStore) SetSession(ctx context.Context, groupID int64, sessionKey string, session intentRouteSession, ttl time.Duration) error {
+func (r *redisIntentRouteStore) InitSession(ctx context.Context, groupID int64, sessionKey string, session intentRouteSession, ttl time.Duration) error {
+	raw, err := json.Marshal(session)
+	if err != nil {
+		return err
+	}
+	return r.rdb.SetNX(ctx, intentRouteSessionRedisKey(groupID, sessionKey), raw, ttl).Err()
+}
+
+func (r *redisIntentRouteStore) TouchSession(ctx context.Context, groupID int64, sessionKey string, ttl time.Duration) error {
+	return r.rdb.Expire(ctx, intentRouteSessionRedisKey(groupID, sessionKey), ttl).Err()
+}
+
+func (r *redisIntentRouteStore) PinSession(ctx context.Context, groupID int64, sessionKey string, session intentRouteSession, ttl time.Duration) error {
 	raw, err := json.Marshal(session)
 	if err != nil {
 		return err
 	}
 	return r.rdb.Set(ctx, intentRouteSessionRedisKey(groupID, sessionKey), raw, ttl).Err()
+}
+
+func (r *redisIntentRouteStore) DeleteSession(ctx context.Context, groupID int64, sessionKey string) error {
+	return r.rdb.Del(ctx, intentRouteSessionRedisKey(groupID, sessionKey)).Err()
 }
 
 // ClearSessions forgets every conversation of a group (groupID > 0) or of all

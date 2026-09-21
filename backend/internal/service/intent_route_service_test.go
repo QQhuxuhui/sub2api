@@ -29,6 +29,7 @@ type memoryIntentRouteStore struct {
 	ttls     map[string]time.Duration
 	events   []IntentRouteEvent
 	getErr   error
+	touches  int
 }
 
 func newMemoryIntentRouteStore() *memoryIntentRouteStore {
@@ -47,11 +48,40 @@ func (m *memoryIntentRouteStore) GetSession(_ context.Context, groupID int64, ke
 	return nil, nil
 }
 
-func (m *memoryIntentRouteStore) SetSession(_ context.Context, groupID int64, key string, s intentRouteSession, ttl time.Duration) error {
+// Same semantics as the Redis store: SETNX / EXPIRE / SET / DEL.
+func (m *memoryIntentRouteStore) InitSession(_ context.Context, groupID int64, key string, s intentRouteSession, ttl time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sessions[intentRouteSessionRedisKey(groupID, key)] = s
-	m.ttls[intentRouteSessionRedisKey(groupID, key)] = ttl
+	k := intentRouteSessionRedisKey(groupID, key)
+	if _, exists := m.sessions[k]; !exists {
+		m.sessions[k], m.ttls[k] = s, ttl
+	}
+	return nil
+}
+
+func (m *memoryIntentRouteStore) TouchSession(_ context.Context, groupID int64, key string, ttl time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := intentRouteSessionRedisKey(groupID, key)
+	if _, exists := m.sessions[k]; exists {
+		m.ttls[k] = ttl
+		m.touches++
+	}
+	return nil
+}
+
+func (m *memoryIntentRouteStore) PinSession(_ context.Context, groupID int64, key string, s intentRouteSession, ttl time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := intentRouteSessionRedisKey(groupID, key)
+	m.sessions[k], m.ttls[k] = s, ttl
+	return nil
+}
+
+func (m *memoryIntentRouteStore) DeleteSession(_ context.Context, groupID int64, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.sessions, intentRouteSessionRedisKey(groupID, key))
 	return nil
 }
 
@@ -436,4 +466,55 @@ func TestIntentRouter_DeleteForgetsEverything(t *testing.T) {
 	require.Empty(t, f.store.sessions)
 	_, err := f.svc.GetRouter(ctx, f.groupID)
 	require.Equal(t, "INTENT_ROUTER_NOT_FOUND", infraerrors.Reason(err))
+}
+
+// Session writes are detached from the request and may land in any order. The
+// classification result arriving AFTER the pin must not wipe the pin out.
+func TestIntentRouter_LateClassificationWriteCannotEraseThePin(t *testing.T) {
+	ctx := context.Background()
+	f := newIntentRouteFixture(t)
+	f.saveRouter(t, nil)
+	f.classifier.answers = []string{"coding"}
+	coding2 := f.accountID(t, "coding-2")
+
+	var queued []func()
+	f.svc.spawn = func(work func()) { queued = append(queued, work) }
+
+	decision := f.svc.Decide(ctx, f.request(intentTurn1))
+	require.NotNil(t, decision)
+	decision.markSelected(coding2)
+	for i := len(queued) - 1; i >= 0; i-- { // worst case: exact reverse order
+		queued[i]()
+	}
+	queued = nil
+	f.svc.spawn = func(work func()) { work() }
+
+	next := f.svc.Decide(ctx, f.request(intentTurn2))
+	require.NotNil(t, next)
+	require.Equal(t, coding2, next.PinnedAccountID, "the account that served the first turn is still remembered")
+	require.Equal(t, 1, f.classifier.calls)
+}
+
+// A turn served from the cache only extends the lifetime; it must not rewrite
+// the value, or it could undo a pin made by a parallel request.
+func TestIntentRouter_CacheHitOnlyTouchesTheSession(t *testing.T) {
+	ctx := context.Background()
+	f := newIntentRouteFixture(t)
+	f.saveRouter(t, nil)
+	f.classifier.answers = []string{"coding"}
+	coding1, coding2 := f.accountID(t, "coding-1"), f.accountID(t, "coding-2")
+	f.svc.Decide(ctx, f.request(intentTurn1)).markSelected(coding1)
+
+	var queued []func()
+	f.svc.spawn = func(work func()) { queued = append(queued, work) }
+	stale := f.svc.Decide(ctx, f.request(intentTurn2)) // read the session while it still says coding-1
+	require.Equal(t, coding1, stale.PinnedAccountID)
+	f.svc.spawn = func(work func()) { work() }
+	// Meanwhile a parallel request of the same conversation failed over to coding-2.
+	f.svc.Decide(ctx, f.request(intentTurn2)).markSelected(coding2)
+	for _, work := range queued { // the first request's delayed writes land last
+		work()
+	}
+	require.Equal(t, coding2, f.svc.Decide(ctx, f.request(intentTurn2)).PinnedAccountID)
+	require.Positive(t, f.store.touches)
 }

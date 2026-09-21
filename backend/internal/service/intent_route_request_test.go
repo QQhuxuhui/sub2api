@@ -63,9 +63,39 @@ func TestIntentSessionKey(t *testing.T) {
 	withHeader.Set("session_id", "abc")
 	require.Equal(t, intentSessionKey(7, withHeader, turn1), intentSessionKey(7, withHeader, other))
 	require.NotEqual(t, intentSessionKey(7, withHeader, turn1), intentSessionKey(8, withHeader, turn1))
-	claudeCode := intentRequestView{body: []byte(`{"metadata":{"user_id":"user_x_session_y"},"messages":[{"role":"user","content":"a"}]}`)}
-	claudeCodeLater := intentRequestView{body: []byte(`{"metadata":{"user_id":"user_x_session_y"},"messages":[{"role":"user","content":"compacted history"}]}`)}
-	require.Equal(t, intentSessionKey(7, none, claudeCode), intentSessionKey(7, none, claudeCodeLater))
+	// Claude Code names the session inside metadata.user_id; its history gets
+	// compacted, so the opening message is not a stable anchor there.
+	device := strings.Repeat("ab", 32)
+	legacy := func(session, first string) intentRequestView {
+		return intentRequestView{body: []byte(`{"metadata":{"user_id":"user_` + device + `_account__session_` + session + `"},"messages":[{"role":"user","content":"` + first + `"}]}`)}
+	}
+	sessA, sessB := "11111111-2222-3333-4444-555555555555", "99999999-2222-3333-4444-555555555555"
+	require.Equal(t, intentSessionKey(7, none, legacy(sessA, "a")), intentSessionKey(7, none, legacy(sessA, "compacted history")))
+	require.NotEqual(t, intentSessionKey(7, none, legacy(sessA, "a")), intentSessionKey(7, none, legacy(sessB, "a")), "a new session of the same device is a new conversation")
+	jsonForm := intentRequestView{body: []byte(`{"metadata":{"user_id":"{\"device_id\":\"d1\",\"session_id\":\"` + sessA + `\"}"},"messages":[{"role":"user","content":"zzz"}]}`)}
+	require.Equal(t, intentSessionKey(7, none, legacy(sessA, "a")), intentSessionKey(7, none, jsonForm), "both metadata formats name the same session")
+
+	// A plain user id is a person, not a conversation: the same user opening a
+	// coding chat and then a small-talk chat must be classified twice.
+	plainUser := func(first string) intentRequestView {
+		return intentRequestView{body: []byte(`{"metadata":{"user_id":"customer-42"},"messages":[{"role":"user","content":"` + first + `"}]}`)}
+	}
+	require.NotEqual(t, intentSessionKey(7, none, plainUser("fix my code")), intentSessionKey(7, none, plainUser("tell me a joke")))
+	require.Equal(t, intentSessionKey(7, none, plainUser("fix my code")), intentSessionKey(7, none, plainUser("fix my code")))
+
+	// A real conversation id outranks everything in the body.
+	conv := func(first string) intentRequestView {
+		return intentRequestView{body: []byte(`{"conversation":{"id":"conv_1"},"metadata":{"user_id":"customer-42"},"input":"` + first + `"}`)}
+	}
+	require.Equal(t, intentSessionKey(7, none, conv("a")), intentSessionKey(7, none, conv("b")))
+
+	// prompt_cache_key is per conversation for some clients and per app for
+	// others, so it only ever narrows a content match.
+	cacheKey := func(key, first string) intentRequestView {
+		return intentRequestView{body: []byte(`{"prompt_cache_key":"` + key + `","input":[{"role":"user","content":"` + first + `"}]}`)}
+	}
+	require.NotEqual(t, intentSessionKey(7, none, cacheKey("app-wide", "fix my code")), intentSessionKey(7, none, cacheKey("app-wide", "tell me a joke")))
+	require.NotEqual(t, intentSessionKey(7, none, cacheKey("k1", "same")), intentSessionKey(7, none, cacheKey("k2", "same")))
 
 	require.Empty(t, intentSessionKey(7, none, intentRequestView{body: []byte(`{}`)}), "nothing to recognize a conversation by")
 }

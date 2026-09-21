@@ -413,13 +413,18 @@ function errorText(err: unknown) {
   return extractI18nErrorMessage(err, t, 'intentRouter.errors', t('common.error'))
 }
 
+// Every request below is tied to the group it was started for. The admin may
+// pick another group while it is in flight; its answer then still updates that
+// group's stored state, but must never touch the form, which by now shows a
+// different group — refilling it would let the next save overwrite the wrong one.
 async function save() {
-  if (!selectedGroupId.value || busy.value) return
+  const groupId = selectedGroupId.value
+  if (!groupId || busy.value) return
   saving.value = true
   try {
-    const res = await intentRoutersAPI.save(selectedGroupId.value, toInput())
-    routers.value = { ...routers.value, [res.data.group_id]: res.data }
-    fillForm(res.data)
+    const res = await intentRoutersAPI.save(groupId, toInput())
+    routers.value = { ...routers.value, [groupId]: res.data }
+    if (selectedGroupId.value === groupId) fillForm(res.data)
     appStore.showSuccess(t('intentRouter.actions.saved'))
   } catch (err) {
     appStore.showError(errorText(err))
@@ -437,7 +442,7 @@ async function removeRouter() {
     const next = { ...routers.value }
     delete next[group.id]
     routers.value = next
-    fillForm(null)
+    if (selectedGroupId.value === group.id) fillForm(null)
     appStore.showSuccess(t('intentRouter.actions.deleted'))
   } catch (err) {
     appStore.showError(errorText(err))
@@ -468,14 +473,16 @@ const testSummary = computed(() => {
 })
 
 async function runTest() {
-  if (!selectedGroupId.value || testing.value || dirty.value || !testText.value) return
+  const groupId = selectedGroupId.value
+  if (!groupId || testing.value || dirty.value || !testText.value) return
   testing.value = true
   testResult.value = null
   testError.value = ''
   try {
-    testResult.value = (await intentRoutersAPI.test(selectedGroupId.value, testText.value)).data
+    const result = (await intentRoutersAPI.test(groupId, testText.value)).data
+    if (selectedGroupId.value === groupId) testResult.value = result
   } catch (err) {
-    testError.value = errorText(err)
+    if (selectedGroupId.value === groupId) testError.value = errorText(err)
   } finally {
     testing.value = false
   }

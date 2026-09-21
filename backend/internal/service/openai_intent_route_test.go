@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -88,4 +89,49 @@ func TestOpenAIIntentRoute_FallsBackToOrdinarySelection(t *testing.T) {
 			require.Zero(t, route.SelectedAccountID())
 		})
 	}
+}
+
+// A Responses follow-up carries previous_response_id, and only the account
+// that produced that response can continue it. Routing must not move the turn.
+func TestOpenAIIntentRoute_RespectsPreviousResponseBinding(t *testing.T) {
+	ctx := context.Background()
+	selectWithPrevious := func(t *testing.T, svc *OpenAIGatewayService, groupID *int64, route *IntentRouteDecision, responseID string) int64 {
+		t.Helper()
+		selection, _, err := svc.SelectAccountWithScheduler(WithIntentRouteDecision(ctx, route), groupID, responseID, "", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+		require.NoError(t, err)
+		require.NotNil(t, selection)
+		return selection.Account.ID
+	}
+
+	t.Run("bound to an account outside the rule: routing steps aside", func(t *testing.T) {
+		svc, groupID := newIntentRouteOpenAIFixture(t, foreignOpenAIAccount())
+		// previous_response_id pinning belongs to the advanced scheduler; with it
+		// off the legacy path ignores bindings altogether.
+		svc.rateLimitService = newOpenAIAdvancedSchedulerRateLimitService("true")
+		svc.cfg.Gateway.OpenAIWS.Enabled = true
+		svc.cfg.Gateway.OpenAIWS.OAuthEnabled = true
+		svc.cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+		require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(ctx, *groupID, "resp_in_group", 41002, time.Hour))
+		route := &IntentRouteDecision{Intent: "coding", AccountIDs: []int64{49001}}
+		require.Equal(t, int64(41002), selectWithPrevious(t, svc, groupID, route, "resp_in_group"), "the turn stays with the account that owns the response")
+		require.Zero(t, route.SelectedAccountID())
+	})
+
+	t.Run("bound to one of the rule's accounts: that one, whatever the order", func(t *testing.T) {
+		second := foreignOpenAIAccount()
+		second.ID = 49002
+		svc, groupID := newIntentRouteOpenAIFixture(t, foreignOpenAIAccount())
+		repo := svc.accountRepo.(schedulerGroupAwareOpenAIAccountRepo)
+		repo.accounts = append(repo.accounts, second)
+		svc.accountRepo = repo
+		require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(ctx, *groupID, "resp_routed", 49002, time.Hour))
+		route := &IntentRouteDecision{Intent: "coding", AccountIDs: []int64{49001, 49002}}
+		require.Equal(t, int64(49002), selectWithPrevious(t, svc, groupID, route, "resp_routed"))
+	})
+
+	t.Run("unknown response id: the preference applies", func(t *testing.T) {
+		svc, groupID := newIntentRouteOpenAIFixture(t, foreignOpenAIAccount())
+		route := &IntentRouteDecision{Intent: "coding", AccountIDs: []int64{49001}}
+		require.Equal(t, int64(49001), selectWithPrevious(t, svc, groupID, route, "resp_never_seen"))
+	})
 }

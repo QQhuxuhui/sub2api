@@ -21,22 +21,34 @@ import (
 // request is scheduled normally.
 func IntentRoute(router *service.IntentRouterService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		applyIntentRoute(c, router)
+		c.Next()
+	}
+}
+
+// WithIntentRoute is IntentRoute for routes registered with an explicit handler
+// chain instead of a route group: it classifies, then runs the handler.
+func WithIntentRoute(router *service.IntentRouterService, handler gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		applyIntentRoute(c, router)
+		handler(c)
+	}
+}
+
+func applyIntentRoute(c *gin.Context, router *service.IntentRouterService) {
+	{
 		if router == nil || !isIntentRoutableRequest(c.Request) {
-			c.Next()
 			return
 		}
 		apiKey, ok := GetAPIKeyFromContext(c)
 		if !ok || apiKey == nil || apiKey.GroupID == nil {
-			c.Next()
 			return
 		}
 		ctx := c.Request.Context()
 		if !router.Enabled(ctx, *apiKey.GroupID) {
-			c.Next()
 			return
 		}
 		if c.Request.ContentLength > router.MaxBodyBytes() || c.Request.Body == nil {
-			c.Next()
 			return
 		}
 
@@ -47,7 +59,6 @@ func IntentRoute(router *service.IntentRouterService) gin.HandlerFunc {
 		// (such as the body size limit) at the point they would have occurred.
 		c.Request.Body = &replayReadCloser{Reader: io.MultiReader(bytes.NewReader(body), original), closer: original}
 		if err != nil || int64(len(body)) > router.MaxBodyBytes() {
-			c.Next()
 			return
 		}
 
@@ -60,7 +71,6 @@ func IntentRoute(router *service.IntentRouterService) gin.HandlerFunc {
 		if decision != nil {
 			c.Request = c.Request.WithContext(service.WithIntentRouteDecision(ctx, decision))
 		}
-		c.Next()
 	}
 }
 
