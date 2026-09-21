@@ -234,7 +234,7 @@ describe('PaymentStatusPanel', () => {
     wrapper.unmount()
   })
 
-  it('shows the exact-amount notice only while a USDT order is waiting', async () => {
+  it('shows the amount card only while a USDT order is waiting', async () => {
     pollOrderStatus.mockResolvedValue({ ...orderFactory('PENDING'), payment_type: 'usdt' })
     const mountPanel = (paymentType: string) => mount(PaymentStatusPanel, {
       props: {
@@ -250,8 +250,8 @@ describe('PaymentStatusPanel', () => {
 
     const usdt = mountPanel('usdt')
     await flushPromises()
-    expect(usdt.find('[data-test="usdt-payment-notice"]').exists()).toBe(true)
-    expect(usdt.text()).toContain('payment.usdtNotice.exactAmount')
+    // One card carries both the rule and the amount; no second notice next to it.
+    expect(usdt.find('[data-test="usdt-payment-notice"]').exists()).toBe(false)
     expect(usdt.get('[data-test="usdt-calculator-stub"]').attributes('data-order-id')).toBe('42')
     usdt.unmount()
 

@@ -167,7 +167,6 @@
 
     <!-- QR Code Mode -->
     <template v-else-if="showQRCode">
-      <UsdtPaymentNotice v-if="isUsdt" />
       <UsdtWithdrawCalculator v-if="isUsdt" :order-id="orderId" />
       <div class="card p-6">
         <div class="flex flex-col items-center space-y-4">
@@ -199,7 +198,6 @@
 
     <!-- Waiting for Popup/Redirect Mode -->
     <template v-else>
-      <UsdtPaymentNotice v-if="isUsdt" />
       <UsdtWithdrawCalculator v-if="isUsdt" :order-id="orderId" />
       <div class="card p-6">
         <div class="flex flex-col items-center space-y-4 py-4">
@@ -232,7 +230,6 @@ import { getPaymentPopupFeatures, isBuiltInAlipayMethod, isBuiltInWxpayMethod } 
 import { currencySymbol, formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
 import type { PaymentOrder } from '@/types/payment'
 import Icon from '@/components/icons/Icon.vue'
-import UsdtPaymentNotice from '@/components/payment/UsdtPaymentNotice.vue'
 import UsdtWithdrawCalculator from '@/components/payment/UsdtWithdrawCalculator.vue'
 import QRCode from 'qrcode'
 import alipayIcon from '@/assets/icons/alipay.svg'
