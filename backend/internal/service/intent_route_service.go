@@ -68,6 +68,27 @@ func (c *intentRouterConfig) usable() bool {
 	return c != nil && c.Enabled && c.ClassifierModel != "" && c.ClassifierAPIKey != "" && len(c.activeRules()) > 0
 }
 
+// scopeAccountIDs lists every account any rule names, once each — including
+// rules that are switched off. The scope answers "could an earlier turn have
+// been routed here?", and a rule (or the whole router) may have been disabled
+// since; a conversation already in flight must still be able to continue.
+func (c *intentRouterConfig) scopeAccountIDs() []int64 {
+	if c == nil {
+		return nil
+	}
+	seen := make(map[int64]struct{})
+	var scope []int64
+	for _, rule := range c.Rules {
+		for _, id := range rule.AccountIDs {
+			if _, dup := seen[id]; !dup && id > 0 {
+				seen[id] = struct{}{}
+				scope = append(scope, id)
+			}
+		}
+	}
+	return scope
+}
+
 func (c *intentRouterConfig) rule(name string) (domain.IntentRule, bool) {
 	for _, rule := range c.activeRules() {
 		if rule.Name == name {
@@ -183,15 +204,50 @@ func (s *IntentRouterService) Enabled(ctx context.Context, groupID int64) bool {
 	return s.config(ctx, groupID).usable()
 }
 
+// ScopeOnly is the decision for a group whose router exists but is not
+// classifying right now (switched off, or incomplete): no preference, just the
+// scope, so follow-ups of conversations routed earlier still find their
+// account. nil when the group has no router or the router names no accounts.
+func (s *IntentRouterService) ScopeOnly(ctx context.Context, groupID int64) *IntentRouteDecision {
+	if s == nil {
+		return nil
+	}
+	cfg := s.config(ctx, groupID)
+	scope := cfg.scopeAccountIDs()
+	if len(scope) == 0 {
+		return nil
+	}
+	return &IntentRouteDecision{GroupID: groupID, ScopeAccountIDs: scope}
+}
+
 // MaxBodyBytes is the largest request body worth buffering for classification.
 func (s *IntentRouterService) MaxBodyBytes() int64 { return intentRouteMaxBodyBytes }
 
 // Decide classifies the request (or recalls its conversation's decision).
-// A nil result means "schedule normally".
-func (s *IntentRouterService) Decide(ctx context.Context, in IntentRouteInput) (decision *IntentRouteDecision) {
+//
+// nil means the group does not use intent routing. For a group that does, a
+// decision is always returned: with AccountIDs when the turn matched a rule,
+// and with only ScopeAccountIDs when it did not (no match, classifier trouble,
+// nothing to classify) — such a turn is scheduled normally, but state an
+// earlier routed turn left on one of the router's accounts stays reachable.
+func (s *IntentRouterService) Decide(ctx context.Context, in IntentRouteInput) *IntentRouteDecision {
 	if s == nil {
 		return nil
 	}
+	cfg := s.config(ctx, in.GroupID)
+	if !cfg.usable() {
+		return nil
+	}
+	decision := s.classify(ctx, cfg, in)
+	if decision == nil {
+		decision = &IntentRouteDecision{GroupID: cfg.GroupID}
+	}
+	decision.ScopeAccountIDs = cfg.scopeAccountIDs()
+	return decision
+}
+
+// classify returns the matched rule's decision, or nil for "no preference".
+func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterConfig, in IntentRouteInput) (decision *IntentRouteDecision) {
 	// Nothing in here may ever take a request down.
 	defer func() {
 		if r := recover(); r != nil {
@@ -199,10 +255,6 @@ func (s *IntentRouterService) Decide(ctx context.Context, in IntentRouteInput) (
 			decision = nil
 		}
 	}()
-	cfg := s.config(ctx, in.GroupID)
-	if !cfg.usable() {
-		return nil
-	}
 	view := intentRequestView{body: in.Body}
 	sessionKey := intentSessionKey(in.APIKeyID, in.Header, view)
 
@@ -278,6 +330,16 @@ func (s *IntentRouterService) Decide(ctx context.Context, in IntentRouteInput) (
 
 func (s *IntentRouterService) newDecision(cfg *intentRouterConfig, rule domain.IntentRule, sessionKey string, pinned int64) *IntentRouteDecision {
 	groupID, ttl, intent := cfg.GroupID, cfg.CacheTTL, rule.Name
+	// One request can pin more than once: the first account fails, failover
+	// settles on another. Those writes are detached and may run in any order,
+	// so each carries a sequence number, they take turns, and one that is no
+	// longer the newest when its turn comes writes nothing. Whatever the order,
+	// the account that finally served the request is what stays pinned.
+	var (
+		seqMu   sync.Mutex
+		latest  int64
+		writeMu sync.Mutex
+	)
 	return &IntentRouteDecision{
 		GroupID:         groupID,
 		Intent:          intent,
@@ -285,11 +347,24 @@ func (s *IntentRouterService) newDecision(cfg *intentRouterConfig, rule domain.I
 		PinnedAccountID: pinned,
 		onSelect: func(accountID int64) {
 			s.record(IntentRouteEvent{GroupID: groupID, Kind: "routed", Intent: intent, AccountID: accountID})
-			if s.store != nil && sessionKey != "" {
-				s.detached(func(ctx context.Context) error {
-					return s.store.PinSession(ctx, groupID, sessionKey, intentRouteSession{Intent: intent, AccountID: accountID}, ttl)
-				})
+			if s.store == nil || sessionKey == "" {
+				return
 			}
+			seqMu.Lock()
+			latest++
+			seq := latest
+			seqMu.Unlock()
+			s.detached(func(ctx context.Context) error {
+				writeMu.Lock()
+				defer writeMu.Unlock()
+				seqMu.Lock()
+				superseded := seq != latest
+				seqMu.Unlock()
+				if superseded {
+					return nil
+				}
+				return s.store.PinSession(ctx, groupID, sessionKey, intentRouteSession{Intent: intent, AccountID: accountID}, ttl)
+			})
 		},
 	}
 }

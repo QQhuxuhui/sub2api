@@ -103,6 +103,14 @@ func TestGatewayIntentRoute_PrefersPinnedThenNextTarget(t *testing.T) {
 	require.Equal(t, int64(8), select9(nil, 1), "a pin that is no longer a target of the rule is ignored")
 }
 
+func TestGatewayIntentRoute_ScopeOnlyDecisionChangesNothing(t *testing.T) {
+	svc, _ := newIntentRouteGatewayFixture(t, foreignAnthropicAccount(9))
+	ctx := WithIntentRouteDecision(context.Background(), &IntentRouteDecision{ScopeAccountIDs: []int64{9}})
+	result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "", "claude-3-5-sonnet-20241022", nil, "", 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Account.ID, "being in scope is not a preference")
+}
+
 func TestIntentRouteDecision_EmptyDecisionIsNotAttached(t *testing.T) {
 	ctx := WithIntentRouteDecision(context.Background(), &IntentRouteDecision{Intent: "coding"})
 	require.Nil(t, IntentRouteDecisionFromContext(ctx))

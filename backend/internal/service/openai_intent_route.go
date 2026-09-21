@@ -40,16 +40,28 @@ func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 	// of the rule's targets, and otherwise step aside so ordinary scheduling
 	// applies its own previous_response_id handling. An unknown binding (expired,
 	// or a first turn) leaves the preference free to apply.
+	//
+	// "One of the rule's targets" is not the test, though: the bound account may
+	// have been routed to by an earlier turn under a different intent — or this
+	// turn may have no intent at all — and ordinary scheduling cannot reach it,
+	// because it does not belong to the group. So any account the router could
+	// have sent this conversation to (its scope) is served from here; only an
+	// account outside the scope is the group's own and is left to the ordinary path.
 	candidates := route.orderedAccountIDs()
+	boundAccountID := int64(0)
 	if prev := strings.TrimSpace(previousResponseID); prev != "" {
 		if store := s.getOpenAIWSStateStore(); store != nil {
 			if bound, err := store.GetResponseAccount(ctx, derefGroupID(groupID), prev); err == nil && bound > 0 {
-				if !containsInt64(candidates, bound) {
+				if !route.inScope(bound) {
 					return nil, none, false
 				}
+				boundAccountID = bound
 				candidates = []int64{bound}
 			}
 		}
+	}
+	if len(candidates) == 0 {
+		return nil, none, false
 	}
 
 	// Same request-scoped context the ordinary path installs before filtering.
@@ -111,9 +123,15 @@ func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 			acquired.ReleaseFunc()
 			continue
 		}
-		route.markSelected(account.ID)
+		if boundAccountID == 0 || route.prefers(account.ID) {
+			route.markSelected(account.ID)
+		} else {
+			// Served for the sake of the binding; the conversation's pin is not
+			// rewritten with an intent this account is not a target of.
+			route.noteSelected(account.ID)
+		}
 		slog.Debug("intent_route.selected",
-			"group_id", derefGroupID(groupID), "intent", route.Intent, "account_id", account.ID, "model", requestedModel)
+			"group_id", derefGroupID(groupID), "intent", route.Intent, "account_id", account.ID, "model", requestedModel, "bound", boundAccountID > 0)
 		return result, OpenAIAccountScheduleDecision{
 			Layer:               openAIAccountScheduleLayerIntentRoute,
 			SelectedAccountID:   account.ID,

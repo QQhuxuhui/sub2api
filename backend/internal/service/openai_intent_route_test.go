@@ -129,6 +129,36 @@ func TestOpenAIIntentRoute_RespectsPreviousResponseBinding(t *testing.T) {
 		require.Equal(t, int64(49002), selectWithPrevious(t, svc, groupID, route, "resp_routed"))
 	})
 
+	// The first turn was routed to 49001 (another group). The follow-up is
+	// classified differently — or not at all — yet only 49001 knows the response,
+	// and ordinary scheduling cannot reach it because it is not in the group.
+	for name, route := range map[string]*IntentRouteDecision{
+		"follow-up matched another rule": {Intent: "chat", AccountIDs: []int64{41002}, ScopeAccountIDs: []int64{41002, 49001}},
+		"follow-up matched no rule":      {ScopeAccountIDs: []int64{49001}},
+	} {
+		t.Run("bound to a routed account outside the group, "+name, func(t *testing.T) {
+			svc, groupID := newIntentRouteOpenAIFixture(t, foreignOpenAIAccount())
+			svc.rateLimitService = newOpenAIAdvancedSchedulerRateLimitService("true")
+			svc.cfg.Gateway.OpenAIWS.Enabled = true
+			svc.cfg.Gateway.OpenAIWS.OAuthEnabled = true
+			svc.cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+			require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(ctx, *groupID, "resp_cross_group", 49001, time.Hour))
+			pinned := false
+			route.onSelect = func(int64) { pinned = true }
+
+			require.Equal(t, int64(49001), selectWithPrevious(t, svc, groupID, route, "resp_cross_group"), "the turn returns to the account that owns the response")
+			require.Equal(t, int64(49001), route.SelectedAccountID())
+			require.False(t, pinned, "serving a binding does not re-pin the conversation under an intent that does not target the account")
+		})
+	}
+
+	t.Run("no preference and nothing bound: ordinary scheduling", func(t *testing.T) {
+		svc, groupID := newIntentRouteOpenAIFixture(t, foreignOpenAIAccount())
+		route := &IntentRouteDecision{ScopeAccountIDs: []int64{49001}}
+		require.Equal(t, int64(41001), selectWithPrevious(t, svc, groupID, route, ""))
+		require.Zero(t, route.SelectedAccountID())
+	})
+
 	t.Run("unknown response id: the preference applies", func(t *testing.T) {
 		svc, groupID := newIntentRouteOpenAIFixture(t, foreignOpenAIAccount())
 		route := &IntentRouteDecision{Intent: "coding", AccountIDs: []int64{49001}}

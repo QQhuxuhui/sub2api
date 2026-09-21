@@ -15,8 +15,15 @@ import (
 type IntentRouteDecision struct {
 	GroupID int64
 	Intent  string
-	// AccountIDs are the rule's targets. They may belong to any group.
+	// AccountIDs are the matched rule's targets. They may belong to any group.
+	// Empty when the request matched no rule (or could not be classified).
 	AccountIDs []int64
+	// ScopeAccountIDs are the targets of every active rule of the group's
+	// router. An account in this set may legitimately have served an earlier
+	// turn of the conversation even though it is not a member of the group, so
+	// state bound to it (an OpenAI previous_response_id) stays reachable
+	// whatever the current turn was classified as.
+	ScopeAccountIDs []int64
 	// PinnedAccountID is the account this conversation was first served by.
 	PinnedAccountID int64
 
@@ -78,6 +85,28 @@ func (d *IntentRouteDecision) markSelected(accountID int64) {
 	}
 }
 
+// noteSelected records the account of this attempt without pinning the
+// conversation to it: used when an account serves the turn because older state
+// is bound to it, not because the current intent prefers it.
+func (d *IntentRouteDecision) noteSelected(accountID int64) {
+	if d == nil || accountID <= 0 {
+		return
+	}
+	d.mu.Lock()
+	d.selected = accountID
+	d.mu.Unlock()
+}
+
+// prefers reports whether the current intent names the account as a target.
+func (d *IntentRouteDecision) prefers(accountID int64) bool {
+	return d != nil && containsInt64(d.AccountIDs, accountID)
+}
+
+// inScope reports whether any active rule of the router targets the account.
+func (d *IntentRouteDecision) inScope(accountID int64) bool {
+	return d != nil && (containsInt64(d.ScopeAccountIDs, accountID) || containsInt64(d.AccountIDs, accountID))
+}
+
 // SelectedAccountID reports the routed account of the latest attempt (0 when
 // the request fell back to ordinary scheduling).
 func (d *IntentRouteDecision) SelectedAccountID() int64 {
@@ -103,7 +132,7 @@ type intentRouteDecisionContextKey struct{}
 
 // WithIntentRouteDecision attaches a decision to the request context.
 func WithIntentRouteDecision(ctx context.Context, decision *IntentRouteDecision) context.Context {
-	if decision == nil || len(decision.AccountIDs) == 0 {
+	if decision == nil || (len(decision.AccountIDs) == 0 && len(decision.ScopeAccountIDs) == 0) {
 		return ctx
 	}
 	return context.WithValue(ctx, intentRouteDecisionContextKey{}, decision)

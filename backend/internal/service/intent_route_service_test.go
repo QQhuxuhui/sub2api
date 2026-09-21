@@ -232,6 +232,16 @@ func (f *intentRouteFixture) request(body string) IntentRouteInput {
 	return IntentRouteInput{GroupID: f.groupID, APIKeyID: 11, Header: http.Header{}, Body: []byte(body)}
 }
 
+// requireNoPreference asserts the turn is left to ordinary scheduling: no
+// target accounts, while the router's scope is still carried along.
+func requireNoPreference(t *testing.T, d *IntentRouteDecision) {
+	t.Helper()
+	require.NotNil(t, d, "a group with a router always carries its scope")
+	require.Empty(t, d.AccountIDs)
+	require.Empty(t, d.Intent)
+	require.NotEmpty(t, d.ScopeAccountIDs)
+}
+
 const (
 	intentTurn1 = `{"messages":[{"role":"user","content":"please fix my go compile error"}]}`
 	intentTurn2 = `{"messages":[{"role":"user","content":"please fix my go compile error"},{"role":"assistant","content":"sure"},{"role":"user","content":"thanks, tell me a joke"}]}`
@@ -284,8 +294,8 @@ func TestIntentRouter_UnmatchedConversationIsRememberedToo(t *testing.T) {
 	f.saveRouter(t, nil)
 	f.classifier.answers = []string{"NONE"}
 
-	require.Nil(t, f.svc.Decide(ctx, f.request(intentTurn1)))
-	require.Nil(t, f.svc.Decide(ctx, f.request(intentTurn2)))
+	requireNoPreference(t, f.svc.Decide(ctx, f.request(intentTurn1)))
+	requireNoPreference(t, f.svc.Decide(ctx, f.request(intentTurn2)))
 	require.Equal(t, 1, f.classifier.calls, "an unmatched conversation is not re-classified every turn")
 }
 
@@ -325,12 +335,12 @@ func TestIntentRouter_EveryFailureMeansOrdinaryScheduling(t *testing.T) {
 		f.classifier.err = errors.New("dial tcp 127.0.0.1:8080: connection refused")
 		for i := 0; i < intentRouteBreakerThreshold; i++ {
 			body := fmt.Sprintf(`{"messages":[{"role":"user","content":"request %d"}]}`, i)
-			require.Nil(t, f.svc.Decide(ctx, f.request(body)))
+			requireNoPreference(t, f.svc.Decide(ctx, f.request(body)))
 		}
 		require.Equal(t, intentRouteBreakerThreshold, f.classifier.calls)
 
 		// Broken classifier: stop paying its timeout on every request.
-		require.Nil(t, f.svc.Decide(ctx, f.request(`{"messages":[{"role":"user","content":"one more"}]}`)))
+		requireNoPreference(t, f.svc.Decide(ctx, f.request(`{"messages":[{"role":"user","content":"one more"}]}`)))
 		require.Equal(t, intentRouteBreakerThreshold, f.classifier.calls, "skipped while cooling down")
 
 		f.now = f.now.Add(intentRouteBreakerCooldown + time.Second)
@@ -344,7 +354,7 @@ func TestIntentRouter_EveryFailureMeansOrdinaryScheduling(t *testing.T) {
 		f := newIntentRouteFixture(t)
 		f.saveRouter(t, nil)
 		f.classifier.answers = []string{"Sure! Here is how to fix your compile error: ..."}
-		require.Nil(t, f.svc.Decide(ctx, f.request(intentTurn1)))
+		requireNoPreference(t, f.svc.Decide(ctx, f.request(intentTurn1)))
 		require.Empty(t, f.store.sessions, "a misunderstanding is not cached; the next turn may try again")
 	})
 
@@ -352,7 +362,7 @@ func TestIntentRouter_EveryFailureMeansOrdinaryScheduling(t *testing.T) {
 		f := newIntentRouteFixture(t)
 		f.saveRouter(t, nil)
 		f.classifier.panics = true
-		require.NotPanics(t, func() { require.Nil(t, f.svc.Decide(ctx, f.request(intentTurn1))) })
+		require.NotPanics(t, func() { requireNoPreference(t, f.svc.Decide(ctx, f.request(intentTurn1))) })
 	})
 
 	t.Run("cache outage still classifies", func(t *testing.T) {
@@ -368,7 +378,7 @@ func TestIntentRouter_EveryFailureMeansOrdinaryScheduling(t *testing.T) {
 	t.Run("nothing to classify", func(t *testing.T) {
 		f := newIntentRouteFixture(t)
 		f.saveRouter(t, nil)
-		require.Nil(t, f.svc.Decide(ctx, f.request(`{"messages":[{"role":"user","content":[{"type":"image","source":{}}]}]}`)))
+		requireNoPreference(t, f.svc.Decide(ctx, f.request(`{"messages":[{"role":"user","content":[{"type":"image","source":{}}]}]}`)))
 		require.Zero(t, f.classifier.calls)
 	})
 
@@ -517,4 +527,60 @@ func TestIntentRouter_CacheHitOnlyTouchesTheSession(t *testing.T) {
 	}
 	require.Equal(t, coding2, f.svc.Decide(ctx, f.request(intentTurn2)).PinnedAccountID)
 	require.Positive(t, f.store.touches)
+}
+
+// One request may pin twice: the first routed account fails and failover moves
+// on. If the first write lands last it must not move the pin back.
+func TestIntentRouter_SupersededPinWriteIsDropped(t *testing.T) {
+	ctx := context.Background()
+	f := newIntentRouteFixture(t)
+	f.saveRouter(t, nil)
+	f.classifier.answers = []string{"coding"}
+	coding1, coding2 := f.accountID(t, "coding-1"), f.accountID(t, "coding-2")
+
+	var queued []func()
+	f.svc.spawn = func(work func()) { queued = append(queued, work) }
+	decision := f.svc.Decide(ctx, f.request(intentTurn1))
+	decision.markSelected(coding1) // first attempt
+	decision.markSelected(coding2) // coding-1 failed, the request was served by coding-2
+	for i := len(queued) - 1; i >= 0; i-- {
+		queued[i]()
+	}
+	f.svc.spawn = func(work func()) { work() }
+
+	next := f.svc.Decide(ctx, f.request(intentTurn2))
+	require.Equal(t, coding2, next.PinnedAccountID, "the account that finally served the request stays pinned")
+}
+
+func TestIntentRouter_EveryDecisionCarriesTheRouterScope(t *testing.T) {
+	ctx := context.Background()
+	f := newIntentRouteFixture(t)
+	f.saveRouter(t, func(in *IntentRouterInput) { in.Rules[1].Enabled = false }) // "chat" -> pool-a is off
+	coding := []int64{f.accountID(t, "coding-1"), f.accountID(t, "coding-2")}
+	// A rule switched off since may still own conversations in flight.
+	scope := append(append([]int64(nil), coding...), f.accountID(t, "pool-a"))
+
+	f.classifier.answers = []string{"coding"}
+	matched := f.svc.Decide(ctx, f.request(intentTurn1))
+	require.Equal(t, scope, matched.ScopeAccountIDs)
+	require.Equal(t, coding, matched.AccountIDs)
+
+	f.classifier.answers = []string{"NONE"}
+	unmatched := f.svc.Decide(ctx, f.request(`{"messages":[{"role":"user","content":"weather?"}]}`))
+	requireNoPreference(t, unmatched)
+	require.Equal(t, scope, unmatched.ScopeAccountIDs)
+	require.NotNil(t, IntentRouteDecisionFromContext(WithIntentRouteDecision(ctx, unmatched)), "a scope-only decision still travels with the request")
+
+	// Switching the router off stops classification, not the reachability of
+	// accounts that conversations were already sent to.
+	f.saveRouter(t, func(in *IntentRouterInput) { in.Enabled = false })
+	calls := f.classifier.calls
+	require.Nil(t, f.svc.Decide(ctx, f.request(intentTurn1)))
+	off := f.svc.ScopeOnly(ctx, f.groupID)
+	requireNoPreference(t, off)
+	require.ElementsMatch(t, scope, off.ScopeAccountIDs)
+	require.Equal(t, calls, f.classifier.calls, "nothing is classified while switched off")
+
+	require.NoError(t, f.svc.DeleteRouter(ctx, f.groupID))
+	require.Nil(t, f.svc.ScopeOnly(ctx, f.groupID), "a deleted router leaves nothing behind")
 }

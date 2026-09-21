@@ -26,6 +26,11 @@ func (s *GatewayService) selectIntentRoutedAccount(
 		return nil, false
 	}
 	decision.clearSelected()
+	if len(decision.AccountIDs) == 0 {
+		// Scope only: this turn has no preference, and these protocols bind no
+		// server-side state to an account that would have to be honored.
+		return nil, false
+	}
 
 	platform, hasForcePlatform, err := s.resolvePlatform(ctx, groupID, group, requestedModel)
 	if err != nil {
