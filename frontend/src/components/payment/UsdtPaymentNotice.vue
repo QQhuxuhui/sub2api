@@ -13,8 +13,6 @@
     <ul class="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-amber-900 dark:text-amber-100">
       <li><span class="font-semibold">{{ t('payment.usdtNotice.exactAmount') }}</span></li>
       <li>{{ t('payment.usdtNotice.exchangeFee') }}</li>
-      <li>{{ t('payment.usdtNotice.network') }}</li>
-      <li>{{ t('payment.usdtNotice.support') }}</li>
     </ul>
   </div>
 </template>
