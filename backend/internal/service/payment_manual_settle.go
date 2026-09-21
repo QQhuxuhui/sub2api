@@ -12,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
+	"github.com/Wei-Shaw/sub2api/ent/paymenttransactionclaim"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/payment/chainverify"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -192,14 +193,38 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 	}
 
 	previousStatus := o.Status
-	tx, err := s.entClient.Tx(ctx)
+	tx, finish, err := beginPaymentSettlement(ctx, s.entClient)
 	if err != nil {
 		return nil, fmt.Errorf("begin manual settlement: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer finish()
 	client := tx.Client()
+	// The preview is advisory. Recheck under the same cross-process lock used
+	// by hashless confirmations before committing ownership.
+	if paidBy, err := hashlessPaidOrderNear(ctx, client, first.BlockTime, o.ID); err != nil {
+		return nil, err
+	} else if paidBy != 0 {
+		return nil, infraerrors.Conflict("HASHLESS_PAYMENT_NEARBY", fmt.Sprintf("order %d has an unresolved hashless confirmation", paidBy))
+	}
 	if _, err := claimPaymentTransaction(ctx, client, o.ID, normalizedHash); err != nil {
 		return nil, err
+	}
+	if err := recordSettlementClaim(ctx, client, o, normalizedHash, claimSourceManual, &first.BlockTime, map[string]any{
+		"network": network, "token": first.Token, "destination": first.To,
+		"received_amount": received.String(), "transfers": matched,
+	}); err != nil {
+		return nil, err
+	}
+	resolved, err := client.PaymentTransactionClaim.Update().Where(
+		paymenttransactionclaim.OrderIDEQ(o.ID), paymenttransactionclaim.ReviewPendingEQ(true),
+	).SetReviewPending(false).Save(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if resolved > 0 {
+		if err := writePaymentAudit(ctx, client, o.ID, "PAYMENT_REVIEW_RESOLVED", req.Operator, map[string]any{"txHash": normalizedHash}); err != nil {
+			return nil, err
+		}
 	}
 	updated, err := client.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),
@@ -233,6 +258,7 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit manual settlement: %w", err)
 	}
+	finish()
 	slog.Info("order settled manually by tx hash", "orderID", o.ID, "txHash", first.TxHash, "network", network, "operator", operator)
 	result.Settled = true
 	result.OrderStatus = OrderStatusPaid

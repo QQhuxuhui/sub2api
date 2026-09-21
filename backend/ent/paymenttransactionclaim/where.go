@@ -64,6 +64,31 @@ func OrderID(v int64) predicate.PaymentTransactionClaim {
 	return predicate.PaymentTransactionClaim(sql.FieldEQ(FieldOrderID, v))
 }
 
+// Source applies equality check predicate on the "source" field. It's identical to SourceEQ.
+func Source(v string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldEQ(FieldSource, v))
+}
+
+// TransferTime applies equality check predicate on the "transfer_time" field. It's identical to TransferTimeEQ.
+func TransferTime(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldEQ(FieldTransferTime, v))
+}
+
+// OrderCreatedAt applies equality check predicate on the "order_created_at" field. It's identical to OrderCreatedAtEQ.
+func OrderCreatedAt(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldEQ(FieldOrderCreatedAt, v))
+}
+
+// OrderWindowEnd applies equality check predicate on the "order_window_end" field. It's identical to OrderWindowEndEQ.
+func OrderWindowEnd(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldEQ(FieldOrderWindowEnd, v))
+}
+
+// ReviewPending applies equality check predicate on the "review_pending" field. It's identical to ReviewPendingEQ.
+func ReviewPending(v bool) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldEQ(FieldReviewPending, v))
+}
+
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
 func CreatedAt(v time.Time) predicate.PaymentTransactionClaim {
 	return predicate.PaymentTransactionClaim(sql.FieldEQ(FieldCreatedAt, v))
@@ -172,6 +197,241 @@ func OrderIDLT(v int64) predicate.PaymentTransactionClaim {
 // OrderIDLTE applies the LTE predicate on the "order_id" field.
 func OrderIDLTE(v int64) predicate.PaymentTransactionClaim {
 	return predicate.PaymentTransactionClaim(sql.FieldLTE(FieldOrderID, v))
+}
+
+// SourceEQ applies the EQ predicate on the "source" field.
+func SourceEQ(v string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldEQ(FieldSource, v))
+}
+
+// SourceNEQ applies the NEQ predicate on the "source" field.
+func SourceNEQ(v string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNEQ(FieldSource, v))
+}
+
+// SourceIn applies the In predicate on the "source" field.
+func SourceIn(vs ...string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldIn(FieldSource, vs...))
+}
+
+// SourceNotIn applies the NotIn predicate on the "source" field.
+func SourceNotIn(vs ...string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNotIn(FieldSource, vs...))
+}
+
+// SourceGT applies the GT predicate on the "source" field.
+func SourceGT(v string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldGT(FieldSource, v))
+}
+
+// SourceGTE applies the GTE predicate on the "source" field.
+func SourceGTE(v string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldGTE(FieldSource, v))
+}
+
+// SourceLT applies the LT predicate on the "source" field.
+func SourceLT(v string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldLT(FieldSource, v))
+}
+
+// SourceLTE applies the LTE predicate on the "source" field.
+func SourceLTE(v string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldLTE(FieldSource, v))
+}
+
+// SourceContains applies the Contains predicate on the "source" field.
+func SourceContains(v string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldContains(FieldSource, v))
+}
+
+// SourceHasPrefix applies the HasPrefix predicate on the "source" field.
+func SourceHasPrefix(v string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldHasPrefix(FieldSource, v))
+}
+
+// SourceHasSuffix applies the HasSuffix predicate on the "source" field.
+func SourceHasSuffix(v string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldHasSuffix(FieldSource, v))
+}
+
+// SourceEqualFold applies the EqualFold predicate on the "source" field.
+func SourceEqualFold(v string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldEqualFold(FieldSource, v))
+}
+
+// SourceContainsFold applies the ContainsFold predicate on the "source" field.
+func SourceContainsFold(v string) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldContainsFold(FieldSource, v))
+}
+
+// TransferTimeEQ applies the EQ predicate on the "transfer_time" field.
+func TransferTimeEQ(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldEQ(FieldTransferTime, v))
+}
+
+// TransferTimeNEQ applies the NEQ predicate on the "transfer_time" field.
+func TransferTimeNEQ(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNEQ(FieldTransferTime, v))
+}
+
+// TransferTimeIn applies the In predicate on the "transfer_time" field.
+func TransferTimeIn(vs ...time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldIn(FieldTransferTime, vs...))
+}
+
+// TransferTimeNotIn applies the NotIn predicate on the "transfer_time" field.
+func TransferTimeNotIn(vs ...time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNotIn(FieldTransferTime, vs...))
+}
+
+// TransferTimeGT applies the GT predicate on the "transfer_time" field.
+func TransferTimeGT(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldGT(FieldTransferTime, v))
+}
+
+// TransferTimeGTE applies the GTE predicate on the "transfer_time" field.
+func TransferTimeGTE(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldGTE(FieldTransferTime, v))
+}
+
+// TransferTimeLT applies the LT predicate on the "transfer_time" field.
+func TransferTimeLT(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldLT(FieldTransferTime, v))
+}
+
+// TransferTimeLTE applies the LTE predicate on the "transfer_time" field.
+func TransferTimeLTE(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldLTE(FieldTransferTime, v))
+}
+
+// TransferTimeIsNil applies the IsNil predicate on the "transfer_time" field.
+func TransferTimeIsNil() predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldIsNull(FieldTransferTime))
+}
+
+// TransferTimeNotNil applies the NotNil predicate on the "transfer_time" field.
+func TransferTimeNotNil() predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNotNull(FieldTransferTime))
+}
+
+// OrderCreatedAtEQ applies the EQ predicate on the "order_created_at" field.
+func OrderCreatedAtEQ(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldEQ(FieldOrderCreatedAt, v))
+}
+
+// OrderCreatedAtNEQ applies the NEQ predicate on the "order_created_at" field.
+func OrderCreatedAtNEQ(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNEQ(FieldOrderCreatedAt, v))
+}
+
+// OrderCreatedAtIn applies the In predicate on the "order_created_at" field.
+func OrderCreatedAtIn(vs ...time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldIn(FieldOrderCreatedAt, vs...))
+}
+
+// OrderCreatedAtNotIn applies the NotIn predicate on the "order_created_at" field.
+func OrderCreatedAtNotIn(vs ...time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNotIn(FieldOrderCreatedAt, vs...))
+}
+
+// OrderCreatedAtGT applies the GT predicate on the "order_created_at" field.
+func OrderCreatedAtGT(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldGT(FieldOrderCreatedAt, v))
+}
+
+// OrderCreatedAtGTE applies the GTE predicate on the "order_created_at" field.
+func OrderCreatedAtGTE(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldGTE(FieldOrderCreatedAt, v))
+}
+
+// OrderCreatedAtLT applies the LT predicate on the "order_created_at" field.
+func OrderCreatedAtLT(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldLT(FieldOrderCreatedAt, v))
+}
+
+// OrderCreatedAtLTE applies the LTE predicate on the "order_created_at" field.
+func OrderCreatedAtLTE(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldLTE(FieldOrderCreatedAt, v))
+}
+
+// OrderCreatedAtIsNil applies the IsNil predicate on the "order_created_at" field.
+func OrderCreatedAtIsNil() predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldIsNull(FieldOrderCreatedAt))
+}
+
+// OrderCreatedAtNotNil applies the NotNil predicate on the "order_created_at" field.
+func OrderCreatedAtNotNil() predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNotNull(FieldOrderCreatedAt))
+}
+
+// OrderWindowEndEQ applies the EQ predicate on the "order_window_end" field.
+func OrderWindowEndEQ(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldEQ(FieldOrderWindowEnd, v))
+}
+
+// OrderWindowEndNEQ applies the NEQ predicate on the "order_window_end" field.
+func OrderWindowEndNEQ(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNEQ(FieldOrderWindowEnd, v))
+}
+
+// OrderWindowEndIn applies the In predicate on the "order_window_end" field.
+func OrderWindowEndIn(vs ...time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldIn(FieldOrderWindowEnd, vs...))
+}
+
+// OrderWindowEndNotIn applies the NotIn predicate on the "order_window_end" field.
+func OrderWindowEndNotIn(vs ...time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNotIn(FieldOrderWindowEnd, vs...))
+}
+
+// OrderWindowEndGT applies the GT predicate on the "order_window_end" field.
+func OrderWindowEndGT(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldGT(FieldOrderWindowEnd, v))
+}
+
+// OrderWindowEndGTE applies the GTE predicate on the "order_window_end" field.
+func OrderWindowEndGTE(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldGTE(FieldOrderWindowEnd, v))
+}
+
+// OrderWindowEndLT applies the LT predicate on the "order_window_end" field.
+func OrderWindowEndLT(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldLT(FieldOrderWindowEnd, v))
+}
+
+// OrderWindowEndLTE applies the LTE predicate on the "order_window_end" field.
+func OrderWindowEndLTE(v time.Time) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldLTE(FieldOrderWindowEnd, v))
+}
+
+// OrderWindowEndIsNil applies the IsNil predicate on the "order_window_end" field.
+func OrderWindowEndIsNil() predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldIsNull(FieldOrderWindowEnd))
+}
+
+// OrderWindowEndNotNil applies the NotNil predicate on the "order_window_end" field.
+func OrderWindowEndNotNil() predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNotNull(FieldOrderWindowEnd))
+}
+
+// ReviewPendingEQ applies the EQ predicate on the "review_pending" field.
+func ReviewPendingEQ(v bool) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldEQ(FieldReviewPending, v))
+}
+
+// ReviewPendingNEQ applies the NEQ predicate on the "review_pending" field.
+func ReviewPendingNEQ(v bool) predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNEQ(FieldReviewPending, v))
+}
+
+// EvidenceIsNil applies the IsNil predicate on the "evidence" field.
+func EvidenceIsNil() predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldIsNull(FieldEvidence))
+}
+
+// EvidenceNotNil applies the NotNil predicate on the "evidence" field.
+func EvidenceNotNil() predicate.PaymentTransactionClaim {
+	return predicate.PaymentTransactionClaim(sql.FieldNotNull(FieldEvidence))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.

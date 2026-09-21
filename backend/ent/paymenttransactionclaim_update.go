@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
@@ -24,6 +25,106 @@ type PaymentTransactionClaimUpdate struct {
 // Where appends a list predicates to the PaymentTransactionClaimUpdate builder.
 func (_u *PaymentTransactionClaimUpdate) Where(ps ...predicate.PaymentTransactionClaim) *PaymentTransactionClaimUpdate {
 	_u.mutation.Where(ps...)
+	return _u
+}
+
+// SetSource sets the "source" field.
+func (_u *PaymentTransactionClaimUpdate) SetSource(v string) *PaymentTransactionClaimUpdate {
+	_u.mutation.SetSource(v)
+	return _u
+}
+
+// SetNillableSource sets the "source" field if the given value is not nil.
+func (_u *PaymentTransactionClaimUpdate) SetNillableSource(v *string) *PaymentTransactionClaimUpdate {
+	if v != nil {
+		_u.SetSource(*v)
+	}
+	return _u
+}
+
+// SetTransferTime sets the "transfer_time" field.
+func (_u *PaymentTransactionClaimUpdate) SetTransferTime(v time.Time) *PaymentTransactionClaimUpdate {
+	_u.mutation.SetTransferTime(v)
+	return _u
+}
+
+// SetNillableTransferTime sets the "transfer_time" field if the given value is not nil.
+func (_u *PaymentTransactionClaimUpdate) SetNillableTransferTime(v *time.Time) *PaymentTransactionClaimUpdate {
+	if v != nil {
+		_u.SetTransferTime(*v)
+	}
+	return _u
+}
+
+// ClearTransferTime clears the value of the "transfer_time" field.
+func (_u *PaymentTransactionClaimUpdate) ClearTransferTime() *PaymentTransactionClaimUpdate {
+	_u.mutation.ClearTransferTime()
+	return _u
+}
+
+// SetOrderCreatedAt sets the "order_created_at" field.
+func (_u *PaymentTransactionClaimUpdate) SetOrderCreatedAt(v time.Time) *PaymentTransactionClaimUpdate {
+	_u.mutation.SetOrderCreatedAt(v)
+	return _u
+}
+
+// SetNillableOrderCreatedAt sets the "order_created_at" field if the given value is not nil.
+func (_u *PaymentTransactionClaimUpdate) SetNillableOrderCreatedAt(v *time.Time) *PaymentTransactionClaimUpdate {
+	if v != nil {
+		_u.SetOrderCreatedAt(*v)
+	}
+	return _u
+}
+
+// ClearOrderCreatedAt clears the value of the "order_created_at" field.
+func (_u *PaymentTransactionClaimUpdate) ClearOrderCreatedAt() *PaymentTransactionClaimUpdate {
+	_u.mutation.ClearOrderCreatedAt()
+	return _u
+}
+
+// SetOrderWindowEnd sets the "order_window_end" field.
+func (_u *PaymentTransactionClaimUpdate) SetOrderWindowEnd(v time.Time) *PaymentTransactionClaimUpdate {
+	_u.mutation.SetOrderWindowEnd(v)
+	return _u
+}
+
+// SetNillableOrderWindowEnd sets the "order_window_end" field if the given value is not nil.
+func (_u *PaymentTransactionClaimUpdate) SetNillableOrderWindowEnd(v *time.Time) *PaymentTransactionClaimUpdate {
+	if v != nil {
+		_u.SetOrderWindowEnd(*v)
+	}
+	return _u
+}
+
+// ClearOrderWindowEnd clears the value of the "order_window_end" field.
+func (_u *PaymentTransactionClaimUpdate) ClearOrderWindowEnd() *PaymentTransactionClaimUpdate {
+	_u.mutation.ClearOrderWindowEnd()
+	return _u
+}
+
+// SetReviewPending sets the "review_pending" field.
+func (_u *PaymentTransactionClaimUpdate) SetReviewPending(v bool) *PaymentTransactionClaimUpdate {
+	_u.mutation.SetReviewPending(v)
+	return _u
+}
+
+// SetNillableReviewPending sets the "review_pending" field if the given value is not nil.
+func (_u *PaymentTransactionClaimUpdate) SetNillableReviewPending(v *bool) *PaymentTransactionClaimUpdate {
+	if v != nil {
+		_u.SetReviewPending(*v)
+	}
+	return _u
+}
+
+// SetEvidence sets the "evidence" field.
+func (_u *PaymentTransactionClaimUpdate) SetEvidence(v map[string]interface{}) *PaymentTransactionClaimUpdate {
+	_u.mutation.SetEvidence(v)
+	return _u
+}
+
+// ClearEvidence clears the value of the "evidence" field.
+func (_u *PaymentTransactionClaimUpdate) ClearEvidence() *PaymentTransactionClaimUpdate {
+	_u.mutation.ClearEvidence()
 	return _u
 }
 
@@ -68,6 +169,36 @@ func (_u *PaymentTransactionClaimUpdate) sqlSave(ctx context.Context) (_node int
 			}
 		}
 	}
+	if value, ok := _u.mutation.Source(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldSource, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.TransferTime(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldTransferTime, field.TypeTime, value)
+	}
+	if _u.mutation.TransferTimeCleared() {
+		_spec.ClearField(paymenttransactionclaim.FieldTransferTime, field.TypeTime)
+	}
+	if value, ok := _u.mutation.OrderCreatedAt(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldOrderCreatedAt, field.TypeTime, value)
+	}
+	if _u.mutation.OrderCreatedAtCleared() {
+		_spec.ClearField(paymenttransactionclaim.FieldOrderCreatedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.OrderWindowEnd(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldOrderWindowEnd, field.TypeTime, value)
+	}
+	if _u.mutation.OrderWindowEndCleared() {
+		_spec.ClearField(paymenttransactionclaim.FieldOrderWindowEnd, field.TypeTime)
+	}
+	if value, ok := _u.mutation.ReviewPending(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldReviewPending, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.Evidence(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldEvidence, field.TypeJSON, value)
+	}
+	if _u.mutation.EvidenceCleared() {
+		_spec.ClearField(paymenttransactionclaim.FieldEvidence, field.TypeJSON)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{paymenttransactionclaim.Label}
@@ -86,6 +217,106 @@ type PaymentTransactionClaimUpdateOne struct {
 	fields   []string
 	hooks    []Hook
 	mutation *PaymentTransactionClaimMutation
+}
+
+// SetSource sets the "source" field.
+func (_u *PaymentTransactionClaimUpdateOne) SetSource(v string) *PaymentTransactionClaimUpdateOne {
+	_u.mutation.SetSource(v)
+	return _u
+}
+
+// SetNillableSource sets the "source" field if the given value is not nil.
+func (_u *PaymentTransactionClaimUpdateOne) SetNillableSource(v *string) *PaymentTransactionClaimUpdateOne {
+	if v != nil {
+		_u.SetSource(*v)
+	}
+	return _u
+}
+
+// SetTransferTime sets the "transfer_time" field.
+func (_u *PaymentTransactionClaimUpdateOne) SetTransferTime(v time.Time) *PaymentTransactionClaimUpdateOne {
+	_u.mutation.SetTransferTime(v)
+	return _u
+}
+
+// SetNillableTransferTime sets the "transfer_time" field if the given value is not nil.
+func (_u *PaymentTransactionClaimUpdateOne) SetNillableTransferTime(v *time.Time) *PaymentTransactionClaimUpdateOne {
+	if v != nil {
+		_u.SetTransferTime(*v)
+	}
+	return _u
+}
+
+// ClearTransferTime clears the value of the "transfer_time" field.
+func (_u *PaymentTransactionClaimUpdateOne) ClearTransferTime() *PaymentTransactionClaimUpdateOne {
+	_u.mutation.ClearTransferTime()
+	return _u
+}
+
+// SetOrderCreatedAt sets the "order_created_at" field.
+func (_u *PaymentTransactionClaimUpdateOne) SetOrderCreatedAt(v time.Time) *PaymentTransactionClaimUpdateOne {
+	_u.mutation.SetOrderCreatedAt(v)
+	return _u
+}
+
+// SetNillableOrderCreatedAt sets the "order_created_at" field if the given value is not nil.
+func (_u *PaymentTransactionClaimUpdateOne) SetNillableOrderCreatedAt(v *time.Time) *PaymentTransactionClaimUpdateOne {
+	if v != nil {
+		_u.SetOrderCreatedAt(*v)
+	}
+	return _u
+}
+
+// ClearOrderCreatedAt clears the value of the "order_created_at" field.
+func (_u *PaymentTransactionClaimUpdateOne) ClearOrderCreatedAt() *PaymentTransactionClaimUpdateOne {
+	_u.mutation.ClearOrderCreatedAt()
+	return _u
+}
+
+// SetOrderWindowEnd sets the "order_window_end" field.
+func (_u *PaymentTransactionClaimUpdateOne) SetOrderWindowEnd(v time.Time) *PaymentTransactionClaimUpdateOne {
+	_u.mutation.SetOrderWindowEnd(v)
+	return _u
+}
+
+// SetNillableOrderWindowEnd sets the "order_window_end" field if the given value is not nil.
+func (_u *PaymentTransactionClaimUpdateOne) SetNillableOrderWindowEnd(v *time.Time) *PaymentTransactionClaimUpdateOne {
+	if v != nil {
+		_u.SetOrderWindowEnd(*v)
+	}
+	return _u
+}
+
+// ClearOrderWindowEnd clears the value of the "order_window_end" field.
+func (_u *PaymentTransactionClaimUpdateOne) ClearOrderWindowEnd() *PaymentTransactionClaimUpdateOne {
+	_u.mutation.ClearOrderWindowEnd()
+	return _u
+}
+
+// SetReviewPending sets the "review_pending" field.
+func (_u *PaymentTransactionClaimUpdateOne) SetReviewPending(v bool) *PaymentTransactionClaimUpdateOne {
+	_u.mutation.SetReviewPending(v)
+	return _u
+}
+
+// SetNillableReviewPending sets the "review_pending" field if the given value is not nil.
+func (_u *PaymentTransactionClaimUpdateOne) SetNillableReviewPending(v *bool) *PaymentTransactionClaimUpdateOne {
+	if v != nil {
+		_u.SetReviewPending(*v)
+	}
+	return _u
+}
+
+// SetEvidence sets the "evidence" field.
+func (_u *PaymentTransactionClaimUpdateOne) SetEvidence(v map[string]interface{}) *PaymentTransactionClaimUpdateOne {
+	_u.mutation.SetEvidence(v)
+	return _u
+}
+
+// ClearEvidence clears the value of the "evidence" field.
+func (_u *PaymentTransactionClaimUpdateOne) ClearEvidence() *PaymentTransactionClaimUpdateOne {
+	_u.mutation.ClearEvidence()
+	return _u
 }
 
 // Mutation returns the PaymentTransactionClaimMutation object of the builder.
@@ -158,6 +389,36 @@ func (_u *PaymentTransactionClaimUpdateOne) sqlSave(ctx context.Context) (_node 
 				ps[i](selector)
 			}
 		}
+	}
+	if value, ok := _u.mutation.Source(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldSource, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.TransferTime(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldTransferTime, field.TypeTime, value)
+	}
+	if _u.mutation.TransferTimeCleared() {
+		_spec.ClearField(paymenttransactionclaim.FieldTransferTime, field.TypeTime)
+	}
+	if value, ok := _u.mutation.OrderCreatedAt(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldOrderCreatedAt, field.TypeTime, value)
+	}
+	if _u.mutation.OrderCreatedAtCleared() {
+		_spec.ClearField(paymenttransactionclaim.FieldOrderCreatedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.OrderWindowEnd(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldOrderWindowEnd, field.TypeTime, value)
+	}
+	if _u.mutation.OrderWindowEndCleared() {
+		_spec.ClearField(paymenttransactionclaim.FieldOrderWindowEnd, field.TypeTime)
+	}
+	if value, ok := _u.mutation.ReviewPending(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldReviewPending, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.Evidence(); ok {
+		_spec.SetField(paymenttransactionclaim.FieldEvidence, field.TypeJSON, value)
+	}
+	if _u.mutation.EvidenceCleared() {
+		_spec.ClearField(paymenttransactionclaim.FieldEvidence, field.TypeJSON)
 	}
 	_node = &PaymentTransactionClaim{config: _u.config}
 	_spec.Assign = _node.assignValues

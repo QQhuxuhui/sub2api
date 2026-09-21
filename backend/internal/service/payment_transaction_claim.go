@@ -6,11 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
-	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymenttransactionclaim"
 	"github.com/Wei-Shaw/sub2api/internal/payment/chainverify"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -69,75 +66,12 @@ func claimPaymentTransaction(ctx context.Context, client *dbent.Client, orderID 
 	return true, nil
 }
 
-// hashlessPaidOrderNear finds an order that was fulfilled on a gateway trade
-// claim alone — its chain hash is still unknown — and was paid around the given
-// block time. Settling another order by a hash from that window could credit
-// the very transfer that order was already paid with: a payer can leave one
-// order unpaid, pay a second one through a switched network, then present that
-// transfer's hash for the first. Returns 0 when there is none.
-func hashlessPaidOrderNear(ctx context.Context, client *dbent.Client, blockTime time.Time, exceptOrderID int64) (int64, error) {
-	claims, err := client.PaymentTransactionClaim.Query().
-		Where(paymenttransactionclaim.TxHashHasPrefix(gatewayTradeClaimPrefix)).All(ctx)
-	if err != nil {
-		return 0, err
-	}
-	candidates := make([]int64, 0, len(claims))
-	for _, claim := range claims {
-		if claim.OrderID != exceptOrderID {
-			candidates = append(candidates, claim.OrderID)
-		}
-	}
-	if len(candidates) == 0 {
-		return 0, nil
-	}
-	linked, err := client.PaymentTransactionClaim.Query().Where(
-		paymenttransactionclaim.OrderIDIn(candidates...),
-		paymenttransactionclaim.Not(paymenttransactionclaim.TxHashHasPrefix(gatewayTradeClaimPrefix)),
-	).All(ctx)
-	if err != nil {
-		return 0, err
-	}
-	hasHash := make(map[int64]bool, len(linked))
-	for _, claim := range linked {
-		hasHash[claim.OrderID] = true
-	}
-	hashless := candidates[:0]
-	for _, id := range candidates {
-		if !hasHash[id] {
-			hashless = append(hashless, id)
-		}
-	}
-	if len(hashless) == 0 {
-		return 0, nil
-	}
-	order, err := client.PaymentOrder.Query().Where(
-		paymentorder.IDIn(hashless...),
-		paymentorder.PaidAtGTE(blockTime.Add(-hashlessPaidBefore)),
-		paymentorder.PaidAtLTE(blockTime.Add(hashlessPaidAfter)),
-	).Order(dbent.Asc(paymentorder.FieldID)).First(ctx)
-	if dbent.IsNotFound(err) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	return order.ID, nil
-}
-
-// A payment is recorded (paid_at) after its transfer is mined: seconds for a
-// callback, but up to the order timeout when only the reconcile job or the
-// pre-expiry query notices it. The window errs on the wide side.
-const (
-	hashlessPaidBefore = 2 * time.Minute
-	hashlessPaidAfter  = 2 * time.Hour
-)
-
 func paymentTransactionAlreadyUsed(orderID string) error {
 	return infraerrors.Conflict("TX_ALREADY_USED", "this transaction already settled order "+orderID)
 }
 
-// paymentTransactionUsedBy also honors pre-migration audit records. The order
-// exclusion permits idempotent retries without ignoring another legacy owner.
+// Historical ownership is backfilled by migration 240 before this indexed
+// lookup is used. Audit text must never be searched on the payment hot path.
 func paymentTransactionUsedBy(ctx context.Context, client *dbent.Client, hash string, exceptOrderID int64) (string, error) {
 	claim, err := client.PaymentTransactionClaim.Query().Where(paymenttransactionclaim.TxHashEQ(hash)).Only(ctx)
 	if err != nil && !dbent.IsNotFound(err) {
@@ -145,26 +79,6 @@ func paymentTransactionUsedBy(ctx context.Context, client *dbent.Client, hash st
 	}
 	if claim != nil && claim.OrderID != exceptOrderID {
 		return strconv.FormatInt(claim.OrderID, 10), nil
-	}
-	logs, err := client.PaymentAuditLog.Query().Where(
-		paymentauditlog.ActionIn("ORDER_PAID", auditActionManualSettled),
-		paymentauditlog.OrderIDNEQ(strconv.FormatInt(exceptOrderID, 10)),
-		paymentauditlog.DetailContainsFold(hash),
-	).All(ctx)
-	if err != nil {
-		return "", err
-	}
-	for _, log := range logs {
-		var detail struct {
-			TxHash string `json:"txHash"`
-		}
-		if err := json.Unmarshal([]byte(log.Detail), &detail); err != nil {
-			return "", fmt.Errorf("read payment transaction audit %d: %w", log.ID, err)
-		}
-		legacyHash, _ := chainverify.NormalizeTxHash(detail.TxHash)
-		if detail.TxHash == hash || legacyHash == hash {
-			return log.OrderID, nil
-		}
 	}
 	return "", nil
 }

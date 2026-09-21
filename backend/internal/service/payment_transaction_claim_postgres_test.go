@@ -55,7 +55,7 @@ func TestPaymentTransactionClaimsPostgres(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 
 	// Execute the actual forward-only migration twice in transactions.
-	for _, file := range []string{"093_payment_audit_logs.sql", "239_payment_transaction_claims.sql", "239_payment_transaction_claims.sql"} {
+	for _, file := range []string{"092_payment_orders.sql", "093_payment_audit_logs.sql", "239_payment_transaction_claims.sql", "239_payment_transaction_claims.sql", "240_payment_settlement_evidence.sql"} {
 		migration, err := dbmigrations.FS.ReadFile(file)
 		require.NoError(t, err)
 		tx, err := scoped.BeginTx(ctx, nil)
@@ -69,12 +69,15 @@ func TestPaymentTransactionClaimsPostgres(t *testing.T) {
 	}
 
 	claim := func(orderID int64, hash string) error {
-		tx, err := client.Tx(ctx)
+		tx, finish, err := beginPaymentSettlement(ctx, client)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = tx.Rollback() }()
+		defer finish()
 		if _, err := claimPaymentTransaction(ctx, tx.Client(), orderID, hash); err != nil {
+			return err
+		}
+		if _, err := tx.Client().PaymentTransactionClaim.Update().Where(paymenttransactionclaim.TxHashEQ(hash)).SetSource(claimSourceGateway).Save(ctx); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -124,8 +127,9 @@ func TestPaymentTransactionClaimsPostgres(t *testing.T) {
 
 	t.Run("rollback_releases_claim", func(t *testing.T) {
 		hash := strings.Repeat("c", 64)
-		tx, err := client.Tx(ctx)
+		tx, finish, err := beginPaymentSettlement(ctx, client)
 		require.NoError(t, err)
+		defer finish()
 		created, err := claimPaymentTransaction(ctx, tx.Client(), 1, hash)
 		require.NoError(t, err)
 		require.True(t, created)
@@ -135,6 +139,10 @@ func TestPaymentTransactionClaimsPostgres(t *testing.T) {
 	t.Run("legacy_audit_is_still_consumed", func(t *testing.T) {
 		hash := strings.Repeat("d", 64)
 		require.NoError(t, writePaymentAudit(ctx, client, 71, "ORDER_PAID", "epusdt", map[string]any{"txHash": "0x" + strings.ToUpper(hash)}))
+		migration, err := dbmigrations.FS.ReadFile("240_payment_settlement_evidence.sql")
+		require.NoError(t, err)
+		_, err = scoped.ExecContext(ctx, string(migration))
+		require.NoError(t, err)
 		require.Equal(t, "TX_ALREADY_USED", infraerrors.Reason(claim(72, hash)))
 		require.NoError(t, claim(71, hash))
 	})

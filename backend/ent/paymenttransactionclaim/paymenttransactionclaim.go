@@ -17,6 +17,18 @@ const (
 	FieldTxHash = "tx_hash"
 	// FieldOrderID holds the string denoting the order_id field in the database.
 	FieldOrderID = "order_id"
+	// FieldSource holds the string denoting the source field in the database.
+	FieldSource = "source"
+	// FieldTransferTime holds the string denoting the transfer_time field in the database.
+	FieldTransferTime = "transfer_time"
+	// FieldOrderCreatedAt holds the string denoting the order_created_at field in the database.
+	FieldOrderCreatedAt = "order_created_at"
+	// FieldOrderWindowEnd holds the string denoting the order_window_end field in the database.
+	FieldOrderWindowEnd = "order_window_end"
+	// FieldReviewPending holds the string denoting the review_pending field in the database.
+	FieldReviewPending = "review_pending"
+	// FieldEvidence holds the string denoting the evidence field in the database.
+	FieldEvidence = "evidence"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
 	// Table holds the table name of the paymenttransactionclaim in the database.
@@ -28,6 +40,12 @@ var Columns = []string{
 	FieldID,
 	FieldTxHash,
 	FieldOrderID,
+	FieldSource,
+	FieldTransferTime,
+	FieldOrderCreatedAt,
+	FieldOrderWindowEnd,
+	FieldReviewPending,
+	FieldEvidence,
 	FieldCreatedAt,
 }
 
@@ -44,6 +62,10 @@ func ValidColumn(column string) bool {
 var (
 	// TxHashValidator is a validator for the "tx_hash" field. It is called by the builders before save.
 	TxHashValidator func(string) error
+	// DefaultSource holds the default value on creation for the "source" field.
+	DefaultSource string
+	// DefaultReviewPending holds the default value on creation for the "review_pending" field.
+	DefaultReviewPending bool
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
 	DefaultCreatedAt func() time.Time
 )
@@ -64,6 +86,31 @@ func ByTxHash(opts ...sql.OrderTermOption) OrderOption {
 // ByOrderID orders the results by the order_id field.
 func ByOrderID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldOrderID, opts...).ToFunc()
+}
+
+// BySource orders the results by the source field.
+func BySource(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSource, opts...).ToFunc()
+}
+
+// ByTransferTime orders the results by the transfer_time field.
+func ByTransferTime(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTransferTime, opts...).ToFunc()
+}
+
+// ByOrderCreatedAt orders the results by the order_created_at field.
+func ByOrderCreatedAt(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOrderCreatedAt, opts...).ToFunc()
+}
+
+// ByOrderWindowEnd orders the results by the order_window_end field.
+func ByOrderWindowEnd(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOrderWindowEnd, opts...).ToFunc()
+}
+
+// ByReviewPending orders the results by the review_pending field.
+func ByReviewPending(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldReviewPending, opts...).ToFunc()
 }
 
 // ByCreatedAt orders the results by the created_at field.

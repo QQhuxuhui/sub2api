@@ -3,6 +3,7 @@
 package ent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -21,6 +22,18 @@ type PaymentTransactionClaim struct {
 	TxHash string `json:"tx_hash,omitempty"`
 	// OrderID holds the value of the "order_id" field.
 	OrderID int64 `json:"order_id,omitempty"`
+	// Source holds the value of the "source" field.
+	Source string `json:"source,omitempty"`
+	// TransferTime holds the value of the "transfer_time" field.
+	TransferTime *time.Time `json:"transfer_time,omitempty"`
+	// OrderCreatedAt holds the value of the "order_created_at" field.
+	OrderCreatedAt *time.Time `json:"order_created_at,omitempty"`
+	// OrderWindowEnd holds the value of the "order_window_end" field.
+	OrderWindowEnd *time.Time `json:"order_window_end,omitempty"`
+	// ReviewPending holds the value of the "review_pending" field.
+	ReviewPending bool `json:"review_pending,omitempty"`
+	// Evidence holds the value of the "evidence" field.
+	Evidence map[string]interface{} `json:"evidence,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	selectValues sql.SelectValues
@@ -31,11 +44,15 @@ func (*PaymentTransactionClaim) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case paymenttransactionclaim.FieldEvidence:
+			values[i] = new([]byte)
+		case paymenttransactionclaim.FieldReviewPending:
+			values[i] = new(sql.NullBool)
 		case paymenttransactionclaim.FieldID, paymenttransactionclaim.FieldOrderID:
 			values[i] = new(sql.NullInt64)
-		case paymenttransactionclaim.FieldTxHash:
+		case paymenttransactionclaim.FieldTxHash, paymenttransactionclaim.FieldSource:
 			values[i] = new(sql.NullString)
-		case paymenttransactionclaim.FieldCreatedAt:
+		case paymenttransactionclaim.FieldTransferTime, paymenttransactionclaim.FieldOrderCreatedAt, paymenttransactionclaim.FieldOrderWindowEnd, paymenttransactionclaim.FieldCreatedAt:
 			values[i] = new(sql.NullTime)
 		default:
 			values[i] = new(sql.UnknownType)
@@ -69,6 +86,47 @@ func (_m *PaymentTransactionClaim) assignValues(columns []string, values []any) 
 				return fmt.Errorf("unexpected type %T for field order_id", values[i])
 			} else if value.Valid {
 				_m.OrderID = value.Int64
+			}
+		case paymenttransactionclaim.FieldSource:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field source", values[i])
+			} else if value.Valid {
+				_m.Source = value.String
+			}
+		case paymenttransactionclaim.FieldTransferTime:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field transfer_time", values[i])
+			} else if value.Valid {
+				_m.TransferTime = new(time.Time)
+				*_m.TransferTime = value.Time
+			}
+		case paymenttransactionclaim.FieldOrderCreatedAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field order_created_at", values[i])
+			} else if value.Valid {
+				_m.OrderCreatedAt = new(time.Time)
+				*_m.OrderCreatedAt = value.Time
+			}
+		case paymenttransactionclaim.FieldOrderWindowEnd:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field order_window_end", values[i])
+			} else if value.Valid {
+				_m.OrderWindowEnd = new(time.Time)
+				*_m.OrderWindowEnd = value.Time
+			}
+		case paymenttransactionclaim.FieldReviewPending:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field review_pending", values[i])
+			} else if value.Valid {
+				_m.ReviewPending = value.Bool
+			}
+		case paymenttransactionclaim.FieldEvidence:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field evidence", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.Evidence); err != nil {
+					return fmt.Errorf("unmarshal field evidence: %w", err)
+				}
 			}
 		case paymenttransactionclaim.FieldCreatedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -117,6 +175,30 @@ func (_m *PaymentTransactionClaim) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("order_id=")
 	builder.WriteString(fmt.Sprintf("%v", _m.OrderID))
+	builder.WriteString(", ")
+	builder.WriteString("source=")
+	builder.WriteString(_m.Source)
+	builder.WriteString(", ")
+	if v := _m.TransferTime; v != nil {
+		builder.WriteString("transfer_time=")
+		builder.WriteString(v.Format(time.ANSIC))
+	}
+	builder.WriteString(", ")
+	if v := _m.OrderCreatedAt; v != nil {
+		builder.WriteString("order_created_at=")
+		builder.WriteString(v.Format(time.ANSIC))
+	}
+	builder.WriteString(", ")
+	if v := _m.OrderWindowEnd; v != nil {
+		builder.WriteString("order_window_end=")
+		builder.WriteString(v.Format(time.ANSIC))
+	}
+	builder.WriteString(", ")
+	builder.WriteString("review_pending=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ReviewPending))
+	builder.WriteString(", ")
+	builder.WriteString("evidence=")
+	builder.WriteString(fmt.Sprintf("%v", _m.Evidence))
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
 	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))

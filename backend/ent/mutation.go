@@ -34219,17 +34219,23 @@ func (m *PaymentProviderInstanceMutation) ResetEdge(name string) error {
 // PaymentTransactionClaimMutation represents an operation that mutates the PaymentTransactionClaim nodes in the graph.
 type PaymentTransactionClaimMutation struct {
 	config
-	op            Op
-	typ           string
-	id            *int64
-	tx_hash       *string
-	order_id      *int64
-	addorder_id   *int64
-	created_at    *time.Time
-	clearedFields map[string]struct{}
-	done          bool
-	oldValue      func(context.Context) (*PaymentTransactionClaim, error)
-	predicates    []predicate.PaymentTransactionClaim
+	op               Op
+	typ              string
+	id               *int64
+	tx_hash          *string
+	order_id         *int64
+	addorder_id      *int64
+	source           *string
+	transfer_time    *time.Time
+	order_created_at *time.Time
+	order_window_end *time.Time
+	review_pending   *bool
+	evidence         *map[string]interface{}
+	created_at       *time.Time
+	clearedFields    map[string]struct{}
+	done             bool
+	oldValue         func(context.Context) (*PaymentTransactionClaim, error)
+	predicates       []predicate.PaymentTransactionClaim
 }
 
 var _ ent.Mutation = (*PaymentTransactionClaimMutation)(nil)
@@ -34422,6 +34428,274 @@ func (m *PaymentTransactionClaimMutation) ResetOrderID() {
 	m.addorder_id = nil
 }
 
+// SetSource sets the "source" field.
+func (m *PaymentTransactionClaimMutation) SetSource(s string) {
+	m.source = &s
+}
+
+// Source returns the value of the "source" field in the mutation.
+func (m *PaymentTransactionClaimMutation) Source() (r string, exists bool) {
+	v := m.source
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSource returns the old "source" field's value of the PaymentTransactionClaim entity.
+// If the PaymentTransactionClaim object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PaymentTransactionClaimMutation) OldSource(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSource is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSource requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSource: %w", err)
+	}
+	return oldValue.Source, nil
+}
+
+// ResetSource resets all changes to the "source" field.
+func (m *PaymentTransactionClaimMutation) ResetSource() {
+	m.source = nil
+}
+
+// SetTransferTime sets the "transfer_time" field.
+func (m *PaymentTransactionClaimMutation) SetTransferTime(t time.Time) {
+	m.transfer_time = &t
+}
+
+// TransferTime returns the value of the "transfer_time" field in the mutation.
+func (m *PaymentTransactionClaimMutation) TransferTime() (r time.Time, exists bool) {
+	v := m.transfer_time
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTransferTime returns the old "transfer_time" field's value of the PaymentTransactionClaim entity.
+// If the PaymentTransactionClaim object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PaymentTransactionClaimMutation) OldTransferTime(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTransferTime is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTransferTime requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTransferTime: %w", err)
+	}
+	return oldValue.TransferTime, nil
+}
+
+// ClearTransferTime clears the value of the "transfer_time" field.
+func (m *PaymentTransactionClaimMutation) ClearTransferTime() {
+	m.transfer_time = nil
+	m.clearedFields[paymenttransactionclaim.FieldTransferTime] = struct{}{}
+}
+
+// TransferTimeCleared returns if the "transfer_time" field was cleared in this mutation.
+func (m *PaymentTransactionClaimMutation) TransferTimeCleared() bool {
+	_, ok := m.clearedFields[paymenttransactionclaim.FieldTransferTime]
+	return ok
+}
+
+// ResetTransferTime resets all changes to the "transfer_time" field.
+func (m *PaymentTransactionClaimMutation) ResetTransferTime() {
+	m.transfer_time = nil
+	delete(m.clearedFields, paymenttransactionclaim.FieldTransferTime)
+}
+
+// SetOrderCreatedAt sets the "order_created_at" field.
+func (m *PaymentTransactionClaimMutation) SetOrderCreatedAt(t time.Time) {
+	m.order_created_at = &t
+}
+
+// OrderCreatedAt returns the value of the "order_created_at" field in the mutation.
+func (m *PaymentTransactionClaimMutation) OrderCreatedAt() (r time.Time, exists bool) {
+	v := m.order_created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOrderCreatedAt returns the old "order_created_at" field's value of the PaymentTransactionClaim entity.
+// If the PaymentTransactionClaim object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PaymentTransactionClaimMutation) OldOrderCreatedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOrderCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOrderCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOrderCreatedAt: %w", err)
+	}
+	return oldValue.OrderCreatedAt, nil
+}
+
+// ClearOrderCreatedAt clears the value of the "order_created_at" field.
+func (m *PaymentTransactionClaimMutation) ClearOrderCreatedAt() {
+	m.order_created_at = nil
+	m.clearedFields[paymenttransactionclaim.FieldOrderCreatedAt] = struct{}{}
+}
+
+// OrderCreatedAtCleared returns if the "order_created_at" field was cleared in this mutation.
+func (m *PaymentTransactionClaimMutation) OrderCreatedAtCleared() bool {
+	_, ok := m.clearedFields[paymenttransactionclaim.FieldOrderCreatedAt]
+	return ok
+}
+
+// ResetOrderCreatedAt resets all changes to the "order_created_at" field.
+func (m *PaymentTransactionClaimMutation) ResetOrderCreatedAt() {
+	m.order_created_at = nil
+	delete(m.clearedFields, paymenttransactionclaim.FieldOrderCreatedAt)
+}
+
+// SetOrderWindowEnd sets the "order_window_end" field.
+func (m *PaymentTransactionClaimMutation) SetOrderWindowEnd(t time.Time) {
+	m.order_window_end = &t
+}
+
+// OrderWindowEnd returns the value of the "order_window_end" field in the mutation.
+func (m *PaymentTransactionClaimMutation) OrderWindowEnd() (r time.Time, exists bool) {
+	v := m.order_window_end
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOrderWindowEnd returns the old "order_window_end" field's value of the PaymentTransactionClaim entity.
+// If the PaymentTransactionClaim object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PaymentTransactionClaimMutation) OldOrderWindowEnd(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOrderWindowEnd is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOrderWindowEnd requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOrderWindowEnd: %w", err)
+	}
+	return oldValue.OrderWindowEnd, nil
+}
+
+// ClearOrderWindowEnd clears the value of the "order_window_end" field.
+func (m *PaymentTransactionClaimMutation) ClearOrderWindowEnd() {
+	m.order_window_end = nil
+	m.clearedFields[paymenttransactionclaim.FieldOrderWindowEnd] = struct{}{}
+}
+
+// OrderWindowEndCleared returns if the "order_window_end" field was cleared in this mutation.
+func (m *PaymentTransactionClaimMutation) OrderWindowEndCleared() bool {
+	_, ok := m.clearedFields[paymenttransactionclaim.FieldOrderWindowEnd]
+	return ok
+}
+
+// ResetOrderWindowEnd resets all changes to the "order_window_end" field.
+func (m *PaymentTransactionClaimMutation) ResetOrderWindowEnd() {
+	m.order_window_end = nil
+	delete(m.clearedFields, paymenttransactionclaim.FieldOrderWindowEnd)
+}
+
+// SetReviewPending sets the "review_pending" field.
+func (m *PaymentTransactionClaimMutation) SetReviewPending(b bool) {
+	m.review_pending = &b
+}
+
+// ReviewPending returns the value of the "review_pending" field in the mutation.
+func (m *PaymentTransactionClaimMutation) ReviewPending() (r bool, exists bool) {
+	v := m.review_pending
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldReviewPending returns the old "review_pending" field's value of the PaymentTransactionClaim entity.
+// If the PaymentTransactionClaim object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PaymentTransactionClaimMutation) OldReviewPending(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldReviewPending is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldReviewPending requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldReviewPending: %w", err)
+	}
+	return oldValue.ReviewPending, nil
+}
+
+// ResetReviewPending resets all changes to the "review_pending" field.
+func (m *PaymentTransactionClaimMutation) ResetReviewPending() {
+	m.review_pending = nil
+}
+
+// SetEvidence sets the "evidence" field.
+func (m *PaymentTransactionClaimMutation) SetEvidence(value map[string]interface{}) {
+	m.evidence = &value
+}
+
+// Evidence returns the value of the "evidence" field in the mutation.
+func (m *PaymentTransactionClaimMutation) Evidence() (r map[string]interface{}, exists bool) {
+	v := m.evidence
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEvidence returns the old "evidence" field's value of the PaymentTransactionClaim entity.
+// If the PaymentTransactionClaim object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PaymentTransactionClaimMutation) OldEvidence(ctx context.Context) (v map[string]interface{}, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEvidence is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEvidence requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEvidence: %w", err)
+	}
+	return oldValue.Evidence, nil
+}
+
+// ClearEvidence clears the value of the "evidence" field.
+func (m *PaymentTransactionClaimMutation) ClearEvidence() {
+	m.evidence = nil
+	m.clearedFields[paymenttransactionclaim.FieldEvidence] = struct{}{}
+}
+
+// EvidenceCleared returns if the "evidence" field was cleared in this mutation.
+func (m *PaymentTransactionClaimMutation) EvidenceCleared() bool {
+	_, ok := m.clearedFields[paymenttransactionclaim.FieldEvidence]
+	return ok
+}
+
+// ResetEvidence resets all changes to the "evidence" field.
+func (m *PaymentTransactionClaimMutation) ResetEvidence() {
+	m.evidence = nil
+	delete(m.clearedFields, paymenttransactionclaim.FieldEvidence)
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (m *PaymentTransactionClaimMutation) SetCreatedAt(t time.Time) {
 	m.created_at = &t
@@ -34492,12 +34766,30 @@ func (m *PaymentTransactionClaimMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *PaymentTransactionClaimMutation) Fields() []string {
-	fields := make([]string, 0, 3)
+	fields := make([]string, 0, 9)
 	if m.tx_hash != nil {
 		fields = append(fields, paymenttransactionclaim.FieldTxHash)
 	}
 	if m.order_id != nil {
 		fields = append(fields, paymenttransactionclaim.FieldOrderID)
+	}
+	if m.source != nil {
+		fields = append(fields, paymenttransactionclaim.FieldSource)
+	}
+	if m.transfer_time != nil {
+		fields = append(fields, paymenttransactionclaim.FieldTransferTime)
+	}
+	if m.order_created_at != nil {
+		fields = append(fields, paymenttransactionclaim.FieldOrderCreatedAt)
+	}
+	if m.order_window_end != nil {
+		fields = append(fields, paymenttransactionclaim.FieldOrderWindowEnd)
+	}
+	if m.review_pending != nil {
+		fields = append(fields, paymenttransactionclaim.FieldReviewPending)
+	}
+	if m.evidence != nil {
+		fields = append(fields, paymenttransactionclaim.FieldEvidence)
 	}
 	if m.created_at != nil {
 		fields = append(fields, paymenttransactionclaim.FieldCreatedAt)
@@ -34514,6 +34806,18 @@ func (m *PaymentTransactionClaimMutation) Field(name string) (ent.Value, bool) {
 		return m.TxHash()
 	case paymenttransactionclaim.FieldOrderID:
 		return m.OrderID()
+	case paymenttransactionclaim.FieldSource:
+		return m.Source()
+	case paymenttransactionclaim.FieldTransferTime:
+		return m.TransferTime()
+	case paymenttransactionclaim.FieldOrderCreatedAt:
+		return m.OrderCreatedAt()
+	case paymenttransactionclaim.FieldOrderWindowEnd:
+		return m.OrderWindowEnd()
+	case paymenttransactionclaim.FieldReviewPending:
+		return m.ReviewPending()
+	case paymenttransactionclaim.FieldEvidence:
+		return m.Evidence()
 	case paymenttransactionclaim.FieldCreatedAt:
 		return m.CreatedAt()
 	}
@@ -34529,6 +34833,18 @@ func (m *PaymentTransactionClaimMutation) OldField(ctx context.Context, name str
 		return m.OldTxHash(ctx)
 	case paymenttransactionclaim.FieldOrderID:
 		return m.OldOrderID(ctx)
+	case paymenttransactionclaim.FieldSource:
+		return m.OldSource(ctx)
+	case paymenttransactionclaim.FieldTransferTime:
+		return m.OldTransferTime(ctx)
+	case paymenttransactionclaim.FieldOrderCreatedAt:
+		return m.OldOrderCreatedAt(ctx)
+	case paymenttransactionclaim.FieldOrderWindowEnd:
+		return m.OldOrderWindowEnd(ctx)
+	case paymenttransactionclaim.FieldReviewPending:
+		return m.OldReviewPending(ctx)
+	case paymenttransactionclaim.FieldEvidence:
+		return m.OldEvidence(ctx)
 	case paymenttransactionclaim.FieldCreatedAt:
 		return m.OldCreatedAt(ctx)
 	}
@@ -34553,6 +34869,48 @@ func (m *PaymentTransactionClaimMutation) SetField(name string, value ent.Value)
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetOrderID(v)
+		return nil
+	case paymenttransactionclaim.FieldSource:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSource(v)
+		return nil
+	case paymenttransactionclaim.FieldTransferTime:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTransferTime(v)
+		return nil
+	case paymenttransactionclaim.FieldOrderCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOrderCreatedAt(v)
+		return nil
+	case paymenttransactionclaim.FieldOrderWindowEnd:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOrderWindowEnd(v)
+		return nil
+	case paymenttransactionclaim.FieldReviewPending:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetReviewPending(v)
+		return nil
+	case paymenttransactionclaim.FieldEvidence:
+		v, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEvidence(v)
 		return nil
 	case paymenttransactionclaim.FieldCreatedAt:
 		v, ok := value.(time.Time)
@@ -34605,7 +34963,20 @@ func (m *PaymentTransactionClaimMutation) AddField(name string, value ent.Value)
 // ClearedFields returns all nullable fields that were cleared during this
 // mutation.
 func (m *PaymentTransactionClaimMutation) ClearedFields() []string {
-	return nil
+	var fields []string
+	if m.FieldCleared(paymenttransactionclaim.FieldTransferTime) {
+		fields = append(fields, paymenttransactionclaim.FieldTransferTime)
+	}
+	if m.FieldCleared(paymenttransactionclaim.FieldOrderCreatedAt) {
+		fields = append(fields, paymenttransactionclaim.FieldOrderCreatedAt)
+	}
+	if m.FieldCleared(paymenttransactionclaim.FieldOrderWindowEnd) {
+		fields = append(fields, paymenttransactionclaim.FieldOrderWindowEnd)
+	}
+	if m.FieldCleared(paymenttransactionclaim.FieldEvidence) {
+		fields = append(fields, paymenttransactionclaim.FieldEvidence)
+	}
+	return fields
 }
 
 // FieldCleared returns a boolean indicating if a field with the given name was
@@ -34618,6 +34989,20 @@ func (m *PaymentTransactionClaimMutation) FieldCleared(name string) bool {
 // ClearField clears the value of the field with the given name. It returns an
 // error if the field is not defined in the schema.
 func (m *PaymentTransactionClaimMutation) ClearField(name string) error {
+	switch name {
+	case paymenttransactionclaim.FieldTransferTime:
+		m.ClearTransferTime()
+		return nil
+	case paymenttransactionclaim.FieldOrderCreatedAt:
+		m.ClearOrderCreatedAt()
+		return nil
+	case paymenttransactionclaim.FieldOrderWindowEnd:
+		m.ClearOrderWindowEnd()
+		return nil
+	case paymenttransactionclaim.FieldEvidence:
+		m.ClearEvidence()
+		return nil
+	}
 	return fmt.Errorf("unknown PaymentTransactionClaim nullable field %s", name)
 }
 
@@ -34630,6 +35015,24 @@ func (m *PaymentTransactionClaimMutation) ResetField(name string) error {
 		return nil
 	case paymenttransactionclaim.FieldOrderID:
 		m.ResetOrderID()
+		return nil
+	case paymenttransactionclaim.FieldSource:
+		m.ResetSource()
+		return nil
+	case paymenttransactionclaim.FieldTransferTime:
+		m.ResetTransferTime()
+		return nil
+	case paymenttransactionclaim.FieldOrderCreatedAt:
+		m.ResetOrderCreatedAt()
+		return nil
+	case paymenttransactionclaim.FieldOrderWindowEnd:
+		m.ResetOrderWindowEnd()
+		return nil
+	case paymenttransactionclaim.FieldReviewPending:
+		m.ResetReviewPending()
+		return nil
+	case paymenttransactionclaim.FieldEvidence:
+		m.ResetEvidence()
 		return nil
 	case paymenttransactionclaim.FieldCreatedAt:
 		m.ResetCreatedAt()
