@@ -29,6 +29,16 @@ vi.mock('@/stores', () => ({
   }),
 }))
 
+// The calculator talks to the API and the app store on its own; it has its
+// own spec, here it only needs to be mounted with the right order.
+vi.mock('@/components/payment/UsdtWithdrawCalculator.vue', () => ({
+  default: {
+    name: 'UsdtWithdrawCalculator',
+    props: ['orderId'],
+    template: '<div data-test="usdt-calculator-stub" :data-order-id="orderId" />',
+  },
+}))
+
 vi.mock('@/api/payment', () => ({
   paymentAPI: {
     cancelOrder,
@@ -242,11 +252,13 @@ describe('PaymentStatusPanel', () => {
     await flushPromises()
     expect(usdt.find('[data-test="usdt-payment-notice"]').exists()).toBe(true)
     expect(usdt.text()).toContain('payment.usdtNotice.exactAmount')
+    expect(usdt.get('[data-test="usdt-calculator-stub"]').attributes('data-order-id')).toBe('42')
     usdt.unmount()
 
     const stripe = mountPanel('stripe')
     await flushPromises()
     expect(stripe.find('[data-test="usdt-payment-notice"]').exists()).toBe(false)
+    expect(stripe.find('[data-test="usdt-calculator-stub"]').exists()).toBe(false)
     stripe.unmount()
   })
 

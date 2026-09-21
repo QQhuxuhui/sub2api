@@ -59,6 +59,11 @@ export const paymentAPI = {
     return apiClient.get<PaymentOrder>(`/payment/orders/${id}`)
   },
 
+  /** Token amount the gateway expects to arrive for a pending crypto order ("" until a network is picked) */
+  getCryptoQuote(id: number) {
+    return apiClient.get<{ network: string; token: string; amount: string }>(`/payment/orders/${id}/crypto-quote`)
+  },
+
   /** Cancel a pending order */
   cancelOrder(id: number) {
     return apiClient.post(`/payment/orders/${id}/cancel`)
