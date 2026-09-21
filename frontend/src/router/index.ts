@@ -463,6 +463,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/intent-routers',
+    name: 'AdminIntentRouters',
+    component: () => import('@/views/admin/IntentRoutersView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Intent Routing',
+      titleKey: 'intentRouter.title',
+      descriptionKey: 'intentRouter.description'
+    }
+  },
+  {
     path: '/admin/channels',
     redirect: '/admin/channels/pricing'
   },
