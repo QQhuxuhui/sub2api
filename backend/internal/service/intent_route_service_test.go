@@ -24,12 +24,14 @@ import (
 )
 
 type memoryIntentRouteStore struct {
-	mu       sync.Mutex
-	sessions map[string]intentRouteSession
-	ttls     map[string]time.Duration
-	events   []IntentRouteEvent
-	getErr   error
-	touches  int
+	mu          sync.Mutex
+	sessions    map[string]intentRouteSession
+	ttls        map[string]time.Duration
+	events      []IntentRouteEvent
+	getErr      error
+	touches     int
+	nextVersion int64
+	versionErr  error
 }
 
 func newMemoryIntentRouteStore() *memoryIntentRouteStore {
@@ -70,11 +72,24 @@ func (m *memoryIntentRouteStore) TouchSession(_ context.Context, groupID int64, 
 	return nil
 }
 
+func (m *memoryIntentRouteStore) NextVersion(context.Context) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.versionErr != nil {
+		return 0, m.versionErr
+	}
+	m.nextVersion++
+	return m.nextVersion, nil
+}
+
 func (m *memoryIntentRouteStore) PinSession(_ context.Context, groupID int64, key string, s intentRouteSession, ttl time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	k := intentRouteSessionRedisKey(groupID, key)
-	m.sessions[k], m.ttls[k] = s, ttl
+	old := m.sessions[k]
+	if s.Version > 0 && s.Sequence > 0 && (old.Version < s.Version || (old.Version == s.Version && old.Sequence < s.Sequence)) {
+		m.sessions[k], m.ttls[k] = s, ttl
+	}
 	return nil
 }
 
@@ -583,4 +598,76 @@ func TestIntentRouter_EveryDecisionCarriesTheRouterScope(t *testing.T) {
 
 	require.NoError(t, f.svc.DeleteRouter(ctx, f.groupID))
 	require.Nil(t, f.svc.ScopeOnly(ctx, f.groupID), "a deleted router leaves nothing behind")
+}
+
+func TestIntentRouter_PinOrderingAcrossRequests(t *testing.T) {
+	f := newIntentRouteFixture(t)
+	f.saveRouter(t, nil)
+	f.classifier.answers = []string{"coding"}
+	ctx := context.Background()
+	var queued []func()
+	f.svc.spawn = func(fn func()) { queued = append(queued, fn) }
+	old := f.svc.Decide(ctx, f.request(intentTurn1))
+	old.markSelected(f.accountID(t, "coding-1"))
+	// A later HTTP request takes another account while older Redis writes are pending.
+	f.svc.spawn = func(fn func()) { fn() }
+	newer := f.svc.Decide(ctx, f.request(intentTurn2))
+	newer.markSelected(f.accountID(t, "coding-2"))
+	for _, fn := range queued {
+		fn()
+	}
+	next := f.svc.Decide(ctx, f.request(intentTurn2))
+	require.Equal(t, f.accountID(t, "coding-2"), next.PinnedAccountID, "an older request must not undo the newer request's account binding")
+}
+
+func TestIntentRouter_VersionFailureKeepsRoutingWithoutOverwritingPin(t *testing.T) {
+	f := newIntentRouteFixture(t)
+	f.saveRouter(t, nil)
+	f.classifier.answers = []string{"coding"}
+	ctx := context.Background()
+	first := f.svc.Decide(ctx, f.request(intentTurn1))
+	first.markSelected(f.accountID(t, "coding-1"))
+	f.store.versionErr = errors.New("redis unavailable")
+	next := f.svc.Decide(ctx, f.request(intentTurn2))
+	require.NotNil(t, next)
+	require.Equal(t, "coding", next.Intent)
+	next.markSelected(f.accountID(t, "coding-2"))
+	key := intentSessionKey(11, http.Header{}, intentRequestView{body: []byte(intentTurn1)})
+	stored, err := f.store.GetSession(ctx, f.groupID, key)
+	require.NoError(t, err)
+	require.Equal(t, f.accountID(t, "coding-1"), stored.AccountID, "failed version allocation must not write an unordered pin")
+}
+
+// The shared Redis client may ignore context deadlines during socket reads.
+type stalledIntentVersionStore struct {
+	*memoryIntentRouteStore
+	release <-chan struct{}
+}
+
+func (s *stalledIntentVersionStore) NextVersion(context.Context) (int64, error) {
+	<-s.release
+	return 1, nil
+}
+func TestIntentRouter_StalledVersionDoesNotDelayRequest(t *testing.T) {
+	f := newIntentRouteFixture(t)
+	f.saveRouter(t, nil)
+	f.classifier.answers = []string{"coding"}
+	release := make(chan struct{})
+	f.svc.store = &stalledIntentVersionStore{memoryIntentRouteStore: f.store, release: release}
+	timer := time.AfterFunc(250*time.Millisecond, func() { close(release) })
+	defer func() {
+		if timer.Stop() {
+			close(release)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	decision := f.svc.Decide(ctx, f.request(intentTurn1))
+	require.Less(t, time.Since(start), 200*time.Millisecond)
+	require.NotNil(t, decision)
+	decision.markSelected(f.accountID(t, "coding-1"))
+	for _, session := range f.store.sessions {
+		require.Zero(t, session.AccountID, "timed-out version allocation must not pin")
+	}
 }

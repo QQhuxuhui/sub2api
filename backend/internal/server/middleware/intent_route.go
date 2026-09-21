@@ -45,14 +45,16 @@ func applyIntentRoute(c *gin.Context, router *service.IntentRouterService) {
 			return
 		}
 		ctx := c.Request.Context()
+		// Preserve response ownership even when classification is disabled or
+		// skipped for a large body. Scope lookup never consumes the request body.
+		if scope := router.ScopeOnly(ctx, *apiKey.GroupID); scope != nil {
+			ctx = service.WithIntentRouteDecision(ctx, scope)
+			c.Request = c.Request.WithContext(ctx)
+		}
 		if !router.Enabled(ctx, *apiKey.GroupID) {
-			// Not classifying, but a router that was on earlier may have sent
-			// this conversation to an account outside the group.
-			if scope := router.ScopeOnly(ctx, *apiKey.GroupID); scope != nil {
-				c.Request = c.Request.WithContext(service.WithIntentRouteDecision(ctx, scope))
-			}
 			return
 		}
+
 		if c.Request.ContentLength > router.MaxBodyBytes() || c.Request.Body == nil {
 			return
 		}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -104,6 +105,8 @@ type intentRouteSession struct {
 	// too, so an unmatched conversation is not re-classified every turn.
 	Intent    string `json:"i"`
 	AccountID int64  `json:"a,omitempty"`
+	Version   int64  `json:"v,omitempty"`
+	Sequence  int64  `json:"q,omitempty"`
 }
 
 // IntentRouteEvent is one line of the admin-facing routing log.
@@ -122,9 +125,11 @@ type IntentRouteEvent struct {
 // Session writes run detached from the request, so they may land in any order,
 // and parallel requests of one conversation write concurrently. The three
 // write kinds are therefore chosen so that no arrival order loses information:
-// only PinSession ever replaces a value, and it always carries the full state.
+// PinSession replaces a value only when its request version and attempt
+// sequence are newer. Redis assigns versions across all gateway instances.
 type intentRouteStore interface {
 	GetSession(ctx context.Context, groupID int64, sessionKey string) (*intentRouteSession, error)
+	NextVersion(ctx context.Context) (int64, error)
 	// InitSession records a fresh classification unless the conversation is
 	// already known — it can never erase a pin written a moment earlier.
 	InitSession(ctx context.Context, groupID int64, sessionKey string, session intentRouteSession, ttl time.Duration) error
@@ -274,7 +279,7 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 				s.detached(func(ctx context.Context) error {
 					return s.store.TouchSession(ctx, in.GroupID, sessionKey, cfg.CacheTTL)
 				})
-				return s.newDecision(cfg, rule, sessionKey, session.AccountID)
+				return s.newDecision(ctx, cfg, rule, sessionKey, session.AccountID)
 			}
 			// Stale entry: make room now, so the new classification below is not
 			// rejected as "already known".
@@ -325,21 +330,35 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 	if !ok {
 		return nil
 	}
-	return s.newDecision(cfg, rule, sessionKey, 0)
+	return s.newDecision(ctx, cfg, rule, sessionKey, 0)
 }
 
-func (s *IntentRouterService) newDecision(cfg *intentRouterConfig, rule domain.IntentRule, sessionKey string, pinned int64) *IntentRouteDecision {
+func (s *IntentRouterService) newDecision(ctx context.Context, cfg *intentRouterConfig, rule domain.IntentRule, sessionKey string, pinned int64) *IntentRouteDecision {
 	groupID, ttl, intent := cfg.GroupID, cfg.CacheTTL, rule.Name
-	// One request can pin more than once: the first account fails, failover
-	// settles on another. Those writes are detached and may run in any order,
-	// so each carries a sequence number, they take turns, and one that is no
-	// longer the newest when its turn comes writes nothing. Whatever the order,
-	// the account that finally served the request is what stays pinned.
-	var (
-		seqMu   sync.Mutex
-		latest  int64
-		writeMu sync.Mutex
-	)
+	// Assign order before spawning writes; a Redis counter avoids clock skew
+	// and process-local ordering. If unavailable, route normally but skip pinning.
+	var version int64
+	if s.store != nil && sessionKey != "" {
+		storeCtx, cancel := context.WithTimeout(ctx, intentRouteStoreTimeout)
+		// The shared Redis client can ignore context deadlines during socket
+		// reads. Bound the caller's wait independently; the buffered result
+		// lets an abandoned allocation finish without blocking a goroutine.
+		type allocation struct {
+			version int64
+			err     error
+		}
+		done := make(chan allocation, 1)
+		go func() { v, err := s.store.NextVersion(storeCtx); done <- allocation{v, err} }()
+		select {
+		case result := <-done:
+			if result.err == nil && storeCtx.Err() == nil {
+				version = result.version
+			}
+		case <-storeCtx.Done():
+		}
+		cancel()
+	}
+	var sequence atomic.Int64
 	return &IntentRouteDecision{
 		GroupID:         groupID,
 		Intent:          intent,
@@ -347,23 +366,12 @@ func (s *IntentRouterService) newDecision(cfg *intentRouterConfig, rule domain.I
 		PinnedAccountID: pinned,
 		onSelect: func(accountID int64) {
 			s.record(IntentRouteEvent{GroupID: groupID, Kind: "routed", Intent: intent, AccountID: accountID})
-			if s.store == nil || sessionKey == "" {
+			if s.store == nil || sessionKey == "" || version <= 0 {
 				return
 			}
-			seqMu.Lock()
-			latest++
-			seq := latest
-			seqMu.Unlock()
+			seq := sequence.Add(1)
 			s.detached(func(ctx context.Context) error {
-				writeMu.Lock()
-				defer writeMu.Unlock()
-				seqMu.Lock()
-				superseded := seq != latest
-				seqMu.Unlock()
-				if superseded {
-					return nil
-				}
-				return s.store.PinSession(ctx, groupID, sessionKey, intentRouteSession{Intent: intent, AccountID: accountID}, ttl)
+				return s.store.PinSession(ctx, groupID, sessionKey, intentRouteSession{Intent: intent, AccountID: accountID, Version: version, Sequence: seq}, ttl)
 			})
 		},
 	}
@@ -540,12 +548,36 @@ func (r *redisIntentRouteStore) TouchSession(ctx context.Context, groupID int64,
 	return r.rdb.Expire(ctx, intentRouteSessionRedisKey(groupID, sessionKey), ttl).Err()
 }
 
+// The counter has no expiry: expired/cleared sessions must not reuse versions.
+func (r *redisIntentRouteStore) NextVersion(ctx context.Context) (int64, error) {
+	return r.rdb.Incr(ctx, "intent_route:version").Result()
+}
+
+var intentRoutePinScript = redis.NewScript(`
+local old = redis.call('GET', KEYS[1])
+if old then
+ local ok, state = pcall(cjson.decode, old)
+ if ok and type(state) == 'table' then
+  local v = tonumber(state.v) or 0
+  local q = tonumber(state.q) or 0
+  local nextv = tonumber(ARGV[2])
+  local nextq = tonumber(ARGV[3])
+  if v > nextv or (v == nextv and q >= nextq) then return 0 end
+ end
+end
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[4])
+return 1
+`)
+
 func (r *redisIntentRouteStore) PinSession(ctx context.Context, groupID int64, sessionKey string, session intentRouteSession, ttl time.Duration) error {
 	raw, err := json.Marshal(session)
 	if err != nil {
 		return err
 	}
-	return r.rdb.Set(ctx, intentRouteSessionRedisKey(groupID, sessionKey), raw, ttl).Err()
+	if session.Version <= 0 || session.Sequence <= 0 {
+		return nil
+	}
+	return intentRoutePinScript.Run(ctx, r.rdb, []string{intentRouteSessionRedisKey(groupID, sessionKey)}, raw, strconv.FormatInt(session.Version, 10), strconv.FormatInt(session.Sequence, 10), ttl.Milliseconds()).Err()
 }
 
 func (r *redisIntentRouteStore) DeleteSession(ctx context.Context, groupID int64, sessionKey string) error {

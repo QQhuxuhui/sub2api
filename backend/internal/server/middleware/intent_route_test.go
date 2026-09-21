@@ -4,11 +4,21 @@ package middleware
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
+	"fmt"
+	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/enttest"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"io"
+	_ "modernc.org/sqlite"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -127,4 +137,43 @@ func TestWithIntentRoute_RunsTheHandlerOnce(t *testing.T) {
 	require.Equal(t, 1, calls)
 	require.Equal(t, http.StatusNoContent, w.Code)
 	require.Equal(t, body, string(seen))
+}
+
+func TestIntentRoute_OversizedRequestKeepsScope(t *testing.T) {
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:intent_middleware_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	require.NoError(t, err)
+	_, err = db.Exec("PRAGMA foreign_keys = ON")
+	require.NoError(t, err)
+	client := enttest.NewClient(t, enttest.WithOptions(dbent.Driver(entsql.OpenDB(dialect.SQLite, db))))
+	t.Cleanup(func() { _ = client.Close() })
+	ctx := context.Background()
+	group, err := client.Group.Create().SetName("intent-group").SetPlatform("openai").Save(ctx)
+	require.NoError(t, err)
+	_, err = client.IntentRouter.Create().SetGroupID(group.ID).SetEnabled(true).SetClassifierAPIKey("test-key").SetClassifierModel("test-model").SetRules([]domain.IntentRule{{Name: "coding", Enabled: true, AccountIDs: []int64{42}}}).Save(ctx)
+	require.NoError(t, err)
+	router := service.NewIntentRouterService(client, nil, nil)
+	for _, chunked := range []bool{false, true} {
+		t.Run(fmt.Sprintf("chunked=%v", chunked), func(t *testing.T) {
+			body := `{"previous_response_id":"resp_old","input":"` + strings.Repeat("x", int(router.MaxBodyBytes())) + `"}`
+			engine := gin.New()
+			engine.POST("/responses", func(c *gin.Context) {
+				c.Set(string(ContextKeyAPIKey), &service.APIKey{ID: 1, GroupID: &group.ID})
+				c.Next()
+			}, IntentRoute(router), func(c *gin.Context) {
+				got, err := io.ReadAll(c.Request.Body)
+				require.NoError(t, err)
+				require.Equal(t, body, string(got))
+				d := service.IntentRouteDecisionFromContext(c.Request.Context())
+				require.NotNil(t, d, "classification bypass must retain response ownership scope")
+				require.Empty(t, d.AccountIDs)
+				require.Equal(t, []int64{42}, d.ScopeAccountIDs)
+			})
+			req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			if chunked {
+				req.ContentLength = -1
+			}
+			engine.ServeHTTP(httptest.NewRecorder(), req)
+		})
+	}
 }
