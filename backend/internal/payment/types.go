@@ -260,8 +260,8 @@ type OnChainSettlementTarget struct {
 	// ExpectedAmount is the token amount quoted by the gateway (decimal string).
 	ExpectedAmount string
 	// TrustedAddresses are extra merchant-owned receiving addresses configured
-	// on the instance, used when the payer switched chains inside the cashier
-	// and the gateway no longer reports that chain's address for the order.
+	// on the same network, used when the gateway returns a sub-order address
+	// that is not the parent order's primary receiving address.
 	TrustedAddresses []string
 	// ChainRPC holds optional per-network RPC endpoint overrides.
 	ChainRPC map[string][]string

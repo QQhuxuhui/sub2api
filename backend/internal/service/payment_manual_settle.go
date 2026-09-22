@@ -139,8 +139,16 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 	if err != nil {
 		return nil, err
 	}
+	if expectedNetwork := chainverify.NormalizeNetwork(target.Network); expectedNetwork != "" && expectedNetwork != network {
+		return nil, infraerrors.BadRequest("NETWORK_MISMATCH", fmt.Sprintf(
+			"the transaction is on %s but the order quote is for %s", network, expectedNetwork))
+	}
 	matched, received := matchSettlementTransfers(transfers, network, target)
 	if len(matched) == 0 {
+		if hasSettlementAddress(transfers, network, target) {
+			return nil, infraerrors.BadRequest("TOKEN_MISMATCH", fmt.Sprintf(
+				"the transaction reaches the order address but uses %s instead of %s", settlementTransferTokens(transfers, network, target), target.Token))
+		}
 		return nil, infraerrors.BadRequest("ADDRESS_MISMATCH", manualSettleAddressMismatchMessage(transfers, target))
 	}
 	first := matched[0]
@@ -286,12 +294,17 @@ func manualSettleAllowedShortfall(expected decimal.Decimal) decimal.Decimal {
 	return decimal.Min(allowed, expected.Mul(manualSettleShortfallCap))
 }
 
-// fetchSettlementTransfers looks the hash up on the requested network, or
-// probes the candidates in order until one of them knows it.
+// fetchSettlementTransfers looks the hash up on the requested network. When
+// the order has no selected network yet, it probes candidate networks.
 func fetchSettlementTransfers(ctx context.Context, fetcher transferFetcher, req ManualSettleRequest, gatewayNetwork string) ([]chainverify.Transfer, string, error) {
 	candidates := chainverify.CandidateNetworks(req.TxHash, gatewayNetwork)
 	if req.Network != "" {
 		candidates = []string{chainverify.NormalizeNetwork(req.Network)}
+	} else if normalizedGatewayNetwork := chainverify.NormalizeNetwork(gatewayNetwork); normalizedGatewayNetwork != "" {
+		// A quote is bound to the chain selected in the cashier. Reusing the
+		// merchant address on another EVM network must not make that network a
+		// valid fallback for this order.
+		candidates = []string{normalizedGatewayNetwork}
 	}
 	var lastErr error
 	for _, network := range candidates {
@@ -322,7 +335,7 @@ func matchSettlementTransfers(transfers []chainverify.Transfer, network string, 
 	var matched []chainverify.Transfer
 	total := decimal.Zero
 	for _, tr := range transfers {
-		if !manualSettleStablecoin(tr.Token) {
+		if !strings.EqualFold(strings.TrimSpace(tr.Token), strings.TrimSpace(target.Token)) {
 			continue
 		}
 		for _, addr := range addresses {
@@ -334,6 +347,39 @@ func matchSettlementTransfers(transfers []chainverify.Transfer, network string, 
 		}
 	}
 	return matched, total
+}
+
+func hasSettlementAddress(transfers []chainverify.Transfer, network string, target *payment.OnChainSettlementTarget) bool {
+	addresses := append([]string{target.ReceiveAddress}, target.TrustedAddresses...)
+	for _, tr := range transfers {
+		for _, addr := range addresses {
+			if chainverify.SameAddress(network, tr.To, addr) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func settlementTransferTokens(transfers []chainverify.Transfer, network string, target *payment.OnChainSettlementTarget) string {
+	seen := make(map[string]struct{})
+	var tokens []string
+	addresses := append([]string{target.ReceiveAddress}, target.TrustedAddresses...)
+	for _, tr := range transfers {
+		for _, addr := range addresses {
+			if chainverify.SameAddress(network, tr.To, addr) {
+				name := strings.TrimSpace(tr.Token)
+				if name != "" {
+					if _, ok := seen[name]; !ok {
+						seen[name] = struct{}{}
+						tokens = append(tokens, name)
+					}
+				}
+				break
+			}
+		}
+	}
+	return strings.Join(tokens, ", ")
 }
 
 func manualSettleAddressMismatchMessage(transfers []chainverify.Transfer, target *payment.OnChainSettlementTarget) string {

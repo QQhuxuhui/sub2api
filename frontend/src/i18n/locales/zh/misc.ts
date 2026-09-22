@@ -457,6 +457,8 @@ export default {
       TX_UNCONFIRMED: '交易确认数还不够，请一两分钟后再试',
       CHAIN_RPC_UNAVAILABLE: '链上节点暂时无法访问，请稍后重试',
       ADDRESS_MISMATCH: '这笔交易的收款地址不是本订单的收款地址',
+      NETWORK_MISMATCH: '这笔交易所在的网络与订单在收银台选择的网络不一致',
+      TOKEN_MISMATCH: '这笔交易转到了本订单的收款地址，但币种与订单报价的币种不一致',
       TX_OUTSIDE_ORDER_WINDOW: '交易时间不属于本订单（早于下单，或晚于下单 24 小时）',
       AMOUNT_MISMATCH: '到账金额远高于订单应付，很可能不是这笔订单的付款；确认属实请手动调整余额',
       SHORTFALL_TOO_LARGE: '到账金额比应付少太多，不能自动补单，请手动调整余额',
