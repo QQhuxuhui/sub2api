@@ -430,6 +430,8 @@ export default {
       TX_UNCONFIRMED: 'Not enough confirmations yet, try again in a minute',
       CHAIN_RPC_UNAVAILABLE: 'The chain RPC is unreachable right now, try again later',
       ADDRESS_MISMATCH: "The transaction does not pay this order's receiving address",
+      NETWORK_MISMATCH: 'The transaction is on a different network than the one selected for this order at checkout',
+      TOKEN_MISMATCH: "The transaction reaches the order's receiving address but with a different token than the order was quoted in",
       TX_OUTSIDE_ORDER_WINDOW: 'The transaction does not belong to this order (sent before it was created, or more than 24 hours after)',
       AMOUNT_MISMATCH: "The amount received is far above the order, so this is probably not this order's payment; adjust the balance manually if it is",
       SHORTFALL_TOO_LARGE: 'The amount received is too far below the order, adjust the balance manually instead',

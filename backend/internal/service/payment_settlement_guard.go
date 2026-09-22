@@ -104,7 +104,10 @@ func manualPaymentForHashlessOrder(ctx context.Context, client *dbent.Client, o 
 		paymenttransactionclaim.OrderIDNEQ(o.ID),
 		paymenttransactionclaim.Or(paymenttransactionclaim.TransferTimeIsNil(), paymenttransactionclaim.And(
 			paymenttransactionclaim.TransferTimeGTE(o.CreatedAt.Add(-manualSettleClockSkew)),
-			paymenttransactionclaim.TransferTimeLTE(settlementWindowEnd(o)),
+			// Only a transfer made while this order could still be paid can be
+			// this order's payment; a manual settlement of a transfer sent after
+			// the order expired belongs to someone else's order.
+			paymenttransactionclaim.TransferTimeLTE(o.ExpiresAt),
 		)),
 	).Order(dbent.Asc(paymenttransactionclaim.FieldID)).First(ctx)
 	if dbent.IsNotFound(err) {

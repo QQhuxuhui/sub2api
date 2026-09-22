@@ -243,10 +243,26 @@ func TestAdminSettleOrderByTxHashGuards(t *testing.T) {
 			Amount: decimal.RequireFromString("4.48"), BlockTime: f.order.CreatedAt.Add(time.Minute), Confirmations: 99,
 		}}}
 		f.provider.target.TrustedAddresses = []string{switched}
-		result, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash, DryRun: true})
-		require.NoError(t, err)
-		require.Equal(t, "polygon", result.Network)
-		require.Equal(t, []string{"binance", "polygon"}, f.fetcher.probed, "gateway network is probed first")
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash, DryRun: true})
+		requireManualSettleReason(t, err, "TX_NOT_FOUND")
+		require.Equal(t, []string{"binance"}, f.fetcher.probed, "a known gateway network must not fall through to another chain")
+	})
+
+	t.Run("wrong stablecoin is rejected", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusExpired, "4.48")
+		f.fetcher.byNetwork["binance"][0].Token = "USDC"
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash, DryRun: true})
+		requireManualSettleReason(t, err, "TOKEN_MISMATCH")
+	})
+
+	t.Run("explicitly selected wrong network is rejected", func(t *testing.T) {
+		f := newManualSettleFixture(t, OrderStatusExpired, "4.48")
+		f.fetcher.byNetwork["polygon"] = []chainverify.Transfer{{
+			Network: "polygon", TxHash: manualSettleTxHash, Token: "USDT", To: manualSettleAddress,
+			Amount: decimal.RequireFromString("4.48"), BlockTime: f.order.CreatedAt.Add(time.Minute), Confirmations: 99,
+		}}
+		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash, Network: "polygon", DryRun: true})
+		requireManualSettleReason(t, err, "NETWORK_MISMATCH")
 	})
 
 	t.Run("transaction older than the order", func(t *testing.T) {
@@ -296,7 +312,7 @@ func TestAdminSettleOrderByTxHashGuards(t *testing.T) {
 		f.fetcher.byNetwork = nil
 		_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
 		requireManualSettleReason(t, err, "TX_NOT_FOUND")
-		require.Equal(t, []string{"binance", "polygon", "ethereum"}, f.fetcher.probed, "a 0x hash is never probed on tron")
+		require.Equal(t, []string{"binance"}, f.fetcher.probed, "a known quote network is the only network probed")
 	})
 }
 
@@ -541,6 +557,24 @@ func TestPaymentManualSettleIgnoresHashlessPaymentFromAnotherTime(t *testing.T) 
 	_, err = f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
 	require.NoError(t, err)
 	require.Equal(t, 60.0, f.userRepo.getByIDUser.Balance)
+}
+
+func TestHashlessCallbackIgnoresUnrelatedManualSettlement(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	second := newSecondSettlementOrder(t, f)
+	manualTime := second.CreatedAt.Add(12 * time.Hour)
+	_, err := f.client.PaymentTransactionClaim.Create().
+		SetTxHash(strings.Repeat("c", 64)).SetOrderID(f.order.ID).
+		SetSource(claimSourceManual).SetTransferTime(manualTime).
+		SetOrderCreatedAt(f.order.CreatedAt).SetOrderWindowEnd(settlementWindowEnd(f.order)).
+		Save(ctx)
+	require.NoError(t, err)
+
+	require.NoError(t, f.svc.confirmPayment(ctx, second.ID, "gateway-trade-2", 30, payment.TypeEpusdt, map[string]string{"token": "USDT"}))
+	got, err := f.client.PaymentOrder.Get(ctx, second.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusCompleted, got.Status)
 }
 
 func TestPaymentManualSettlementRollsBackWhenAuditFails(t *testing.T) {
