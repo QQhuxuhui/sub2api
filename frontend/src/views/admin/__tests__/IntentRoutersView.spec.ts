@@ -84,14 +84,14 @@ describe('IntentRoutersView', () => {
     expect(api.save).toHaveBeenCalledTimes(1)
     const [groupId, input] = api.save.mock.calls[0]
     expect(groupId).toBe(1)
-    expect(input.rules).toEqual([{ name: 'coding', description: 'code', account_ids: [21, 99, 22], enabled: true }])
+    expect(input.rules).toEqual([{ name: 'coding', description: 'code', keywords: [], account_ids: [21, 99, 22], enabled: true }])
     expect(input.cache_ttl_seconds).toBe(1800)
     expect(input.classifier_api_key).toBe('') // blank keeps the stored key
     expect(toast.showSuccess).toHaveBeenCalledWith('intentRouter.actions.saved')
   })
 
   it('tries a text against the saved router, but not while edits are unsaved', async () => {
-    api.test.mockResolvedValue({ data: { answer: 'coding', intent: 'coding', understood: true, account_ids: [21], latency_ms: 420 } })
+    api.test.mockResolvedValue({ data: { matched_by: 'classifier', answer: 'coding', intent: 'coding', understood: true, account_ids: [21], latency_ms: 420 } })
     const wrapper = await mountView()
 
     await wrapper.get('[data-test="intent-test-text"]').setValue('fix my go build')
@@ -104,6 +104,78 @@ describe('IntentRoutersView', () => {
     await wrapper.get('[data-test="intent-model"]').setValue('another-model')
     expect(wrapper.get('[data-test="intent-test-run"]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('intentRouter.test.saveFirst')
+  })
+
+  it('edits keywords as one text field and saves them as a list', async () => {
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, rules: [{ ...savedRouter.rules[0], keywords: ['Traceback', '编译'] }] }] })
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+
+    const field = wrapper.get('[data-test="intent-rule-keywords"]')
+    expect((field.element as HTMLTextAreaElement).value).toBe('Traceback, 编译')
+    expect(wrapper.text()).not.toContain('intentRouter.test.saveFirst') // loading keywords does not count as an edit
+
+    await field.setValue('Traceback\n编译，报错、 build failed ,,')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].rules[0].keywords).toEqual(['Traceback', '编译', '报错', 'build failed'])
+  })
+
+  it('preserves saved keywords containing delimiters when other settings change', async () => {
+    const keywords = ['foo, bar', 'say "hello"', '编译']
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, rules: [{ ...savedRouter.rules[0], keywords }] }] })
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+
+    const field = wrapper.get('[data-test="intent-rule-keywords"]')
+    expect((field.element as HTMLTextAreaElement).value).toBe('"foo, bar", "say ""hello""", 编译')
+    await wrapper.get('[data-test="intent-model"]').setValue('another-model')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].rules[0].keywords).toEqual(keywords)
+  })
+
+  it('preserves a saved keyword with a carriage return when another field changes', async () => {
+    const keywords = ['foo\rbar']
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, rules: [{ ...savedRouter.rules[0], keywords }] }] })
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-model"]').setValue('another-model')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].rules[0].keywords).toEqual(keywords)
+  })
+
+  it('keeps an existing carriage return keyword when the keywords field is edited', async () => {
+    const keywords = ['foo\rbar']
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, rules: [{ ...savedRouter.rules[0], keywords }] }] })
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+    const field = wrapper.get('[data-test="intent-rule-keywords"]')
+    await field.setValue(`${(field.element as HTMLTextAreaElement).value}, extra`)
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].rules[0].keywords).toEqual(['foo\rbar', 'extra'])
+  })
+
+  it('keeps a manually entered Windows path literal inside a quoted keyword', async () => {
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-rule-keywords"]').setValue('"C:\\repo, test"')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].rules[0].keywords).toEqual(['C:\\repo, test'])
+  })
+
+  it('says when a keyword decided the try-it result', async () => {
+    api.test.mockResolvedValue({ data: { matched_by: 'keyword', keyword: 'traceback', answer: '', intent: 'coding', understood: true, account_ids: [21], latency_ms: 0 } })
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-test-text"]').setValue('a traceback')
+    await wrapper.get('[data-test="intent-test-run"]').trigger('click')
+    await flushPromises()
+    const text = wrapper.get('[data-test="intent-test-result"]').text()
+    expect(text).toContain('intentRouter.test.byKeyword:{"keyword":"traceback"}')
+    expect(text).not.toContain('intentRouter.test.answer')
   })
 
   it('reports a rejected save with the server reason translated', async () => {

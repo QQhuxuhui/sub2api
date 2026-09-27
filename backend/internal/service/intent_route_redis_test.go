@@ -54,6 +54,26 @@ func TestIntentRouteRedis_PinOrderingAcrossInstances(t *testing.T) {
 	require.Greater(t, next, newVersion)
 }
 
+func TestIntentRouteRedis_DeleteOnlyObservedSession(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	store := &redisIntentRouteStore{rdb: client}
+	ctx := context.Background()
+	old := intentRouteSession{Intent: "removed", Version: 1, Sequence: 1}
+	newer := intentRouteSession{Intent: "chat", AccountID: 4, Version: 2, Sequence: 2}
+	require.NoError(t, store.PinSession(ctx, 1, "conversation", old, time.Minute))
+	require.NoError(t, store.PinSession(ctx, 1, "conversation", newer, time.Minute))
+	require.NoError(t, store.DeleteSession(ctx, 1, "conversation", old))
+	got, err := store.GetSession(ctx, 1, "conversation")
+	require.NoError(t, err)
+	require.Equal(t, newer, *got)
+	require.NoError(t, store.DeleteSession(ctx, 1, "conversation", newer))
+	got, err = store.GetSession(ctx, 1, "conversation")
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
 func TestIntentRouter_PinOrderingAcrossInstances(t *testing.T) {
 	server := miniredis.RunT(t)
 	a, b := newIntentRouteFixture(t), newIntentRouteFixture(t)

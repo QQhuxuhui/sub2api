@@ -23,6 +23,8 @@ const (
 	intentRouteMaxCacheTTL        = 7 * 24 * 3600
 	intentRouteMinInputChars      = 100
 	intentRouteMaxInputChars      = 20000
+	intentRouteMaxKeywordsPerRule = 100
+	intentRouteMaxKeywordRunes    = 100
 )
 
 // IntentRouterView is a router as the admin UI sees it. The classifier API key
@@ -57,6 +59,10 @@ type IntentRouterInput struct {
 
 // IntentClassifyTestResult is the outcome of trying a text against a router.
 type IntentClassifyTestResult struct {
+	// MatchedBy is "keyword" when a keyword decided (the classifier was not
+	// asked), "classifier" when the model was asked, "" when neither applied.
+	MatchedBy  string  `json:"matched_by"`
+	Keyword    string  `json:"keyword,omitempty"`
 	Answer     string  `json:"answer"`
 	Intent     string  `json:"intent"`
 	Understood bool    `json:"understood"`
@@ -198,9 +204,7 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 	if in.MaxInputChars < intentRouteMinInputChars || in.MaxInputChars > intentRouteMaxInputChars {
 		return bad("INTENT_INVALID_MAX_INPUT", fmt.Sprintf("max input chars must be %d-%d", intentRouteMinInputChars, intentRouteMaxInputChars))
 	}
-	if in.Enabled && (in.ClassifierModel == "" || in.ClassifierAPIKey == "") {
-		return bad("INTENT_CLASSIFIER_INCOMPLETE", "an enabled router needs a classifier model and API key")
-	}
+	classifierReady := in.ClassifierModel != "" && in.ClassifierAPIKey != ""
 
 	if len(in.Rules) > intentRouteMaxRules {
 		return bad("INTENT_TOO_MANY_RULES", fmt.Sprintf("at most %d rules", intentRouteMaxRules))
@@ -226,8 +230,11 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 				WithMetadata(map[string]string{"name": rule.Name})
 		}
 		names[key] = struct{}{}
-		if rule.Description == "" {
-			return infraerrors.BadRequest("INTENT_RULE_DESCRIPTION_REQUIRED", "rule \""+rule.Name+"\" needs a description: it is what the classifier decides by").
+		if err := normalizeIntentKeywords(rule); err != nil {
+			return err
+		}
+		if rule.Description == "" && len(rule.Keywords) == 0 {
+			return infraerrors.BadRequest("INTENT_RULE_MATCHER_REQUIRED", "rule \""+rule.Name+"\" needs keywords or a description: keywords are matched directly, the description is what the classifier decides by").
 				WithMetadata(map[string]string{"name": rule.Name})
 		}
 		if len(rule.AccountIDs) == 0 {
@@ -262,7 +269,56 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 	if in.Rules == nil {
 		in.Rules = []domain.IntentRule{}
 	}
+	if in.Enabled && !classifierReady {
+		if !intentRulesHaveKeywords(in.Rules) {
+			return bad("INTENT_CLASSIFIER_INCOMPLETE", "an enabled router needs a classifier model and API key, or rules with keywords")
+		}
+		for _, rule := range in.Rules {
+			if rule.Enabled && len(rule.Keywords) == 0 {
+				return infraerrors.BadRequest("INTENT_RULE_UNREACHABLE", "rule \""+rule.Name+"\" has no keywords and no classifier is configured, so it can never match").
+					WithMetadata(map[string]string{"name": rule.Name})
+			}
+		}
+	}
 	return s.validateIntentRuleAccounts(ctx, accountIDs, groupPlatform)
+}
+
+// normalizeIntentKeywords trims the rule's keywords and drops empty ones and
+// case-insensitive duplicates, keeping the configured order.
+func normalizeIntentKeywords(rule *domain.IntentRule) error {
+	if len(rule.Keywords) > intentRouteMaxKeywordsPerRule {
+		return infraerrors.BadRequest("INTENT_RULE_TOO_MANY_KEYWORDS", fmt.Sprintf("at most %d keywords per rule", intentRouteMaxKeywordsPerRule)).
+			WithMetadata(map[string]string{"name": rule.Name, "max": fmt.Sprint(intentRouteMaxKeywordsPerRule)})
+	}
+	seen := make(map[string]struct{}, len(rule.Keywords))
+	keywords := make([]string, 0, len(rule.Keywords))
+	for _, keyword := range rule.Keywords {
+		keyword = strings.TrimSpace(keyword)
+		if keyword == "" {
+			continue
+		}
+		if len([]rune(keyword)) > intentRouteMaxKeywordRunes {
+			return infraerrors.BadRequest("INTENT_RULE_KEYWORD_TOO_LONG", fmt.Sprintf("keywords are limited to %d characters", intentRouteMaxKeywordRunes)).
+				WithMetadata(map[string]string{"name": rule.Name, "max": fmt.Sprint(intentRouteMaxKeywordRunes)})
+		}
+		key := strings.ToLower(keyword)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		keywords = append(keywords, keyword)
+	}
+	rule.Keywords = keywords
+	return nil
+}
+
+func intentRulesHaveKeywords(rules []domain.IntentRule) bool {
+	for _, rule := range rules {
+		if rule.Enabled && len(rule.Keywords) > 0 && len(rule.AccountIDs) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // validateIntentRuleAccounts rejects targets that could never serve a request
@@ -319,7 +375,7 @@ func intentAccountPlatformCompatible(groupPlatform, accountPlatform string) bool
 // rules can be tuned before they affect traffic. Unlike Decide it reports
 // failures, because here the caller is the admin who needs to see them.
 func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, text string) (*IntentClassifyTestResult, error) {
-	text = strings.TrimSpace(text)
+	text = stripIntentInjectedText(text)
 	if text == "" {
 		return nil, infraerrors.BadRequest("INTENT_TEST_TEXT_REQUIRED", "enter a message to classify")
 	}
@@ -331,11 +387,24 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 		return nil, fmt.Errorf("load intent router: %w", err)
 	}
 	cfg := intentRouterConfigFromEnt(row)
-	if cfg.ClassifierModel == "" || cfg.ClassifierAPIKey == "" {
-		return nil, infraerrors.BadRequest("INTENT_CLASSIFIER_INCOMPLETE", "set the classifier model and API key first")
-	}
 	if len(cfg.activeRules()) == 0 {
 		return nil, infraerrors.BadRequest("INTENT_NO_ACTIVE_RULES", "enable at least one rule first")
+	}
+	// Same order as live traffic: keywords first, the classifier only after.
+	if rule, keyword, ok := cfg.matchKeywords(text); ok {
+		return &IntentClassifyTestResult{MatchedBy: "keyword", Keyword: keyword, Intent: rule.Name, Understood: true, AccountIDs: rule.AccountIDs}, nil
+	}
+	rules := cfg.classifierRules()
+	if len(rules) == 0 {
+		if !cfg.classifierReady() {
+			for _, rule := range cfg.activeRules() {
+				if len(rule.Keywords) == 0 {
+					return nil, infraerrors.BadRequest("INTENT_CLASSIFIER_INCOMPLETE", "set the classifier model and API key first")
+				}
+			}
+		}
+		// Keyword-only router (or no rule the classifier may pick): no match.
+		return &IntentClassifyTestResult{Understood: true, AccountIDs: []int64{}}, nil
 	}
 	started := s.now()
 	classifyCtx, cancel := context.WithTimeout(ctx, cfg.ClassifierTimeout)
@@ -346,8 +415,8 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 		return nil, infraerrors.BadRequest("INTENT_CLASSIFIER_FAILED", "classifier call failed: "+truncateRunes(err.Error(), 300)).
 			WithMetadata(map[string]string{"latency_ms": fmt.Sprint(latency)})
 	}
-	result := &IntentClassifyTestResult{Answer: truncateRunes(answer, 300), LatencyMS: latency, AccountIDs: []int64{}}
-	result.Intent, result.Understood = matchIntentLabel(answer, cfg.activeRules())
+	result := &IntentClassifyTestResult{MatchedBy: "classifier", Answer: truncateRunes(answer, 300), LatencyMS: latency, AccountIDs: []int64{}}
+	result.Intent, result.Understood = matchIntentLabel(answer, rules)
 	if rule, ok := cfg.rule(result.Intent); ok {
 		result.AccountIDs = rule.AccountIDs
 	}

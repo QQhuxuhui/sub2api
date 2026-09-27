@@ -134,6 +134,12 @@
               </div>
 
               <div>
+                <label class="input-label">{{ t('intentRouter.rules.keywords') }}</label>
+                <textarea v-model="rule.keywordsText" data-test="intent-rule-keywords" rows="2" class="input" :placeholder="t('intentRouter.rules.keywordsPlaceholder')"></textarea>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.rules.keywordsHint') }}</p>
+              </div>
+
+              <div>
                 <label class="input-label">{{ t('intentRouter.rules.accounts') }}</label>
                 <div class="flex flex-wrap gap-2">
                   <span
@@ -208,7 +214,10 @@
             </button>
             <div v-if="testResult" data-test="intent-test-result" class="rounded-lg bg-gray-50 p-3 text-sm leading-6 dark:bg-dark-800">
               <p class="font-medium text-gray-900 dark:text-white">{{ testSummary }}</p>
-              <p class="text-gray-500 dark:text-gray-400">
+              <p v-if="testResult.matched_by === 'keyword'" class="text-gray-500 dark:text-gray-400">
+                {{ t('intentRouter.test.byKeyword', { keyword: testResult.keyword }) }}
+              </p>
+              <p v-else-if="testResult.matched_by === 'classifier'" class="text-gray-500 dark:text-gray-400">
                 {{ t('intentRouter.test.answer', { answer: testResult.answer || '—' }) }} · {{ t('intentRouter.test.latency', { ms: testResult.latency_ms }) }}
               </p>
             </div>
@@ -248,7 +257,7 @@
                 <td class="whitespace-nowrap py-2 pr-4">{{ event.kind === 'classified' && !event.intent ? t('intentRouter.events.noIntent') : event.intent || '—' }}</td>
                 <td class="whitespace-nowrap py-2 pr-4">{{ event.account_id ? accountLabel(event.account_id) : '—' }}</td>
                 <td class="whitespace-nowrap py-2 pr-4 tabular-nums">{{ event.latency_ms ? `${event.latency_ms} ms` : '—' }}</td>
-                <td class="max-w-md break-words py-2 text-xs text-gray-500 dark:text-gray-400">{{ event.detail || '' }}</td>
+                <td class="max-w-md break-words py-2 text-xs text-gray-500 dark:text-gray-400">{{ event.kind === 'keyword' ? t('intentRouter.events.keywordDetail', { keyword: event.detail }) : event.detail || '' }}</td>
               </tr>
             </tbody>
           </table>
@@ -270,7 +279,7 @@ import { extractI18nErrorMessage } from '@/utils/apiError'
 
 interface GroupOption { id: number; name: string; platform: string }
 interface AccountOption { id: number; name: string; platform: string }
-interface RuleForm { uid: number; name: string; description: string; account_ids: number[]; enabled: boolean; search: string }
+interface RuleForm { uid: number; name: string; description: string; keywordsText: string; originalKeywords: string[]; account_ids: number[]; enabled: boolean; search: string }
 type FormState = Omit<IntentRouterInput, 'rules'> & { rules: RuleForm[] }
 
 const ACCOUNT_PAGE_SIZE = 1000
@@ -335,8 +344,52 @@ function toInput(): IntentRouterInput {
     classifier_timeout_ms: Number(form.classifier_timeout_ms) || 0,
     cache_ttl_seconds: Number(form.cache_ttl_seconds) || 0,
     max_input_chars: Number(form.max_input_chars) || 0,
-    rules: form.rules.map(({ name, description, account_ids, enabled }) => ({ name, description, account_ids: [...account_ids], enabled })),
+    rules: form.rules.map(({ name, description, keywordsText, originalKeywords, account_ids, enabled }) => ({
+      name, description, keywords: restoreOriginalControls(parseKeywords(keywordsText), originalKeywords), account_ids: [...account_ids], enabled,
+    })),
   }
+}
+// Keywords are typed one per line or comma-separated (ASCII or Chinese commas).
+function parseKeywords(text: string): string[] {
+  const result: string[] = []
+  let current = ''
+  let quoted = false
+  const finish = () => {
+    const keyword = current.trim()
+    if (keyword) result.push(keyword)
+    current = ''
+  }
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]
+    if (quoted) {
+      if (char === '"' && text[i + 1] === '"') {
+        current += '"'
+        i++
+      } else if (char === '"') {
+        quoted = false
+      } else {
+        current += char
+      }
+    } else if (char === '"' && current.trim() === '') {
+      quoted = true
+    } else if (/[\n,，、]/.test(char)) {
+      finish()
+    } else {
+      current += char
+    }
+  }
+  finish()
+  return result
+}
+function formatKeywords(keywords: string[]): string {
+  return keywords.map((keyword) => /[\r\n,，、"]/.test(keyword)
+    ? `"${keyword.replace(/\r/g, '\\r').replace(/"/g, '""')}"`
+    : keyword).join(', ')
+}
+function restoreOriginalControls(parsed: string[], originals: string[]): string[] {
+  const controls = new Map(originals.filter((keyword) => keyword.includes('\r'))
+    .map((keyword) => [keyword.replace(/\r/g, '\\r'), keyword]))
+  return parsed.map((keyword) => controls.get(keyword) ?? keyword)
 }
 function snapshot() { return JSON.stringify(toInput()) }
 
@@ -350,7 +403,9 @@ function fillForm(router: IntentRouter | null) {
     form.classifier_timeout_ms = router.classifier_timeout_ms
     form.cache_ttl_seconds = router.cache_ttl_seconds
     form.max_input_chars = router.max_input_chars
-    form.rules = (router.rules ?? []).map((rule) => ({ ...rule, account_ids: [...(rule.account_ids ?? [])], uid: nextUid++, search: '' }))
+    form.rules = (router.rules ?? []).map(({ keywords, ...rule }) => ({
+      ...rule, keywordsText: formatKeywords(keywords ?? []), originalKeywords: [...(keywords ?? [])], account_ids: [...(rule.account_ids ?? [])], uid: nextUid++, search: '',
+    }))
   }
   baseline.value = snapshot()
   testResult.value = null
@@ -406,7 +461,7 @@ function removeAccount(rule: RuleForm, id: number) {
   rule.account_ids = rule.account_ids.filter((x) => x !== id)
 }
 function addRule() {
-  form.rules.push({ uid: nextUid++, name: '', description: '', account_ids: [], enabled: true, search: '' })
+  form.rules.push({ uid: nextUid++, name: '', description: '', keywordsText: '', originalKeywords: [], account_ids: [], enabled: true, search: '' })
 }
 
 function errorText(err: unknown) {
@@ -496,6 +551,7 @@ function formatTime(value: string) {
 function eventClass(kind: IntentRouteEvent['kind']) {
   if (kind === 'error') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
   if (kind === 'skipped') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+  if (kind === 'keyword') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
   if (kind === 'routed') return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
   return 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
 }

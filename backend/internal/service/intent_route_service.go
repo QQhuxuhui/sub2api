@@ -65,8 +65,59 @@ func (c *intentRouterConfig) activeRules() []domain.IntentRule {
 	return rules
 }
 
+// usable reports whether the router can route anything: it needs active rules
+// and at least one way of matching them — a classifier, or keywords.
 func (c *intentRouterConfig) usable() bool {
-	return c != nil && c.Enabled && c.ClassifierModel != "" && c.ClassifierAPIKey != "" && len(c.activeRules()) > 0
+	if c == nil || !c.Enabled {
+		return false
+	}
+	return len(c.classifierRules()) > 0 || c.hasKeywords()
+}
+
+func (c *intentRouterConfig) classifierReady() bool {
+	return c != nil && c.ClassifierModel != "" && c.ClassifierAPIKey != ""
+}
+
+// classifierRules are the active rules the classifier chooses among: those
+// with a description. Keyword-only rules are never offered to the model.
+// Empty when no classifier is configured.
+func (c *intentRouterConfig) classifierRules() []domain.IntentRule {
+	if !c.classifierReady() {
+		return nil
+	}
+	var rules []domain.IntentRule
+	for _, rule := range c.activeRules() {
+		if strings.TrimSpace(rule.Description) != "" {
+			rules = append(rules, rule)
+		}
+	}
+	return rules
+}
+
+func (c *intentRouterConfig) hasKeywords() bool {
+	for _, rule := range c.activeRules() {
+		if len(rule.Keywords) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// matchKeywords returns the first active rule, in configured order, that has a
+// keyword occurring in text (case-insensitive), and the keyword that matched.
+func (c *intentRouterConfig) matchKeywords(text string) (domain.IntentRule, string, bool) {
+	if text == "" {
+		return domain.IntentRule{}, "", false
+	}
+	lower := strings.ToLower(text)
+	for _, rule := range c.activeRules() {
+		for _, keyword := range rule.Keywords {
+			if k := strings.ToLower(strings.TrimSpace(keyword)); k != "" && strings.Contains(lower, k) {
+				return rule, keyword, true
+			}
+		}
+	}
+	return domain.IntentRule{}, "", false
 }
 
 // scopeAccountIDs lists every account any rule names, once each — including
@@ -113,7 +164,7 @@ type intentRouteSession struct {
 type IntentRouteEvent struct {
 	Time      time.Time `json:"time"`
 	GroupID   int64     `json:"group_id"`
-	Kind      string    `json:"kind"` // classified | cached | routed | error | skipped
+	Kind      string    `json:"kind"` // keyword | classified | cached | routed | error | skipped
 	Intent    string    `json:"intent,omitempty"`
 	AccountID int64     `json:"account_id,omitempty"`
 	LatencyMS int64     `json:"latency_ms,omitempty"`
@@ -137,7 +188,7 @@ type intentRouteStore interface {
 	TouchSession(ctx context.Context, groupID int64, sessionKey string, ttl time.Duration) error
 	// PinSession stores the intent together with the account that served it.
 	PinSession(ctx context.Context, groupID int64, sessionKey string, session intentRouteSession, ttl time.Duration) error
-	DeleteSession(ctx context.Context, groupID int64, sessionKey string) error
+	DeleteSession(ctx context.Context, groupID int64, sessionKey string, observed intentRouteSession) error
 	ClearSessions(ctx context.Context, groupID int64) (int64, error)
 	AppendEvent(ctx context.Context, event IntentRouteEvent) error
 	ListEvents(ctx context.Context, limit int) ([]IntentRouteEvent, error)
@@ -263,32 +314,76 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 	view := intentRequestView{body: in.Body}
 	sessionKey := intentSessionKey(in.APIKeyID, in.Header, view)
 
+	var session *intentRouteSession
+	var version int64
 	if sessionKey != "" && s.store != nil {
+		// Reserve the write order before reading the session: a slow read must
+		// not let an older request overwrite a later keyword decision. Both
+		// operations share one time budget.
 		storeCtx, cancel := context.WithTimeout(ctx, intentRouteStoreTimeout)
-		session, err := s.store.GetSession(storeCtx, in.GroupID, sessionKey)
-		cancel()
-		if err == nil && session != nil {
-			if session.Intent == "" {
-				return nil
+		version = s.nextRequestVersion(storeCtx, sessionKey)
+		if storeCtx.Err() == nil {
+			type readResult struct {
+				session *intentRouteSession
+				err     error
 			}
-			// A rule that was renamed, disabled or emptied no longer binds its sessions.
-			if rule, ok := cfg.rule(session.Intent); ok {
-				s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "cached", Intent: rule.Name, AccountID: session.AccountID})
-				// Sliding expiry: a conversation in progress keeps its route; only
-				// one left idle for the whole TTL is classified afresh.
-				s.detached(func(ctx context.Context) error {
-					return s.store.TouchSession(ctx, in.GroupID, sessionKey, cfg.CacheTTL)
-				})
-				return s.newDecision(ctx, cfg, rule, sessionKey, session.AccountID)
+			done := make(chan readResult, 1)
+			go func() {
+				got, err := s.store.GetSession(storeCtx, in.GroupID, sessionKey)
+				done <- readResult{got, err}
+			}()
+			select {
+			case result := <-done:
+				if result.err == nil {
+					session = result.session
+				}
+			case <-storeCtx.Done():
 			}
-			// Stale entry: make room now, so the new classification below is not
-			// rejected as "already known".
-			storeCtx, cancel := context.WithTimeout(ctx, intentRouteStoreTimeout)
-			_ = s.store.DeleteSession(storeCtx, in.GroupID, sessionKey)
-			cancel()
 		}
+		cancel()
 	}
 
+	// Keywords are checked on every turn against the latest user message, and
+	// a hit overrides whatever the conversation was routed by before.
+	if rule, keyword, ok := cfg.matchKeywords(view.lastUserText(0)); ok {
+		if session != nil && session.Intent == rule.Name {
+			// Same intent as before: keep the conversation on its account.
+			s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "keyword", Intent: rule.Name, AccountID: session.AccountID, Detail: keyword})
+			s.detached(func(ctx context.Context) error {
+				return s.store.TouchSession(ctx, in.GroupID, sessionKey, cfg.CacheTTL)
+			})
+			return s.newDecision(cfg, rule, sessionKey, session.AccountID, false, version)
+		}
+		s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "keyword", Intent: rule.Name, Detail: keyword})
+		return s.newDecision(cfg, rule, sessionKey, 0, true, version)
+	}
+
+	if session != nil {
+		if session.Intent == "" {
+			return nil
+		}
+		// A rule that was renamed, disabled or emptied no longer binds its sessions.
+		if rule, ok := cfg.rule(session.Intent); ok {
+			s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "cached", Intent: rule.Name, AccountID: session.AccountID})
+			// Sliding expiry: a conversation in progress keeps its route; only
+			// one left idle for the whole TTL is classified afresh.
+			s.detached(func(ctx context.Context) error {
+				return s.store.TouchSession(ctx, in.GroupID, sessionKey, cfg.CacheTTL)
+			})
+			return s.newDecision(cfg, rule, sessionKey, session.AccountID, false, version)
+		}
+		// Stale entry: make room now, so the new classification below is not
+		// rejected as "already known".
+		storeCtx, cancel := context.WithTimeout(ctx, intentRouteStoreTimeout)
+		_ = s.store.DeleteSession(storeCtx, in.GroupID, sessionKey, *session)
+		cancel()
+	}
+
+	rules := cfg.classifierRules()
+	if len(rules) == 0 {
+		// Keyword-only router: an unmatched turn is scheduled normally.
+		return nil
+	}
 	text := view.lastUserText(cfg.MaxInputChars)
 	if text == "" {
 		return nil
@@ -309,7 +404,7 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 		s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "error", LatencyMS: latency, Detail: truncateRunes(err.Error(), 300)})
 		return nil
 	}
-	intent, understood := matchIntentLabel(answer, cfg.activeRules())
+	intent, understood := matchIntentLabel(answer, rules)
 	if !understood {
 		s.breakerFailure(in.GroupID)
 		slog.Warn("intent_route.answer_not_understood", "group_id", in.GroupID, "answer", truncateRunes(answer, 120))
@@ -330,35 +425,50 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 	if !ok {
 		return nil
 	}
-	return s.newDecision(ctx, cfg, rule, sessionKey, 0)
+	return s.newDecision(cfg, rule, sessionKey, 0, false, version)
 }
 
-func (s *IntentRouterService) newDecision(ctx context.Context, cfg *intentRouterConfig, rule domain.IntentRule, sessionKey string, pinned int64) *IntentRouteDecision {
-	groupID, ttl, intent := cfg.GroupID, cfg.CacheTTL, rule.Name
-	// Assign order before spawning writes; a Redis counter avoids clock skew
-	// and process-local ordering. If unavailable, route normally but skip pinning.
-	var version int64
-	if s.store != nil && sessionKey != "" {
-		storeCtx, cancel := context.WithTimeout(ctx, intentRouteStoreTimeout)
-		// The shared Redis client can ignore context deadlines during socket
-		// reads. Bound the caller's wait independently; the buffered result
-		// lets an abandoned allocation finish without blocking a goroutine.
-		type allocation struct {
-			version int64
-			err     error
-		}
-		done := make(chan allocation, 1)
-		go func() { v, err := s.store.NextVersion(storeCtx); done <- allocation{v, err} }()
-		select {
-		case result := <-done:
-			if result.err == nil && storeCtx.Err() == nil {
-				version = result.version
-			}
-		case <-storeCtx.Done():
-		}
-		cancel()
+// nextRequestVersion reserves write order before any potentially slow
+// classification. Redis assigns versions across gateway instances.
+func (s *IntentRouterService) nextRequestVersion(ctx context.Context, sessionKey string) int64 {
+	if s.store == nil || sessionKey == "" {
+		return 0
 	}
+	storeCtx, cancel := context.WithTimeout(ctx, intentRouteStoreTimeout)
+	// The shared Redis client can ignore context deadlines during socket
+	// reads. Bound the caller's wait independently; the buffered result
+	// lets an abandoned allocation finish without blocking a goroutine.
+	type allocation struct {
+		version int64
+		err     error
+	}
+	done := make(chan allocation, 1)
+	go func() { v, err := s.store.NextVersion(storeCtx); done <- allocation{v, err} }()
+	var version int64
+	select {
+	case result := <-done:
+		if result.err == nil && storeCtx.Err() == nil {
+			version = result.version
+		}
+	case <-storeCtx.Done():
+	}
+	cancel()
+	return version
+}
+
+// newDecision builds the routed decision for rule. override (a keyword hit that
+// changes the conversation's intent) records the new intent at once, versioned
+// like a pin, so it replaces the conversation's earlier intent and account even
+// if no target account ends up serving this turn.
+func (s *IntentRouterService) newDecision(cfg *intentRouterConfig, rule domain.IntentRule, sessionKey string, pinned int64, override bool, version int64) *IntentRouteDecision {
+	groupID, ttl, intent := cfg.GroupID, cfg.CacheTTL, rule.Name
 	var sequence atomic.Int64
+	if override && s.store != nil && sessionKey != "" && version > 0 {
+		seq := sequence.Add(1)
+		s.detached(func(ctx context.Context) error {
+			return s.store.PinSession(ctx, groupID, sessionKey, intentRouteSession{Intent: intent, Version: version, Sequence: seq}, ttl)
+		})
+	}
 	return &IntentRouteDecision{
 		GroupID:         groupID,
 		Intent:          intent,
@@ -580,8 +690,22 @@ func (r *redisIntentRouteStore) PinSession(ctx context.Context, groupID int64, s
 	return intentRoutePinScript.Run(ctx, r.rdb, []string{intentRouteSessionRedisKey(groupID, sessionKey)}, raw, strconv.FormatInt(session.Version, 10), strconv.FormatInt(session.Sequence, 10), ttl.Milliseconds()).Err()
 }
 
-func (r *redisIntentRouteStore) DeleteSession(ctx context.Context, groupID int64, sessionKey string) error {
-	return r.rdb.Del(ctx, intentRouteSessionRedisKey(groupID, sessionKey)).Err()
+var intentRouteDeleteScript = redis.NewScript(`
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local ok, state = pcall(cjson.decode, raw)
+if not ok or type(state) ~= 'table' then return 0 end
+if (tonumber(state.v) or 0) ~= tonumber(ARGV[1]) then return 0 end
+if (tonumber(state.q) or 0) ~= tonumber(ARGV[2]) then return 0 end
+if (state.i or '') ~= ARGV[3] then return 0 end
+if (tonumber(state.a) or 0) ~= tonumber(ARGV[4]) then return 0 end
+return redis.call('DEL', KEYS[1])
+`)
+
+func (r *redisIntentRouteStore) DeleteSession(ctx context.Context, groupID int64, sessionKey string, observed intentRouteSession) error {
+	return intentRouteDeleteScript.Run(ctx, r.rdb, []string{intentRouteSessionRedisKey(groupID, sessionKey)},
+		strconv.FormatInt(observed.Version, 10), strconv.FormatInt(observed.Sequence, 10),
+		observed.Intent, strconv.FormatInt(observed.AccountID, 10)).Err()
 }
 
 // ClearSessions forgets every conversation of a group (groupID > 0) or of all

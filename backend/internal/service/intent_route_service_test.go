@@ -93,10 +93,13 @@ func (m *memoryIntentRouteStore) PinSession(_ context.Context, groupID int64, ke
 	return nil
 }
 
-func (m *memoryIntentRouteStore) DeleteSession(_ context.Context, groupID int64, key string) error {
+func (m *memoryIntentRouteStore) DeleteSession(_ context.Context, groupID int64, key string, observed intentRouteSession) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.sessions, intentRouteSessionRedisKey(groupID, key))
+	k := intentRouteSessionRedisKey(groupID, key)
+	if m.sessions[k] == observed {
+		delete(m.sessions, k)
+	}
 	return nil
 }
 
@@ -422,7 +425,7 @@ func TestIntentRouter_SaveValidation(t *testing.T) {
 		"cache ttl out of range":     {func(in *IntentRouterInput) { in.CacheTTLSeconds = 5 }, "INTENT_INVALID_CACHE_TTL"},
 		"rule without name":          {func(in *IntentRouterInput) { in.Rules[0].Name = " " }, "INTENT_RULE_NAME_REQUIRED"},
 		"reserved rule name":         {func(in *IntentRouterInput) { in.Rules[0].Name = "none" }, "INTENT_RULE_NAME_RESERVED"},
-		"rule without description":   {func(in *IntentRouterInput) { in.Rules[0].Description = "" }, "INTENT_RULE_DESCRIPTION_REQUIRED"},
+		"rule without description":   {func(in *IntentRouterInput) { in.Rules[0].Description = "" }, "INTENT_RULE_MATCHER_REQUIRED"},
 		"rule without accounts":      {func(in *IntentRouterInput) { in.Rules[0].AccountIDs = nil }, "INTENT_RULE_ACCOUNTS_REQUIRED"},
 		"duplicate rule names": {func(in *IntentRouterInput) {
 			in.Rules = append(in.Rules, domain.IntentRule{Name: "Coding", Description: "x", AccountIDs: []int64{pool}})

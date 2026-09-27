@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -26,26 +27,57 @@ type intentRequestView struct {
 }
 
 // lastUserText returns the text of the most recent user turn that has any
-// (tool results and images are skipped), cut to maxChars runes.
+// (tool results and images are skipped), cut to maxChars runes (0: uncut).
+// Text that coding clients inject into user turns (see intentInjectedBlocks)
+// is not what the user asked, so it is removed first; a turn holding nothing
+// else counts as having no text.
 func (v intentRequestView) lastUserText(maxChars int) string {
 	turns := v.turns()
 	for i := len(turns) - 1; i >= 0; i-- {
 		if !isIntentUserRole(turns[i].Get("role").String()) {
 			continue
 		}
-		if text := intentTurnText(turns[i]); text != "" {
+		if text := stripIntentInjectedText(intentTurnText(turns[i])); text != "" {
 			return truncateRunes(text, maxChars)
 		}
 	}
 	// Responses API / legacy completions with a bare string prompt.
 	for _, path := range []string{"input", "prompt"} {
 		if r := gjson.GetBytes(v.body, path); r.Type == gjson.String {
-			if text := strings.TrimSpace(r.String()); text != "" {
+			if text := stripIntentInjectedText(r.String()); text != "" {
 				return truncateRunes(text, maxChars)
 			}
 		}
 	}
 	return ""
+}
+
+// intentInjectedBlocks match tagged blocks that clients such as Claude Code
+// and Codex put into user turns on their own: reminders, IDE context, local
+// command output, environment and instruction dumps. They are long and full
+// of ordinary words, so leaving them in would make keywords match (and the
+// classifier judge) text the user never wrote.
+var intentInjectedBlocks = func() []*regexp.Regexp {
+	tags := []string{
+		"system-reminder", "local-command-stdout", "local-command-stderr",
+		"ide_opened_file", "ide_selection", "ide_diagnostics",
+		"environment_context", "user_instructions",
+	}
+	patterns := make([]*regexp.Regexp, 0, len(tags))
+	for _, tag := range tags {
+		patterns = append(patterns, regexp.MustCompile(`(?s)<`+tag+`>.*?</`+tag+`>`))
+	}
+	return patterns
+}()
+
+func stripIntentInjectedText(text string) string {
+	if strings.IndexByte(text, '<') < 0 {
+		return strings.TrimSpace(text)
+	}
+	for _, pattern := range intentInjectedBlocks {
+		text = pattern.ReplaceAllString(text, "")
+	}
+	return strings.TrimSpace(text)
 }
 
 // firstUserText anchors content-derived session keys: it stays the same for
@@ -55,12 +87,12 @@ func (v intentRequestView) firstUserText() string {
 		if !isIntentUserRole(turn.Get("role").String()) {
 			continue
 		}
-		if text := intentTurnText(turn); text != "" {
+		if text := stripIntentInjectedText(intentTurnText(turn)); text != "" {
 			return text
 		}
 	}
 	if r := gjson.GetBytes(v.body, "input"); r.Type == gjson.String {
-		return strings.TrimSpace(r.String())
+		return stripIntentInjectedText(r.String())
 	}
 	return ""
 }
@@ -200,7 +232,7 @@ func intentSessionKey(apiKeyID int64, header http.Header, view intentRequestView
 		if first == "" {
 			return ""
 		}
-		seed = "c:" + view.systemText() + "\x00" + first
+		seed = "c:" + stripIntentInjectedText(view.systemText()) + "\x00" + first
 		// A cache key narrows the match when present, but never widens it.
 		if r := gjson.GetBytes(view.body, "prompt_cache_key"); r.Type == gjson.String {
 			seed += "\x00" + strings.TrimSpace(r.String())

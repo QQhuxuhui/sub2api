@@ -6,10 +6,15 @@ package domain
 type IntentRule struct {
 	// Name is the label the classifier model answers with. Unique per router.
 	Name string `json:"name"`
-	// Description tells the classifier model when this intent applies.
-	Description string  `json:"description"`
-	AccountIDs  []int64 `json:"account_ids"`
-	Enabled     bool    `json:"enabled"`
+	// Description tells the classifier model when this intent applies. A rule
+	// without one is matched by its keywords only.
+	Description string `json:"description"`
+	// Keywords route a request to this rule without asking the classifier:
+	// any one of them appearing in the user's latest message is a match
+	// (case-insensitive substring). Checked on every turn, before the model.
+	Keywords   []string `json:"keywords,omitempty"`
+	AccountIDs []int64  `json:"account_ids"`
+	Enabled    bool     `json:"enabled"`
 }
 
 const (

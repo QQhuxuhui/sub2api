@@ -58,7 +58,7 @@ func (c *httpIntentClassifier) Classify(ctx context.Context, cfg *intentRouterCo
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return "", fmt.Errorf("classifier base url is not an http(s) url")
 	}
-	system := buildIntentClassifierPrompt(cfg.activeRules())
+	system := buildIntentClassifierPrompt(cfg.classifierRules())
 	// The message is data to label, not an instruction to follow.
 	user := "Message to classify:\n<<<\n" + text + "\n>>>"
 

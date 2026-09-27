@@ -3,6 +3,8 @@ import { apiClient } from '../client'
 export interface IntentRule {
   name: string
   description: string
+  /** Matched against the latest user message on every turn, before the classifier. */
+  keywords?: string[]
   account_ids: number[]
   enabled: boolean
 }
@@ -38,6 +40,9 @@ export interface IntentRouterInput {
 }
 
 export interface IntentClassifyTestResult {
+  /** keyword: decided by a keyword, the classifier was not asked; '' when neither applied. */
+  matched_by: 'keyword' | 'classifier' | ''
+  keyword?: string
   answer: string
   intent: string
   understood: boolean
@@ -48,7 +53,7 @@ export interface IntentClassifyTestResult {
 export interface IntentRouteEvent {
   time: string
   group_id: number
-  kind: 'classified' | 'cached' | 'routed' | 'error' | 'skipped'
+  kind: 'keyword' | 'classified' | 'cached' | 'routed' | 'error' | 'skipped'
   intent?: string
   account_id?: number
   latency_ms?: number
