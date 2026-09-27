@@ -15,6 +15,14 @@
         </span>
       </div>
 
+      <!-- 分组倍率刚被修改：专属倍率不会自动跟随，提示同比调整 -->
+      <div
+        v-if="previousGroupRate != null && previousGroupRate !== group.rate_multiplier && serverEntries.length > 0"
+        class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300"
+      >
+        {{ t('admin.groups.groupRateChangedHint', { from: previousGroupRate, to: group.rate_multiplier, count: serverEntries.length, factor: suggestedFactor }) }}
+      </div>
+
       <!-- 操作区 -->
       <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
         <!-- 添加用户 -->
@@ -71,36 +79,75 @@
         </div>
 
         <!-- 批量调整 + 全部清空 -->
-        <div v-if="localEntries.length > 0" class="mt-3 flex items-center gap-3 border-t border-gray-100 pt-3 dark:border-dark-600">
-          <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.groups.batchAdjust') }}</span>
-          <div class="flex items-center gap-1.5">
-            <span class="text-xs text-gray-400">×</span>
-            <input
-              v-model.number="batchFactor"
-              type="number"
-              step="0.1"
-              min="0"
-              autocomplete="off"
-              class="hide-spinner w-20 rounded border border-gray-200 bg-white px-2 py-1 text-center text-sm transition-colors focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500/20 dark:border-dark-500 dark:bg-dark-700 dark:focus:border-primary-500"
-              placeholder="0.5"
-            />
-            <button
-              type="button"
-              class="btn btn-primary btn-sm shrink-0 px-2.5 py-1 text-xs"
-              :disabled="!batchFactor || batchFactor <= 0"
-              @click="applyBatchFactor"
-            >
-              {{ t('admin.groups.applyMultiplier') }}
-            </button>
+        <div v-if="localEntries.length > 0" class="mt-3 space-y-2 border-t border-gray-100 pt-3 dark:border-dark-600">
+          <div class="text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.groups.batchTarget') }}:
+            <span class="font-medium text-gray-700 dark:text-gray-200">
+              {{ selectedIds.size > 0
+                ? t('admin.groups.batchTargetSelected', { count: batchTargets.length })
+                : t('admin.groups.batchTargetFiltered', { count: batchTargets.length }) }}
+            </span>
           </div>
-          <div class="ml-auto">
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.groups.batchAdjust') }}</span>
+              <span class="text-xs text-gray-400">×</span>
+              <input
+                v-model.number="batchFactor"
+                type="number"
+                step="0.1"
+                min="0"
+                autocomplete="off"
+                class="hide-spinner w-20 rounded border border-gray-200 bg-white px-2 py-1 text-center text-sm transition-colors focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500/20 dark:border-dark-500 dark:bg-dark-700 dark:focus:border-primary-500"
+                placeholder="0.5"
+              />
+              <button
+                type="button"
+                class="btn btn-primary btn-sm shrink-0 px-2.5 py-1 text-xs"
+                :disabled="!batchFactor || batchFactor <= 0 || batchTargets.length === 0"
+                @click="applyBatchFactor"
+              >
+                {{ t('admin.groups.applyMultiplier') }}
+              </button>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.groups.batchFloor') }}</span>
+              <input
+                v-model.number="floorRate"
+                type="number"
+                step="0.001"
+                min="0"
+                autocomplete="off"
+                class="hide-spinner w-20 rounded border border-gray-200 bg-white px-2 py-1 text-center text-sm transition-colors focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500/20 dark:border-dark-500 dark:bg-dark-700 dark:focus:border-primary-500"
+                :placeholder="String(groupRate)"
+              />
+              <button
+                type="button"
+                class="btn btn-primary btn-sm shrink-0 px-2.5 py-1 text-xs"
+                :disabled="!floorRate || floorRate <= 0 || batchTargets.length === 0"
+                @click="applyFloor"
+              >
+                {{ t('admin.groups.applyMultiplier') }}
+              </button>
+            </div>
             <button
               type="button"
-              class="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40"
-              @click="clearAllLocal"
+              class="rounded-lg border border-gray-200 px-3 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-dark-500 dark:text-gray-300 dark:hover:bg-dark-600"
+              :disabled="batchTargets.length === 0"
+              :title="t('admin.groups.followGroupRateTip')"
+              @click="removeTargets"
             >
-              {{ t('admin.groups.clearAll') }}
+              {{ t('admin.groups.followGroupRate') }}
             </button>
+            <div class="ml-auto">
+              <button
+                type="button"
+                class="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40"
+                @click="clearAllLocal"
+              >
+                {{ t('admin.groups.clearAll') }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -115,12 +162,25 @@
 
       <!-- 已设置的用户列表 -->
       <div v-else>
-        <h4 class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-          {{ t('admin.groups.rateMultipliers') }} ({{ localEntries.length }})
-        </h4>
+        <div class="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ t('admin.groups.rateMultipliers') }} ({{ localEntries.length }})
+          </h4>
+          <span v-if="localEntries.length > 0" class="text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.groups.rateSummary', { below: belowCount, min: minRate }) }}
+          </span>
+          <label v-if="localEntries.length > 0" class="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+            <input v-model="onlyBelow" type="checkbox" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            {{ t('admin.groups.onlyBelowGroupRate') }}
+          </label>
+        </div>
 
         <div v-if="localEntries.length === 0" class="py-6 text-center text-sm text-gray-400 dark:text-gray-500">
           {{ t('admin.groups.noRateMultipliers') }}
+        </div>
+
+        <div v-else-if="visibleEntries.length === 0" class="py-6 text-center text-sm text-gray-400 dark:text-gray-500">
+          {{ t('admin.groups.noBelowGroupRate') }}
         </div>
 
         <div v-else>
@@ -130,12 +190,26 @@
               <table class="w-full min-w-max text-sm">
                 <thead class="sticky top-0 z-[1]">
                   <tr class="border-b border-gray-200 bg-gray-50 dark:border-dark-600 dark:bg-dark-700">
+                    <th class="w-8 px-3 py-2">
+                      <input
+                        type="checkbox"
+                        class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        :checked="allVisibleSelected"
+                        @change="toggleSelectAllVisible"
+                      />
+                    </th>
                     <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.groups.columns.userEmail') }}</th>
                     <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">ID</th>
                     <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.groups.columns.userName') }}</th>
                     <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.groups.columns.userNotes') }}</th>
                     <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.groups.columns.userStatus') }}</th>
-                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.groups.columns.rateMultiplier') }}</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+                      <button type="button" class="inline-flex items-center gap-1 hover:text-gray-700 dark:hover:text-gray-200" @click="toggleSort">
+                        {{ t('admin.groups.columns.rateMultiplier') }}
+                        <span>{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+                      </button>
+                    </th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.groups.vsGroupRate') }}</th>
                     <th v-if="showFinalRate" class="px-3 py-2 text-left text-xs font-medium text-primary-600 dark:text-primary-400">{{ t('admin.groups.finalRate') }}</th>
                     <th class="w-10 px-2 py-2"></th>
                   </tr>
@@ -146,6 +220,14 @@
                     :key="entry.user_id"
                     class="hover:bg-gray-50 dark:hover:bg-dark-700/50"
                   >
+                    <td class="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        :checked="selectedIds.has(entry.user_id)"
+                        @change="toggleSelect(entry.user_id)"
+                      />
+                    </td>
                     <td class="px-3 py-2 text-gray-600 dark:text-gray-400">{{ entry.user_email }}</td>
                     <td class="whitespace-nowrap px-3 py-2 text-gray-400 dark:text-gray-500">{{ entry.user_id }}</td>
                     <td class="whitespace-nowrap px-3 py-2 text-gray-900 dark:text-white">{{ entry.user_name || '-' }}</td>
@@ -174,8 +256,11 @@
                         @change="updateLocalRate(entry.user_id, ($event.target as HTMLInputElement).value)"
                       />
                     </td>
+                    <td class="whitespace-nowrap px-3 py-2 text-xs font-medium" :class="diffClass(entry.rate_multiplier)">
+                      {{ formatDiff(entry.rate_multiplier) }}
+                    </td>
                     <td v-if="showFinalRate" class="whitespace-nowrap px-3 py-2 font-medium text-primary-600 dark:text-primary-400">
-                      {{ computeFinalRate(entry.rate_multiplier) }}
+                      {{ isBatchTarget(entry.user_id) ? computeFinalRate(entry.rate_multiplier) : '-' }}
                     </td>
                     <td class="px-2 py-2">
                       <button
@@ -194,7 +279,7 @@
 
           <!-- 分页 -->
           <Pagination
-            :total="localEntries.length"
+            :total="visibleEntries.length"
             :page="currentPage"
             :page-size="pageSize"
             @update:page="currentPage = $event"
@@ -255,6 +340,8 @@ interface LocalEntry extends GroupRateMultiplierEntry {}
 const props = defineProps<{
   show: boolean
   group: AdminGroup | null
+  // 分组倍率修改前的值；传入时提示专属倍率不会跟随，并预填同比例乘数
+  previousGroupRate?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -277,6 +364,10 @@ const newRate = ref<number | null>(null)
 const currentPage = ref(1)
 const pageSize = ref(10)
 const batchFactor = ref<number | null>(null)
+const floorRate = ref<number | null>(null)
+const onlyBelow = ref(false)
+const sortOrder = ref<'asc' | 'desc'>('asc')
+const selectedIds = ref<Set<number>>(new Set())
 
 let searchTimeout: ReturnType<typeof setTimeout>
 
@@ -288,6 +379,81 @@ const platformColorClass = computed(() => {
     default: return 'text-blue-700 dark:text-blue-400'
   }
 })
+
+const groupRate = computed(() => props.group?.rate_multiplier ?? 1)
+
+const suggestedFactor = computed(() => {
+  const prev = props.previousGroupRate
+  if (!prev || prev <= 0) return null
+  return parseFloat((groupRate.value / prev).toFixed(6))
+})
+
+const isBelowGroup = (rate: number | null | undefined) => rate != null && rate < groupRate.value
+
+const belowCount = computed(() => localEntries.value.filter(e => isBelowGroup(e.rate_multiplier)).length)
+
+const minRate = computed(() => {
+  const rates = localEntries.value.map(e => e.rate_multiplier).filter((r): r is number => r != null)
+  return rates.length ? Math.min(...rates) : '-'
+})
+
+// 按专属倍率排序（默认从低到高，最让利的排最前），可只看低于分组倍率的
+const visibleEntries = computed(() => {
+  const list = onlyBelow.value
+    ? localEntries.value.filter(e => isBelowGroup(e.rate_multiplier))
+    : [...localEntries.value]
+  const dir = sortOrder.value === 'asc' ? 1 : -1
+  return list.sort((a, b) => ((a.rate_multiplier ?? groupRate.value) - (b.rate_multiplier ?? groupRate.value)) * dir || a.user_id - b.user_id)
+})
+
+// 批量操作对象：有勾选用勾选，否则为当前筛选结果
+const batchTargets = computed(() => {
+  if (selectedIds.value.size > 0) {
+    return localEntries.value.filter(e => selectedIds.value.has(e.user_id))
+  }
+  return visibleEntries.value
+})
+
+const isBatchTarget = (userId: number) => batchTargets.value.some(e => e.user_id === userId)
+
+const allVisibleSelected = computed(() =>
+  visibleEntries.value.length > 0 && visibleEntries.value.every(e => selectedIds.value.has(e.user_id))
+)
+
+const toggleSelect = (userId: number) => {
+  const next = new Set(selectedIds.value)
+  if (next.has(userId)) next.delete(userId)
+  else next.add(userId)
+  selectedIds.value = next
+}
+
+const toggleSelectAllVisible = () => {
+  const next = new Set(selectedIds.value)
+  if (allVisibleSelected.value) {
+    visibleEntries.value.forEach(e => next.delete(e.user_id))
+  } else {
+    visibleEntries.value.forEach(e => next.add(e.user_id))
+  }
+  selectedIds.value = next
+}
+
+const toggleSort = () => {
+  sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+}
+
+const formatDiff = (rate: number | null | undefined) => {
+  if (rate == null || groupRate.value <= 0) return '-'
+  const pct = (rate / groupRate.value - 1) * 100
+  if (Math.abs(pct) < 0.05) return t('admin.groups.sameAsGroupRate')
+  return `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`
+}
+
+const diffClass = (rate: number | null | undefined) => {
+  if (rate == null || rate === groupRate.value) return 'text-gray-400 dark:text-gray-500'
+  return rate < groupRate.value
+    ? 'text-amber-600 dark:text-amber-400'
+    : 'text-green-600 dark:text-green-400'
+}
 
 // 是否显示"最终倍率"预览列
 const showFinalRate = computed(() => {
@@ -310,7 +476,7 @@ const isDirty = computed(() => {
 
 const paginatedLocalEntries = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return localEntries.value.slice(start, start + pageSize.value)
+  return visibleEntries.value.slice(start, start + pageSize.value)
 })
 
 const cloneEntries = (entries: GroupRateMultiplierEntry[]): LocalEntry[] => {
@@ -335,16 +501,24 @@ const loadEntries = async () => {
 }
 
 const adjustPage = () => {
-  const totalPages = Math.max(1, Math.ceil(localEntries.value.length / pageSize.value))
+  const totalPages = Math.max(1, Math.ceil(visibleEntries.value.length / pageSize.value))
   if (currentPage.value > totalPages) {
     currentPage.value = totalPages
   }
 }
 
+watch(onlyBelow, () => {
+  currentPage.value = 1
+})
+
 watch(() => props.show, (val) => {
   if (val && props.group) {
     currentPage.value = 1
-    batchFactor.value = null
+    batchFactor.value = suggestedFactor.value && suggestedFactor.value !== 1 ? suggestedFactor.value : null
+    floorRate.value = null
+    onlyBelow.value = false
+    sortOrder.value = 'asc'
+    selectedIds.value = new Set()
     searchQuery.value = ''
     searchResults.value = []
     selectedUser.value = null
@@ -425,13 +599,14 @@ const updateLocalRate = (userId: number, value: string) => {
 // 本地删除
 const removeLocal = (userId: number) => {
   localEntries.value = localEntries.value.filter(e => e.user_id !== userId)
+  if (selectedIds.value.has(userId)) toggleSelect(userId)
   adjustPage()
 }
 
-// 批量乘数应用到本地
+// 批量乘数应用到批量对象
 const applyBatchFactor = () => {
   if (!batchFactor.value || batchFactor.value <= 0) return
-  for (const entry of localEntries.value) {
+  for (const entry of batchTargets.value) {
     if (entry.rate_multiplier != null) {
       entry.rate_multiplier = parseFloat((entry.rate_multiplier * batchFactor.value).toFixed(6))
     }
@@ -439,15 +614,37 @@ const applyBatchFactor = () => {
   batchFactor.value = null
 }
 
+// 低于下限的拉到下限，高于的不动
+const applyFloor = () => {
+  if (!floorRate.value || floorRate.value <= 0) return
+  for (const entry of batchTargets.value) {
+    if (entry.rate_multiplier != null && entry.rate_multiplier < floorRate.value) {
+      entry.rate_multiplier = floorRate.value
+    }
+  }
+  floorRate.value = null
+}
+
+// 删除专属倍率，改为跟随分组倍率（以后分组调价自动生效）
+const removeTargets = () => {
+  const ids = new Set(batchTargets.value.map(e => e.user_id))
+  localEntries.value = localEntries.value.filter(e => !ids.has(e.user_id))
+  selectedIds.value = new Set()
+  adjustPage()
+}
+
 // 本地清空
 const clearAllLocal = () => {
   localEntries.value = []
+  selectedIds.value = new Set()
 }
 
 // 取消：恢复到服务器数据
 const handleCancel = () => {
   localEntries.value = cloneEntries(serverEntries.value)
   batchFactor.value = null
+  floorRate.value = null
+  selectedIds.value = new Set()
   adjustPage()
 }
 

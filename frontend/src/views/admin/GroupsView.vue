@@ -4688,6 +4688,7 @@
     <GroupRateMultipliersModal
       :show="showRateMultipliersModal"
       :group="rateMultipliersGroup"
+      :previous-group-rate="rateMultipliersPreviousRate"
       @close="showRateMultipliersModal = false"
       @success="loadGroups"
     />
@@ -5277,6 +5278,7 @@ const deletingGroup = ref<AdminGroup | null>(null);
 const duplicatingGroupIds = reactive(new Set<number>());
 const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
+const rateMultipliersPreviousRate = ref<number | null>(null);
 const showRPMOverridesModal = ref(false);
 const rpmOverridesGroup = ref<AdminGroup | null>(null);
 const sortableGroups = ref<AdminGroup[]>([]);
@@ -6755,10 +6757,12 @@ const handleUpdateGroup = async () => {
     payload.peak_rate_multiplier = normalizeRateMultiplier(
       editForm.peak_rate_multiplier,
     );
-    await adminAPI.groups.update(editingGroup.value.id, payload);
+    const previousRate = editingGroup.value.rate_multiplier;
+    const updated = await adminAPI.groups.update(editingGroup.value.id, payload);
     appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
     loadGroups();
+    void promptRateOverridesAfterGroupRateChange(updated, previousRate);
   } catch (error: any) {
     appStore.showError(
       extractApiErrorMessage(error, t("admin.groups.failedToUpdate")),
@@ -6795,6 +6799,24 @@ const removeEditMessagesDispatchMapping = (row: MessagesDispatchMappingRow) => {
 
 const handleRateMultipliers = (group: AdminGroup) => {
   rateMultipliersGroup.value = group;
+  rateMultipliersPreviousRate.value = null;
+  showRateMultipliersModal.value = true;
+};
+
+// 分组倍率变更后，用户专属倍率不会跟随；若该分组有专属倍率，直接打开弹窗并预填同比例乘数
+const promptRateOverridesAfterGroupRateChange = async (
+  group: AdminGroup,
+  previousRate: number,
+) => {
+  if (!group || group.rate_multiplier === previousRate) return;
+  try {
+    const entries = await adminAPI.groups.getGroupRateMultipliers(group.id);
+    if (!entries.some((e) => e.rate_multiplier != null)) return;
+  } catch {
+    return;
+  }
+  rateMultipliersGroup.value = group;
+  rateMultipliersPreviousRate.value = previousRate;
   showRateMultipliersModal.value = true;
 };
 
