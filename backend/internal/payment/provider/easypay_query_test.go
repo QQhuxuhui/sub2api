@@ -84,17 +84,18 @@ func TestEasyPayQueryOrderStatusMapping(t *testing.T) {
 
 			var gotForm url.Values
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPost {
-					t.Errorf("method = %q, want %q", r.Method, http.MethodPost)
+				// api.php only honours query-string params; a form body is ignored upstream.
+				if r.Method != http.MethodGet {
+					t.Errorf("method = %q, want %q", r.Method, http.MethodGet)
 				}
 				if r.URL.Path != "/api.php" {
 					t.Errorf("path = %q, want /api.php", r.URL.Path)
 				}
-				if err := r.ParseForm(); err != nil {
-					t.Errorf("ParseForm: %v", err)
+				if r.ContentLength > 0 {
+					t.Errorf("unexpected request body (%d bytes); params must be in the query string", r.ContentLength)
 				}
-				gotForm = make(url.Values, len(r.PostForm))
-				for key, values := range r.PostForm {
+				gotForm = make(url.Values, len(r.URL.Query()))
+				for key, values := range r.URL.Query() {
 					gotForm[key] = append([]string(nil), values...)
 				}
 				w.Header().Set("Content-Type", "application/json")
