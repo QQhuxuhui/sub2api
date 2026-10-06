@@ -305,7 +305,10 @@ func (e *EasyPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.Quer
 		"act": "order", "pid": e.config["pid"],
 		"key": e.config["pkey"], "out_trade_no": tradeNo,
 	}
-	body, err := e.post(ctx, e.apiBase()+"/api.php", params)
+	// EasyPay's api.php reads act/pid/key/out_trade_no from the query string
+	// and ignores a form-encoded body (8-pay returns an empty 200 for a POST
+	// body), so the query must go in the URL.
+	body, err := e.get(ctx, e.apiBase()+"/api.php", params)
 	if err != nil {
 		return nil, fmt.Errorf("easypay query: %w", err)
 	}
@@ -544,6 +547,38 @@ func (e *EasyPay) resolveCID(paymentType string) string {
 		return v
 	}
 	return e.config["cid"]
+}
+
+// get issues a GET with params in the query string (used by api.php queries).
+func (e *EasyPay) get(ctx context.Context, endpoint string, params map[string]string) ([]byte, error) {
+	q := url.Values{}
+	for k, v := range params {
+		q.Set(k, v)
+	}
+	target := endpoint
+	if strings.Contains(endpoint, "?") {
+		target += "&" + q.Encode()
+	} else {
+		target += "?" + q.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	client := e.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: easypayHTTPTimeout}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxEasypayResponseSize))
+	if err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 func (e *EasyPay) post(ctx context.Context, endpoint string, params map[string]string) ([]byte, error) {
