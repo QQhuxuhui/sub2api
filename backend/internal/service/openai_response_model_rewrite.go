@@ -239,3 +239,26 @@ func (r openAIResponseModelRewrite) applySSEBody(body string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// rewriteOpenAIImagesRawSSELine 改写原样透传的一行 SSE 字节（保留行尾的 \r\n / \n）。
+func rewriteOpenAIImagesRawSSELine(line []byte, r openAIResponseModelRewrite) []byte {
+	if !r.mayApplyBytes(line) {
+		return line
+	}
+	content := bytes.TrimRight(line, "\r\n")
+	updated := r.applySSELine(string(content))
+	if updated == string(content) {
+		return line
+	}
+	out := make([]byte, 0, len(updated)+len(line)-len(content))
+	out = append(out, updated...)
+	return append(out, line[len(content):]...)
+}
+
+// applyImageMeta 在拼装生图输出前覆盖元数据里的模型名，避免对 MB 级 b64 载荷再做一遍 JSON 改写。
+func (r openAIResponseModelRewrite) applyImageMeta(meta openAIResponsesImageResult) openAIResponsesImageResult {
+	if r.force && r.to != "" && meta.Model != "" {
+		meta.Model = r.to
+	}
+	return meta
+}

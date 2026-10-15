@@ -225,6 +225,9 @@ func (s *OpenAIGatewayService) handleCodexDirectImagesNonStreamingResponse(resp 
 	}
 	clientModel := strings.TrimSpace(parsed.Model)
 	if clientModel != "" {
+		if root := gjson.GetBytes(body, "model"); root.Type == gjson.String {
+			body, _ = sjson.SetBytes(body, "model", clientModel)
+		}
 		for i := range gjson.GetBytes(body, "data").Array() {
 			body, _ = sjson.SetBytes(body, fmt.Sprintf("data.%d.model", i), clientModel)
 		}

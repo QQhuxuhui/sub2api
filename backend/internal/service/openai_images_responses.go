@@ -1335,6 +1335,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 	c *gin.Context,
 	responseFormat string,
 	fallbackModel string,
+	modelRewrite openAIResponseModelRewrite,
 ) (OpenAIUsage, int, []string, error) {
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
@@ -1380,11 +1381,14 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 			RetryableOnSameAccount: true,
 		}
 	}
+	if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
+		observer.Observe(firstMeta.Model, true)
+	}
 	if strings.TrimSpace(firstMeta.Model) == "" {
 		firstMeta.Model = strings.TrimSpace(fallbackModel)
 	}
 
-	responseBody, err := buildOpenAIImagesAPIResponse(results, createdAt, usageRaw, firstMeta, responseFormat)
+	responseBody, err := buildOpenAIImagesAPIResponse(results, createdAt, usageRaw, modelRewrite.applyImageMeta(firstMeta), responseFormat)
 	if err != nil {
 		return OpenAIUsage{}, 0, nil, err
 	}
@@ -1400,6 +1404,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 	responseFormat string,
 	streamPrefix string,
 	fallbackModel string,
+	modelRewrite openAIResponseModelRewrite,
 ) (OpenAIUsage, int, []string, *int, error) {
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Header("Content-Type", "text/event-stream")
@@ -1457,6 +1462,10 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 			return
 		}
 		if meta, eventCreatedAt, ok := extractOpenAIResponsesImageMetaFromLifecycleEvent(dataBytes); ok {
+			// 生图工具模型（tools.0.model）才是实际出图的模型，主驱动模型与计费无关。
+			if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
+				observer.Observe(meta.Model, gjson.GetBytes(dataBytes, "type").String() == "response.completed")
+			}
 			mergeOpenAIResponsesImageMeta(&streamMeta, meta)
 			if eventCreatedAt > 0 {
 				createdAt = eventCreatedAt
@@ -1483,7 +1492,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 				gjson.GetBytes(dataBytes, "partial_image_index").Int(),
 				format,
 				createdAt,
-				partialMeta,
+				modelRewrite.applyImageMeta(partialMeta),
 			)
 			s.tryWriteOpenAIImagesStreamEvent(c, flusher, &clientDisconnected, &lastDownstreamWriteAt, eventName, payload)
 		case "response.output_item.done":
@@ -1556,7 +1565,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 				if _, exists := emitted[key]; exists {
 					continue
 				}
-				payload := buildOpenAIImagesStreamCompletedPayload(eventName, img, format, createdAt, usageRaw)
+				payload := buildOpenAIImagesStreamCompletedPayload(eventName, modelRewrite.applyImageMeta(img), format, createdAt, usageRaw)
 				emitted[key] = struct{}{}
 				s.tryWriteOpenAIImagesStreamEvent(c, flusher, &clientDisconnected, &lastDownstreamWriteAt, eventName, payload)
 			}
@@ -1612,7 +1621,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 				if _, exists := emitted[key]; exists {
 					continue
 				}
-				payload := buildOpenAIImagesStreamCompletedPayload(eventName, img, format, createdAt, nil)
+				payload := buildOpenAIImagesStreamCompletedPayload(eventName, modelRewrite.applyImageMeta(img), format, createdAt, nil)
 				emitted[key] = struct{}{}
 				s.tryWriteOpenAIImagesStreamEvent(c, flusher, &clientDisconnected, &lastDownstreamWriteAt, eventName, payload)
 			}
@@ -1806,6 +1815,8 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	direct := usesCodexDirectImages(upstreamModel) && !isOpenAIImagesForceResponses(ctx)
 	beginUpstreamResponseModelObservation(c)
 	SetOpsUpstreamModel(c, upstreamModel)
+	// 命中映射时响应里的 model 一律还原成客户端请求名；上游原值先交给观测器，管理端可见。
+	modelRewrite := newOpenAIResponseModelRewrite(c, account, parsed.Model, upstreamModel).forcedOnly()
 	logger.LegacyPrintf(
 		"service.openai_gateway",
 		"[OpenAI] Images request routing request_model=%s endpoint=%s account_type=%s uploads=%d",
@@ -1936,9 +1947,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	writerSizeBeforeResponse := OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c)
 	if parsed.Stream {
 		if direct {
-			usage, imageCount, imageOutputSizes, firstTokenMs, err = s.handleOpenAIImagesStreamingResponse(resp, c, startTime, parsed)
+			usage, imageCount, imageOutputSizes, firstTokenMs, err = s.handleOpenAIImagesStreamingResponse(resp, c, startTime, parsed, modelRewrite)
 		} else {
-			usage, imageCount, imageOutputSizes, firstTokenMs, err = s.handleOpenAIImagesOAuthStreamingResponse(resp, c, startTime, parsed.ResponseFormat, openAIImagesStreamPrefix(parsed), upstreamModel)
+			usage, imageCount, imageOutputSizes, firstTokenMs, err = s.handleOpenAIImagesOAuthStreamingResponse(resp, c, startTime, parsed.ResponseFormat, openAIImagesStreamPrefix(parsed), upstreamModel, modelRewrite)
 		}
 		if err != nil {
 			if imageCount > 0 {
@@ -1976,7 +1987,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		if direct {
 			usage, imageCount, imageOutputSizes, err = s.handleCodexDirectImagesNonStreamingResponse(resp, c, parsed)
 		} else {
-			usage, imageCount, imageOutputSizes, err = s.handleOpenAIImagesOAuthNonStreamingResponse(resp, c, parsed.ResponseFormat, requestModel)
+			usage, imageCount, imageOutputSizes, err = s.handleOpenAIImagesOAuthNonStreamingResponse(resp, c, parsed.ResponseFormat, requestModel, modelRewrite)
 		}
 		if err != nil {
 			return nil, s.handleOpenAIImagesOAuthResponseError(

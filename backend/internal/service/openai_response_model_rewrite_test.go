@@ -327,3 +327,120 @@ func TestHandleStreamingResponse_RewritesEmbeddedModelHeaders(t *testing.T) {
 	requireClientSeesAliasAndLogKeepsUpstream(t, c, rec.Body.String())
 	require.Contains(t, rec.Body.String(), `"openai-model":"my-alias"`)
 }
+
+// 生图场景：客户端请求 my-image，账号映射成 gpt-image-2，上游回声成 gpt-image-2-swapped。
+const (
+	rewriteTestImageClientModel   = "my-image"
+	rewriteTestImageUpstreamModel = "gpt-image-2"
+	rewriteTestImageSwappedModel  = "gpt-image-2-swapped"
+)
+
+func newImagesRewriteTestContext(t *testing.T) (*gin.Context, *httptest.ResponseRecorder, openAIResponseModelRewrite) {
+	t.Helper()
+	c, rec := newRewriteTestContext(t, rewriteTestImageClientModel)
+	beginUpstreamResponseModelObservation(c)
+	rw := newOpenAIResponseModelRewrite(c, openAIRewriteTestAccount(AccountTypeOAuth), rewriteTestImageClientModel, rewriteTestImageUpstreamModel).forcedOnly()
+	require.True(t, rw.force)
+	return c, rec, rw
+}
+
+func requireImageClientSeesAliasAndLogKeepsUpstream(t *testing.T, c *gin.Context, clientBody string) {
+	t.Helper()
+	require.NotContains(t, clientBody, rewriteTestImageSwappedModel)
+	require.Contains(t, clientBody, rewriteTestImageClientModel)
+	require.Equal(t, rewriteTestImageSwappedModel, observedUpstreamResponseModel(c))
+}
+
+func TestRewriteOpenAIImagesRawSSELine_KeepsLineEnding(t *testing.T) {
+	_, _, rw := newImagesRewriteTestContext(t)
+	out := rewriteOpenAIImagesRawSSELine([]byte("data: {\"type\":\"image_generation.completed\",\"model\":\"gpt-image-2-swapped\"}\r\n"), rw)
+	require.Equal(t, "data: {\"type\":\"image_generation.completed\",\"model\":\"my-image\"}\r\n", string(out))
+
+	untouched := []byte("event: image_generation.completed\n")
+	require.Equal(t, untouched, rewriteOpenAIImagesRawSSELine(untouched, rw))
+	require.Equal(t, "data: {\"model\":\"gpt-image-2-swapped\"}\n",
+		string(rewriteOpenAIImagesRawSSELine([]byte("data: {\"model\":\"gpt-image-2-swapped\"}\n"), openAIResponseModelRewrite{})),
+		"未命中映射时原样透传")
+}
+
+func TestHandleOpenAIImagesNonStreamingResponse_ForcesClientModel(t *testing.T) {
+	c, rec, rw := newImagesRewriteTestContext(t)
+	resp := newRewriteTestUpstreamResponse("application/json", `{"created":1,"model":"gpt-image-2-swapped","data":[{"b64_json":"aW1n"}]}`)
+	_, count, _, err := newRewriteTestService().handleOpenAIImagesNonStreamingResponse(context.Background(), resp, c, openAIRewriteTestAccount(AccountTypeAPIKey), &OpenAIImagesRequest{}, rw)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, rewriteTestImageClientModel, gjson.Get(rec.Body.String(), "model").String())
+	requireImageClientSeesAliasAndLogKeepsUpstream(t, c, rec.Body.String())
+}
+
+func TestHandleOpenAIImagesStreamingResponse_RawPassthroughForcesClientModel(t *testing.T) {
+	c, rec, rw := newImagesRewriteTestContext(t)
+	body := strings.Join([]string{
+		"event: image_generation.partial_image",
+		`data: {"type":"image_generation.partial_image","model":"gpt-image-2-swapped","b64_json":"cA=="}`,
+		"",
+		"event: image_generation.completed",
+		`data: {"type":"image_generation.completed","model":"gpt-image-2-swapped","b64_json":"aW1n","usage":{"input_tokens":1,"output_tokens":2}}`,
+		"",
+	}, "\n")
+	resp := newRewriteTestUpstreamResponse("text/event-stream", body)
+	_, count, _, _, err := newRewriteTestService().handleOpenAIImagesStreamingResponse(resp, c, time.Now(), nil, rw)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, 2, strings.Count(rec.Body.String(), `"model":"my-image"`))
+	requireImageClientSeesAliasAndLogKeepsUpstream(t, c, rec.Body.String())
+}
+
+func swappedImagesResponsesSSE() string {
+	tools := `"tools":[{"type":"image_generation","model":"gpt-image-2-swapped","output_format":"png"}]`
+	return strings.Join([]string{
+		`data: {"type":"response.created","response":{"created_at":1710000000,"model":"gpt-5.6-luna",` + tools + `}}`,
+		"",
+		`data: {"type":"response.image_generation_call.partial_image","partial_image_b64":"cA==","partial_image_index":0}`,
+		"",
+		`data: {"type":"response.completed","response":{"created_at":1710000000,"model":"gpt-5.6-luna",` + tools + `,"output":[{"type":"image_generation_call","id":"ig_1","result":"aW1n","output_format":"png"}]}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+}
+
+func TestHandleOpenAIImagesOAuthStreamingResponse_ForcesClientModel(t *testing.T) {
+	c, rec, rw := newImagesRewriteTestContext(t)
+	resp := newRewriteTestUpstreamResponse("text/event-stream", swappedImagesResponsesSSE())
+	_, count, _, _, err := newRewriteTestService().handleOpenAIImagesOAuthStreamingResponse(resp, c, time.Now(), "b64_json", "image_generation", rewriteTestImageUpstreamModel, rw)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, 2, strings.Count(rec.Body.String(), `"model":"my-image"`), "partial 与 completed 都要覆盖")
+	requireImageClientSeesAliasAndLogKeepsUpstream(t, c, rec.Body.String())
+}
+
+func TestHandleOpenAIImagesOAuthNonStreamingResponse_ForcesClientModel(t *testing.T) {
+	c, rec, rw := newImagesRewriteTestContext(t)
+	resp := newRewriteTestUpstreamResponse("text/event-stream", swappedImagesResponsesSSE())
+	_, count, _, err := newRewriteTestService().handleOpenAIImagesOAuthNonStreamingResponse(resp, c, "b64_json", rewriteTestImageUpstreamModel, rw)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, rewriteTestImageClientModel, gjson.Get(rec.Body.String(), "model").String())
+	requireImageClientSeesAliasAndLogKeepsUpstream(t, c, rec.Body.String())
+}
+
+func TestHandleOpenAIImagesOAuthResponses_NoRenameKeepsUpstreamModel(t *testing.T) {
+	c, rec := newRewriteTestContext(t, rewriteTestImageUpstreamModel)
+	rw := newOpenAIResponseModelRewrite(c, openAIRewriteTestAccount(AccountTypeOAuth), rewriteTestImageUpstreamModel, rewriteTestImageUpstreamModel).forcedOnly()
+	require.False(t, rw.active())
+	resp := newRewriteTestUpstreamResponse("text/event-stream", swappedImagesResponsesSSE())
+	_, _, _, err := newRewriteTestService().handleOpenAIImagesOAuthNonStreamingResponse(resp, c, "b64_json", rewriteTestImageUpstreamModel, rw)
+	require.NoError(t, err)
+	require.Equal(t, rewriteTestImageSwappedModel, gjson.Get(rec.Body.String(), "model").String(), "未改名的请求维持原行为")
+}
+
+func TestHandleCodexDirectImagesNonStreamingResponse_RewritesRootModel(t *testing.T) {
+	c, rec, _ := newImagesRewriteTestContext(t)
+	resp := newRewriteTestUpstreamResponse("application/json", `{"created":1,"model":"gpt-image-2-swapped","data":[{"b64_json":"aW1n","model":"gpt-image-2-swapped"}]}`)
+	_, count, _, err := newRewriteTestService().handleCodexDirectImagesNonStreamingResponse(resp, c, &OpenAIImagesRequest{Model: rewriteTestImageClientModel})
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, rewriteTestImageClientModel, gjson.Get(rec.Body.String(), "model").String())
+	requireImageClientSeesAliasAndLogKeepsUpstream(t, c, rec.Body.String())
+}
