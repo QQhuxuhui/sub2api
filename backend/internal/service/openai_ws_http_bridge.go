@@ -641,13 +641,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	bareErrorMessage := ""
 	failureAccountSideEffectsApplied := false
 	mappedModel := actualModel
-	needModelReplace := false
-	var mappedModelBytes []byte
+	var modelRewrite openAIResponseModelRewrite
 	if originalModel != "" {
-		needModelReplace = mappedModel != "" && mappedModel != originalModel
-		if needModelReplace {
-			mappedModelBytes = []byte(mappedModel)
-		}
+		modelRewrite = newOpenAIResponseModelRewrite(c, account, originalModel, mappedModel)
 	}
 
 	resultWithUsage := func() *OpenAIForwardResult {
@@ -783,8 +779,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		imageCounter.AddSSEData(upstreamMessage)
 
-		if needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && strings.Contains(trimmedData, mappedModel) {
-			upstreamMessage = replaceOpenAIWSMessageModel(upstreamMessage, mappedModel, originalModel)
+		if openAIWSEventMayContainModel(eventType) && modelRewrite.mayApply(trimmedData) {
+			upstreamMessage = modelRewrite.applyJSON(upstreamMessage)
 		}
 		if s.toolCorrector != nil && openAIWSEventMayContainToolCalls(eventType) && openAIWSMessageLikelyContainsToolCalls(upstreamMessage) {
 			if corrected, changed := s.toolCorrector.CorrectToolCallsInSSEBytes(upstreamMessage); changed {
