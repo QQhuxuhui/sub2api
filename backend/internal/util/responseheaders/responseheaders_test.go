@@ -88,3 +88,24 @@ func TestFilterHeadersEnabledUsesAllowlist(t *testing.T) {
 		t.Fatalf("expected X-Blocked removed, got %q", filtered.Get("X-Blocked"))
 	}
 }
+
+// 上游真实模型头永不透传，即使管理员把它加进 additional_allowed。
+func TestFilterHeadersAlwaysRemovesUpstreamModelHeaders(t *testing.T) {
+	src := http.Header{}
+	src.Add("Content-Type", "text/event-stream")
+	src.Add("OpenAI-Model", "gpt-5.4-2026-03-05")
+	src.Add("X-OpenAI-Model", "gpt-5.4-2026-03-05")
+
+	for _, cfg := range []config.ResponseHeaderConfig{
+		{},
+		{Enabled: true, AdditionalAllowed: []string{"openai-model", "x-openai-model"}},
+	} {
+		filtered := FilterHeaders(src, CompileHeaderFilter(cfg))
+		if filtered.Get("OpenAI-Model") != "" || filtered.Get("X-OpenAI-Model") != "" {
+			t.Fatalf("upstream model headers leaked with cfg %+v: %v", cfg, filtered)
+		}
+		if filtered.Get("Content-Type") != "text/event-stream" {
+			t.Fatalf("content-type dropped with cfg %+v", cfg)
+		}
+	}
+}

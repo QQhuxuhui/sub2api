@@ -37,6 +37,15 @@ var defaultAllowed = map[string]struct{}{
 	"x-reasoning-included": {},
 }
 
+// alwaysRemoved 是无论配置如何都不透传的响应头：上游声明的真实模型名。
+// 模型映射（尤其 OpenAI 账号的响应模型强制覆盖）要求上游模型不外泄给下游；
+// Codex 客户端会依据 openai-model 头提示「模型被替换」。即使管理员把它们
+// 加进 additional_allowed 也不放行。
+var alwaysRemoved = map[string]struct{}{
+	"openai-model":   {},
+	"x-openai-model": {},
+}
+
 // hopByHopHeaders 是跳过的 hop-by-hop 头部，这些头部由 HTTP 库自动处理
 var hopByHopHeaders = map[string]struct{}{
 	"content-length":    {},
@@ -67,9 +76,11 @@ func CompileHeaderFilter(cfg config.ResponseHeaderConfig) *CompiledHeaderFilter 
 		}
 	}
 
-	forceRemove := map[string]struct{}{}
+	forceRemove := make(map[string]struct{}, len(alwaysRemoved)+len(cfg.ForceRemove))
+	for key := range alwaysRemoved {
+		forceRemove[key] = struct{}{}
+	}
 	if cfg.Enabled {
-		forceRemove = make(map[string]struct{}, len(cfg.ForceRemove))
 		for _, key := range cfg.ForceRemove {
 			normalized := strings.ToLower(strings.TrimSpace(key))
 			if normalized == "" {

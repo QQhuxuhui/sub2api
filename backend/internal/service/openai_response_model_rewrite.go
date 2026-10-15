@@ -14,6 +14,42 @@ import (
 // 只改结构化字段，不碰错误文本或正文里出现的模型名。
 var openAIForcedResponseModelPaths = []string{"model", "response.model", "message.model"}
 
+// openAIForcedResponseModelHeaderPaths 是载荷里内嵌响应头的位置：Responses 流事件
+// 的 response.headers，以及 WS response.metadata 事件的顶层 headers。Codex 正是
+// 靠其中的 openai-model / x-openai-model 判断服务端模型并提示「模型被替换」，
+// 它忽略载荷里的 model 字段（codex-rs/codex-api/src/sse/responses.rs）。
+var openAIForcedResponseModelHeaderPaths = []string{"response.headers", "headers"}
+
+func isOpenAIModelHeaderName(name string) bool {
+	return strings.EqualFold(name, "openai-model") || strings.EqualFold(name, "x-openai-model")
+}
+
+// containsModelHeaderKeyHint 判断是否可能含 "...-model" 形式的 JSON 键（大小写不敏感），
+// 热路径上逐行调用，不做内存分配。
+func containsModelHeaderKeyHint[T string | []byte](data T) bool {
+	const suffix = `-model"`
+	for i := 0; i+len(suffix) <= len(data); i++ {
+		if data[i] != '-' {
+			continue
+		}
+		matched := true
+		for j := 1; j < len(suffix); j++ {
+			ch := data[i+j]
+			if 'A' <= ch && ch <= 'Z' {
+				ch += 'a' - 'A'
+			}
+			if ch != suffix[j] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
 // openAIResponseModelRewrite 描述如何把上游响应里的 model 还原成客户端可见的名字。
 //
 // OpenAI 平台账号：请求在任一层被改过名（渠道映射、/v1/messages 默认映射、
@@ -84,7 +120,7 @@ func (r openAIResponseModelRewrite) mayApply(data string) bool {
 		return false
 	}
 	if r.force {
-		return strings.Contains(data, `"model"`)
+		return strings.Contains(data, `"model"`) || containsModelHeaderKeyHint(data)
 	}
 	return strings.Contains(data, r.from)
 }
@@ -94,9 +130,19 @@ func (r openAIResponseModelRewrite) mayApplyBytes(data []byte) bool {
 		return false
 	}
 	if r.force {
-		return bytes.Contains(data, []byte(`"model"`))
+		return bytes.Contains(data, []byte(`"model"`)) || containsModelHeaderKeyHint(data)
 	}
 	return bytes.Contains(data, []byte(r.from))
+}
+
+// appliesToWSEvent 决定某个 WS 事件是否需要改写。强制模式不按事件类型过滤，
+// 交给 mayApply 的字符串预检，避免 response.metadata / response.queued 或上游
+// 新增的事件类型漏改。
+func (r openAIResponseModelRewrite) appliesToWSEvent(eventType string) bool {
+	if !r.active() {
+		return false
+	}
+	return r.force || openAIWSEventMayContainModel(eventType)
 }
 
 // applyJSON 改写一个 JSON 文档（非流式响应体、SSE data 负载或 WS 帧）。
@@ -117,6 +163,45 @@ func (r openAIResponseModelRewrite) applyJSON(data []byte) []byte {
 			updated = next
 		}
 	}
+	for _, headersPath := range openAIForcedResponseModelHeaderPaths {
+		updated = r.rewriteEmbeddedModelHeaders(updated, headersPath)
+	}
+	return updated
+}
+
+// rewriteEmbeddedModelHeaders 把 headersPath 对象里的 openai-model / x-openai-model
+// 改成客户端模型；值可以是字符串或字符串数组，保持原有形状。
+func (r openAIResponseModelRewrite) rewriteEmbeddedModelHeaders(data []byte, headersPath string) []byte {
+	headers := gjson.GetBytes(data, headersPath)
+	if !headers.IsObject() {
+		return data
+	}
+	updated := data
+	headers.ForEach(func(key, value gjson.Result) bool {
+		if !isOpenAIModelHeaderName(key.Str) {
+			return true
+		}
+		// 键名只会是 openai-model / x-openai-model 的大小写变体，无需路径转义。
+		path := headersPath + "." + key.Str
+		switch {
+		case value.Type == gjson.String:
+			if value.Str != r.to {
+				if next, err := sjson.SetBytes(updated, path, r.to); err == nil {
+					updated = next
+				}
+			}
+		case value.IsArray():
+			value.ForEach(func(index, item gjson.Result) bool {
+				if item.Type == gjson.String && item.Str != r.to {
+					if next, err := sjson.SetBytes(updated, path+"."+index.String(), r.to); err == nil {
+						updated = next
+					}
+				}
+				return true
+			})
+		}
+		return true
+	})
 	return updated
 }
 

@@ -959,12 +959,16 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		interTurnIdleTimeout: s.openAIWSIngressInterTurnIdleTimeout(),
 		interTurnStarted:     make(chan struct{}, 1),
 		restoreResponseModel: func(payload []byte) []byte {
-			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
-			if !openAIWSEventMayContainModel(eventType) {
+			requestModel, upstreamModel := usageMeta.turnModels("")
+			modelRewrite := newOpenAIResponseModelRewrite(nil, account, requestModel, upstreamModel)
+			if !modelRewrite.mayApplyBytes(payload) {
 				return payload
 			}
-			requestModel, upstreamModel := usageMeta.turnModels("")
-			return newOpenAIResponseModelRewrite(nil, account, requestModel, upstreamModel).applyJSON(payload)
+			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+			if !modelRewrite.appliesToWSEvent(eventType) {
+				return payload
+			}
+			return modelRewrite.applyJSON(payload)
 		},
 		restoreToolNames: func(payload []byte) []byte {
 			return restoreCodexToolNamesFromContext(c, payload)

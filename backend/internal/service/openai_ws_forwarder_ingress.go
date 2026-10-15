@@ -1156,7 +1156,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			imageCounter.AddSSEData(upstreamMessage)
 
 			if !clientDisconnected {
-				if openAIWSEventMayContainModel(eventType) && modelRewrite.mayApplyBytes(upstreamMessage) {
+				if modelRewrite.appliesToWSEvent(eventType) && modelRewrite.mayApplyBytes(upstreamMessage) {
 					upstreamMessage = modelRewrite.applyJSON(upstreamMessage)
 				}
 				if openAIWSEventMayContainToolCalls(eventType) && openAIWSMessageLikelyContainsToolCalls(upstreamMessage) {

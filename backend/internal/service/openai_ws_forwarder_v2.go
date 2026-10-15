@@ -646,7 +646,7 @@ readLoop:
 		}
 
 		if !clientDisconnected {
-			if openAIWSEventMayContainModel(eventType) && modelRewrite.mayApplyBytes(message) {
+			if modelRewrite.appliesToWSEvent(eventType) && modelRewrite.mayApplyBytes(message) {
 				message = modelRewrite.applyJSON(message)
 			}
 			if openAIWSEventMayContainToolCalls(eventType) && openAIWSMessageLikelyContainsToolCalls(message) {

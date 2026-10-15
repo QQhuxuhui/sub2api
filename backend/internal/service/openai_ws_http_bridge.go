@@ -779,7 +779,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		imageCounter.AddSSEData(upstreamMessage)
 
-		if openAIWSEventMayContainModel(eventType) && modelRewrite.mayApply(trimmedData) {
+		if modelRewrite.appliesToWSEvent(eventType) && modelRewrite.mayApply(trimmedData) {
 			upstreamMessage = modelRewrite.applyJSON(upstreamMessage)
 		}
 		if s.toolCorrector != nil && openAIWSEventMayContainToolCalls(eventType) && openAIWSMessageLikelyContainsToolCalls(upstreamMessage) {

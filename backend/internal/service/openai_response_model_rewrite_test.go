@@ -268,3 +268,62 @@ func TestConversionPaths_UseClientRequestedModel(t *testing.T) {
 	requireClientSeesAliasAndLogKeepsUpstream(t, c, rec.Body.String())
 	require.NotContains(t, rec.Body.String(), rewriteTestChannelModel)
 }
+
+// Codex 靠 response.headers / 顶层 headers 里的 openai-model 判断服务端模型，
+// 忽略载荷的 model 字段，所以内嵌响应头也必须改写。
+func TestOpenAIResponseModelRewrite_EmbeddedModelHeaders(t *testing.T) {
+	rw := newOpenAIResponseModelRewrite(nil, openAIRewriteTestAccount(AccountTypeOAuth), rewriteTestClientModel, rewriteTestUpstreamModel)
+
+	created := []byte(`{"type":"response.created","response":{"id":"resp_1","headers":{"OpenAI-Model":"gpt-5.4-2026-03-05","x-request-id":"req_1"}}}`)
+	out := rw.applyJSON(created)
+	require.Equal(t, rewriteTestClientModel, gjson.GetBytes(out, "response.headers.OpenAI-Model").String())
+	require.Equal(t, "req_1", gjson.GetBytes(out, "response.headers.x-request-id").String())
+
+	metadata := []byte(`{"type":"response.metadata","headers":{"x-openai-model":["gpt-5.4-2026-03-05","gpt-5.4"],"openai-processing-ms":"12"}}`)
+	out = rw.applyJSON(metadata)
+	require.Equal(t, `["my-alias","my-alias"]`, gjson.GetBytes(out, "headers.x-openai-model").Raw)
+	require.Equal(t, "12", gjson.GetBytes(out, "headers.openai-processing-ms").String())
+
+	// 只有内嵌头、没有 "model" 键的 SSE 行也不能被预检跳过。
+	line := `data: {"type":"response.in_progress","response":{"headers":{"openai-model":"gpt-5.4-2026-03-05"}}}`
+	require.NotContains(t, rw.applySSELine(line), rewriteTestSwappedModel)
+
+	// 非强制模式（非 OpenAI 平台）不动内嵌头。
+	legacy := newOpenAIResponseModelRewrite(nil, &Account{Platform: PlatformGrok}, "grok-alias", "grok-4.5")
+	require.Equal(t, string(metadata), string(legacy.applyJSON(metadata)))
+}
+
+func TestOpenAIResponseModelRewrite_WSEventGate(t *testing.T) {
+	forced := newOpenAIResponseModelRewrite(nil, openAIRewriteTestAccount(AccountTypeOAuth), rewriteTestClientModel, rewriteTestUpstreamModel)
+	require.True(t, forced.appliesToWSEvent("response.metadata"))
+	require.True(t, forced.appliesToWSEvent("response.queued"))
+	frame := []byte(`{"type":"response.metadata","headers":{"openai-model":"gpt-5.4-2026-03-05"}}`)
+	require.True(t, forced.mayApplyBytes(frame))
+	require.NotContains(t, string(forced.applyJSON(frame)), rewriteTestSwappedModel)
+
+	legacy := newOpenAIResponseModelRewrite(nil, &Account{Platform: PlatformGrok}, "grok-alias", "grok-4.5")
+	require.False(t, legacy.appliesToWSEvent("response.metadata"))
+	require.True(t, legacy.appliesToWSEvent("response.completed"))
+	require.False(t, openAIResponseModelRewrite{}.appliesToWSEvent("response.completed"))
+}
+
+func TestContainsModelHeaderKeyHint(t *testing.T) {
+	require.True(t, containsModelHeaderKeyHint(`{"openai-model":"x"}`))
+	require.True(t, containsModelHeaderKeyHint([]byte(`{"X-OpenAI-MODEL":"x"}`)))
+	require.False(t, containsModelHeaderKeyHint(`{"delta":"gpt-5.4 model"}`))
+	require.False(t, containsModelHeaderKeyHint(`-mode`))
+	require.False(t, containsModelHeaderKeyHint(""))
+}
+
+func TestHandleStreamingResponse_RewritesEmbeddedModelHeaders(t *testing.T) {
+	c, rec := newRewriteTestContext(t, rewriteTestClientModel)
+	upstream := strings.Replace(swappedResponsesSSE(),
+		`"response":{"id":"resp_1","model":"gpt-5.4-2026-03-05","status":"in_progress"`,
+		`"response":{"id":"resp_1","model":"gpt-5.4-2026-03-05","headers":{"openai-model":"gpt-5.4-2026-03-05"},"status":"in_progress"`, 1)
+	require.Contains(t, upstream, `"headers":{"openai-model"`)
+
+	_, err := newRewriteTestService().handleStreamingResponse(context.Background(), newRewriteTestUpstreamResponse("text/event-stream", upstream), c, openAIRewriteTestAccount(AccountTypeOAuth), time.Now(), rewriteTestChannelModel, rewriteTestUpstreamModel)
+	require.NoError(t, err)
+	requireClientSeesAliasAndLogKeepsUpstream(t, c, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"openai-model":"my-alias"`)
+}
