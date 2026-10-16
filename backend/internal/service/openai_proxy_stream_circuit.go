@@ -284,6 +284,9 @@ func openAIProxyStreamQuarantineBypassed(ctx context.Context) bool {
 }
 
 func (s *OpenAIGatewayService) isOpenAIProxyStreamQuarantined(ctx context.Context, account *Account) bool {
+	if account.KeepAvailable() {
+		return false
+	}
 	proxyID, ok := openAIProxyStreamCircuitProxyID(account)
 	if !ok {
 		return false

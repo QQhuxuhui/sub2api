@@ -151,6 +151,13 @@ type AdminAccountRepository interface {
 	AccountRepository
 	AccountDuplicateRepository
 	AccountBillingSettingsRepository
+	AccountKeepAvailableRepository
+}
+
+// AccountKeepAvailableRepository restores automatic state atomically against
+// the current policy and status, preserving manual scheduling decisions.
+type AccountKeepAvailableRepository interface {
+	RestoreKeepAvailableState(ctx context.Context, id int64) (bool, error)
 }
 
 // AccountBulkUpdate describes the fields that can be updated in a bulk operation.

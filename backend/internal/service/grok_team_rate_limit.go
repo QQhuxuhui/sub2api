@@ -90,7 +90,7 @@ func markGrokTeamModelRateLimit(account *Account, model string, until time.Time)
 // isGrokTeamModelRateLimited reports whether the account's team is currently
 // blocked for the requested model.
 func isGrokTeamModelRateLimited(account *Account, model string, now time.Time) bool {
-	if account == nil || !account.IsGrokOAuth() {
+	if account == nil || !account.IsGrokOAuth() || account.KeepAvailable() {
 		return false
 	}
 	fp := grokTeamFingerprint(accountGrokTeamID(account))

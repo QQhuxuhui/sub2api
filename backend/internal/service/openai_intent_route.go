@@ -110,7 +110,7 @@ func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 		}
 		now := time.Now()
 		upstreamModel := canonicalOpenAIAccountSchedulingModel(account, requestedModel)
-		if isGrokTeamModelRateLimited(account, upstreamModel, now) || isGrokModelQuotaBlocked(account.ID, upstreamModel, now) {
+		if isGrokTeamModelRateLimited(account, upstreamModel, now) || isGrokAccountModelQuotaBlocked(account, upstreamModel, now) {
 			continue
 		}
 		acquired, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)

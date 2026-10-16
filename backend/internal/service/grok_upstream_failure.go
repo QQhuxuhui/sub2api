@@ -559,6 +559,9 @@ func (s *OpenAIGatewayService) applyGrokUpstreamFailureDecision(
 	if s == nil || account == nil || !decision.ShouldCooldown || decision.Cooldown <= 0 {
 		return false
 	}
+	if account.KeepAvailable() {
+		return true
+	}
 	// Keep reasons short and stable for ops UI / temp_unschedulable_reason.
 	var reason string
 	switch decision.Class {

@@ -896,6 +896,14 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	if updated.KeepAvailable() {
+		if err := s.restoreKeepAvailableAccountState(ctx, updated); err != nil {
+			return nil, err
+		}
+		if updated, err = s.accountRepo.GetByID(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	return updated, nil
 }
 
@@ -922,7 +930,17 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	if len(updates) == 0 {
 		return nil
 	}
-	return s.accountRepo.UpdateExtra(ctx, id, updates)
+	if err := s.accountRepo.UpdateExtra(ctx, id, updates); err != nil {
+		return err
+	}
+	if keep, ok := updates[KeepAvailableExtraKey].(bool); ok && keep {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		return s.restoreKeepAvailableAccountState(ctx, account)
+	}
+	return nil
 }
 
 // BulkUpdateAccounts updates multiple accounts in one request.
@@ -1156,9 +1174,25 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 	}
 
-	// Handle group bindings per account (requires individual operations).
+	// Restore automatic state only when this batch explicitly enables the policy.
+	restoreKeepAvailable, _ := input.Extra[KeepAvailableExtraKey].(bool)
+	// Handle restoration and group bindings per account so failures remain visible.
 	for _, accountID := range input.AccountIDs {
 		entry := BulkUpdateAccountResult{AccountID: accountID}
+
+		if restoreKeepAvailable {
+			account, err := s.accountRepo.GetByID(ctx, accountID)
+			if err == nil {
+				err = s.restoreKeepAvailableAccountState(ctx, account)
+			}
+			if err != nil {
+				entry.Error = err.Error()
+				result.Failed++
+				result.FailedIDs = append(result.FailedIDs, accountID)
+				result.Results = append(result.Results, entry)
+				continue
+			}
+		}
 
 		if input.GroupIDs != nil {
 			if err := s.accountRepo.BindGroups(ctx, accountID, *input.GroupIDs); err != nil {

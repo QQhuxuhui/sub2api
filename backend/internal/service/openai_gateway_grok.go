@@ -1991,7 +1991,7 @@ func grokRequestedModelFromCtx(ctx context.Context) string {
 }
 
 func persistGrokTransientModelCooldown(account *Account, decision GrokUpstreamFailureDecision) bool {
-	if account == nil {
+	if account == nil || account.KeepAvailable() {
 		return false
 	}
 	model := strings.TrimSpace(decision.Model)

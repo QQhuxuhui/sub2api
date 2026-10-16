@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -24,6 +26,61 @@ func forceChatMessagesFallbackAccount() *Account {
 		openai_compat.ExtraKeyResponsesMode: string(openai_compat.ResponsesSupportModeForceChatCompletions),
 	}
 	return account
+}
+
+func TestForwardAsAnthropic_ChatFallbackRestoresClientModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, stream := range []bool{false, true} {
+		for _, clientModel := range []string{"my-alias", ""} {
+			t.Run(fmt.Sprintf("stream=%v/client=%s", stream, clientModel), func(t *testing.T) {
+				body := []byte(fmt.Sprintf(`{"model":"chan-model","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":%v}`, stream))
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+				if clientModel != "" {
+					c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Model, clientModel))
+				}
+				upstreamBody := `{"id":"chatcmpl_alias","model":"gpt-5.4-snapshot","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`
+				contentType := "application/json"
+				if stream {
+					contentType = "text/event-stream"
+					upstreamBody = "data: " + `{"id":"chatcmpl_alias","model":"gpt-5.4-snapshot","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}` + "\n\n" +
+						"data: " + `{"id":"chatcmpl_alias","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}` + "\n\ndata: [DONE]\n\n"
+				}
+				upstream := &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{contentType}},
+					Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+				}}
+				account := forceChatMessagesFallbackAccount()
+				account.Credentials["model_mapping"] = map[string]any{"chan-model": "gpt-5.4"}
+				svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+				result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+				require.NoError(t, err)
+				require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
+				require.Equal(t, "chan-model", result.Model)
+				require.Equal(t, "gpt-5.4", result.BillingModel)
+				require.Equal(t, "gpt-5.4", result.UpstreamModel)
+				require.Equal(t, 3, result.Usage.InputTokens)
+				require.Equal(t, 2, result.Usage.OutputTokens)
+				want := clientModel
+				if want == "" {
+					want = "chan-model"
+				}
+				if stream {
+					var model string
+					for _, line := range strings.Split(rec.Body.String(), "\n") {
+						if data, ok := extractOpenAISSEDataLine(line); ok && gjson.Get(data, "type").String() == "message_start" {
+							model = gjson.Get(data, "message.model").String()
+						}
+					}
+					require.Equal(t, want, model)
+				} else {
+					require.Equal(t, want, gjson.Get(rec.Body.String(), "model").String())
+				}
+			})
+		}
+	}
 }
 
 // errTailReader yields the given data, then returns err instead of io.EOF,

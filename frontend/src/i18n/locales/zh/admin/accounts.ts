@@ -964,6 +964,8 @@ export default {
       },
       autoPauseOnExpired: '过期自动暂停调度',
       autoPauseOnExpiredDesc: '启用后，账号过期将自动暂停调度',
+      keepAvailable: '保持可用',
+      keepAvailableDesc: '启用后，无论上游返回什么错误（限流、过载、网络故障、鉴权失败等），系统都不会自动把账号置为错误、限流或临时不可调度；手动停用、关闭调度、过期暂停和额度上限仍然生效。已关闭的调度开关需手动开启',
 	  autoPause5hThreshold: '5h 用量阈值(%)',
 	  autoPause7dThreshold: '7d 用量阈值(%)',
 	  autoPauseThresholdHint: '留空或填 0 表示使用全局默认阈值（在运维设置中配置）；填具体值则覆盖全局默认。达到阈值后仅在调度时跳过账号，不修改 schedulable。',

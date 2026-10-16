@@ -894,6 +894,8 @@ export default {
       },
       autoPauseOnExpired: 'Auto Pause On Expired',
       autoPauseOnExpiredDesc: 'When enabled, the account will auto pause scheduling after it expires',
+      keepAvailable: 'Keep Available',
+      keepAvailableDesc: 'When enabled, upstream failures (rate limits, overload, network errors, auth errors, etc.) never put this account into error, rate-limited or temporarily unschedulable state. Manual disable, schedulable toggle, expiry pause and quota limits still apply. Accounts with scheduling turned off must be enabled manually',
 	  autoPause5hThreshold: '5h Usage Threshold (%)',
 	  autoPause7dThreshold: '7d Usage Threshold (%)',
 	  autoPauseThresholdHint: 'Leave empty or set 0 to use the global default threshold (configured in Ops settings); set a value to override the global default. Reaching the threshold only skips the account during scheduling and does not modify schedulable.',

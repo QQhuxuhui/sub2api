@@ -107,6 +107,12 @@ func isGrokModelQuotaBlocked(accountID int64, model string, now time.Time) bool 
 	return true
 }
 
+// Scheduling checks must use the account's current policy, including for blocks
+// learned before keep_available was enabled or from an in-flight stale snapshot.
+func isGrokAccountModelQuotaBlocked(account *Account, model string, now time.Time) bool {
+	return account != nil && !account.KeepAvailable() && isGrokModelQuotaBlocked(account.ID, model, now)
+}
+
 func filterGrokModelQuotaBlockedAccounts(accounts []Account, model string, now time.Time) []Account {
 	if len(accounts) == 0 || strings.TrimSpace(model) == "" {
 		return accounts
@@ -114,7 +120,7 @@ func filterGrokModelQuotaBlockedAccounts(accounts []Account, model string, now t
 	out := make([]Account, 0, len(accounts))
 	for i := range accounts {
 		upstreamModel := canonicalOpenAIAccountSchedulingModel(&accounts[i], model)
-		if isGrokModelQuotaBlocked(accounts[i].ID, upstreamModel, now) {
+		if isGrokAccountModelQuotaBlocked(&accounts[i], upstreamModel, now) {
 			continue
 		}
 		out = append(out, accounts[i])

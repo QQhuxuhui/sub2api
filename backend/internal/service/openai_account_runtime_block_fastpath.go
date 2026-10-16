@@ -324,7 +324,7 @@ func openAIOAuth429SameAccountRetryDelay(headers http.Header, deadline time.Time
 }
 
 func (s *OpenAIGatewayService) BlockAccountScheduling(account *Account, until time.Time, reason string) {
-	if s == nil || !isOpenAIAccount(account) {
+	if s == nil || !isOpenAIAccount(account) || account.KeepAvailable() {
 		return
 	}
 	mu := s.openAIAccountRuntimeBlockLock(account.ID)
@@ -391,7 +391,7 @@ func (s *OpenAIGatewayService) ClearAccountSchedulingBlock(accountID int64) {
 }
 
 func (s *OpenAIGatewayService) isOpenAIAccountRuntimeBlocked(account *Account) bool {
-	if s == nil || !isOpenAIAccount(account) {
+	if s == nil || !isOpenAIAccount(account) || account.KeepAvailable() {
 		return false
 	}
 	mu := s.openAIAccountRuntimeBlockLock(account.ID)
@@ -465,7 +465,7 @@ func (s *OpenAIGatewayService) clearOpenAIAccountModelTransientState(accountID i
 }
 
 func (s *OpenAIGatewayService) isOpenAIAccountModelRuntimeBlocked(account *Account, requestedModel string) bool {
-	if s == nil || account == nil {
+	if s == nil || account == nil || account.KeepAvailable() {
 		return false
 	}
 	state := s.getOpenAIAccountModelTransientState()
@@ -553,7 +553,7 @@ func (s *OpenAIGatewayService) clearOpenAIAccountRuntimeBlockIfUnchanged(account
 // are left alone. This is fail-open if a DB write failed or the snapshot has
 // not caught up yet: empty cooldown fields drop the local account-level block.
 func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlocked(account *Account, requestedModel string) bool {
-	if s == nil {
+	if s == nil || account.KeepAvailable() {
 		return false
 	}
 	snapshot := s.peekOpenAIAccountRuntimeBlock(account)

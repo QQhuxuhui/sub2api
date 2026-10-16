@@ -455,7 +455,7 @@ type openAIQuotaAutoPauseDecision struct {
 }
 
 func shouldAutoPauseGrokAccountByQuota(account *Account) (bool, openAIQuotaAutoPauseDecision) {
-	if account == nil || !account.IsGrok() || account.Type != AccountTypeOAuth {
+	if account == nil || !account.IsGrok() || account.Type != AccountTypeOAuth || account.KeepAvailable() {
 		return false, openAIQuotaAutoPauseDecision{}
 	}
 	snapshot, err := grokQuotaSnapshotFromExtra(account.Extra)

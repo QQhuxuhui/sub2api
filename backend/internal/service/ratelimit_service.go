@@ -166,7 +166,7 @@ func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, 
 	if s == nil || s.settingService == nil || s.accountRepo == nil || account == nil || account.ID <= 0 {
 		return false
 	}
-	if !account.IsActive() || !account.Schedulable {
+	if !account.IsActive() || !account.Schedulable || account.KeepAvailable() {
 		return false
 	}
 

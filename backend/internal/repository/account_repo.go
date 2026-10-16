@@ -1362,14 +1362,17 @@ func (r *accountRepository) BatchUpdateLastUsed(ctx context.Context, updates map
 }
 
 func (r *accountRepository) SetError(ctx context.Context, id int64, errorMsg string) error {
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
+	updated, err := r.client.Account.Update().
+		Where(dbaccount.IDEQ(id), accountUpstreamStateWriteAllowed()).
 		SetStatus(service.StatusError).
 		SetErrorMessage(errorMsg).
 		SetSchedulable(false).
 		Save(ctx)
 	if err != nil {
 		return err
+	}
+	if updated == 0 {
+		return nil
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue set error failed: account=%d err=%v", id, err)
@@ -1393,6 +1396,7 @@ func (r *accountRepository) SetGrokCredentialErrorIfMatch(
 			updated_at = NOW()
 		WHERE a.id = $3
 			AND a.deleted_at IS NULL
+			AND `+accountUpstreamStateWriteAllowedSQL+`
 			AND a.status = $4
 			AND a.platform = $5
 			AND a.type = $6
@@ -1453,6 +1457,7 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 			updated_at = NOW()
 		WHERE a.id = $3
 			AND a.deleted_at IS NULL
+			AND `+accountUpstreamStateWriteAllowedSQL+`
 			AND a.platform = $4
 			AND a.type = $5
 			AND a.status = $6
@@ -1574,6 +1579,7 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 			updated_at = NOW()
 		WHERE a.id = $3
 			AND a.deleted_at IS NULL
+			AND `+accountUpstreamStateWriteAllowedSQL+`
 			AND a.platform = $4
 			AND a.type = $5
 			AND a.status = $6
@@ -1634,6 +1640,7 @@ func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnc
 			updated_at = NOW()
 		WHERE a.id = $3
 			AND a.deleted_at IS NULL
+			AND `+accountUpstreamStateWriteAllowedSQL+`
 			AND a.platform = $4
 			AND a.type = $5
 			AND a.status = $6
@@ -2181,13 +2188,16 @@ func (r *accountRepository) ListModelAvailabilityCandidates(
 
 func (r *accountRepository) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	now := time.Now()
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
+	updated, err := r.client.Account.Update().
+		Where(dbaccount.IDEQ(id), accountUpstreamStateWriteAllowed()).
 		SetRateLimitedAt(now).
 		SetRateLimitResetAt(resetAt).
 		Save(ctx)
 	if err != nil {
 		return err
+	}
+	if updated == 0 {
+		return nil
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue rate limit failed: account=%d err=%v", id, err)
@@ -2204,6 +2214,7 @@ func (r *accountRepository) SetRateLimitedIfLater(ctx context.Context, id int64,
 	updated, err := r.client.Account.Update().
 		Where(
 			dbaccount.IDEQ(id),
+			accountUpstreamStateWriteAllowed(),
 			dbaccount.Or(
 				dbaccount.RateLimitResetAtIsNil(),
 				dbaccount.RateLimitResetAtLT(resetAt),
@@ -2277,7 +2288,7 @@ func (r *accountRepository) SetRateLimitedIfUnchanged(
 	expectedLimitedAt, expectedResetAt *time.Time,
 	newResetAt time.Time,
 ) (bool, error) {
-	preds := []dbpredicate.Account{dbaccount.IDEQ(id), dbaccount.UpdatedAtEQ(expectedUpdatedAt)}
+	preds := []dbpredicate.Account{dbaccount.IDEQ(id), dbaccount.UpdatedAtEQ(expectedUpdatedAt), accountUpstreamStateWriteAllowed()}
 	if expectedLimitedAt == nil {
 		preds = append(preds, dbaccount.RateLimitedAtIsNil())
 	} else {
@@ -2342,7 +2353,7 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 				true
 			),
 			updated_at = NOW()
-		WHERE id = $3 AND deleted_at IS NULL`,
+		WHERE id = $3 AND deleted_at IS NULL AND `+accountUpstreamStateWriteAllowedSQL,
 		scope,
 		raw,
 		id,
@@ -2356,7 +2367,15 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 		return err
 	}
 	if affected == 0 {
-		return service.ErrAccountNotFound
+		// Keep-available is an intentional no-op, not a missing account.
+		exists, err := client.Account.Query().Where(dbaccount.IDEQ(id), dbaccount.DeletedAtIsNil()).Exist(ctx)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return service.ErrAccountNotFound
+		}
+		return nil
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue model rate limit failed: account=%d err=%v", id, err)
@@ -2366,12 +2385,15 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 }
 
 func (r *accountRepository) SetOverloaded(ctx context.Context, id int64, until time.Time) error {
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
+	updated, err := r.client.Account.Update().
+		Where(dbaccount.IDEQ(id), accountUpstreamStateWriteAllowed()).
 		SetOverloadUntil(until).
 		Save(ctx)
 	if err != nil {
 		return err
+	}
+	if updated == 0 {
+		return nil
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue overload failed: account=%d err=%v", id, err)
@@ -2388,6 +2410,7 @@ func (r *accountRepository) SetTempUnschedulable(ctx context.Context, id int64, 
 			updated_at = NOW()
 		WHERE id = $3
 			AND deleted_at IS NULL
+			AND `+accountUpstreamStateWriteAllowedSQL+`
 			AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until < $1)
 	`, until, reason, id)
 	if err != nil {
@@ -2425,6 +2448,7 @@ func (r *accountRepository) SetGrokCredentialTempUnschedulableIfMatch(
 			updated_at = NOW()
 		WHERE a.id = $3
 			AND a.deleted_at IS NULL
+			AND `+accountUpstreamStateWriteAllowedSQL+`
 			AND a.status = $4
 			AND a.platform = $5
 			AND a.type = $6
@@ -3908,4 +3932,15 @@ func (r *accountRepository) ListShadowsByParent(ctx context.Context, parentID in
 		out = append(out, accountEntityToService(m))
 	}
 	return out, nil
+}
+
+// Evaluate the JSON boolean in the mutation itself so a concurrent enable is
+// respected after PostgreSQL reacquires the row lock. Missing/null/string flags
+// do not enable the policy, matching Account.KeepAvailable.
+const accountUpstreamStateWriteAllowedSQL = "COALESCE(extra->'keep_available' = 'true'::jsonb, false) = false"
+
+func accountUpstreamStateWriteAllowed() dbpredicate.Account {
+	return func(s *entsql.Selector) {
+		s.Where(entsql.ExprP(accountUpstreamStateWriteAllowedSQL))
+	}
 }
