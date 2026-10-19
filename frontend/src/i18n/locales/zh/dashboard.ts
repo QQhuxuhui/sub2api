@@ -390,6 +390,8 @@ export default {
     duration: '耗时',
     latency: '延迟',
     latencyFirstToken: '首字',
+    latencyClientFirstByte: '实际首字',
+    latencyClientFirstByteHint: '从请求进入网关到第一段响应写回客户端，含鉴权、选号、重试与换号等待',
     latencyDuration: '总耗时',
     time: '时间',
     ws: 'WS',

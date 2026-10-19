@@ -613,6 +613,7 @@ func TestAPIContracts(t *testing.T) {
 							"stream": true,
 							"duration_ms": 100,
 							"first_token_ms": 50,
+							"client_first_byte_ms": null,
 							"image_count": 0,
 							"image_size": null,
 							"image_input_size": null,
@@ -1942,6 +1943,10 @@ func (s *stubAccountRepo) UpdateLastUsed(ctx context.Context, id int64) error {
 
 func (s *stubAccountRepo) BatchUpdateLastUsed(ctx context.Context, updates map[int64]time.Time) error {
 	return errors.New("not implemented")
+}
+
+func (s *stubAccountRepo) RestoreKeepAvailableState(ctx context.Context, id int64) (bool, error) {
+	return false, nil
 }
 
 func (s *stubAccountRepo) SetError(ctx context.Context, id int64, errorMsg string) error {

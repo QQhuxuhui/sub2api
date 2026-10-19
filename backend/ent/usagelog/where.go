@@ -225,6 +225,11 @@ func FirstTokenMs(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldFirstTokenMs, v))
 }
 
+// ClientFirstByteMs applies equality check predicate on the "client_first_byte_ms" field. It's identical to ClientFirstByteMsEQ.
+func ClientFirstByteMs(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldClientFirstByteMs, v))
+}
+
 // UserAgent applies equality check predicate on the "user_agent" field. It's identical to UserAgentEQ.
 func UserAgent(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldUserAgent, v))
@@ -1783,6 +1788,56 @@ func FirstTokenMsIsNil() predicate.UsageLog {
 // FirstTokenMsNotNil applies the NotNil predicate on the "first_token_ms" field.
 func FirstTokenMsNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldFirstTokenMs))
+}
+
+// ClientFirstByteMsEQ applies the EQ predicate on the "client_first_byte_ms" field.
+func ClientFirstByteMsEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldClientFirstByteMs, v))
+}
+
+// ClientFirstByteMsNEQ applies the NEQ predicate on the "client_first_byte_ms" field.
+func ClientFirstByteMsNEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldClientFirstByteMs, v))
+}
+
+// ClientFirstByteMsIn applies the In predicate on the "client_first_byte_ms" field.
+func ClientFirstByteMsIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldClientFirstByteMs, vs...))
+}
+
+// ClientFirstByteMsNotIn applies the NotIn predicate on the "client_first_byte_ms" field.
+func ClientFirstByteMsNotIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldClientFirstByteMs, vs...))
+}
+
+// ClientFirstByteMsGT applies the GT predicate on the "client_first_byte_ms" field.
+func ClientFirstByteMsGT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldClientFirstByteMs, v))
+}
+
+// ClientFirstByteMsGTE applies the GTE predicate on the "client_first_byte_ms" field.
+func ClientFirstByteMsGTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldClientFirstByteMs, v))
+}
+
+// ClientFirstByteMsLT applies the LT predicate on the "client_first_byte_ms" field.
+func ClientFirstByteMsLT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldClientFirstByteMs, v))
+}
+
+// ClientFirstByteMsLTE applies the LTE predicate on the "client_first_byte_ms" field.
+func ClientFirstByteMsLTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldClientFirstByteMs, v))
+}
+
+// ClientFirstByteMsIsNil applies the IsNil predicate on the "client_first_byte_ms" field.
+func ClientFirstByteMsIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldClientFirstByteMs))
+}
+
+// ClientFirstByteMsNotNil applies the NotNil predicate on the "client_first_byte_ms" field.
+func ClientFirstByteMsNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldClientFirstByteMs))
 }
 
 // UserAgentEQ applies the EQ predicate on the "user_agent" field.

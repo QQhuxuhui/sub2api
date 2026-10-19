@@ -18,6 +18,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/firstbyte"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
@@ -253,6 +254,10 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	}
 	if requestID, _ := parent.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 		base = context.WithValue(base, ctxkey.RequestID, strings.TrimSpace(requestID))
+	}
+	// 客户端实际首字节 Tracker 随请求 context 一起带到用量落库任务里。
+	if tracker := firstbyte.FromContext(parent); tracker != nil {
+		base = firstbyte.WithTracker(base, tracker)
 	}
 	return base
 }

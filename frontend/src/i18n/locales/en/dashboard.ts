@@ -385,6 +385,8 @@ export default {
     duration: 'Duration',
     latency: 'Latency',
     latencyFirstToken: 'First',
+    latencyClientFirstByte: 'Real first',
+    latencyClientFirstByteHint: 'From request arrival to the first response bytes sent to the client, including auth, scheduling, retries and account switches',
     latencyDuration: 'Total',
     time: 'Time',
     ws: 'WS',

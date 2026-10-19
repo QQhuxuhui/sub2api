@@ -180,8 +180,11 @@ type UsageLog struct {
 	NativeCompactionV2 bool
 	DurationMs         *int
 	FirstTokenMs       *int
-	UserAgent          *string
-	IPAddress          *string
+	// ClientFirstByteMs 客户端实际首字节耗时：从请求进入网关到第一段响应体写回客户端，
+	// 包含鉴权、选号、同号重试与换号的全部等待；first_token_ms 只从最后一次成功转发起算。
+	ClientFirstByteMs *int
+	UserAgent         *string
+	IPAddress         *string
 	// SessionID is the explicit client-provided request correlation identifier
 	// (e.g. the session_id / X-Session-Id headers). Nil when the client sent no
 	// valid session header. It is never derived from prompt_cache_key or content.

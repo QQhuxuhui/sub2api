@@ -631,6 +631,8 @@ type UsageLog struct {
 	NativeCompactionV2 bool `json:"native_compaction_v2"`
 	DurationMs         *int `json:"duration_ms"`
 	FirstTokenMs       *int `json:"first_token_ms"`
+	// 客户端实际首字节耗时（含重试/换号等待）；历史数据为 null
+	ClientFirstByteMs *int `json:"client_first_byte_ms"`
 
 	// 图片生成字段
 	ImageCount         int            `json:"image_count"`

@@ -132,6 +132,10 @@ func (UsageLog) Fields() []ent.Field {
 		field.Int("first_token_ms").
 			Optional().
 			Nillable(),
+		// 客户端实际首字节耗时（含重试/换号等待），见 pkg/firstbyte
+		field.Int("client_first_byte_ms").
+			Optional().
+			Nillable(),
 		field.String("user_agent").
 			MaxLen(512).
 			Optional().

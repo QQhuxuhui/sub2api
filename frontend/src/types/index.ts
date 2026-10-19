@@ -1728,6 +1728,8 @@ export interface UsageLog {
   native_compaction_v2: boolean
   duration_ms: number | null
   first_token_ms: number | null
+  // 客户端实际首字节耗时（含重试/换号等待），历史数据为 null
+  client_first_byte_ms?: number | null
 
   // 图片生成字段
   image_count: number
