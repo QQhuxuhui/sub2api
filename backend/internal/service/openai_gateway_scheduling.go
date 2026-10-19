@@ -1149,6 +1149,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					MaxConcurrency: account.Concurrency,
 					Timeout:        cfg.StickySessionWaitTimeout,
 					MaxWaiting:     cfg.StickySessionMaxWaiting,
+					Kind:           AccountWaitKindSticky,
 				})
 			}
 		}
@@ -1157,6 +1158,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			MaxConcurrency: account.Concurrency,
 			Timeout:        cfg.FallbackWaitTimeout,
 			MaxWaiting:     cfg.FallbackMaxWaiting,
+			Kind:           AccountWaitKindFallback,
 		})
 	}
 
@@ -1221,6 +1223,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 								MaxConcurrency: account.Concurrency,
 								Timeout:        cfg.StickySessionWaitTimeout,
 								MaxWaiting:     cfg.StickySessionMaxWaiting,
+								Kind:           AccountWaitKindSticky,
 							})
 						}
 						stickySpillover = true
@@ -1463,6 +1466,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			MaxConcurrency: fresh.Concurrency,
 			Timeout:        cfg.FallbackWaitTimeout,
 			MaxWaiting:     cfg.FallbackMaxWaiting,
+			Kind:           AccountWaitKindFallback,
 		})
 	}
 

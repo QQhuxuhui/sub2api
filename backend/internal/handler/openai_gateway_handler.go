@@ -2141,6 +2141,9 @@ type openAISlotErrorWriter func(status int, errType, code, message string)
 // acquireOpenAIAccountSlot centralizes scheduler selection admission. The
 // optional error writer lets non-Responses endpoints retain their wire format
 // while sharing the same WaitPlan, cancellation, and release semantics.
+// openAIAccountSlotWaitWarnMs 等槽位超过该毫秒数时按 WARN 记录（WARN 以上才会进 ops_system_logs）。
+const openAIAccountSlotWaitWarnMs = 3000
+
 func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	c *gin.Context,
 	groupID *int64,
@@ -2243,6 +2246,11 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	}
 	defer releaseWait()
 
+	waitKind := selection.WaitPlan.Kind
+	if waitKind == "" {
+		waitKind = "unknown"
+	}
+	waitStart := time.Now()
 	accountReleaseFunc, err := h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
 		c,
 		account.ID,
@@ -2251,8 +2259,16 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		reqStream,
 		streamStarted,
 	)
+	waitedMs := time.Since(waitStart).Milliseconds()
 	if err != nil {
-		reqLog.Warn("openai.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+		reqLog.Warn("openai.account_slot_acquire_failed",
+			zap.Int64("account_id", account.ID),
+			zap.String("wait_kind", waitKind),
+			zap.Int64("wait_ms", waitedMs),
+			zap.Int64("timeout_ms", selection.WaitPlan.Timeout.Milliseconds()),
+			zap.Int("max_concurrency", selection.WaitPlan.MaxConcurrency),
+			zap.Error(err),
+		)
 		status, errType, code, message := concurrencyErrorResponse(err, "account")
 		writeError(status, errType, code, message)
 		return nil, openAISlotAcquireFailed
@@ -2260,6 +2276,19 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 
 	// Slot acquired: no longer waiting in queue.
 	releaseWait()
+	// 等槽位的时间不在 first_token_ms 里，但计入 client_first_byte_ms；超过阈值记 WARN 以便落入 ops_system_logs 对账。
+	slotWaitLog := reqLog.Info
+	if waitedMs >= openAIAccountSlotWaitWarnMs {
+		slotWaitLog = reqLog.Warn
+	}
+	slotWaitLog("openai.account_slot_waited",
+		zap.Int64("account_id", account.ID),
+		zap.String("wait_kind", waitKind),
+		zap.Int64("wait_ms", waitedMs),
+		zap.Int64("timeout_ms", selection.WaitPlan.Timeout.Milliseconds()),
+		zap.Int("max_concurrency", selection.WaitPlan.MaxConcurrency),
+		zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
+	)
 	// 分组利润控制：WaitPlan 排队成功后终检。排队期间账号倍率
 	// 可能上调，越线则释放槽位交由调用方排除重选，不绑定粘连。
 	latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(ctx, account)

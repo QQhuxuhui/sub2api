@@ -205,6 +205,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 						MaxConcurrency: account.Concurrency,
 						Timeout:        cfg.StickySessionWaitTimeout,
 						MaxWaiting:     cfg.StickySessionMaxWaiting,
+						Kind:           AccountWaitKindSticky,
 					})
 				}
 			}
@@ -213,6 +214,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				MaxConcurrency: account.Concurrency,
 				Timeout:        cfg.FallbackWaitTimeout,
 				MaxWaiting:     cfg.FallbackMaxWaiting,
+				Kind:           AccountWaitKindFallback,
 			})
 		}
 	}
@@ -408,6 +410,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 											MaxConcurrency: stickyAccount.Concurrency,
 											Timeout:        cfg.StickySessionWaitTimeout,
 											MaxWaiting:     cfg.StickySessionMaxWaiting,
+											Kind:           AccountWaitKindSticky,
 										})
 									}
 								} else {
@@ -517,6 +520,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 						MaxConcurrency: item.account.Concurrency,
 						Timeout:        cfg.StickySessionWaitTimeout,
 						MaxWaiting:     cfg.StickySessionMaxWaiting,
+						Kind:           AccountWaitKindRouting,
 					})
 				}
 				// 所有路由账号会话限制都已满，继续到 Layer 2 回退
@@ -616,6 +620,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								MaxConcurrency: account.Concurrency,
 								Timeout:        cfg.StickySessionWaitTimeout,
 								MaxWaiting:     cfg.StickySessionMaxWaiting,
+								Kind:           AccountWaitKindSticky,
 							})
 						}
 					}
@@ -794,6 +799,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			MaxConcurrency: acc.Concurrency,
 			Timeout:        cfg.FallbackWaitTimeout,
 			MaxWaiting:     cfg.FallbackMaxWaiting,
+			Kind:           AccountWaitKindFallback,
 		})
 	}
 	return nil, ErrNoAvailableAccounts

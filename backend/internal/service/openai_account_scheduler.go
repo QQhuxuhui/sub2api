@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -563,11 +565,11 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	}
 	escapeCfg := s.service.openAIStickyEscapeConfig()
 	if reason, errorRate, ttft, shouldEscape := s.shouldEscapeStickyAccount(accountID, escapeCfg); shouldEscape && !req.DisableStickyEscape {
-		slog.Info("sticky_escape_triggered",
-			"account_id", accountID,
-			"reason", reason,
-			"error_rate", errorRate,
-			"ttft", ttft,
+		logger.FromContext(ctx).Info("openai.sticky_escape_triggered",
+			zap.Int64("account_id", accountID),
+			zap.String("reason", reason),
+			zap.Float64("error_rate", errorRate),
+			zap.Float64("ttft_ms", ttft),
 		)
 		return nil, true, nil
 	}
@@ -591,11 +593,12 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	if s.service.concurrencyService != nil {
 		if escapeCfg.enabled && !req.DisableStickyEscape && acquireErr == nil && result != nil && !result.Acquired {
 			errorRate, ttft, _ := s.stats.snapshot(accountID)
-			slog.Info("sticky_escape_triggered",
-				"account_id", accountID,
-				"reason", "concurrency_full",
-				"error_rate", errorRate,
-				"ttft", ttft,
+			logger.FromContext(ctx).Info("openai.sticky_escape_triggered",
+				zap.Int64("account_id", accountID),
+				zap.String("reason", "concurrency_full"),
+				zap.Int("concurrency", account.Concurrency),
+				zap.Float64("error_rate", errorRate),
+				zap.Float64("ttft_ms", ttft),
 			)
 			return nil, true, nil
 		}
@@ -606,6 +609,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 				MaxConcurrency: account.Concurrency,
 				Timeout:        cfg.StickySessionWaitTimeout,
 				MaxWaiting:     cfg.StickySessionMaxWaiting,
+				Kind:           AccountWaitKindSticky,
 			},
 		}), false, nil
 	}
@@ -1343,6 +1347,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 					MaxConcurrency: account.Concurrency,
 					Timeout:        cfg.StickySessionWaitTimeout,
 					MaxWaiting:     cfg.StickySessionMaxWaiting,
+					Kind:           AccountWaitKindSticky,
 				},
 			}), nil
 		}
@@ -1729,6 +1734,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 					MaxConcurrency: fresh.Concurrency,
 					Timeout:        cfg.FallbackWaitTimeout,
 					MaxWaiting:     cfg.FallbackMaxWaiting,
+					Kind:           AccountWaitKindFallback,
 				},
 			}), candidateCount, topK, loadSkew, nil
 		}

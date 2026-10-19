@@ -568,11 +568,20 @@ func shouldClearStickySession(account *Account, requestedModel string) bool {
 	return false
 }
 
+// AccountWaitKind 标识等槽位的来源，仅用于日志与诊断。
+const (
+	AccountWaitKindSticky   = "sticky"   // 粘性会话绑定的账号已满，等它释放
+	AccountWaitKindRouting  = "routing"  // 模型路由候选槽位全满，等路由候选释放
+	AccountWaitKindFallback = "fallback" // 负载均衡候选全满，等最优候选释放
+)
+
 type AccountWaitPlan struct {
 	AccountID      int64
 	MaxConcurrency int
 	Timeout        time.Duration
 	MaxWaiting     int
+	// Kind 见 AccountWaitKind*；空表示旧调用点未标注。
+	Kind string
 }
 
 type AccountSelectionResult struct {
