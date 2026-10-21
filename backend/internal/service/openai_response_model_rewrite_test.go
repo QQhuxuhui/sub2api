@@ -62,22 +62,56 @@ func TestOpenAIResponseModelRewrite_FallsBackToForwardModelWithoutClientContext(
 	require.Equal(t, rewriteTestClientModel, rw.to)
 }
 
-func TestOpenAIResponseModelRewrite_NoRenameLeavesResponseUntouched(t *testing.T) {
+// 没配任何映射、请求原样发给上游，上游自己偷换成别的模型：仍要改回客户端请求名。
+func TestOpenAIResponseModelRewrite_NoMappingStillForcesClientModel(t *testing.T) {
 	c, _ := newRewriteTestContext(t, rewriteTestUpstreamModel)
 	rw := newOpenAIResponseModelRewrite(c, openAIRewriteTestAccount(AccountTypeOAuth), rewriteTestUpstreamModel, rewriteTestUpstreamModel)
-	require.False(t, rw.active())
+	require.True(t, rw.force)
+	require.Equal(t, rewriteTestUpstreamModel, rw.to)
 
 	body := []byte(`{"model":"gpt-5.4-2026-03-05"}`)
-	require.Equal(t, string(body), string(rw.applyJSON(body)))
-	line := `data: {"type":"response.created","response":{"model":"gpt-5.4-2026-03-05"}}`
-	require.Equal(t, line, rw.applySSELine(line))
+	require.Equal(t, rewriteTestUpstreamModel, gjson.GetBytes(rw.applyJSON(body), "model").String())
+	line := `data: {"type":"response.created","response":{"model":"gpt-5.4-2026-03-05","headers":{"OpenAI-Model":"gpt-5.4-2026-03-05"}}}`
+	out := strings.TrimPrefix(rw.applySSELine(line), "data: ")
+	require.Equal(t, rewriteTestUpstreamModel, gjson.Get(out, "response.model").String())
+	require.Equal(t, rewriteTestUpstreamModel, gjson.Get(out, "response.headers.OpenAI-Model").String())
 }
 
-// 渠道把 A 映射成 B、账号又把 B 映射回 A：净效果没有改名，不能把响应改成中间名 B。
+// 上游老老实实回了客户端请求的模型：字节级原样返回，不多一次改写。
+func TestOpenAIResponseModelRewrite_HonestUpstreamLeavesBytesUntouched(t *testing.T) {
+	c, _ := newRewriteTestContext(t, rewriteTestUpstreamModel)
+	rw := newOpenAIResponseModelRewrite(c, openAIRewriteTestAccount(AccountTypeOAuth), rewriteTestUpstreamModel, rewriteTestUpstreamModel)
+	require.True(t, rw.active())
+
+	body := []byte(`{"model":"gpt-5.4","response":{"model":"gpt-5.4","headers":{"openai-model":["gpt-5.4"]}}}`)
+	out := rw.applyJSON(body)
+	require.Equal(t, string(body), string(out))
+	require.Same(t, &body[0], &out[0], "未改写时返回同一切片")
+	line := `data: {"type":"response.created","response":{"model":"gpt-5.4"}}`
+	require.Equal(t, line, rw.applySSELine(line))
+	delta := `data: {"type":"response.output_text.delta","delta":"gpt-5.4-2026-03-05"}`
+	require.Equal(t, delta, rw.applySSELine(delta), "正文里的模型名不碰")
+}
+
+// 渠道把 A 映射成 B、账号又把 B 映射回 A：净效果没有改名，响应只能是客户端名 A，
+// 不能把响应改成中间名 B。
 func TestOpenAIResponseModelRewrite_RoundTripMappingDoesNotExposeIntermediateName(t *testing.T) {
 	c, _ := newRewriteTestContext(t, rewriteTestUpstreamModel)
 	rw := newOpenAIResponseModelRewrite(c, openAIRewriteTestAccount(AccountTypeAPIKey), rewriteTestChannelModel, rewriteTestUpstreamModel)
+	require.True(t, rw.force)
+	require.Equal(t, rewriteTestUpstreamModel, rw.to)
+	out := rw.applyJSON([]byte(`{"model":"gpt-5.4-2026-03-05"}`))
+	require.Equal(t, rewriteTestUpstreamModel, gjson.GetBytes(out, "model").String())
+	require.NotContains(t, string(out), rewriteTestChannelModel)
+}
+
+// 没有客户端请求名（请求体无 model、WS 轮次无模型）时不开启强制，保持原样透传。
+func TestOpenAIResponseModelRewrite_NoClientModelStaysInactive(t *testing.T) {
+	c, _ := newRewriteTestContext(t, "")
+	rw := newOpenAIResponseModelRewrite(c, openAIRewriteTestAccount(AccountTypeOAuth), "", "")
 	require.False(t, rw.active())
+	body := []byte(`{"model":"gpt-5.4-2026-03-05"}`)
+	require.Equal(t, string(body), string(rw.applyJSON(body)))
 }
 
 func TestOpenAIResponseModelRewrite_NonOpenAIKeepsExactMatchSemantics(t *testing.T) {
@@ -162,6 +196,51 @@ func TestHandleStreamingResponse_ForcesClientModelAndObservesUpstream(t *testing
 	require.NoError(t, err)
 	requireClientSeesAliasAndLogKeepsUpstream(t, c, rec.Body.String())
 	require.NotContains(t, rec.Body.String(), rewriteTestChannelModel, "渠道映射的中间名也不能外泄")
+}
+
+// 无映射：originalModel == mappedModel，上游仍偷换成快照名，四条 HTTP 通路都要改回。
+func TestHandleResponses_NoMappingStillForcesClientModel(t *testing.T) {
+	jsonBody := `{"id":"resp_1","object":"response","model":"gpt-5.4-2026-03-05","status":"completed","output":[],"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}`
+	requireNoMapping := func(t *testing.T, c *gin.Context, clientBody string) {
+		t.Helper()
+		require.NotContains(t, clientBody, rewriteTestSwappedModel)
+		require.Contains(t, clientBody, rewriteTestUpstreamModel)
+		require.Equal(t, rewriteTestSwappedModel, observedUpstreamResponseModel(c))
+	}
+	t.Run("streaming", func(t *testing.T) {
+		c, rec := newRewriteTestContext(t, rewriteTestUpstreamModel)
+		resp := newRewriteTestUpstreamResponse("text/event-stream", swappedResponsesSSE())
+		_, err := newRewriteTestService().handleStreamingResponse(context.Background(), resp, c, openAIRewriteTestAccount(AccountTypeOAuth), time.Now(), rewriteTestUpstreamModel, rewriteTestUpstreamModel)
+		require.NoError(t, err)
+		requireNoMapping(t, c, rec.Body.String())
+	})
+	t.Run("non-streaming", func(t *testing.T) {
+		c, rec := newRewriteTestContext(t, rewriteTestUpstreamModel)
+		resp := newRewriteTestUpstreamResponse("application/json", jsonBody)
+		_, err := newRewriteTestService().handleNonStreamingResponse(context.Background(), resp, c, openAIRewriteTestAccount(AccountTypeAPIKey), rewriteTestUpstreamModel, rewriteTestUpstreamModel)
+		require.NoError(t, err)
+		requireNoMapping(t, c, rec.Body.String())
+	})
+	t.Run("passthrough streaming", func(t *testing.T) {
+		c, rec := newRewriteTestContext(t, rewriteTestUpstreamModel)
+		resp := newRewriteTestUpstreamResponse("text/event-stream", swappedResponsesSSE())
+		_, err := newRewriteTestService().handleStreamingResponsePassthrough(context.Background(), resp, c, openAIRewriteTestAccount(AccountTypeAPIKey), time.Now(), rewriteTestUpstreamModel, rewriteTestUpstreamModel)
+		require.NoError(t, err)
+		requireNoMapping(t, c, rec.Body.String())
+	})
+	t.Run("passthrough non-streaming", func(t *testing.T) {
+		c, rec := newRewriteTestContext(t, rewriteTestUpstreamModel)
+		resp := newRewriteTestUpstreamResponse("application/json", jsonBody)
+		_, err := newRewriteTestService().handleNonStreamingResponsePassthrough(context.Background(), resp, c, openAIRewriteTestAccount(AccountTypeAPIKey), rewriteTestUpstreamModel, rewriteTestUpstreamModel)
+		require.NoError(t, err)
+		requireNoMapping(t, c, rec.Body.String())
+	})
+	t.Run("ws metadata without client context", func(t *testing.T) {
+		rw := newOpenAIResponseModelRewrite(nil, openAIRewriteTestAccount(AccountTypeOAuth), rewriteTestUpstreamModel, rewriteTestUpstreamModel)
+		frame := []byte(`{"type":"response.metadata","headers":{"x-openai-model":"gpt-5.4-2026-03-05"}}`)
+		require.True(t, rw.appliesToWSEvent("response.metadata"))
+		require.Equal(t, rewriteTestUpstreamModel, gjson.GetBytes(rw.applyJSON(frame), "headers.x-openai-model").String())
+	})
 }
 
 func TestHandleNonStreamingResponse_ForcesClientModelAndObservesUpstream(t *testing.T) {
@@ -425,14 +504,14 @@ func TestHandleOpenAIImagesOAuthNonStreamingResponse_ForcesClientModel(t *testin
 	requireImageClientSeesAliasAndLogKeepsUpstream(t, c, rec.Body.String())
 }
 
-func TestHandleOpenAIImagesOAuthResponses_NoRenameKeepsUpstreamModel(t *testing.T) {
+func TestHandleOpenAIImagesOAuthResponses_NoRenameStillForcesClientModel(t *testing.T) {
 	c, rec := newRewriteTestContext(t, rewriteTestImageUpstreamModel)
 	rw := newOpenAIResponseModelRewrite(c, openAIRewriteTestAccount(AccountTypeOAuth), rewriteTestImageUpstreamModel, rewriteTestImageUpstreamModel).forcedOnly()
-	require.False(t, rw.active())
+	require.True(t, rw.active())
 	resp := newRewriteTestUpstreamResponse("text/event-stream", swappedImagesResponsesSSE())
 	_, _, _, err := newRewriteTestService().handleOpenAIImagesOAuthNonStreamingResponse(resp, c, "b64_json", rewriteTestImageUpstreamModel, rw)
 	require.NoError(t, err)
-	require.Equal(t, rewriteTestImageSwappedModel, gjson.Get(rec.Body.String(), "model").String(), "未改名的请求维持原行为")
+	require.Equal(t, rewriteTestImageUpstreamModel, gjson.Get(rec.Body.String(), "model").String(), "没配映射、上游偷换生图模型时也改回客户端请求名")
 }
 
 func TestHandleCodexDirectImagesNonStreamingResponse_RewritesRootModel(t *testing.T) {

@@ -52,9 +52,11 @@ func containsModelHeaderKeyHint[T string | []byte](data T) bool {
 
 // openAIResponseModelRewrite 描述如何把上游响应里的 model 还原成客户端可见的名字。
 //
-// OpenAI 平台账号：请求在任一层被改过名（渠道映射、/v1/messages 默认映射、
-// 账号 model_mapping、上游模型归一化）时 force=true，响应 model 字段无论上游
-// 返回什么都一律覆盖成客户端请求体里原本的名字，避免上游偷换的模型名外泄。
+// OpenAI 平台账号：只要能取到客户端请求的模型名就 force=true，响应 model 字段
+// 无论上游返回什么都一律覆盖成客户端请求体里原本的名字。不要求网关这一层改过名
+// （渠道映射、/v1/messages 默认映射、账号 model_mapping、上游模型归一化）：没配任何
+// 映射、上游自己偷换模型（请求 gpt-6-astra 回 gpt-6.1-sol）同样不外泄。字段值已等于
+// 客户端模型时原样返回，正常响应不多一个字节。
 // 上游原值由 upstreamResponseModelObserver 在改写之前记录，管理端日志可见。
 //
 // 其他平台保持旧语义：仅当字段值恰好等于上游模型名时才替换。
@@ -89,8 +91,7 @@ func newOpenAIResponseModelRewrite(c *gin.Context, account *Account, originalMod
 	originalModel = strings.TrimSpace(originalModel)
 	upstreamModel = strings.TrimSpace(upstreamModel)
 	if account != nil && account.Platform == PlatformOpenAI {
-		clientModel := openAIClientVisibleModel(c, account, originalModel)
-		if clientModel != "" && upstreamModel != "" && clientModel != upstreamModel {
+		if clientModel := openAIClientVisibleModel(c, account, originalModel); clientModel != "" {
 			return openAIResponseModelRewrite{to: clientModel, force: true}
 		}
 		return openAIResponseModelRewrite{}
