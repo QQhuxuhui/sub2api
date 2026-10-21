@@ -111,7 +111,6 @@ export default {
       INTENT_RULE_UNREACHABLE: 'Without a classifier model, rule "{name}" needs keywords or it can never match',
       INTENT_RULE_MATCHER_REQUIRED: 'Rule "{name}" needs keywords or a description: keywords match directly, the description is for the model',
       INTENT_RULE_TOO_MANY_KEYWORDS: 'Rule "{name}" can have at most {max} keywords',
-      INTENT_RULE_KEYWORD_TOO_LONG: 'A keyword of rule "{name}" is longer than {max} characters',
       INTENT_TOO_MANY_RULES: 'At most 20 rules',
       INTENT_RULE_NAME_REQUIRED: 'Every rule needs a name',
       INTENT_RULE_NAME_RESERVED: 'NONE is reserved (it means "none of them") and cannot be an intent name',

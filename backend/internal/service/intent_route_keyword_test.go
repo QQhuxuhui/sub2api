@@ -418,9 +418,6 @@ func TestIntentRouter_SaveKeywords(t *testing.T) {
 		mutate func(*IntentRouterInput)
 		reason string
 	}{
-		"keyword too long": {func(in *IntentRouterInput) {
-			in.Rules[0].Keywords = []string{strings.Repeat("长", intentRouteMaxKeywordRunes+1)}
-		}, "INTENT_RULE_KEYWORD_TOO_LONG"},
 		"too many keywords": {func(in *IntentRouterInput) {
 			in.Rules[0].Keywords = make([]string, intentRouteMaxKeywordsPerRule+1)
 		}, "INTENT_RULE_TOO_MANY_KEYWORDS"},

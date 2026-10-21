@@ -24,7 +24,6 @@ const (
 	intentRouteMinInputChars      = 100
 	intentRouteMaxInputChars      = 20000
 	intentRouteMaxKeywordsPerRule = 100
-	intentRouteMaxKeywordRunes    = 100
 )
 
 // IntentRouterView is a router as the admin UI sees it. The classifier API key
@@ -296,10 +295,6 @@ func normalizeIntentKeywords(rule *domain.IntentRule) error {
 		keyword = strings.TrimSpace(keyword)
 		if keyword == "" {
 			continue
-		}
-		if len([]rune(keyword)) > intentRouteMaxKeywordRunes {
-			return infraerrors.BadRequest("INTENT_RULE_KEYWORD_TOO_LONG", fmt.Sprintf("keywords are limited to %d characters", intentRouteMaxKeywordRunes)).
-				WithMetadata(map[string]string{"name": rule.Name, "max": fmt.Sprint(intentRouteMaxKeywordRunes)})
 		}
 		key := strings.ToLower(keyword)
 		if _, dup := seen[key]; dup {

@@ -111,7 +111,6 @@ export default {
       INTENT_RULE_UNREACHABLE: '没有配置识别模型时，规则「{name}」必须填关键字，否则永远不会命中',
       INTENT_RULE_MATCHER_REQUIRED: '规则「{name}」至少要填关键字或描述：关键字直接匹配，描述是给模型判断用的',
       INTENT_RULE_TOO_MANY_KEYWORDS: '规则「{name}」的关键字最多 {max} 个',
-      INTENT_RULE_KEYWORD_TOO_LONG: '规则「{name}」里有关键字超过 {max} 个字',
       INTENT_TOO_MANY_RULES: '规则最多 20 条',
       INTENT_RULE_NAME_REQUIRED: '每条规则都要有名称',
       INTENT_RULE_NAME_RESERVED: 'NONE 是保留字（表示「都不是」），不能用作意图名称',
