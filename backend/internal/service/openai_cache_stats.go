@@ -158,6 +158,9 @@ type OpenAICacheSimConfigView struct {
 	Cap             float64 `json:"cap"`
 }
 
+// NewOpenAICacheSimConfigView 把账号级配置转成对外形态（handler 返回用）。
+func NewOpenAICacheSimConfigView(cfg OpenAICacheSimConfig) OpenAICacheSimConfigView { return openAICacheSimConfigView(cfg) }
+
 func openAICacheSimConfigView(cfg OpenAICacheSimConfig) OpenAICacheSimConfigView {
 	return OpenAICacheSimConfigView{Enabled: cfg.Enabled, Lo: cfg.Lo, Hi: cfg.Hi, HalfLifeMinutes: cfg.HalfLifeMinutes, Cap: cfg.Cap}
 }

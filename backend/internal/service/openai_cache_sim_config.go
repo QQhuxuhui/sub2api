@@ -16,6 +16,9 @@ import (
 // 只对 OpenAI 平台账号生效，默认关。
 const openAICacheSimulationKey = "openai_cache_simulation"
 
+// OpenAICacheSimulationExtraKey 对外暴露的 Extra 键名（管理端快捷修改用）。
+const OpenAICacheSimulationExtraKey = openAICacheSimulationKey
+
 const (
 	openAICacheSimDefaultLo       = 82.0
 	openAICacheSimDefaultHi       = 88.0

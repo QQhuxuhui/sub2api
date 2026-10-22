@@ -89,33 +89,6 @@
         <div v-else class="h-72">
           <Line :data="chartData" :options="chartOptions" />
         </div>
-        <p v-if="daily.length > 300" class="mt-3 text-xs text-gray-500">{{ t('admin.openaiCache.chart.tableHidden') }}</p>
-        <div v-if="daily.length && daily.length <= 300" class="mt-4 overflow-x-auto">
-          <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-dark-700">
-            <thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-800 dark:text-dark-400">
-              <tr>
-                <th class="px-3 py-2 text-left">{{ t('usage.time') }}</th>
-                <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.requests') }}</th>
-                <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.rawRate') }}</th>
-                <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.displayRate') }}</th>
-                <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.expectedCost') }}</th>
-                <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.billedCost') }}</th>
-                <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.costDelta') }}</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-              <tr v-for="d in daily" :key="d.date">
-                <td class="px-3 py-1.5 text-gray-700 dark:text-gray-300">{{ d.date }}</td>
-                <td class="px-3 py-1.5 text-right text-gray-700 dark:text-gray-300">{{ bucketOf(d).requests.toLocaleString() }}</td>
-                <td class="px-3 py-1.5 text-right" :class="rateClass(bucketOf(d).raw_rate, threshold)">{{ fmtPct(bucketOf(d).raw_rate) }}</td>
-                <td class="px-3 py-1.5 text-right" :class="rateClass(bucketOf(d).display_rate, threshold)">{{ fmtPct(bucketOf(d).display_rate) }}</td>
-                <td class="px-3 py-1.5 text-right text-gray-700 dark:text-gray-300">{{ fmtMoney(d.expected_cost) }}</td>
-                <td class="px-3 py-1.5 text-right text-gray-700 dark:text-gray-300">{{ fmtMoney(d.billed_cost) }}</td>
-                <td class="px-3 py-1.5 text-right text-amber-600 dark:text-amber-400">{{ fmtMoney(d.cost_delta) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
       </div>
 
       <!-- 账号表 -->
@@ -150,7 +123,30 @@
                 @click="selectAccount(row)"
               >
                 <td class="px-3 py-2">
-                  <div class="font-medium text-gray-900 dark:text-white">{{ row.name }}</div>
+                  <div class="flex items-center gap-2">
+                    <div class="font-medium text-gray-900 dark:text-white">{{ row.name }}</div>
+                    <button
+                      type="button"
+                      role="switch"
+                      :aria-checked="row.simulation.enabled"
+                      :disabled="row.is_shadow"
+                      :title="row.is_shadow ? t('admin.openaiCache.table.simInherited') : t('admin.openaiCache.table.simToggle')"
+                      :data-testid="`openai-cache-sim-toggle-${row.account_id}`"
+                      :class="[
+                        'relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
+                        row.is_shadow ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+                        row.simulation.enabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                      ]"
+                      @click.stop="openSimModal(row)"
+                    >
+                      <span
+                        :class="[
+                          'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                          row.simulation.enabled ? 'translate-x-4' : 'translate-x-0'
+                        ]"
+                      />
+                    </button>
+                  </div>
                   <div class="text-xs text-gray-500">#{{ row.account_id }}<span v-if="row.is_shadow"> · {{ t('admin.openaiCache.table.shadow') }}</span></div>
                 </td>
                 <td class="px-3 py-2" @click.stop>
@@ -189,7 +185,42 @@
           </table>
         </div>
       </div>
+
+      <!-- 走势明细 -->
+      <div v-if="daily.length" class="card p-4">
+        <h3 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">
+          {{ selectedAccount ? t('admin.openaiCache.chart.detailFor', { name: selectedAccount.name }) : t('admin.openaiCache.chart.detail') }}
+        </h3>
+        <p v-if="daily.length > 300" class="text-xs text-gray-500">{{ t('admin.openaiCache.chart.tableHidden') }}</p>
+        <div v-else class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-dark-700">
+            <thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-800 dark:text-dark-400">
+              <tr>
+                <th class="px-3 py-2 text-left">{{ t('usage.time') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.requests') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.rawRate') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.displayRate') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.expectedCost') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.billedCost') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.costDelta') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+              <tr v-for="d in daily" :key="d.date">
+                <td class="px-3 py-1.5 text-gray-700 dark:text-gray-300">{{ d.date }}</td>
+                <td class="px-3 py-1.5 text-right text-gray-700 dark:text-gray-300">{{ bucketOf(d).requests.toLocaleString() }}</td>
+                <td class="px-3 py-1.5 text-right" :class="rateClass(bucketOf(d).raw_rate, threshold)">{{ fmtPct(bucketOf(d).raw_rate) }}</td>
+                <td class="px-3 py-1.5 text-right" :class="rateClass(bucketOf(d).display_rate, threshold)">{{ fmtPct(bucketOf(d).display_rate) }}</td>
+                <td class="px-3 py-1.5 text-right text-gray-700 dark:text-gray-300">{{ fmtMoney(d.expected_cost) }}</td>
+                <td class="px-3 py-1.5 text-right text-gray-700 dark:text-gray-300">{{ fmtMoney(d.billed_cost) }}</td>
+                <td class="px-3 py-1.5 text-right text-amber-600 dark:text-amber-400">{{ fmtMoney(d.cost_delta) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
+    <OpenAICacheSimModal :show="simModalOpen" :account="simModalAccount" @close="simModalOpen = false" @saved="onSimSaved" />
   </AppLayout>
 </template>
 
@@ -213,6 +244,7 @@ import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
+import OpenAICacheSimModal from '@/components/admin/OpenAICacheSimModal.vue'
 import { useAppStore } from '@/stores/app'
 import { openaiCacheAPI } from '@/api/admin/openaiCache'
 import type {
@@ -220,6 +252,7 @@ import type {
   OpenAICacheDailyRow,
   OpenAICacheGranularity,
   OpenAICacheRateView,
+  OpenAICacheSimConfigView,
   OpenAICacheSummary
 } from '@/api/admin/openaiCache'
 import type { Account } from '@/types'
@@ -427,6 +460,21 @@ const reload = async () => {
 const selectAccount = (row: OpenAICacheAccountRow | null) => {
   selectedAccount.value = row && selectedAccount.value?.account_id === row.account_id ? null : row
   void loadDaily()
+}
+
+// 账号名旁的快捷开关：点开弹窗改缓存模拟配置，保存后刷新账号表（达标线依赖账号自身的 lo）。
+const simModalOpen = ref(false)
+const simModalAccount = ref<OpenAICacheAccountRow | null>(null)
+const openSimModal = (row: OpenAICacheAccountRow) => {
+  if (row.is_shadow) return
+  simModalAccount.value = row
+  simModalOpen.value = true
+}
+const onSimSaved = (accountId: number, config: OpenAICacheSimConfigView) => {
+  simModalOpen.value = false
+  const row = accounts.value.find((a) => a.account_id === accountId)
+  if (row) row.simulation = config
+  void loadAccounts()
 }
 
 onMounted(reload)

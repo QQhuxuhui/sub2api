@@ -34,6 +34,8 @@ export default {
       expectedCost: 'Expected',
       billedCost: 'Billed',
       empty: 'No data in range',
+      detail: 'Trend detail',
+      detailFor: 'Trend detail: {name}',
       tableHidden: 'Trend table is shown only for 300 points or fewer'
     },
     table: {
@@ -62,7 +64,17 @@ export default {
       sortDelta: 'Concession desc',
       sortRawRate: 'Real rate asc',
       sortRequests: 'Requests desc',
-      zeroCacheWarn: 'High zero-cache share; simulation may not reach the lower bound'
+      zeroCacheWarn: 'High zero-cache share; simulation may not reach the lower bound',
+      simToggle: 'Cache simulation',
+      simInherited: 'Shadow accounts inherit cache simulation from the parent account'
+    },
+    simModal: {
+      title: 'Cache simulation: {name}',
+      enabled: 'Enable cache simulation',
+      save: 'Save',
+      cancel: 'Cancel',
+      saved: 'Cache simulation settings saved',
+      saveFailed: 'Failed to save cache simulation settings'
     },
     loadFailed: 'Failed to load upstream cache data'
   }

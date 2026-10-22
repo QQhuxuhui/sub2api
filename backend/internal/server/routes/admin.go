@@ -299,6 +299,7 @@ func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		openAICache.GET("/accounts", h.Admin.OpenAICache.ListAccounts)
 		openAICache.GET("/daily", h.Admin.OpenAICache.ListDaily)
+		openAICache.PUT("/accounts/:id/simulation", h.Admin.OpenAICache.UpdateSimulation)
 	}
 
 	dashboard := admin.Group("/dashboard")

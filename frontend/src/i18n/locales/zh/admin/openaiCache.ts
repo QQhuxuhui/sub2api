@@ -34,6 +34,8 @@ export default {
       expectedCost: '本该收',
       billedCost: '实收',
       empty: '范围内没有数据',
+      detail: '走势明细',
+      detailFor: '走势明细：{name}',
       tableHidden: '走势明细只在 300 个点以内展示'
     },
     table: {
@@ -62,7 +64,17 @@ export default {
       sortDelta: '让利降序',
       sortRawRate: '真实缓存率升序',
       sortRequests: '请求数降序',
-      zeroCacheWarn: '零缓存请求占比高，模拟可能拉不到下限'
+      zeroCacheWarn: '零缓存请求占比高，模拟可能拉不到下限',
+      simToggle: '缓存模拟',
+      simInherited: '影子账号继承父账号的缓存模拟配置'
+    },
+    simModal: {
+      title: '缓存模拟：{name}',
+      enabled: '开启缓存模拟',
+      save: '保存',
+      cancel: '取消',
+      saved: '缓存模拟配置已保存',
+      saveFailed: '保存缓存模拟配置失败'
     },
     loadFailed: '加载上游缓存数据失败'
   }

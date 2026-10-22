@@ -109,5 +109,28 @@ export async function listDaily(
   return { days: data.days || [], granularity: data.granularity || 'day' }
 }
 
-export const openaiCacheAPI = { listAccounts, listDaily }
+export interface OpenAICacheSimUpdateRequest {
+  enabled: boolean
+  lo: number
+  hi: number
+  half_life_minutes: number
+  cap: number
+}
+
+/**
+ * 页面内快捷修改某账号的缓存模拟配置。后端只对 extra.openai_cache_simulation 做 key 级合并，
+ * 不会碰账号的其它 extra 键。
+ */
+export async function updateSimulation(
+  accountId: number,
+  payload: OpenAICacheSimUpdateRequest
+): Promise<OpenAICacheSimConfigView> {
+  const { data } = await apiClient.put<OpenAICacheSimConfigView>(
+    `/admin/openai-cache/accounts/${accountId}/simulation`,
+    payload
+  )
+  return data
+}
+
+export const openaiCacheAPI = { listAccounts, listDaily, updateSimulation }
 export default openaiCacheAPI
