@@ -2138,6 +2138,16 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 
 type openAISlotErrorWriter func(status int, errType, code, message string)
 
+// bindStickySessionUnlessIntentRouted 在准入通过后绑定粘性会话，但本轮由意图路由
+// 选中的账号除外：关键字只决定当前这一轮，不能把整段对话的粘性改到规则账号上，
+// 下一轮没有命中关键字时要回到对话原来所在的账号。
+func (h *OpenAIGatewayHandler) bindStickySessionUnlessIntentRouted(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if service.IntentRouteSelectedAccount(ctx) == accountID {
+		return nil
+	}
+	return h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, accountID)
+}
+
 // acquireOpenAIAccountSlot centralizes scheduler selection admission. The
 // optional error writer lets non-Responses endpoints retain their wire format
 // while sharing the same WaitPlan, cancellation, and release semantics.
@@ -2183,7 +2193,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		// 调度器已抢槽路径无门时由选号内部完成 eager 绑定；门下选号内部
 		// 推迟绑定，这里在终检通过后补准入后绑定。
 		if selection.ProfitGateActive() {
-			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
+			if err := h.bindStickySessionUnlessIntentRouted(ctx, groupID, sessionHash, account.ID); err != nil {
 				reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
@@ -2219,7 +2229,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		}
 		account = latest
 		selection.Account = latest
-		if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
+		if err := h.bindStickySessionUnlessIntentRouted(ctx, groupID, sessionHash, account.ID); err != nil {
 			reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
 		return wrapReleaseOnDone(ctx, fastReleaseFunc), openAISlotAcquireOK
@@ -2301,7 +2311,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	}
 	account = latest
 	selection.Account = latest
-	if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
+	if err := h.bindStickySessionUnlessIntentRouted(ctx, groupID, sessionHash, account.ID); err != nil {
 		reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
 	return wrapReleaseOnDone(ctx, accountReleaseFunc), openAISlotAcquireOK
@@ -2763,7 +2773,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// captured by the previous failover account before credential lookup.
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 		currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
-		if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, apiKey.GroupID, sessionHash, account.ID); err != nil {
+		if err := h.bindStickySessionUnlessIntentRouted(ctx, apiKey.GroupID, sessionHash, account.ID); err != nil {
 			reqLog.Warn("openai.websocket_bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
 

@@ -117,6 +117,19 @@ func NewGatewayHandler(
 	}
 }
 
+// bindStickySessionUnlessIntentRouted 绑定粘性会话，但本轮由意图路由选中的账号除外：
+// 关键字只决定当前这一轮，不能把整段对话的粘性改到规则账号上，下一轮没有命中
+// 关键字时要回到对话原来所在的账号。plain 为 true 走无准入门的直接绑定。
+func (h *GatewayHandler) bindStickySessionUnlessIntentRouted(ctx context.Context, groupID *int64, sessionKey string, accountID int64, plain bool) error {
+	if service.IntentRouteSelectedAccount(ctx) == accountID {
+		return nil
+	}
+	if plain {
+		return h.gatewayService.BindStickySession(ctx, groupID, sessionKey, accountID)
+	}
+	return h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionKey, accountID)
+}
+
 // Messages handles Claude API compatible messages endpoint
 // POST /v1/messages
 func (h *GatewayHandler) Messages(c *gin.Context) {
@@ -459,7 +472,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			if selection.ProfitGateActive() || !selection.Acquired {
-				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.bindStickySessionUnlessIntentRouted(admissionCtx, apiKey.GroupID, sessionKey, account.ID, false); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -805,7 +818,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			if selection.ProfitGateActive() || !selection.Acquired {
-				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.bindStickySessionUnlessIntentRouted(admissionCtx, currentAPIKey.GroupID, sessionKey, account.ID, false); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -1100,7 +1113,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
 			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.bindStickySessionUnlessIntentRouted(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID, true); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}

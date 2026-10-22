@@ -100,7 +100,7 @@ func TestIntentRouter_KeywordsSeeTheWholeMessage(t *testing.T) {
 	require.Zero(t, f.classifier.calls)
 }
 
-func TestIntentRouter_KeywordHitOverridesTheConversation(t *testing.T) {
+func TestIntentRouter_KeywordHitRoutesOnlyThatTurn(t *testing.T) {
 	ctx := context.Background()
 	f := newIntentRouteFixture(t)
 	f.saveRouter(t, withKeywords(nil, []string{"笑话"}))
@@ -111,37 +111,46 @@ func TestIntentRouter_KeywordHitOverridesTheConversation(t *testing.T) {
 	require.Equal(t, "coding", first.Intent)
 	first.markSelected(coding2)
 
-	// The latest message carries a keyword of another rule: re-route at once.
+	// The latest message carries a keyword: this turn goes to that rule's accounts ...
 	second := f.svc.Decide(ctx, f.request(userTurns("fix my go build", "讲个笑话")))
 	require.Equal(t, "chat", second.Intent)
 	require.Equal(t, []int64{pool}, second.AccountIDs)
-	require.Zero(t, second.PinnedAccountID, "the old pin belongs to the old intent")
+	require.Zero(t, second.PinnedAccountID, "a keyword turn is never pinned")
 	second.markSelected(pool)
 
-	// No keyword this turn: the conversation keeps its new route, unclassified.
+	// ... and is forgotten at once: the next turn is back on the classified route.
 	third := f.svc.Decide(ctx, f.request(userTurns("fix my go build", "讲个笑话", "再来一个")))
-	require.Equal(t, "chat", third.Intent)
-	require.Equal(t, pool, third.PinnedAccountID)
+	require.Equal(t, "coding", third.Intent)
+	require.Equal(t, coding2, third.PinnedAccountID)
 	require.Equal(t, 1, f.classifier.calls)
 	require.Equal(t, []string{"classified", "routed", "keyword", "routed", "cached"}, f.store.kinds())
+	for _, event := range f.store.events {
+		if event.Kind == "routed" && event.Intent == "chat" {
+			require.Equal(t, pool, event.AccountID, "the routed event still names the account")
+		}
+	}
 }
 
-func TestIntentRouter_KeywordOverrideStandsEvenWithoutASelection(t *testing.T) {
+func TestIntentRouter_KeywordTurnLeavesTheConversationUntouched(t *testing.T) {
 	ctx := context.Background()
 	f := newIntentRouteFixture(t)
 	f.saveRouter(t, withKeywords(nil, []string{"笑话"}))
+	coding1 := f.accountID(t, "coding-1")
 	f.classifier.answers = []string{"coding"}
-	f.svc.Decide(ctx, f.request(userTurns("fix my go build"))).markSelected(f.accountID(t, "coding-1"))
+	f.svc.Decide(ctx, f.request(userTurns("fix my go build"))).markSelected(coding1)
+	sessionsBefore := len(f.store.sessions)
 
-	// Every chat account is busy, so this turn falls back to the group ...
+	// Whether or not a chat account is actually selected ...
 	f.svc.Decide(ctx, f.request(userTurns("fix my go build", "讲个笑话")))
-	// ... but the conversation is still re-routed for the next turn.
-	next := f.svc.Decide(ctx, f.request(userTurns("fix my go build", "讲个笑话", "继续")))
-	require.Equal(t, "chat", next.Intent)
-	require.Zero(t, next.PinnedAccountID)
+	f.svc.Decide(ctx, f.request(userTurns("fix my go build", "讲个笑话", "再讲个笑话"))).markSelected(f.accountID(t, "pool-a"))
+	// ... the conversation's own route is exactly as it was.
+	next := f.svc.Decide(ctx, f.request(userTurns("fix my go build", "讲个笑话", "再讲个笑话", "继续")))
+	require.Equal(t, "coding", next.Intent)
+	require.Equal(t, coding1, next.PinnedAccountID)
+	require.Len(t, f.store.sessions, sessionsBefore, "keyword turns write nothing to the store")
 }
 
-func TestIntentRouter_KeywordOfTheSameIntentKeepsThePin(t *testing.T) {
+func TestIntentRouter_RepeatedKeywordHitsNeverPin(t *testing.T) {
 	ctx := context.Background()
 	f := newIntentRouteFixture(t)
 	f.saveRouter(t, withKeywords([]string{"traceback"}, nil))
@@ -150,8 +159,10 @@ func TestIntentRouter_KeywordOfTheSameIntentKeepsThePin(t *testing.T) {
 	f.svc.Decide(ctx, f.request(userTurns("traceback one"))).markSelected(coding2)
 	again := f.svc.Decide(ctx, f.request(userTurns("traceback one", "another traceback")))
 	require.Equal(t, "coding", again.Intent)
-	require.Equal(t, coding2, again.PinnedAccountID, "same intent: the conversation stays on its account")
-	require.Equal(t, 1, f.store.touches)
+	require.Zero(t, again.PinnedAccountID, "every keyword turn starts from the rule's configured order")
+	require.Zero(t, f.store.touches)
+	require.Empty(t, f.store.sessions)
+	require.Equal(t, []string{"keyword", "routed", "keyword"}, f.store.kinds())
 }
 
 func TestIntentRouter_KeywordOverridesAnUnmatchedConversation(t *testing.T) {
@@ -164,9 +175,12 @@ func TestIntentRouter_KeywordOverridesAnUnmatchedConversation(t *testing.T) {
 	d := f.svc.Decide(ctx, f.request(userTurns("hello", "what does this traceback mean")))
 	require.Equal(t, "coding", d.Intent)
 	require.Equal(t, 1, f.classifier.calls)
+	// The unmatched memory is still there for the next keyword-free turn.
+	requireNoPreference(t, f.svc.Decide(ctx, f.request(userTurns("hello", "what does this traceback mean", "thanks"))))
+	require.Equal(t, 1, f.classifier.calls)
 }
 
-func TestIntentRouter_LateWriteOfAnEarlierRequestCannotUndoAKeywordOverride(t *testing.T) {
+func TestIntentRouter_KeywordTurnDoesNotDisturbAnEarlierClassification(t *testing.T) {
 	ctx := context.Background()
 	f := newIntentRouteFixture(t)
 	f.saveRouter(t, withKeywords(nil, []string{"笑话"}))
@@ -176,9 +190,11 @@ func TestIntentRouter_LateWriteOfAnEarlierRequestCannotUndoAKeywordOverride(t *t
 	later := f.svc.Decide(ctx, f.request(userTurns("fix my go build", "讲个笑话")))
 	require.Equal(t, "chat", later.Intent)
 
-	earlier.markSelected(f.accountID(t, "coding-1")) // the earlier request's pin lands last
+	coding1 := f.accountID(t, "coding-1")
+	earlier.markSelected(coding1) // the earlier request's pin lands after the keyword turn
 	next := f.svc.Decide(ctx, f.request(userTurns("fix my go build", "讲个笑话", "继续")))
-	require.Equal(t, "chat", next.Intent)
+	require.Equal(t, "coding", next.Intent)
+	require.Equal(t, coding1, next.PinnedAccountID)
 }
 
 type waitingIntentClassifier struct {
@@ -196,7 +212,7 @@ func (c *waitingIntentClassifier) Classify(ctx context.Context, _ *intentRouterC
 	}
 }
 
-func TestIntentRouter_SlowEarlierClassificationCannotUndoLaterKeyword(t *testing.T) {
+func TestIntentRouter_SlowClassificationStillPinsAcrossAKeywordTurn(t *testing.T) {
 	f := newIntentRouteFixture(t)
 	f.saveRouter(t, withKeywords(nil, []string{"笑话"}))
 	classifier := &waitingIntentClassifier{entered: make(chan struct{}), release: make(chan struct{})}
@@ -217,7 +233,7 @@ func TestIntentRouter_SlowEarlierClassificationCannotUndoLaterKeyword(t *testing
 	require.Equal(t, "coding", old.Intent)
 	old.markSelected(f.accountID(t, "coding-1"))
 	next := f.svc.Decide(ctx, f.request(userTurns("fix my go build", "讲个笑话", "继续")))
-	require.Equal(t, "chat", next.Intent, "an older classification must not replace a newer keyword decision")
+	require.Equal(t, "coding", next.Intent, "the keyword turn in between is not part of the conversation's route")
 }
 
 type delayedReadIntentStore struct {
@@ -237,7 +253,7 @@ func (s *delayedReadIntentStore) GetSession(ctx context.Context, groupID int64, 
 	return session, err
 }
 
-func TestIntentRouter_SlowEarlierSessionReadCannotUndoLaterKeyword(t *testing.T) {
+func TestIntentRouter_KeywordTurnDoesNotWaitForTheStore(t *testing.T) {
 	f := newIntentRouteFixture(t)
 	f.saveRouter(t, withKeywords(nil, []string{"笑话"}))
 	f.classifier.answers = []string{"coding"}
@@ -252,15 +268,16 @@ func TestIntentRouter_SlowEarlierSessionReadCannotUndoLaterKeyword(t *testing.T)
 	case <-time.After(time.Second):
 		t.Fatal("earlier request did not reach the session read")
 	}
+	// The store is blocked, yet a keyword turn is decided immediately.
 	later := f.svc.Decide(ctx, f.request(userTurns("fix my go build", "讲个笑话")))
 	require.Equal(t, "chat", later.Intent)
 	later.markSelected(f.accountID(t, "pool-a"))
 	close(store.release)
 	old := <-earlier
 	require.Equal(t, "coding", old.Intent)
-	old.markSelected(f.accountID(t, "coding-2"))
 	next := f.svc.Decide(ctx, f.request(userTurns("fix my go build", "讲个笑话", "继续")))
-	require.Equal(t, "chat", next.Intent, "an old cache read must not replace a newer keyword decision")
+	require.Equal(t, "coding", next.Intent, "the conversation keeps its classified route")
+	require.Equal(t, f.accountID(t, "coding-1"), next.PinnedAccountID)
 }
 
 type delayedDeleteIntentStore struct {
@@ -279,7 +296,7 @@ func (s *delayedDeleteIntentStore) DeleteSession(ctx context.Context, groupID in
 	return s.memoryIntentRouteStore.DeleteSession(ctx, groupID, key, observed)
 }
 
-func TestIntentRouter_OldStaleDeleteCannotEraseLaterKeyword(t *testing.T) {
+func TestIntentRouter_StaleDeleteDoesNotAffectKeywordTurns(t *testing.T) {
 	f := newIntentRouteFixture(t)
 	f.saveRouter(t, withKeywords(nil, []string{"笑话"}))
 	ctx := context.Background()
@@ -303,7 +320,7 @@ func TestIntentRouter_OldStaleDeleteCannotEraseLaterKeyword(t *testing.T) {
 	close(store.release)
 	<-earlier
 	next := f.svc.Decide(ctx, f.request(userTurns("hello", "讲个笑话", "继续")))
-	require.Equal(t, "chat", next.Intent, "deleting an old session must preserve a newer keyword override")
+	require.Equal(t, "coding", next.Intent, "the fresh classification is what the conversation remembers")
 }
 
 func TestIntentRouter_KeywordOnlyRouter(t *testing.T) {
@@ -312,9 +329,16 @@ func TestIntentRouter_KeywordOnlyRouter(t *testing.T) {
 	f.saveRouter(t, keywordOnly([]string{"traceback"}, []string{"笑话"}))
 	require.True(t, f.svc.Enabled(ctx, f.groupID), "keywords alone make a working router")
 
-	require.Equal(t, "chat", f.svc.Decide(ctx, f.request(userTurns("讲个笑话"))).Intent)
+	hit := f.svc.Decide(ctx, f.request(userTurns("讲个笑话")))
+	require.Equal(t, "chat", hit.Intent)
+	hit.markSelected(f.accountID(t, "pool-a"))
 	requireNoPreference(t, f.svc.Decide(ctx, IntentRouteInput{GroupID: f.groupID, APIKeyID: 12, Body: []byte(userTurns("hello"))}))
+	// The very next turn of the routed conversation has no keyword: ordinary scheduling.
+	requireNoPreference(t, f.svc.Decide(ctx, f.request(userTurns("讲个笑话", "谢谢"))))
 	require.Zero(t, f.classifier.calls)
+	require.Empty(t, f.store.sessions, "a keyword-only router never touches the conversation store")
+	require.Zero(t, f.store.nextVersion, "nor does it reserve write versions")
+	require.Equal(t, []string{"keyword", "routed"}, f.store.kinds())
 }
 
 func TestIntentRouter_KeywordOnlyRulesAreNotOfferedToTheClassifier(t *testing.T) {

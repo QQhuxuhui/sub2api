@@ -312,13 +312,32 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 		}
 	}()
 	view := intentRequestView{body: in.Body}
+
+	// Keywords decide one turn at a time and leave no trace in the conversation
+	// store: a hit sends this request to the rule's accounts, the next turn is
+	// judged on its own latest message, and a turn without a keyword goes back
+	// to ordinary scheduling (or, on a router that also classifies, to whatever
+	// the conversation was classified as). The routed accounts are a scarce
+	// resource; remembering a hit would keep every later turn of the
+	// conversation on them.
+	if rule, keyword, ok := cfg.matchKeywords(view.lastUserText(0)); ok {
+		s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "keyword", Intent: rule.Name, Detail: keyword})
+		return s.newDecision(cfg, rule, "", 0, 0)
+	}
+	rules := cfg.classifierRules()
+	if len(rules) == 0 {
+		// Keyword-only router: nothing else to consult, and the store is never
+		// touched, so an unmatched turn costs no Redis round trip.
+		return nil
+	}
+
 	sessionKey := intentSessionKey(in.APIKeyID, in.Header, view)
 
 	var session *intentRouteSession
 	var version int64
 	if sessionKey != "" && s.store != nil {
 		// Reserve the write order before reading the session: a slow read must
-		// not let an older request overwrite a later keyword decision. Both
+		// not let an older request's pin overwrite a newer classification. Both
 		// operations share one time budget.
 		storeCtx, cancel := context.WithTimeout(ctx, intentRouteStoreTimeout)
 		version = s.nextRequestVersion(storeCtx, sessionKey)
@@ -343,21 +362,6 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 		cancel()
 	}
 
-	// Keywords are checked on every turn against the latest user message, and
-	// a hit overrides whatever the conversation was routed by before.
-	if rule, keyword, ok := cfg.matchKeywords(view.lastUserText(0)); ok {
-		if session != nil && session.Intent == rule.Name {
-			// Same intent as before: keep the conversation on its account.
-			s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "keyword", Intent: rule.Name, AccountID: session.AccountID, Detail: keyword})
-			s.detached(func(ctx context.Context) error {
-				return s.store.TouchSession(ctx, in.GroupID, sessionKey, cfg.CacheTTL)
-			})
-			return s.newDecision(cfg, rule, sessionKey, session.AccountID, false, version)
-		}
-		s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "keyword", Intent: rule.Name, Detail: keyword})
-		return s.newDecision(cfg, rule, sessionKey, 0, true, version)
-	}
-
 	if session != nil {
 		if session.Intent == "" {
 			return nil
@@ -370,7 +374,7 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 			s.detached(func(ctx context.Context) error {
 				return s.store.TouchSession(ctx, in.GroupID, sessionKey, cfg.CacheTTL)
 			})
-			return s.newDecision(cfg, rule, sessionKey, session.AccountID, false, version)
+			return s.newDecision(cfg, rule, sessionKey, session.AccountID, version)
 		}
 		// Stale entry: make room now, so the new classification below is not
 		// rejected as "already known".
@@ -379,11 +383,6 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 		cancel()
 	}
 
-	rules := cfg.classifierRules()
-	if len(rules) == 0 {
-		// Keyword-only router: an unmatched turn is scheduled normally.
-		return nil
-	}
 	text := view.lastUserText(cfg.MaxInputChars)
 	if text == "" {
 		return nil
@@ -425,7 +424,7 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 	if !ok {
 		return nil
 	}
-	return s.newDecision(cfg, rule, sessionKey, 0, false, version)
+	return s.newDecision(cfg, rule, sessionKey, 0, version)
 }
 
 // nextRequestVersion reserves write order before any potentially slow
@@ -460,15 +459,13 @@ func (s *IntentRouterService) nextRequestVersion(ctx context.Context, sessionKey
 // changes the conversation's intent) records the new intent at once, versioned
 // like a pin, so it replaces the conversation's earlier intent and account even
 // if no target account ends up serving this turn.
-func (s *IntentRouterService) newDecision(cfg *intentRouterConfig, rule domain.IntentRule, sessionKey string, pinned int64, override bool, version int64) *IntentRouteDecision {
+// newDecision builds the decision for one turn. A non-empty sessionKey with a
+// version makes the selected account the conversation's pin (classifier
+// decisions); an empty sessionKey yields a one-turn decision that is routed
+// and logged but never remembered (keyword decisions).
+func (s *IntentRouterService) newDecision(cfg *intentRouterConfig, rule domain.IntentRule, sessionKey string, pinned int64, version int64) *IntentRouteDecision {
 	groupID, ttl, intent := cfg.GroupID, cfg.CacheTTL, rule.Name
 	var sequence atomic.Int64
-	if override && s.store != nil && sessionKey != "" && version > 0 {
-		seq := sequence.Add(1)
-		s.detached(func(ctx context.Context) error {
-			return s.store.PinSession(ctx, groupID, sessionKey, intentRouteSession{Intent: intent, Version: version, Sequence: seq}, ttl)
-		})
-	}
 	return &IntentRouteDecision{
 		GroupID:         groupID,
 		Intent:          intent,

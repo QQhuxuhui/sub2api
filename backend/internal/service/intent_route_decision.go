@@ -138,6 +138,15 @@ func WithIntentRouteDecision(ctx context.Context, decision *IntentRouteDecision)
 	return context.WithValue(ctx, intentRouteDecisionContextKey{}, decision)
 }
 
+// IntentRouteSelectedAccount reports the account intent routing picked for the
+// request's current attempt, or 0 when ordinary scheduling did (or there is no
+// decision). Callers that bind conversation state to the selected account
+// (sticky sessions) use it to leave that state alone for a routed turn: the
+// next turn without a keyword must go back to where the conversation was.
+func IntentRouteSelectedAccount(ctx context.Context) int64 {
+	return IntentRouteDecisionFromContext(ctx).SelectedAccountID()
+}
+
 // IntentRouteDecisionFromContext returns the request's decision, or nil.
 func IntentRouteDecisionFromContext(ctx context.Context) *IntentRouteDecision {
 	if ctx == nil {

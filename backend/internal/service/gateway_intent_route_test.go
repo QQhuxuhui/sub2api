@@ -116,3 +116,30 @@ func TestIntentRouteDecision_EmptyDecisionIsNotAttached(t *testing.T) {
 	require.Nil(t, IntentRouteDecisionFromContext(ctx))
 	require.Nil(t, IntentRouteDecisionFromContext(WithIntentRouteDecision(context.Background(), nil)))
 }
+
+// A keyword turn is served by the rule's account without touching the
+// conversation's sticky binding, and the next turn without a keyword goes back
+// to the account the conversation lived on. (The handler skips the sticky
+// rebind when IntentRouteSelectedAccount names the selected account.)
+func TestGatewayIntentRoute_KeywordTurnLeavesTheStickySessionAlone(t *testing.T) {
+	svc, _ := newIntentRouteGatewayFixture(t)
+	cache := svc.cache.(*mockGatewayCacheForPlatform)
+	// The conversation lives on account 2, not the group's first-priority account 1.
+	cache.sessionBindings = map[string]int64{"conv-1": 2}
+
+	// Keyword turn: the rule names account 1 of the same group (gptniubi: account 45 in group 4).
+	routed := &IntentRouteDecision{Intent: "test", AccountIDs: []int64{1}}
+	ctx := WithIntentRouteDecision(context.Background(), routed)
+	result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "conv-1", "claude-3-5-sonnet-20241022", nil, "", 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Account.ID, "the keyword turn goes to the rule's account")
+	require.Equal(t, int64(1), IntentRouteSelectedAccount(ctx), "the handler can tell this selection was routed")
+	require.Equal(t, int64(2), cache.sessionBindings["conv-1"], "selection itself never rebinds the conversation")
+
+	// Next turn without a keyword: scope only, ordinary scheduling, sticky binding wins.
+	next := WithIntentRouteDecision(context.Background(), &IntentRouteDecision{ScopeAccountIDs: []int64{1}})
+	result, err = svc.SelectAccountWithLoadAwareness(next, nil, "conv-1", "claude-3-5-sonnet-20241022", nil, "", 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), result.Account.ID, "back on the account the conversation was on")
+	require.Zero(t, IntentRouteSelectedAccount(next), "an ordinary selection lets the handler bind as usual")
+}
