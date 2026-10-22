@@ -51,9 +51,14 @@ func observeOpenAICacheSimState(state *cachesim.State, data []byte) {
 				return
 			}
 		}
-		if root.Get(prefix + "tool_usage.image_gen").IsObject() {
-			state.Exclude()
-			return
+		// OpenAI 现在每个 Responses 响应都带全零的 tool_usage.image_gen 占位对象（含
+		// image_tokens: 0），只有真的产生了图片 token 才算生图请求。
+		if imageGen := root.Get(prefix + "tool_usage.image_gen"); imageGen.IsObject() {
+			if imageGen.Get("total_tokens").Int() > 0 || imageGen.Get("input_tokens").Int() > 0 || imageGen.Get("output_tokens").Int() > 0 ||
+				imageGen.Get("input_tokens_details.image_tokens").Int() > 0 || imageGen.Get("output_tokens_details.image_tokens").Int() > 0 {
+				state.Exclude()
+				return
+			}
 		}
 		for _, item := range root.Get(prefix + "output").Array() {
 			if openAICacheSimExcludedOutput(item.Get("type").String()) {

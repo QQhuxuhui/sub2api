@@ -290,3 +290,35 @@ func TestRecordUsage_CacheSimUndecidedStateLeavesUsageRaw(t *testing.T) {
 	require.Equal(t, 2000, usageRepo.lastLog.CacheReadTokens)
 	require.Equal(t, 1, store.adds, "WS 不计入窗口")
 }
+
+func TestObserveOpenAICacheSim_ZeroToolUsagePlaceholderDoesNotExclude(t *testing.T) {
+	// 线上两家 Codex 中转（与 OpenAI 本身）每个响应都带全零的 tool_usage.image_gen 占位对象。
+	placeholder := []byte(`{"id":"resp_1","output":[{"type":"message"}],"tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"usage":{"input_tokens":26841,"input_tokens_details":{"cached_tokens":26838},"output_tokens":5}}`)
+	st := cachesim.New()
+	observeOpenAICacheSimState(st, placeholder)
+	require.False(t, st.Excluded(), "全零占位对象不是生图请求")
+
+	withSearch := []byte(`{"output":[{"type":"web_search_call","status":"completed"},{"type":"message"}],"usage":{"input_tokens":5000,"input_tokens_details":{"cached_tokens":2000}}}`)
+	st2 := cachesim.New()
+	observeOpenAICacheSimState(st2, withSearch)
+	require.False(t, st2.Excluded(), "联网搜索仍是文本对话")
+
+	realImage := []byte(`{"output":[{"type":"message"}],"tool_usage":{"image_gen":{"input_tokens":0,"output_tokens":1120,"output_tokens_details":{"image_tokens":1120,"text_tokens":0},"total_tokens":1120}},"usage":{"input_tokens":5000,"input_tokens_details":{"cached_tokens":2000}}}`)
+	st3 := cachesim.New()
+	observeOpenAICacheSimState(st3, realImage)
+	require.True(t, st3.Excluded(), "真的产生了图片 token 才排除")
+
+	imageCall := []byte(`{"output":[{"type":"image_generation_call","status":"completed"}],"usage":{"input_tokens":5000}}`)
+	st4 := cachesim.New()
+	observeOpenAICacheSimState(st4, imageCall)
+	require.True(t, st4.Excluded())
+
+	// 走完整改写层：占位对象不阻止加码。
+	sim := &openAICacheSimRequest{accountID: 1, cfg: OpenAICacheSimConfig{Enabled: true, Lo: 85, Hi: 85, HalfLifeMinutes: 60, Cap: 95}, state: cachesim.New(), store: &memCacheSimStore{}, ctx: context.Background()}
+	out := sim.applyJSON([]byte(`{"type":"response.completed","response":`+string(placeholder)+`}`), false)
+	require.Equal(t, int64(26838), gjson.GetBytes(out, "response.usage.input_tokens_details.cached_tokens").Int(), "原始已超目标：不动")
+	sim2 := &openAICacheSimRequest{accountID: 1, cfg: OpenAICacheSimConfig{Enabled: true, Lo: 85, Hi: 85, HalfLifeMinutes: 60, Cap: 95}, state: cachesim.New(), store: &memCacheSimStore{}, ctx: context.Background()}
+	low := []byte(`{"type":"response.completed","response":{"tool_usage":{"image_gen":{"total_tokens":0,"input_tokens_details":{"image_tokens":0}}},"usage":{"input_tokens":10000,"input_tokens_details":{"cached_tokens":2000}}}}`)
+	out2 := sim2.applyJSON(low, false)
+	require.Equal(t, int64(8448), gjson.GetBytes(out2, "response.usage.input_tokens_details.cached_tokens").Int())
+}
