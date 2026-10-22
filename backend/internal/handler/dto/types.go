@@ -683,6 +683,12 @@ type AdminUsageLog struct {
 	UpstreamResponseModel *string `json:"upstream_response_model,omitempty"`
 	// UpstreamModelMismatch is nil when the upstream did not declare a model.
 	UpstreamModelMismatch *bool `json:"upstream_model_mismatch,omitempty"`
+	// RawInputTokens / RawCacheReadTokens 是 OpenAI 缓存模拟前的上游原始值（互斥口径）；
+	// 历史行与未模拟的平台为 null，表示与 input_tokens / cache_read_tokens 相同。仅管理端。
+	RawInputTokens     *int `json:"raw_input_tokens,omitempty"`
+	RawCacheReadTokens *int `json:"raw_cache_read_tokens,omitempty"`
+	// CacheSimCostDelta 本笔因缓存模拟少收的费用。仅管理端。
+	CacheSimCostDelta float64 `json:"cache_sim_cost_delta"`
 
 	// ChannelID 渠道 ID
 	ChannelID *int64 `json:"channel_id,omitempty"`

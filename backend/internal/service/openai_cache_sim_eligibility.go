@@ -1,0 +1,73 @@
+package service
+
+import (
+	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cachesim"
+	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+)
+
+// Exclusion must be observed before typed protocol conversion drops modality
+// fields, and before any usage object in a payload is rewritten.
+func containsCacheSimExclusionHint[T string | []byte](data T) bool {
+	s := string(data)
+	return strings.Contains(s, "image_tokens") || strings.Contains(s, "audio_tokens") ||
+		strings.Contains(s, "image_generation_call") || strings.Contains(s, "web_search_call") ||
+		strings.Contains(s, "tool_usage")
+}
+
+func observeOpenAICacheSimPayload(c *gin.Context, data []byte) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	observeOpenAICacheSimState(cachesim.FromContext(c.Request.Context()), data)
+}
+
+// A non-streaming client can receive only the final JSON extracted from an
+// upstream SSE body. Observe intermediate tool events before discarding them.
+func observeOpenAICacheSimSSEBody(c *gin.Context, body string) {
+	if !containsCacheSimExclusionHint(body) {
+		return
+	}
+	forEachOpenAISSEFrame(body, func(eventType string, data []byte) {
+		observeOpenAICacheSimPayload(c, []byte(openAICompatPayloadWithEventType(string(data), eventType)))
+	})
+}
+
+func observeOpenAICacheSimState(state *cachesim.State, data []byte) {
+	if state == nil || state.Excluded() || !containsCacheSimExclusionHint(data) {
+		return
+	}
+	root := gjson.ParseBytes(data)
+	if strings.HasPrefix(root.Get("type").String(), "response.image_generation_call.") {
+		state.Exclude()
+		return
+	}
+	for _, prefix := range []string{"", "response.", "message.", "data.", "data.response."} {
+		usage := root.Get(prefix + "usage")
+		for _, details := range []string{"input_tokens_details", "prompt_tokens_details", "output_tokens_details", "completion_tokens_details"} {
+			if usage.Get(details+".image_tokens").Int() > 0 || usage.Get(details+".audio_tokens").Int() > 0 {
+				state.Exclude()
+				return
+			}
+		}
+		if root.Get(prefix + "tool_usage.image_gen").IsObject() {
+			state.Exclude()
+			return
+		}
+		for _, item := range root.Get(prefix + "output").Array() {
+			if openAICacheSimExcludedOutput(item.Get("type").String()) {
+				state.Exclude()
+				return
+			}
+		}
+	}
+	if openAICacheSimExcludedOutput(root.Get("item.type").String()) {
+		state.Exclude()
+	}
+}
+
+func openAICacheSimExcludedOutput(kind string) bool {
+	return kind == "image_generation_call" || kind == "web_search_call"
+}

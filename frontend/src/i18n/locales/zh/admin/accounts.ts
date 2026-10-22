@@ -688,6 +688,13 @@ export default {
         longContextBillingDesc: '默认关闭。仅当该账号的上游会按模型阈值收取 OpenAI API 长上下文费率时开启。',
         stripCacheCreation: '抹掉缓存写入',
         stripCacheCreationDesc: '默认开启。OpenAI 本身不对提示缓存写入收费，有些中转会按别家口径把未命中缓存的输入报成缓存写入。开启后这部分 token 不记入使用记录、不计费，发给下游的 usage 里也删掉对应字段。',
+        cacheSimulation: '缓存模拟',
+        cacheSimulationDesc: '默认关闭。开启后抬高发给下游的 cached_tokens，让该账号最近一段时间的展示缓存率落在区间内：只对上游已有缓存且 prompt ≥ 1024 的文本请求加码（128 取整），零缓存、生图、embeddings 不碰，只往上拉不往下压。计费与使用记录按模拟后的值走，原始值与让利只在管理端「上游缓存」页可见。',
+        cacheSimulationLo: '区间下限 %',
+        cacheSimulationHi: '区间上限 %',
+        cacheSimulationHalfLife: '窗口半衰期（分钟）',
+        cacheSimulationCap: '单笔上限 %',
+        cacheSimulationRangeInvalid: '缓存模拟区间下限不能大于上限',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           '默认关闭。开启后可启用 responses_websockets_v2 协议能力（受网关全局开关与账号类型开关约束）。',

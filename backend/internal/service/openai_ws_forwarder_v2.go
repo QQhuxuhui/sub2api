@@ -369,7 +369,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	responseID := ""
 	var finalResponse []byte
 	wroteDownstream := false
-	modelRewrite := newOpenAIResponseModelRewrite(c, account, originalModel, mappedModel)
+	modelRewrite := newOpenAIResponseModelRewrite(c, account, originalModel, mappedModel).withoutCacheSim()
 	bufferedStreamEvents := make([][]byte, 0, 4)
 	eventCount := 0
 	tokenEventCount := 0

@@ -1,0 +1,61 @@
+export default {
+  openaiCache: {
+    title: '上游缓存',
+    description: 'OpenAI 账号的真实 / 展示缓存率，以及缓存模拟带来的让利',
+    timeRange: '时间范围',
+    threshold: '达标线',
+    thresholdHint: '开了模拟的账号按自身区间下限判定；其余账号按这里的全局阈值。',
+    scopeAll: '全部请求',
+    scopeText: '文本请求',
+    scopeHint: '文本请求口径排除生图、视频、embeddings，与模拟窗口一致。',
+    summary: {
+      accounts: 'OpenAI 账号',
+      rawRate: '真实缓存率',
+      displayRate: '展示缓存率',
+      expectedCost: '本该收',
+      billedCost: '实收',
+      costDelta: '让利',
+      costDeltaHint: '让利 = 本该收 − 实收，均为客户计费口径，不是上游成本。',
+      requests: '请求数'
+    },
+    chart: {
+      title: '按天走势',
+      titleFor: '按天走势：{name}',
+      backToAll: '返回全站',
+      rawRate: '真实缓存率 %',
+      displayRate: '展示缓存率 %',
+      costDelta: '让利',
+      expectedCost: '本该收',
+      billedCost: '实收',
+      empty: '范围内没有数据'
+    },
+    table: {
+      account: '账号',
+      type: '类型',
+      simulation: '模拟',
+      requests: '请求数',
+      rawRate: '真实缓存率',
+      displayRate: '展示缓存率',
+      zeroCache: '零缓存占比',
+      expectedCost: '本该收',
+      billedCost: '实收',
+      costDelta: '让利',
+      status: '达标',
+      window: '实时窗口',
+      windowHint: 'Redis 衰减窗口里的展示缓存率（半衰期加权）',
+      simOff: '关',
+      simOn: '{lo}–{hi}%',
+      shadow: '影子',
+      ok: '达标',
+      below: '未达标',
+      noData: '无数据',
+      empty: '没有 OpenAI 账号',
+      sortBy: '排序',
+      sortDelta: '让利降序',
+      sortRawRate: '真实缓存率升序',
+      sortRequests: '请求数降序',
+      zeroCacheWarn: '零缓存请求占比高，模拟可能拉不到下限'
+    },
+    loadFailed: '加载上游缓存数据失败'
+  }
+}

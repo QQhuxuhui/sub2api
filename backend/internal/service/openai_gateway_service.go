@@ -447,6 +447,7 @@ type OpenAIGatewayService struct {
 	userRepo              UserRepository
 	userSubRepo           UserSubscriptionRepository
 	cache                 GatewayCache
+	cacheSimStore         OpenAICacheSimWindowStore
 	cfg                   *config.Config
 	codexDetector         CodexClientRestrictionDetector
 	schedulerSnapshot     *SchedulerSnapshotService

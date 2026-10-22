@@ -643,7 +643,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	mappedModel := actualModel
 	var modelRewrite openAIResponseModelRewrite
 	if originalModel != "" {
-		modelRewrite = newOpenAIResponseModelRewrite(c, account, originalModel, mappedModel)
+		modelRewrite = newOpenAIResponseModelRewrite(c, account, originalModel, mappedModel).withoutCacheSim()
 	}
 
 	resultWithUsage := func() *OpenAIForwardResult {

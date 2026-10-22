@@ -1,0 +1,61 @@
+export default {
+  openaiCache: {
+    title: 'Upstream Cache',
+    description: 'Real vs displayed cache rates of OpenAI accounts, and the concession from cache simulation',
+    timeRange: 'Time range',
+    threshold: 'Target line',
+    thresholdHint: 'Accounts with simulation on are judged by their own lower bound; others by this global threshold.',
+    scopeAll: 'All requests',
+    scopeText: 'Text requests',
+    scopeHint: 'Text scope excludes images, video and embeddings, matching the simulation window.',
+    summary: {
+      accounts: 'OpenAI accounts',
+      rawRate: 'Real cache rate',
+      displayRate: 'Displayed cache rate',
+      expectedCost: 'Expected',
+      billedCost: 'Billed',
+      costDelta: 'Concession',
+      costDeltaHint: 'Concession = expected − billed, both in customer billing terms (not upstream cost).',
+      requests: 'Requests'
+    },
+    chart: {
+      title: 'Daily trend',
+      titleFor: 'Daily trend: {name}',
+      backToAll: 'Back to all accounts',
+      rawRate: 'Real cache %',
+      displayRate: 'Displayed cache %',
+      costDelta: 'Concession',
+      expectedCost: 'Expected',
+      billedCost: 'Billed',
+      empty: 'No data in range'
+    },
+    table: {
+      account: 'Account',
+      type: 'Type',
+      simulation: 'Simulation',
+      requests: 'Requests',
+      rawRate: 'Real rate',
+      displayRate: 'Displayed rate',
+      zeroCache: 'Zero-cache share',
+      expectedCost: 'Expected',
+      billedCost: 'Billed',
+      costDelta: 'Concession',
+      status: 'Status',
+      window: 'Live window',
+      windowHint: 'Displayed cache rate in the Redis decay window (half-life weighted)',
+      simOff: 'Off',
+      simOn: '{lo}–{hi}%',
+      shadow: 'Shadow',
+      ok: 'OK',
+      below: 'Below',
+      noData: 'No data',
+      empty: 'No OpenAI accounts',
+      sortBy: 'Sort',
+      sortDelta: 'Concession desc',
+      sortRawRate: 'Real rate asc',
+      sortRequests: 'Requests desc',
+      zeroCacheWarn: 'High zero-cache share; simulation may not reach the lower bound'
+    },
+    loadFailed: 'Failed to load upstream cache data'
+  }
+}

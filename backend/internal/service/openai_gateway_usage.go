@@ -183,6 +183,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		result.Usage.CacheCreationInputTokens = 0
 	}
 
+	// 账号开了「缓存模拟」时，计费与落库按模拟后的缓存读（客户看到的数字）走，
+	// 原始值留底到 raw_* 列，差价记到 cache_sim_cost_delta。决策与响应改写共用同一份状态。
+	cacheSim := s.resolveOpenAICacheSimForRecord(ctx, account, result, input.InboundEndpoint)
+	if cacheSim.Changed() {
+		result.Usage.CacheReadInputTokens = cacheSim.SimCached
+	}
+
 	// OpenAI input_tokens 是总输入，包含缓存读取和缓存写入明细。
 	// 将三类 token 拆成互斥桶，避免缓存写入同时按普通输入和 cache_write 重复计费。
 	actualInputTokens := result.Usage.InputTokens - result.Usage.CacheReadInputTokens - result.Usage.CacheCreationInputTokens
@@ -334,6 +341,24 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 	}
 
+	// 缓存模拟让利：按上游原始 usage 用同一套定价再算一次，差额 = 本该收 − 实收。
+	cacheSimCostDelta := 0.0
+	if cacheSim.Changed() && cost != nil {
+		rawTokens := tokens
+		rawTokens.CacheReadTokens = cacheSim.RawCached
+		rawTokens.InputTokens = max(cacheSim.RawTotal-cacheSim.RawCached-result.Usage.CacheCreationInputTokens, 0)
+		rawServiceTier := serviceTier
+		if groupBillsOpenAIFastAtStandard(apiKey, billingAccount, serviceTier) {
+			rawServiceTier = ""
+		}
+		if rawCost, rawErr := s.calculateOpenAIRecordUsageCost(
+			ctx, result, apiKey, billingModels, multiplier, imageMultiplier,
+			videoMultiplier, baseMultiplier, rawTokens, rawServiceTier, longContextBillingGate, pricingAt,
+		); rawErr == nil && rawCost != nil {
+			cacheSimCostDelta = rawCost.ActualCost - cost.ActualCost
+		}
+	}
+
 	// Determine billing type
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 	billingType := BillingTypeBalance
@@ -416,6 +441,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		ImageSizeSource:          optionalTrimmedStringPtr(result.ImageSizeSource),
 		ImageSizeBreakdown:       imageSizeBreakdown,
 		NativeCompactionV2:       input.NativeCompactionV2,
+		CacheSimCostDelta:        cacheSimCostDelta,
+	}
+	if account.IsOpenAI() {
+		rawInput := max(cacheSim.RawTotal-cacheSim.RawCached-result.Usage.CacheCreationInputTokens, 0)
+		rawCached := cacheSim.RawCached
+		usageLog.RawInputTokens = &rawInput
+		usageLog.RawCacheReadTokens = &rawCached
 	}
 	isVideoUsage := isGrokVideoUsageResult(result, billingModels)
 	if isVideoUsage {

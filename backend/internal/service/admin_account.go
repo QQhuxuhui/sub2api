@@ -364,6 +364,10 @@ func ValidateOpenAILongContextBillingExtra(platform string, extra map[string]any
 	if err := ValidateOpenAIStripCacheCreationExtra(platform, extra); err != nil {
 		return err
 	}
+	// 缓存模拟配置同样走这个共同入口。
+	if err := ValidateOpenAICacheSimulationExtra(platform, extra); err != nil {
+		return err
+	}
 	raw, exists := extra[openAILongContextBillingEnabledKey]
 	if !exists {
 		return nil
@@ -434,6 +438,12 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 	if _, provided := input.Extra[openAIStripCacheCreationKey]; !provided {
 		if current, ok := account.Extra[openAIStripCacheCreationKey].(bool); ok {
 			normalized[openAIStripCacheCreationKey] = current
+		}
+	}
+	// 缓存模拟配置同理。
+	if _, provided := input.Extra[openAICacheSimulationKey]; !provided {
+		if current := cloneOpenAICacheSimulationExtra(account); current != nil {
+			normalized[openAICacheSimulationKey] = current
 		}
 	}
 	return normalized, nil
@@ -951,7 +961,8 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	delete(updates, OllamaCloudUsageSnapshotExtraKey)
 	_, hasLongContext := updates[openAILongContextBillingEnabledKey]
 	_, hasStripCacheCreation := updates[openAIStripCacheCreationKey]
-	if hasLongContext || hasStripCacheCreation {
+	_, hasCacheSimulation := updates[openAICacheSimulationKey]
+	if hasLongContext || hasStripCacheCreation || hasCacheSimulation {
 		account, err := s.accountRepo.GetByID(ctx, id)
 		if err != nil {
 			return err
@@ -1492,6 +1503,9 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 			openAILongContextBillingEnabledKey: parent.IsOpenAILongContextBillingEnabled(),
 			openAIStripCacheCreationKey:        parent.StripsOpenAICacheCreation(),
 		},
+	}
+	if sim := cloneOpenAICacheSimulationExtra(parent); sim != nil {
+		shadow.Extra[openAICacheSimulationKey] = sim
 	}
 
 	// 5. 持久化（Create 填充 shadow.ID）。并发竞态:预查(步骤2)放行后另一请求抢先建成,本次会撞

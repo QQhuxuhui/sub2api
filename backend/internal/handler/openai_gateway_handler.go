@@ -18,6 +18,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cachesim"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/firstbyte"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -258,6 +259,10 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	// 客户端实际首字节 Tracker 随请求 context 一起带到用量落库任务里。
 	if tracker := firstbyte.FromContext(parent); tracker != nil {
 		base = firstbyte.WithTracker(base, tracker)
+	}
+	// OpenAI 缓存模拟决策随请求 context 带到落库任务，计费与响应改写共用同一份。
+	if state := cachesim.FromContext(parent); state != nil {
+		base = cachesim.WithState(base, state)
 	}
 	return base
 }

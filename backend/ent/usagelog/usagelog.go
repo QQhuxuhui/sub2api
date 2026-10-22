@@ -84,6 +84,12 @@ const (
 	FieldFirstTokenMs = "first_token_ms"
 	// FieldClientFirstByteMs holds the string denoting the client_first_byte_ms field in the database.
 	FieldClientFirstByteMs = "client_first_byte_ms"
+	// FieldRawInputTokens holds the string denoting the raw_input_tokens field in the database.
+	FieldRawInputTokens = "raw_input_tokens"
+	// FieldRawCacheReadTokens holds the string denoting the raw_cache_read_tokens field in the database.
+	FieldRawCacheReadTokens = "raw_cache_read_tokens"
+	// FieldCacheSimCostDelta holds the string denoting the cache_sim_cost_delta field in the database.
+	FieldCacheSimCostDelta = "cache_sim_cost_delta"
 	// FieldUserAgent holds the string denoting the user_agent field in the database.
 	FieldUserAgent = "user_agent"
 	// FieldIPAddress holds the string denoting the ip_address field in the database.
@@ -197,6 +203,9 @@ var Columns = []string{
 	FieldDurationMs,
 	FieldFirstTokenMs,
 	FieldClientFirstByteMs,
+	FieldRawInputTokens,
+	FieldRawCacheReadTokens,
+	FieldCacheSimCostDelta,
 	FieldUserAgent,
 	FieldIPAddress,
 	FieldImageCount,
@@ -271,6 +280,8 @@ var (
 	DefaultBillingType int8
 	// DefaultStream holds the default value on creation for the "stream" field.
 	DefaultStream bool
+	// DefaultCacheSimCostDelta holds the default value on creation for the "cache_sim_cost_delta" field.
+	DefaultCacheSimCostDelta float64
 	// UserAgentValidator is a validator for the "user_agent" field. It is called by the builders before save.
 	UserAgentValidator func(string) error
 	// IPAddressValidator is a validator for the "ip_address" field. It is called by the builders before save.
@@ -476,6 +487,21 @@ func ByFirstTokenMs(opts ...sql.OrderTermOption) OrderOption {
 // ByClientFirstByteMs orders the results by the client_first_byte_ms field.
 func ByClientFirstByteMs(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldClientFirstByteMs, opts...).ToFunc()
+}
+
+// ByRawInputTokens orders the results by the raw_input_tokens field.
+func ByRawInputTokens(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRawInputTokens, opts...).ToFunc()
+}
+
+// ByRawCacheReadTokens orders the results by the raw_cache_read_tokens field.
+func ByRawCacheReadTokens(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRawCacheReadTokens, opts...).ToFunc()
+}
+
+// ByCacheSimCostDelta orders the results by the cache_sim_cost_delta field.
+func ByCacheSimCostDelta(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCacheSimCostDelta, opts...).ToFunc()
 }
 
 // ByUserAgent orders the results by the user_agent field.

@@ -604,7 +604,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	SetOpsUpstreamModel(c, upstreamModel)
 	beginUpstreamResponseModelObservation(c)
 	// 命中映射时响应里的 model 一律还原成客户端请求名；上游原值先交给观测器，管理端可见。
-	modelRewrite := newOpenAIResponseModelRewrite(c, account, parsed.Model, upstreamModel).forcedOnly()
+	modelRewrite := newOpenAIResponseModelRewrite(c, account, parsed.Model, upstreamModel).forcedOnly().withoutCacheSim()
 	logger.LegacyPrintf(
 		"service.openai_gateway",
 		"[OpenAI] Images request routing request_model=%s upstream_model=%s endpoint=%s account_type=%s",

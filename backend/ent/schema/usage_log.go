@@ -136,6 +136,17 @@ func (UsageLog) Fields() []ent.Field {
 		field.Int("client_first_byte_ms").
 			Optional().
 			Nillable(),
+		// OpenAI 缓存模拟：上游原始输入 / 缓存读（互斥口径），NULL 表示与现有列相同
+		field.Int("raw_input_tokens").
+			Optional().
+			Nillable(),
+		field.Int("raw_cache_read_tokens").
+			Optional().
+			Nillable(),
+		// 本笔因缓存模拟少收的费用（本该收 − 实收），未模拟为 0
+		field.Float("cache_sim_cost_delta").
+			Default(0).
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
 		field.String("user_agent").
 			MaxLen(512).
 			Optional().

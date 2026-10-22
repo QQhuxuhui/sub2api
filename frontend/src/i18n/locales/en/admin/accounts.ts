@@ -603,6 +603,14 @@ export default {
         stripCacheCreation: 'Strip cache-write usage',
         stripCacheCreationDesc:
           'Enabled by default. OpenAI never bills prompt-cache writes, but some relays report uncached input as cache writes. When enabled those tokens are neither logged nor billed, and the cache-write fields are removed from the usage sent downstream.',
+        cacheSimulation: 'Cache simulation',
+        cacheSimulationDesc:
+          'Disabled by default. When enabled, cached_tokens sent downstream is raised so that this account\'s recent displayed cache rate lands inside the range: only text requests that already have upstream cache and a prompt of at least 1024 tokens are topped up (rounded to 128); zero-cache, image and embeddings requests are left alone, and the rate is never pushed down. Billing and usage records follow the simulated value; the raw values and the concession are visible only on the admin Upstream Cache page.',
+        cacheSimulationLo: 'Range low %',
+        cacheSimulationHi: 'Range high %',
+        cacheSimulationHalfLife: 'Window half-life (minutes)',
+        cacheSimulationCap: 'Per-request cap %',
+        cacheSimulationRangeInvalid: 'Cache simulation low bound must not exceed the high bound',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',

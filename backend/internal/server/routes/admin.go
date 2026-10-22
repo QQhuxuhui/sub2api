@@ -294,6 +294,13 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 }
 
 func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	// OpenAI 账号「上游缓存」页：真实/展示缓存率与缓存模拟让利。
+	openAICache := admin.Group("/openai-cache")
+	{
+		openAICache.GET("/accounts", h.Admin.OpenAICache.ListAccounts)
+		openAICache.GET("/daily", h.Admin.OpenAICache.ListDaily)
+	}
+
 	dashboard := admin.Group("/dashboard")
 	{
 		dashboard.GET("/snapshot-v2", h.Admin.Dashboard.GetSnapshotV2)

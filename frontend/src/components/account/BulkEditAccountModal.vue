@@ -193,6 +193,78 @@
         </p>
       </div>
 
+      <!-- OpenAI cache simulation -->
+      <div
+        v-if="allOpenAIPassthroughCapable"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="mb-3 flex items-center justify-between gap-4">
+          <div class="flex-1">
+            <label
+              id="bulk-edit-openai-cache-simulation-label"
+              class="input-label mb-0"
+              for="bulk-edit-openai-cache-simulation-enabled"
+            >
+              {{ t('admin.accounts.openai.cacheSimulation') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.cacheSimulationDesc') }}
+            </p>
+          </div>
+          <input
+            v-model="enableOpenAICacheSimulation"
+            id="bulk-edit-openai-cache-simulation-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-openai-cache-simulation-body"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-openai-cache-simulation-body"
+          :class="!enableOpenAICacheSimulation && 'pointer-events-none opacity-50'"
+          role="group"
+          aria-labelledby="bulk-edit-openai-cache-simulation-label"
+        >
+          <button
+            type="button"
+            data-testid="bulk-edit-openai-cache-simulation-toggle"
+            role="switch"
+            :disabled="!enableOpenAICacheSimulation"
+            :aria-checked="openAICacheSimEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              openAICacheSimEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+            @click="openAICacheSimEnabled = !openAICacheSimEnabled"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                openAICacheSimEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+          <div v-if="openAICacheSimEnabled" class="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div>
+              <label class="input-label text-xs">{{ t('admin.accounts.openai.cacheSimulationLo') }}</label>
+              <input v-model.number="openAICacheSimLo" type="number" min="0" max="100" step="0.5" class="input" :disabled="!enableOpenAICacheSimulation" />
+            </div>
+            <div>
+              <label class="input-label text-xs">{{ t('admin.accounts.openai.cacheSimulationHi') }}</label>
+              <input v-model.number="openAICacheSimHi" type="number" min="0" max="100" step="0.5" class="input" :disabled="!enableOpenAICacheSimulation" />
+            </div>
+            <div>
+              <label class="input-label text-xs">{{ t('admin.accounts.openai.cacheSimulationHalfLife') }}</label>
+              <input v-model.number="openAICacheSimHalfLife" type="number" min="1" max="1440" step="1" class="input" :disabled="!enableOpenAICacheSimulation" />
+            </div>
+            <div>
+              <label class="input-label text-xs">{{ t('admin.accounts.openai.cacheSimulationCap') }}</label>
+              <input v-model.number="openAICacheSimCap" type="number" min="50" max="100" step="1" class="input" :disabled="!enableOpenAICacheSimulation" />
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Base URL (API Key only) -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1660,6 +1732,12 @@ const enableGroups = ref(false)
 const enableOpenAIPassthrough = ref(false)
 const enableOpenAIFlattenNamespaces = ref(false)
 const enableOpenAILongContextBilling = ref(false)
+const enableOpenAICacheSimulation = ref(false)
+const openAICacheSimEnabled = ref(false)
+const openAICacheSimLo = ref(82)
+const openAICacheSimHi = ref(88)
+const openAICacheSimHalfLife = ref(60)
+const openAICacheSimCap = ref(95)
 const enableOpenAIEndpointCapabilities = ref(false)
 const enableOpenAIResponsesMode = ref(false)
 const enableOpenAIWSMode = ref(false)
@@ -1994,6 +2072,17 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     extra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
   }
 
+  if (enableOpenAICacheSimulation.value && allOpenAIPassthroughCapable.value) {
+    const extra = ensureExtra()
+    extra.openai_cache_simulation = {
+      enabled: openAICacheSimEnabled.value,
+      lo: openAICacheSimLo.value,
+      hi: openAICacheSimHi.value,
+      half_life_minutes: openAICacheSimHalfLife.value,
+      cap: openAICacheSimCap.value
+    }
+  }
+
   if (applyOpenAIEndpointCapabilities) {
     credentials.openai_capabilities =
       openAIEndpointCapabilities.value.length === 2
@@ -2194,6 +2283,15 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 }
 
 const handleSubmit = async () => {
+  if (
+    enableOpenAICacheSimulation.value &&
+    allOpenAIPassthroughCapable.value &&
+    openAICacheSimEnabled.value &&
+    openAICacheSimLo.value > openAICacheSimHi.value
+  ) {
+    appStore.showError(t('admin.accounts.openai.cacheSimulationRangeInvalid'))
+    return
+  }
   if (targetMode.value === 'selected' && props.accountIds.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
@@ -2384,6 +2482,12 @@ watch(
       openaiPassthroughEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
       openAILongContextBillingEnabled.value = false
+      enableOpenAICacheSimulation.value = false
+      openAICacheSimEnabled.value = false
+      openAICacheSimLo.value = 82
+      openAICacheSimHi.value = 88
+      openAICacheSimHalfLife.value = 60
+      openAICacheSimCap.value = 95
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
       openAIResponsesMode.value = 'auto'
       modelRestrictionMode.value = 'whitelist'

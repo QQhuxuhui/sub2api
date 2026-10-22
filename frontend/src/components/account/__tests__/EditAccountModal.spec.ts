@@ -816,6 +816,50 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_strip_cache_creation).toBe(false)
   })
 
+  it('saves the OpenAI cache-simulation config with its range', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="openai-cache-simulation-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+
+    await toggle.trigger('click')
+    await wrapper.get('[data-testid="openai-cache-simulation-lo"]').setValue('80')
+    await wrapper.get('[data-testid="openai-cache-simulation-hi"]').setValue('90')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_cache_simulation).toEqual({
+      enabled: true,
+      lo: 80,
+      hi: 90,
+      half_life_minutes: 60,
+      cap: 95
+    })
+  })
+
+  it('loads an enabled OpenAI cache-simulation config and rejects an inverted range', async () => {
+    const account = buildAccount()
+    account.extra = { openai_cache_simulation: { enabled: true, lo: 70, hi: 75, half_life_minutes: 30, cap: 90 } }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    expect(wrapper.get('[data-testid="openai-cache-simulation-toggle"]').attributes('aria-checked')).toBe('true')
+    expect((wrapper.get('[data-testid="openai-cache-simulation-lo"]').element as HTMLInputElement).value).toBe('70')
+    expect((wrapper.get('[data-testid="openai-cache-simulation-half-life"]').element as HTMLInputElement).value).toBe('30')
+
+    await wrapper.get('[data-testid="openai-cache-simulation-lo"]').setValue('95')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+  })
+
   it('loads an explicitly disabled OpenAI strip-cache-write toggle', async () => {
     const account = buildAccount()
     account.extra = { openai_strip_cache_creation: false }

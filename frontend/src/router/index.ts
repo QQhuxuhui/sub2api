@@ -648,6 +648,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/openai-cache',
+    name: 'AdminOpenAICache',
+    component: () => import('@/views/admin/OpenAICacheView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Upstream Cache',
+      titleKey: 'admin.openaiCache.title',
+      descriptionKey: 'admin.openaiCache.description'
+    }
+  },
+  {
     path: '/admin/affiliates',
     redirect: '/admin/affiliates/invites'
   },

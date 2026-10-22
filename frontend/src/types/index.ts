@@ -1771,6 +1771,10 @@ export interface AdminUsageLog extends UsageLog {
   upstream_reasoning_effort?: string | null
   upstream_response_model?: string | null
   upstream_model_mismatch?: boolean | null
+  // OpenAI 缓存模拟留底（仅管理端）：上游原始输入/缓存读；null 表示与现有列相同
+  raw_input_tokens?: number | null
+  raw_cache_read_tokens?: number | null
+  cache_sim_cost_delta?: number
   model_mapping_chain?: string | null
   upstream_request_id?: string | null
 

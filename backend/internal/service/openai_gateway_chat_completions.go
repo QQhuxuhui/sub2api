@@ -609,7 +609,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	// accumulated delta events so the client receives the full content.
 	acc.SupplementResponseOutput(finalResponse)
 
-	rewrite := cacheWriteResponseRewrite(account)
+	rewrite := cacheWriteResponseRewrite(c, account)
 	finalResponse.Usage = rewrite.applyResponsesUsage(finalResponse.Usage)
 	chatResp := apicompat.ResponsesToChatCompletions(finalResponse, openAIClientVisibleModel(c, account, originalModel))
 
@@ -702,7 +702,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	startTime time.Time,
 	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
-	rewrite := cacheWriteResponseRewrite(account)
+	rewrite := cacheWriteResponseRewrite(c, account)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -779,6 +779,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			searchCount += countGrokNativeSearchCallsInSSEDataDedup([]byte(payload), streamSearchSeen)
 		}
 
+		observeOpenAICacheSimPayload(c, []byte(payload))
 		var event apicompat.ResponsesStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			logger.L().Warn("openai chat_completions stream: failed to parse event",

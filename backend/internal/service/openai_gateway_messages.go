@@ -654,7 +654,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	// accumulated delta events so the client receives the full content.
 	acc.SupplementResponseOutput(finalResponse)
 
-	rewrite := cacheWriteResponseRewrite(account)
+	rewrite := anthropicUsageResponseRewrite(c, account)
 	finalResponse.Usage = rewrite.applyResponsesUsage(finalResponse.Usage)
 	anthropicResp := apicompat.ResponsesToAnthropic(finalResponse, openAIClientVisibleModel(c, account, originalModel))
 
@@ -842,6 +842,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 				if frame, ok := parser.Finish(); ok {
 					payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
 					payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
+					observeOpenAICacheSimPayload(c, []byte(payload))
 					var event apicompat.ResponsesStreamEvent
 					if err := json.Unmarshal([]byte(payload), &event); err == nil {
 						s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
@@ -883,6 +884,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
 			payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
 
+			observeOpenAICacheSimPayload(c, []byte(payload))
 			var event apicompat.ResponsesStreamEvent
 			if err := json.Unmarshal([]byte(payload), &event); err != nil {
 				logger.L().Warn(logPrefix+": failed to parse event",
@@ -933,7 +935,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
-	rewrite := cacheWriteResponseRewrite(account)
+	rewrite := anthropicUsageResponseRewrite(c, account)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -1008,6 +1010,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			searchCount += countGrokNativeSearchCallsInSSEDataDedup([]byte(payload), streamSearchSeen)
 		}
 
+		observeOpenAICacheSimPayload(c, []byte(payload))
 		var event apicompat.ResponsesStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			logger.L().Warn("openai messages stream: failed to parse event",

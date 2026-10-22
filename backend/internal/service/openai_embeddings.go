@@ -162,7 +162,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	}
 
 	usage := extractOpenAIEmbeddingsUsage(respBody)
-	respBody = cacheWriteResponseRewrite(account).applyJSON(respBody)
+	respBody = cacheWriteResponseRewrite(c, account).withoutCacheSim().applyJSON(respBody)
 	writeOpenAIEmbeddingsUpstreamResponse(c, resp, respBody, s.responseHeaderFilter)
 
 	return &OpenAIForwardResult{

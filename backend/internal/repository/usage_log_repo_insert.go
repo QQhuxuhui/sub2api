@@ -60,6 +60,9 @@ var usageLogInsertArgTypes = [...]string{
 	"integer",     // duration_ms
 	"integer",     // first_token_ms
 	"integer",     // client_first_byte_ms
+	"integer",     // raw_input_tokens
+	"integer",     // raw_cache_read_tokens
+	"numeric",     // cache_sim_cost_delta
 	"text",        // user_agent
 	"text",        // ip_address
 	"integer",     // image_count
@@ -262,6 +265,9 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			duration_ms,
 			first_token_ms,
 			client_first_byte_ms,
+			raw_input_tokens,
+			raw_cache_read_tokens,
+			cache_sim_cost_delta,
 			user_agent,
 			ip_address,
 			image_count,
@@ -295,7 +301,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -723,6 +729,9 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			duration_ms,
 			first_token_ms,
 			client_first_byte_ms,
+			raw_input_tokens,
+			raw_cache_read_tokens,
+			cache_sim_cost_delta,
 			user_agent,
 			ip_address,
 			image_count,
@@ -819,6 +828,9 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				duration_ms,
 				first_token_ms,
 				client_first_byte_ms,
+				raw_input_tokens,
+				raw_cache_read_tokens,
+				cache_sim_cost_delta,
 				user_agent,
 				ip_address,
 				image_count,
@@ -884,6 +896,9 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				duration_ms,
 				first_token_ms,
 				client_first_byte_ms,
+				raw_input_tokens,
+				raw_cache_read_tokens,
+				cache_sim_cost_delta,
 				user_agent,
 				ip_address,
 				image_count,
@@ -989,6 +1004,9 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			duration_ms,
 			first_token_ms,
 			client_first_byte_ms,
+			raw_input_tokens,
+			raw_cache_read_tokens,
+			cache_sim_cost_delta,
 			user_agent,
 			ip_address,
 			image_count,
@@ -1080,6 +1098,9 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			duration_ms,
 			first_token_ms,
 			client_first_byte_ms,
+			raw_input_tokens,
+			raw_cache_read_tokens,
+			cache_sim_cost_delta,
 			user_agent,
 			ip_address,
 			image_count,
@@ -1145,6 +1166,9 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			duration_ms,
 			first_token_ms,
 			client_first_byte_ms,
+			raw_input_tokens,
+			raw_cache_read_tokens,
+			cache_sim_cost_delta,
 			user_agent,
 			ip_address,
 			image_count,
@@ -1218,6 +1242,9 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			duration_ms,
 			first_token_ms,
 			client_first_byte_ms,
+			raw_input_tokens,
+			raw_cache_read_tokens,
+			cache_sim_cost_delta,
 			user_agent,
 			ip_address,
 			image_count,
@@ -1251,7 +1278,7 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1276,6 +1303,8 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 	duration := nullInt(log.DurationMs)
 	firstToken := nullInt(log.FirstTokenMs)
 	clientFirstByte := nullInt(log.ClientFirstByteMs)
+	rawInputTokens := nullInt(log.RawInputTokens)
+	rawCacheReadTokens := nullInt(log.RawCacheReadTokens)
 	userAgent := nullString(log.UserAgent)
 	ipAddress := nullString(log.IPAddress)
 	imageSize := nullString(log.ImageSize)
@@ -1351,6 +1380,9 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			duration,
 			firstToken,
 			clientFirstByte,
+			rawInputTokens,
+			rawCacheReadTokens,
+			log.CacheSimCostDelta,
 			userAgent,
 			ipAddress,
 			log.ImageCount,

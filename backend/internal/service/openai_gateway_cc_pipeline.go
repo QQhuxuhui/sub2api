@@ -291,6 +291,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 			st.Usage = *u
 		}
 
+		observeOpenAICacheSimPayload(c, []byte(payload))
 		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			logger.L().Warn(logPrefix+": failed to parse chat stream chunk",
@@ -303,6 +304,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 			ms := int(time.Since(startTime).Milliseconds())
 			st.FirstTokenMs = &ms
 		}
+		preserveCCCacheCreationUsage(chunk.Usage, st.Usage)
 		emit(&chunk)
 	}
 
@@ -340,6 +342,7 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 		return nil, OpenAIUsage{}, fmt.Errorf("read upstream body: %w", err)
 	}
 
+	observeOpenAICacheSimPayload(c, respBody)
 	var ccResp apicompat.ChatCompletionsResponse
 	if err := json.Unmarshal(respBody, &ccResp); err != nil {
 		writeError(c, http.StatusBadGateway, "api_error", "Failed to parse upstream response")
@@ -355,7 +358,25 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	if parsed, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
 		usage = parsed
 	}
+	preserveCCCacheCreationUsage(ccResp.Usage, usage)
 	return &ccResp, usage, nil
+}
+
+// ChatUsage only models nested cache-write details. Preserve the canonical
+// raw value (including top-level aliases) before protocol conversion and cache
+// policy, so the response and the billing snapshot reserve the same tokens.
+func preserveCCCacheCreationUsage(usage *apicompat.ChatUsage, raw OpenAIUsage) {
+	if usage == nil {
+		return
+	}
+	if usage.PromptTokensDetails == nil {
+		if raw.CacheCreationInputTokens <= 0 {
+			return
+		}
+		usage.PromptTokensDetails = &apicompat.ChatTokenDetails{}
+	}
+	usage.PromptTokensDetails.CacheCreationTokens = raw.CacheCreationInputTokens
+	usage.PromptTokensDetails.CacheWriteTokens = 0
 }
 
 // writeOpenAIResponsesFallbackError 以 /v1/responses 回退路径的既有错误格式回写

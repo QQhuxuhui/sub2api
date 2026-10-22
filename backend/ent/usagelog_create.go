@@ -477,6 +477,48 @@ func (_c *UsageLogCreate) SetNillableClientFirstByteMs(v *int) *UsageLogCreate {
 	return _c
 }
 
+// SetRawInputTokens sets the "raw_input_tokens" field.
+func (_c *UsageLogCreate) SetRawInputTokens(v int) *UsageLogCreate {
+	_c.mutation.SetRawInputTokens(v)
+	return _c
+}
+
+// SetNillableRawInputTokens sets the "raw_input_tokens" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableRawInputTokens(v *int) *UsageLogCreate {
+	if v != nil {
+		_c.SetRawInputTokens(*v)
+	}
+	return _c
+}
+
+// SetRawCacheReadTokens sets the "raw_cache_read_tokens" field.
+func (_c *UsageLogCreate) SetRawCacheReadTokens(v int) *UsageLogCreate {
+	_c.mutation.SetRawCacheReadTokens(v)
+	return _c
+}
+
+// SetNillableRawCacheReadTokens sets the "raw_cache_read_tokens" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableRawCacheReadTokens(v *int) *UsageLogCreate {
+	if v != nil {
+		_c.SetRawCacheReadTokens(*v)
+	}
+	return _c
+}
+
+// SetCacheSimCostDelta sets the "cache_sim_cost_delta" field.
+func (_c *UsageLogCreate) SetCacheSimCostDelta(v float64) *UsageLogCreate {
+	_c.mutation.SetCacheSimCostDelta(v)
+	return _c
+}
+
+// SetNillableCacheSimCostDelta sets the "cache_sim_cost_delta" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableCacheSimCostDelta(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetCacheSimCostDelta(*v)
+	}
+	return _c
+}
+
 // SetUserAgent sets the "user_agent" field.
 func (_c *UsageLogCreate) SetUserAgent(v string) *UsageLogCreate {
 	_c.mutation.SetUserAgent(v)
@@ -775,6 +817,10 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultStream
 		_c.mutation.SetStream(v)
 	}
+	if _, ok := _c.mutation.CacheSimCostDelta(); !ok {
+		v := usagelog.DefaultCacheSimCostDelta
+		_c.mutation.SetCacheSimCostDelta(v)
+	}
 	if _, ok := _c.mutation.ImageCount(); !ok {
 		v := usagelog.DefaultImageCount
 		_c.mutation.SetImageCount(v)
@@ -897,6 +943,9 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.Stream(); !ok {
 		return &ValidationError{Name: "stream", err: errors.New(`ent: missing required field "UsageLog.stream"`)}
+	}
+	if _, ok := _c.mutation.CacheSimCostDelta(); !ok {
+		return &ValidationError{Name: "cache_sim_cost_delta", err: errors.New(`ent: missing required field "UsageLog.cache_sim_cost_delta"`)}
 	}
 	if v, ok := _c.mutation.UserAgent(); ok {
 		if err := usagelog.UserAgentValidator(v); err != nil {
@@ -1100,6 +1149,18 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ClientFirstByteMs(); ok {
 		_spec.SetField(usagelog.FieldClientFirstByteMs, field.TypeInt, value)
 		_node.ClientFirstByteMs = &value
+	}
+	if value, ok := _c.mutation.RawInputTokens(); ok {
+		_spec.SetField(usagelog.FieldRawInputTokens, field.TypeInt, value)
+		_node.RawInputTokens = &value
+	}
+	if value, ok := _c.mutation.RawCacheReadTokens(); ok {
+		_spec.SetField(usagelog.FieldRawCacheReadTokens, field.TypeInt, value)
+		_node.RawCacheReadTokens = &value
+	}
+	if value, ok := _c.mutation.CacheSimCostDelta(); ok {
+		_spec.SetField(usagelog.FieldCacheSimCostDelta, field.TypeFloat64, value)
+		_node.CacheSimCostDelta = value
 	}
 	if value, ok := _c.mutation.UserAgent(); ok {
 		_spec.SetField(usagelog.FieldUserAgent, field.TypeString, value)
@@ -1905,6 +1966,72 @@ func (u *UsageLogUpsert) AddClientFirstByteMs(v int) *UsageLogUpsert {
 // ClearClientFirstByteMs clears the value of the "client_first_byte_ms" field.
 func (u *UsageLogUpsert) ClearClientFirstByteMs() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldClientFirstByteMs)
+	return u
+}
+
+// SetRawInputTokens sets the "raw_input_tokens" field.
+func (u *UsageLogUpsert) SetRawInputTokens(v int) *UsageLogUpsert {
+	u.Set(usagelog.FieldRawInputTokens, v)
+	return u
+}
+
+// UpdateRawInputTokens sets the "raw_input_tokens" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateRawInputTokens() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldRawInputTokens)
+	return u
+}
+
+// AddRawInputTokens adds v to the "raw_input_tokens" field.
+func (u *UsageLogUpsert) AddRawInputTokens(v int) *UsageLogUpsert {
+	u.Add(usagelog.FieldRawInputTokens, v)
+	return u
+}
+
+// ClearRawInputTokens clears the value of the "raw_input_tokens" field.
+func (u *UsageLogUpsert) ClearRawInputTokens() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldRawInputTokens)
+	return u
+}
+
+// SetRawCacheReadTokens sets the "raw_cache_read_tokens" field.
+func (u *UsageLogUpsert) SetRawCacheReadTokens(v int) *UsageLogUpsert {
+	u.Set(usagelog.FieldRawCacheReadTokens, v)
+	return u
+}
+
+// UpdateRawCacheReadTokens sets the "raw_cache_read_tokens" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateRawCacheReadTokens() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldRawCacheReadTokens)
+	return u
+}
+
+// AddRawCacheReadTokens adds v to the "raw_cache_read_tokens" field.
+func (u *UsageLogUpsert) AddRawCacheReadTokens(v int) *UsageLogUpsert {
+	u.Add(usagelog.FieldRawCacheReadTokens, v)
+	return u
+}
+
+// ClearRawCacheReadTokens clears the value of the "raw_cache_read_tokens" field.
+func (u *UsageLogUpsert) ClearRawCacheReadTokens() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldRawCacheReadTokens)
+	return u
+}
+
+// SetCacheSimCostDelta sets the "cache_sim_cost_delta" field.
+func (u *UsageLogUpsert) SetCacheSimCostDelta(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldCacheSimCostDelta, v)
+	return u
+}
+
+// UpdateCacheSimCostDelta sets the "cache_sim_cost_delta" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateCacheSimCostDelta() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldCacheSimCostDelta)
+	return u
+}
+
+// AddCacheSimCostDelta adds v to the "cache_sim_cost_delta" field.
+func (u *UsageLogUpsert) AddCacheSimCostDelta(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldCacheSimCostDelta, v)
 	return u
 }
 
@@ -2887,6 +3014,83 @@ func (u *UsageLogUpsertOne) UpdateClientFirstByteMs() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearClientFirstByteMs() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearClientFirstByteMs()
+	})
+}
+
+// SetRawInputTokens sets the "raw_input_tokens" field.
+func (u *UsageLogUpsertOne) SetRawInputTokens(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRawInputTokens(v)
+	})
+}
+
+// AddRawInputTokens adds v to the "raw_input_tokens" field.
+func (u *UsageLogUpsertOne) AddRawInputTokens(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRawInputTokens(v)
+	})
+}
+
+// UpdateRawInputTokens sets the "raw_input_tokens" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateRawInputTokens() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRawInputTokens()
+	})
+}
+
+// ClearRawInputTokens clears the value of the "raw_input_tokens" field.
+func (u *UsageLogUpsertOne) ClearRawInputTokens() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRawInputTokens()
+	})
+}
+
+// SetRawCacheReadTokens sets the "raw_cache_read_tokens" field.
+func (u *UsageLogUpsertOne) SetRawCacheReadTokens(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRawCacheReadTokens(v)
+	})
+}
+
+// AddRawCacheReadTokens adds v to the "raw_cache_read_tokens" field.
+func (u *UsageLogUpsertOne) AddRawCacheReadTokens(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRawCacheReadTokens(v)
+	})
+}
+
+// UpdateRawCacheReadTokens sets the "raw_cache_read_tokens" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateRawCacheReadTokens() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRawCacheReadTokens()
+	})
+}
+
+// ClearRawCacheReadTokens clears the value of the "raw_cache_read_tokens" field.
+func (u *UsageLogUpsertOne) ClearRawCacheReadTokens() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRawCacheReadTokens()
+	})
+}
+
+// SetCacheSimCostDelta sets the "cache_sim_cost_delta" field.
+func (u *UsageLogUpsertOne) SetCacheSimCostDelta(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCacheSimCostDelta(v)
+	})
+}
+
+// AddCacheSimCostDelta adds v to the "cache_sim_cost_delta" field.
+func (u *UsageLogUpsertOne) AddCacheSimCostDelta(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddCacheSimCostDelta(v)
+	})
+}
+
+// UpdateCacheSimCostDelta sets the "cache_sim_cost_delta" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateCacheSimCostDelta() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCacheSimCostDelta()
 	})
 }
 
@@ -4071,6 +4275,83 @@ func (u *UsageLogUpsertBulk) UpdateClientFirstByteMs() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearClientFirstByteMs() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearClientFirstByteMs()
+	})
+}
+
+// SetRawInputTokens sets the "raw_input_tokens" field.
+func (u *UsageLogUpsertBulk) SetRawInputTokens(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRawInputTokens(v)
+	})
+}
+
+// AddRawInputTokens adds v to the "raw_input_tokens" field.
+func (u *UsageLogUpsertBulk) AddRawInputTokens(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRawInputTokens(v)
+	})
+}
+
+// UpdateRawInputTokens sets the "raw_input_tokens" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateRawInputTokens() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRawInputTokens()
+	})
+}
+
+// ClearRawInputTokens clears the value of the "raw_input_tokens" field.
+func (u *UsageLogUpsertBulk) ClearRawInputTokens() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRawInputTokens()
+	})
+}
+
+// SetRawCacheReadTokens sets the "raw_cache_read_tokens" field.
+func (u *UsageLogUpsertBulk) SetRawCacheReadTokens(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRawCacheReadTokens(v)
+	})
+}
+
+// AddRawCacheReadTokens adds v to the "raw_cache_read_tokens" field.
+func (u *UsageLogUpsertBulk) AddRawCacheReadTokens(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRawCacheReadTokens(v)
+	})
+}
+
+// UpdateRawCacheReadTokens sets the "raw_cache_read_tokens" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateRawCacheReadTokens() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRawCacheReadTokens()
+	})
+}
+
+// ClearRawCacheReadTokens clears the value of the "raw_cache_read_tokens" field.
+func (u *UsageLogUpsertBulk) ClearRawCacheReadTokens() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRawCacheReadTokens()
+	})
+}
+
+// SetCacheSimCostDelta sets the "cache_sim_cost_delta" field.
+func (u *UsageLogUpsertBulk) SetCacheSimCostDelta(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCacheSimCostDelta(v)
+	})
+}
+
+// AddCacheSimCostDelta adds v to the "cache_sim_cost_delta" field.
+func (u *UsageLogUpsertBulk) AddCacheSimCostDelta(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddCacheSimCostDelta(v)
+	})
+}
+
+// UpdateCacheSimCostDelta sets the "cache_sim_cost_delta" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateCacheSimCostDelta() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCacheSimCostDelta()
 	})
 }
 

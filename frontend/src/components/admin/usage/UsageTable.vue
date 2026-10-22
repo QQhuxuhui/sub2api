@@ -385,6 +385,16 @@
               <span class="text-gray-400">{{ t('admin.usage.cacheReadTokens') }}</span>
               <span class="font-medium text-white">{{ tokenTooltipData.cache_read_tokens.toLocaleString() }}</span>
             </div>
+            <template v-if="tokenTooltipData && hasCacheSimDiff(tokenTooltipData)">
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('admin.usage.rawCacheReadTokens') }}</span>
+                <span class="font-medium text-amber-300">{{ (tokenTooltipData.raw_cache_read_tokens ?? 0).toLocaleString() }} (+{{ (tokenTooltipData.cache_read_tokens - (tokenTooltipData.raw_cache_read_tokens ?? 0)).toLocaleString() }})</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('admin.usage.cacheSimCostDelta') }}</span>
+                <span class="font-medium text-amber-300">${{ (tokenTooltipData.cache_sim_cost_delta ?? 0).toFixed(6) }}</span>
+              </div>
+            </template>
           </div>
           <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
             <span class="text-gray-400">{{ t('usage.totalTokens') }}</span>
@@ -624,6 +634,10 @@ const showUpstreamEndpoint = props.showUpstreamEndpoint
 const ipGeoBatchLoading = ref(false)
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
+
+// OpenAI 缓存模拟：原始缓存读与展示值不同时，悬浮框里显示真实值与让利（仅管理端有这两个字段）。
+const hasCacheSimDiff = (row: AdminUsageLog): boolean =>
+  row.raw_cache_read_tokens != null && row.raw_cache_read_tokens !== row.cache_read_tokens
 
 const hasReasoningEffortMapping = (row: AdminUsageLog): boolean => {
   const requested = row.reasoning_effort?.trim() || ''

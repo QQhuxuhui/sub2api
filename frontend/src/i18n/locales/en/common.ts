@@ -214,6 +214,7 @@ export default {
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
+    openaiCache: 'Upstream Cache',
   },
 
   // Auth

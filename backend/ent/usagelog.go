@@ -93,6 +93,12 @@ type UsageLog struct {
 	FirstTokenMs *int `json:"first_token_ms,omitempty"`
 	// ClientFirstByteMs holds the value of the "client_first_byte_ms" field.
 	ClientFirstByteMs *int `json:"client_first_byte_ms,omitempty"`
+	// RawInputTokens holds the value of the "raw_input_tokens" field.
+	RawInputTokens *int `json:"raw_input_tokens,omitempty"`
+	// RawCacheReadTokens holds the value of the "raw_cache_read_tokens" field.
+	RawCacheReadTokens *int `json:"raw_cache_read_tokens,omitempty"`
+	// CacheSimCostDelta holds the value of the "cache_sim_cost_delta" field.
+	CacheSimCostDelta float64 `json:"cache_sim_cost_delta,omitempty"`
 	// UserAgent holds the value of the "user_agent" field.
 	UserAgent *string `json:"user_agent,omitempty"`
 	// IPAddress holds the value of the "ip_address" field.
@@ -206,9 +212,9 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 			values[i] = new([]byte)
 		case usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
-		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
+		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier, usagelog.FieldCacheSimCostDelta:
 			values[i] = new(sql.NullFloat64)
-		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldClientFirstByteMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds:
+		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldClientFirstByteMs, usagelog.FieldRawInputTokens, usagelog.FieldRawCacheReadTokens, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds:
 			values[i] = new(sql.NullInt64)
 		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution:
 			values[i] = new(sql.NullString)
@@ -458,6 +464,26 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ClientFirstByteMs = new(int)
 				*_m.ClientFirstByteMs = int(value.Int64)
+			}
+		case usagelog.FieldRawInputTokens:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field raw_input_tokens", values[i])
+			} else if value.Valid {
+				_m.RawInputTokens = new(int)
+				*_m.RawInputTokens = int(value.Int64)
+			}
+		case usagelog.FieldRawCacheReadTokens:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field raw_cache_read_tokens", values[i])
+			} else if value.Valid {
+				_m.RawCacheReadTokens = new(int)
+				*_m.RawCacheReadTokens = int(value.Int64)
+			}
+		case usagelog.FieldCacheSimCostDelta:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field cache_sim_cost_delta", values[i])
+			} else if value.Valid {
+				_m.CacheSimCostDelta = value.Float64
 			}
 		case usagelog.FieldUserAgent:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -740,6 +766,19 @@ func (_m *UsageLog) String() string {
 		builder.WriteString("client_first_byte_ms=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
+	builder.WriteString(", ")
+	if v := _m.RawInputTokens; v != nil {
+		builder.WriteString("raw_input_tokens=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.RawCacheReadTokens; v != nil {
+		builder.WriteString("raw_cache_read_tokens=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	builder.WriteString("cache_sim_cost_delta=")
+	builder.WriteString(fmt.Sprintf("%v", _m.CacheSimCostDelta))
 	builder.WriteString(", ")
 	if v := _m.UserAgent; v != nil {
 		builder.WriteString("user_agent=")

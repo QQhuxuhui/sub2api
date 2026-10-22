@@ -230,6 +230,21 @@ func ClientFirstByteMs(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldClientFirstByteMs, v))
 }
 
+// RawInputTokens applies equality check predicate on the "raw_input_tokens" field. It's identical to RawInputTokensEQ.
+func RawInputTokens(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRawInputTokens, v))
+}
+
+// RawCacheReadTokens applies equality check predicate on the "raw_cache_read_tokens" field. It's identical to RawCacheReadTokensEQ.
+func RawCacheReadTokens(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRawCacheReadTokens, v))
+}
+
+// CacheSimCostDelta applies equality check predicate on the "cache_sim_cost_delta" field. It's identical to CacheSimCostDeltaEQ.
+func CacheSimCostDelta(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldCacheSimCostDelta, v))
+}
+
 // UserAgent applies equality check predicate on the "user_agent" field. It's identical to UserAgentEQ.
 func UserAgent(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldUserAgent, v))
@@ -1838,6 +1853,146 @@ func ClientFirstByteMsIsNil() predicate.UsageLog {
 // ClientFirstByteMsNotNil applies the NotNil predicate on the "client_first_byte_ms" field.
 func ClientFirstByteMsNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldClientFirstByteMs))
+}
+
+// RawInputTokensEQ applies the EQ predicate on the "raw_input_tokens" field.
+func RawInputTokensEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRawInputTokens, v))
+}
+
+// RawInputTokensNEQ applies the NEQ predicate on the "raw_input_tokens" field.
+func RawInputTokensNEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldRawInputTokens, v))
+}
+
+// RawInputTokensIn applies the In predicate on the "raw_input_tokens" field.
+func RawInputTokensIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldRawInputTokens, vs...))
+}
+
+// RawInputTokensNotIn applies the NotIn predicate on the "raw_input_tokens" field.
+func RawInputTokensNotIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldRawInputTokens, vs...))
+}
+
+// RawInputTokensGT applies the GT predicate on the "raw_input_tokens" field.
+func RawInputTokensGT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldRawInputTokens, v))
+}
+
+// RawInputTokensGTE applies the GTE predicate on the "raw_input_tokens" field.
+func RawInputTokensGTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldRawInputTokens, v))
+}
+
+// RawInputTokensLT applies the LT predicate on the "raw_input_tokens" field.
+func RawInputTokensLT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldRawInputTokens, v))
+}
+
+// RawInputTokensLTE applies the LTE predicate on the "raw_input_tokens" field.
+func RawInputTokensLTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldRawInputTokens, v))
+}
+
+// RawInputTokensIsNil applies the IsNil predicate on the "raw_input_tokens" field.
+func RawInputTokensIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldRawInputTokens))
+}
+
+// RawInputTokensNotNil applies the NotNil predicate on the "raw_input_tokens" field.
+func RawInputTokensNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldRawInputTokens))
+}
+
+// RawCacheReadTokensEQ applies the EQ predicate on the "raw_cache_read_tokens" field.
+func RawCacheReadTokensEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRawCacheReadTokens, v))
+}
+
+// RawCacheReadTokensNEQ applies the NEQ predicate on the "raw_cache_read_tokens" field.
+func RawCacheReadTokensNEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldRawCacheReadTokens, v))
+}
+
+// RawCacheReadTokensIn applies the In predicate on the "raw_cache_read_tokens" field.
+func RawCacheReadTokensIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldRawCacheReadTokens, vs...))
+}
+
+// RawCacheReadTokensNotIn applies the NotIn predicate on the "raw_cache_read_tokens" field.
+func RawCacheReadTokensNotIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldRawCacheReadTokens, vs...))
+}
+
+// RawCacheReadTokensGT applies the GT predicate on the "raw_cache_read_tokens" field.
+func RawCacheReadTokensGT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldRawCacheReadTokens, v))
+}
+
+// RawCacheReadTokensGTE applies the GTE predicate on the "raw_cache_read_tokens" field.
+func RawCacheReadTokensGTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldRawCacheReadTokens, v))
+}
+
+// RawCacheReadTokensLT applies the LT predicate on the "raw_cache_read_tokens" field.
+func RawCacheReadTokensLT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldRawCacheReadTokens, v))
+}
+
+// RawCacheReadTokensLTE applies the LTE predicate on the "raw_cache_read_tokens" field.
+func RawCacheReadTokensLTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldRawCacheReadTokens, v))
+}
+
+// RawCacheReadTokensIsNil applies the IsNil predicate on the "raw_cache_read_tokens" field.
+func RawCacheReadTokensIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldRawCacheReadTokens))
+}
+
+// RawCacheReadTokensNotNil applies the NotNil predicate on the "raw_cache_read_tokens" field.
+func RawCacheReadTokensNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldRawCacheReadTokens))
+}
+
+// CacheSimCostDeltaEQ applies the EQ predicate on the "cache_sim_cost_delta" field.
+func CacheSimCostDeltaEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldCacheSimCostDelta, v))
+}
+
+// CacheSimCostDeltaNEQ applies the NEQ predicate on the "cache_sim_cost_delta" field.
+func CacheSimCostDeltaNEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldCacheSimCostDelta, v))
+}
+
+// CacheSimCostDeltaIn applies the In predicate on the "cache_sim_cost_delta" field.
+func CacheSimCostDeltaIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldCacheSimCostDelta, vs...))
+}
+
+// CacheSimCostDeltaNotIn applies the NotIn predicate on the "cache_sim_cost_delta" field.
+func CacheSimCostDeltaNotIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldCacheSimCostDelta, vs...))
+}
+
+// CacheSimCostDeltaGT applies the GT predicate on the "cache_sim_cost_delta" field.
+func CacheSimCostDeltaGT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldCacheSimCostDelta, v))
+}
+
+// CacheSimCostDeltaGTE applies the GTE predicate on the "cache_sim_cost_delta" field.
+func CacheSimCostDeltaGTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldCacheSimCostDelta, v))
+}
+
+// CacheSimCostDeltaLT applies the LT predicate on the "cache_sim_cost_delta" field.
+func CacheSimCostDeltaLT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldCacheSimCostDelta, v))
+}
+
+// CacheSimCostDeltaLTE applies the LTE predicate on the "cache_sim_cost_delta" field.
+func CacheSimCostDeltaLTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldCacheSimCostDelta, v))
 }
 
 // UserAgentEQ applies the EQ predicate on the "user_agent" field.

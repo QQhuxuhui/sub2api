@@ -739,6 +739,81 @@ func (_u *UsageLogUpdate) ClearClientFirstByteMs() *UsageLogUpdate {
 	return _u
 }
 
+// SetRawInputTokens sets the "raw_input_tokens" field.
+func (_u *UsageLogUpdate) SetRawInputTokens(v int) *UsageLogUpdate {
+	_u.mutation.ResetRawInputTokens()
+	_u.mutation.SetRawInputTokens(v)
+	return _u
+}
+
+// SetNillableRawInputTokens sets the "raw_input_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableRawInputTokens(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetRawInputTokens(*v)
+	}
+	return _u
+}
+
+// AddRawInputTokens adds value to the "raw_input_tokens" field.
+func (_u *UsageLogUpdate) AddRawInputTokens(v int) *UsageLogUpdate {
+	_u.mutation.AddRawInputTokens(v)
+	return _u
+}
+
+// ClearRawInputTokens clears the value of the "raw_input_tokens" field.
+func (_u *UsageLogUpdate) ClearRawInputTokens() *UsageLogUpdate {
+	_u.mutation.ClearRawInputTokens()
+	return _u
+}
+
+// SetRawCacheReadTokens sets the "raw_cache_read_tokens" field.
+func (_u *UsageLogUpdate) SetRawCacheReadTokens(v int) *UsageLogUpdate {
+	_u.mutation.ResetRawCacheReadTokens()
+	_u.mutation.SetRawCacheReadTokens(v)
+	return _u
+}
+
+// SetNillableRawCacheReadTokens sets the "raw_cache_read_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableRawCacheReadTokens(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetRawCacheReadTokens(*v)
+	}
+	return _u
+}
+
+// AddRawCacheReadTokens adds value to the "raw_cache_read_tokens" field.
+func (_u *UsageLogUpdate) AddRawCacheReadTokens(v int) *UsageLogUpdate {
+	_u.mutation.AddRawCacheReadTokens(v)
+	return _u
+}
+
+// ClearRawCacheReadTokens clears the value of the "raw_cache_read_tokens" field.
+func (_u *UsageLogUpdate) ClearRawCacheReadTokens() *UsageLogUpdate {
+	_u.mutation.ClearRawCacheReadTokens()
+	return _u
+}
+
+// SetCacheSimCostDelta sets the "cache_sim_cost_delta" field.
+func (_u *UsageLogUpdate) SetCacheSimCostDelta(v float64) *UsageLogUpdate {
+	_u.mutation.ResetCacheSimCostDelta()
+	_u.mutation.SetCacheSimCostDelta(v)
+	return _u
+}
+
+// SetNillableCacheSimCostDelta sets the "cache_sim_cost_delta" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableCacheSimCostDelta(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetCacheSimCostDelta(*v)
+	}
+	return _u
+}
+
+// AddCacheSimCostDelta adds value to the "cache_sim_cost_delta" field.
+func (_u *UsageLogUpdate) AddCacheSimCostDelta(v float64) *UsageLogUpdate {
+	_u.mutation.AddCacheSimCostDelta(v)
+	return _u
+}
+
 // SetUserAgent sets the "user_agent" field.
 func (_u *UsageLogUpdate) SetUserAgent(v string) *UsageLogUpdate {
 	_u.mutation.SetUserAgent(v)
@@ -1344,6 +1419,30 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.ClientFirstByteMsCleared() {
 		_spec.ClearField(usagelog.FieldClientFirstByteMs, field.TypeInt)
+	}
+	if value, ok := _u.mutation.RawInputTokens(); ok {
+		_spec.SetField(usagelog.FieldRawInputTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRawInputTokens(); ok {
+		_spec.AddField(usagelog.FieldRawInputTokens, field.TypeInt, value)
+	}
+	if _u.mutation.RawInputTokensCleared() {
+		_spec.ClearField(usagelog.FieldRawInputTokens, field.TypeInt)
+	}
+	if value, ok := _u.mutation.RawCacheReadTokens(); ok {
+		_spec.SetField(usagelog.FieldRawCacheReadTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRawCacheReadTokens(); ok {
+		_spec.AddField(usagelog.FieldRawCacheReadTokens, field.TypeInt, value)
+	}
+	if _u.mutation.RawCacheReadTokensCleared() {
+		_spec.ClearField(usagelog.FieldRawCacheReadTokens, field.TypeInt)
+	}
+	if value, ok := _u.mutation.CacheSimCostDelta(); ok {
+		_spec.SetField(usagelog.FieldCacheSimCostDelta, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedCacheSimCostDelta(); ok {
+		_spec.AddField(usagelog.FieldCacheSimCostDelta, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.UserAgent(); ok {
 		_spec.SetField(usagelog.FieldUserAgent, field.TypeString, value)
@@ -2289,6 +2388,81 @@ func (_u *UsageLogUpdateOne) ClearClientFirstByteMs() *UsageLogUpdateOne {
 	return _u
 }
 
+// SetRawInputTokens sets the "raw_input_tokens" field.
+func (_u *UsageLogUpdateOne) SetRawInputTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetRawInputTokens()
+	_u.mutation.SetRawInputTokens(v)
+	return _u
+}
+
+// SetNillableRawInputTokens sets the "raw_input_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableRawInputTokens(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetRawInputTokens(*v)
+	}
+	return _u
+}
+
+// AddRawInputTokens adds value to the "raw_input_tokens" field.
+func (_u *UsageLogUpdateOne) AddRawInputTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.AddRawInputTokens(v)
+	return _u
+}
+
+// ClearRawInputTokens clears the value of the "raw_input_tokens" field.
+func (_u *UsageLogUpdateOne) ClearRawInputTokens() *UsageLogUpdateOne {
+	_u.mutation.ClearRawInputTokens()
+	return _u
+}
+
+// SetRawCacheReadTokens sets the "raw_cache_read_tokens" field.
+func (_u *UsageLogUpdateOne) SetRawCacheReadTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetRawCacheReadTokens()
+	_u.mutation.SetRawCacheReadTokens(v)
+	return _u
+}
+
+// SetNillableRawCacheReadTokens sets the "raw_cache_read_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableRawCacheReadTokens(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetRawCacheReadTokens(*v)
+	}
+	return _u
+}
+
+// AddRawCacheReadTokens adds value to the "raw_cache_read_tokens" field.
+func (_u *UsageLogUpdateOne) AddRawCacheReadTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.AddRawCacheReadTokens(v)
+	return _u
+}
+
+// ClearRawCacheReadTokens clears the value of the "raw_cache_read_tokens" field.
+func (_u *UsageLogUpdateOne) ClearRawCacheReadTokens() *UsageLogUpdateOne {
+	_u.mutation.ClearRawCacheReadTokens()
+	return _u
+}
+
+// SetCacheSimCostDelta sets the "cache_sim_cost_delta" field.
+func (_u *UsageLogUpdateOne) SetCacheSimCostDelta(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetCacheSimCostDelta()
+	_u.mutation.SetCacheSimCostDelta(v)
+	return _u
+}
+
+// SetNillableCacheSimCostDelta sets the "cache_sim_cost_delta" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableCacheSimCostDelta(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetCacheSimCostDelta(*v)
+	}
+	return _u
+}
+
+// AddCacheSimCostDelta adds value to the "cache_sim_cost_delta" field.
+func (_u *UsageLogUpdateOne) AddCacheSimCostDelta(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddCacheSimCostDelta(v)
+	return _u
+}
+
 // SetUserAgent sets the "user_agent" field.
 func (_u *UsageLogUpdateOne) SetUserAgent(v string) *UsageLogUpdateOne {
 	_u.mutation.SetUserAgent(v)
@@ -2924,6 +3098,30 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.ClientFirstByteMsCleared() {
 		_spec.ClearField(usagelog.FieldClientFirstByteMs, field.TypeInt)
+	}
+	if value, ok := _u.mutation.RawInputTokens(); ok {
+		_spec.SetField(usagelog.FieldRawInputTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRawInputTokens(); ok {
+		_spec.AddField(usagelog.FieldRawInputTokens, field.TypeInt, value)
+	}
+	if _u.mutation.RawInputTokensCleared() {
+		_spec.ClearField(usagelog.FieldRawInputTokens, field.TypeInt)
+	}
+	if value, ok := _u.mutation.RawCacheReadTokens(); ok {
+		_spec.SetField(usagelog.FieldRawCacheReadTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRawCacheReadTokens(); ok {
+		_spec.AddField(usagelog.FieldRawCacheReadTokens, field.TypeInt, value)
+	}
+	if _u.mutation.RawCacheReadTokensCleared() {
+		_spec.ClearField(usagelog.FieldRawCacheReadTokens, field.TypeInt)
+	}
+	if value, ok := _u.mutation.CacheSimCostDelta(); ok {
+		_spec.SetField(usagelog.FieldCacheSimCostDelta, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedCacheSimCostDelta(); ok {
+		_spec.AddField(usagelog.FieldCacheSimCostDelta, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.UserAgent(); ok {
 		_spec.SetField(usagelog.FieldUserAgent, field.TypeString, value)

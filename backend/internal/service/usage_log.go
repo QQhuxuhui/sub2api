@@ -183,6 +183,12 @@ type UsageLog struct {
 	// ClientFirstByteMs 客户端实际首字节耗时：从请求进入网关到第一段响应体写回客户端，
 	// 包含鉴权、选号、同号重试与换号的全部等待；first_token_ms 只从最后一次成功转发起算。
 	ClientFirstByteMs *int
+	// RawInputTokens / RawCacheReadTokens：OpenAI 缓存模拟留底，上游原始的输入 / 缓存读
+	// （与 InputTokens / CacheReadTokens 同为互斥口径）；nil 表示与现有列相同。仅管理端可见。
+	RawInputTokens     *int
+	RawCacheReadTokens *int
+	// CacheSimCostDelta 本笔因缓存模拟少收的费用（本该收 − 实收），未模拟为 0。仅管理端可见。
+	CacheSimCostDelta float64
 	UserAgent         *string
 	IPAddress         *string
 	// SessionID is the explicit client-provided request correlation identifier

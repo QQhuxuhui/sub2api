@@ -67,6 +67,12 @@ type openAIResponseModelRewrite struct {
 	// stripCacheWrite 为 true 时，把发给客户端的 usage 里缓存写入相关字段删掉
 	// （账号开关 StripsOpenAICacheCreation）。与 model 改写共用同一批改写点。
 	stripCacheWrite bool
+	// cacheSim 非空时按账号「缓存模拟」配置抬高发给客户端的 cached_tokens；
+	// 决策与计费落库共用 request context 上的同一份状态。
+	cacheSim *openAICacheSimRequest
+	// anthropicShape 为 true 时载荷里的 usage 是 Anthropic 口径（/v1/messages 转换输出），
+	// input_tokens 与 cache_read_input_tokens 互斥。
+	anthropicShape bool
 }
 
 // openAICacheWriteUsagePaths 是上游 usage 里可能出现的缓存写入字段，与
@@ -146,10 +152,11 @@ func newOpenAIResponseModelRewrite(c *gin.Context, account *Account, originalMod
 	upstreamModel = strings.TrimSpace(upstreamModel)
 	if account != nil && account.Platform == PlatformOpenAI {
 		strip := account.StripsOpenAICacheCreation()
+		sim := openAICacheSimForRequest(c, account)
 		if clientModel := openAIClientVisibleModel(c, account, originalModel); clientModel != "" {
-			return openAIResponseModelRewrite{to: clientModel, force: true, stripCacheWrite: strip}
+			return openAIResponseModelRewrite{to: clientModel, force: true, stripCacheWrite: strip, cacheSim: sim}
 		}
-		return openAIResponseModelRewrite{stripCacheWrite: strip}
+		return openAIResponseModelRewrite{stripCacheWrite: strip, cacheSim: sim}
 	}
 	if originalModel != "" && upstreamModel != "" && originalModel != upstreamModel {
 		return openAIResponseModelRewrite{from: upstreamModel, to: originalModel}
@@ -163,7 +170,14 @@ func (r openAIResponseModelRewrite) forcedOnly() openAIResponseModelRewrite {
 	if r.force {
 		return r
 	}
-	return openAIResponseModelRewrite{stripCacheWrite: r.stripCacheWrite}
+	return openAIResponseModelRewrite{stripCacheWrite: r.stripCacheWrite, cacheSim: r.cacheSim, anthropicShape: r.anthropicShape}
+}
+
+// withoutCacheSim 丢弃缓存模拟：生图、embeddings 等非文本路径不参与模拟，
+// 与 RecordUsage 的 openAICacheSimEligibleResult 口径一致，避免客户端看到改写而落库没改。
+func (r openAIResponseModelRewrite) withoutCacheSim() openAIResponseModelRewrite {
+	r.cacheSim = nil
+	return r
 }
 
 // rewritesModel 报告是否要改写 model 字段（强制或等值替换）。
@@ -172,12 +186,20 @@ func (r openAIResponseModelRewrite) rewritesModel() bool {
 }
 
 func (r openAIResponseModelRewrite) active() bool {
-	return r.rewritesModel() || r.stripCacheWrite
+	return r.rewritesModel() || r.stripCacheWrite || r.cacheSim != nil
+}
+
+// containsUsageHint 是缓存模拟的字符串预检：不含 usage 对象的事件无需解析。
+func containsUsageHint[T string | []byte](data T) bool {
+	return strings.Contains(string(data), `"usage"`)
 }
 
 // mayApply 是快速预判，避免对绝大多数不含 model 的事件做 JSON 解析。
 func (r openAIResponseModelRewrite) mayApply(data string) bool {
 	if r.stripCacheWrite && containsCacheWriteHint(data) {
+		return true
+	}
+	if r.cacheSim != nil && (containsUsageHint(data) || containsCacheSimExclusionHint(data)) {
 		return true
 	}
 	if !r.rewritesModel() {
@@ -191,6 +213,9 @@ func (r openAIResponseModelRewrite) mayApply(data string) bool {
 
 func (r openAIResponseModelRewrite) mayApplyBytes(data []byte) bool {
 	if r.stripCacheWrite && containsCacheWriteHint(data) {
+		return true
+	}
+	if r.cacheSim != nil && (containsUsageHint(data) || containsCacheSimExclusionHint(data)) {
 		return true
 	}
 	if !r.rewritesModel() {
@@ -209,7 +234,7 @@ func (r openAIResponseModelRewrite) appliesToWSEvent(eventType string) bool {
 	if !r.active() {
 		return false
 	}
-	return r.force || r.stripCacheWrite || openAIWSEventMayContainModel(eventType)
+	return r.force || r.stripCacheWrite || r.cacheSim != nil || openAIWSEventMayContainModel(eventType)
 }
 
 // applyJSON 改写一个 JSON 文档（非流式响应体、SSE data 负载或 WS 帧）。
@@ -238,6 +263,9 @@ func (r openAIResponseModelRewrite) applyJSON(data []byte) []byte {
 	}
 	if r.stripCacheWrite {
 		updated = stripOpenAICacheWriteUsage(updated)
+	}
+	if r.cacheSim != nil {
+		updated = r.cacheSim.applyJSON(updated, r.anthropicShape)
 	}
 	return updated
 }
@@ -287,7 +315,7 @@ func (r openAIResponseModelRewrite) applySSELine(line string) string {
 	if !ok || data == "" || data == "[DONE]" {
 		return line
 	}
-	if !r.force && !r.stripCacheWrite {
+	if !r.force && !r.stripCacheWrite && r.cacheSim == nil {
 		return replaceOpenAIModelInSSELine(line, r.from, r.to)
 	}
 	trimmed := strings.TrimSpace(data)
