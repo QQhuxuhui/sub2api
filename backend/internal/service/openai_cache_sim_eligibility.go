@@ -13,8 +13,7 @@ import (
 func containsCacheSimExclusionHint[T string | []byte](data T) bool {
 	s := string(data)
 	return strings.Contains(s, "image_tokens") || strings.Contains(s, "audio_tokens") ||
-		strings.Contains(s, "image_generation_call") || strings.Contains(s, "web_search_call") ||
-		strings.Contains(s, "tool_usage")
+		strings.Contains(s, "image_generation_call") || strings.Contains(s, "tool_usage")
 }
 
 func observeOpenAICacheSimPayload(c *gin.Context, data []byte) {
@@ -68,6 +67,9 @@ func observeOpenAICacheSimState(state *cachesim.State, data []byte) {
 	}
 }
 
+// 只排除真正的非文本模态（生图）。带 web_search_call 的 Responses 仍是普通文本对话，
+// 提示缓存语义与计费不变；之前把它也排除掉，导致开着联网搜索的客户（如账号 113）
+// 94% 的请求既不改写也不进窗口，模拟形同虚设。
 func openAICacheSimExcludedOutput(kind string) bool {
-	return kind == "image_generation_call" || kind == "web_search_call"
+	return kind == "image_generation_call"
 }
