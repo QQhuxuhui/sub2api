@@ -57,7 +57,8 @@ func (h *OpenAICacheHandler) ListAccounts(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// ListDaily GET /admin/openai-cache/daily?start_date&end_date&timezone&account_id
+// ListDaily GET /admin/openai-cache/daily?start_date&end_date&timezone&account_id&granularity=day|hour|5min|minute
+// 分钟级只在范围不超过 2 天时生效，超出自动降为 5 分钟；返回里带实际生效的 granularity。
 func (h *OpenAICacheHandler) ListDaily(c *gin.Context) {
 	startTime, endTime, ok := h.timeRange(c)
 	if !ok {
@@ -72,10 +73,11 @@ func (h *OpenAICacheHandler) ListDaily(c *gin.Context) {
 		}
 		accountID = id
 	}
-	rows, err := h.statsService.ListDaily(c.Request.Context(), startTime, endTime, startTime.Location(), accountID)
+	granularity := service.NormalizeOpenAICacheGranularity(c.Query("granularity"), endTime.Sub(startTime))
+	rows, err := h.statsService.ListTrend(c.Request.Context(), startTime, endTime, startTime.Location(), accountID, granularity)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, gin.H{"days": rows})
+	response.Success(c, gin.H{"days": rows, "granularity": granularity})
 }

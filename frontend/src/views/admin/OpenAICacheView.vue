@@ -30,6 +30,12 @@
               <Select v-model="scope" :options="scopeOptions" />
             </div>
           </div>
+          <div class="flex items-center gap-2" :title="t('admin.openaiCache.granularityMinuteHint')">
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.openaiCache.granularity') }}:</span>
+            <div class="w-32">
+              <Select v-model="granularity" :options="granularityOptions" @change="loadDaily" />
+            </div>
+          </div>
           <div class="ml-auto flex items-center gap-2">
             <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.openaiCache.table.sortBy') }}:</span>
             <div class="w-44">
@@ -83,7 +89,8 @@
         <div v-else class="h-72">
           <Line :data="chartData" :options="chartOptions" />
         </div>
-        <div v-if="daily.length" class="mt-4 overflow-x-auto">
+        <p v-if="daily.length > 300" class="mt-3 text-xs text-gray-500">{{ t('admin.openaiCache.chart.tableHidden') }}</p>
+        <div v-if="daily.length && daily.length <= 300" class="mt-4 overflow-x-auto">
           <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-dark-700">
             <thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-800 dark:text-dark-400">
               <tr>
@@ -120,6 +127,7 @@
             <thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-800 dark:text-dark-400">
               <tr>
                 <th class="px-3 py-2 text-left">{{ t('admin.openaiCache.table.account') }}</th>
+                <th class="px-3 py-2 text-left">{{ t('admin.openaiCache.table.accountStatus') }}</th>
                 <th class="px-3 py-2 text-left">{{ t('admin.openaiCache.table.type') }}</th>
                 <th class="px-3 py-2 text-left">{{ t('admin.openaiCache.table.simulation') }}</th>
                 <th class="px-3 py-2 text-right">{{ t('admin.openaiCache.table.requests') }}</th>
@@ -144,6 +152,12 @@
                 <td class="px-3 py-2">
                   <div class="font-medium text-gray-900 dark:text-white">{{ row.name }}</div>
                   <div class="text-xs text-gray-500">#{{ row.account_id }}<span v-if="row.is_shadow"> · {{ t('admin.openaiCache.table.shadow') }}</span></div>
+                </td>
+                <td class="px-3 py-2" @click.stop>
+                  <div class="flex items-center gap-1.5">
+                    <AccountStatusIndicator :account="asAccount(row)" />
+                    <span v-if="!row.schedulable" class="inline-flex rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ t('admin.accounts.schedulableDisabled') }}</span>
+                  </div>
                 </td>
                 <td class="px-3 py-2 text-gray-700 dark:text-gray-300">{{ row.type }}</td>
                 <td class="px-3 py-2">
@@ -198,14 +212,17 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import { useAppStore } from '@/stores/app'
 import { openaiCacheAPI } from '@/api/admin/openaiCache'
 import type {
   OpenAICacheAccountRow,
   OpenAICacheDailyRow,
+  OpenAICacheGranularity,
   OpenAICacheRateView,
   OpenAICacheSummary
 } from '@/api/admin/openaiCache'
+import type { Account } from '@/types'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
@@ -243,6 +260,45 @@ const scopeOptions = computed(() => [
   { value: 'all', label: t('admin.openaiCache.scopeAll') },
   { value: 'text', label: t('admin.openaiCache.scopeText') }
 ])
+
+const granularity = ref<OpenAICacheGranularity>('hour')
+const rangeDays = computed(() => {
+  const s = new Date(`${startDate.value}T00:00:00`).getTime()
+  const e = new Date(`${endDate.value}T00:00:00`).getTime()
+  return Math.round((e - s) / 86400000) + 1
+})
+const granularityOptions = computed(() => {
+  const opts = [
+    { value: 'day', label: t('admin.openaiCache.granularityDay') },
+    { value: 'hour', label: t('admin.openaiCache.granularityHour') },
+    { value: '5min', label: t('admin.openaiCache.granularity5Min') }
+  ]
+  // 分钟级只在范围不超过 2 天时可选（后端超过 2 天会自动降到 5 分钟）。
+  if (rangeDays.value <= 2) opts.push({ value: 'minute', label: t('admin.openaiCache.granularityMinute') })
+  return opts
+})
+watch(rangeDays, (d) => {
+  if (d > 2 && granularity.value === 'minute') granularity.value = '5min'
+})
+
+// 复用账号页的状态指示组件：把本页的行映射成它需要的 Account 字段。
+const asAccount = (row: OpenAICacheAccountRow): Account =>
+  ({
+    id: row.account_id,
+    name: row.name,
+    platform: 'openai',
+    type: row.type,
+    status: row.status,
+    schedulable: row.schedulable,
+    error_message: row.error_message || '',
+    rate_limit_reset_at: row.rate_limit_reset_at ?? null,
+    overload_until: row.overload_until ?? null,
+    temp_unschedulable_until: row.temp_unschedulable_until ?? null,
+    temp_unschedulable_reason: row.temp_unschedulable_reason || '',
+    expires_at: row.expires_at ?? null,
+    last_used_at: row.last_used_at ?? null,
+    extra: {}
+  }) as unknown as Account
 
 type SortKey = 'delta' | 'rawRate' | 'requests'
 const sortKey = ref<SortKey>('delta')
@@ -348,11 +404,14 @@ const loadAccounts = async () => {
 const loadDaily = async () => {
   dailyLoading.value = true
   try {
-    daily.value = await openaiCacheAPI.listDaily({
+    const res = await openaiCacheAPI.listDaily({
       start_date: startDate.value,
       end_date: endDate.value,
-      account_id: selectedAccount.value?.account_id
+      account_id: selectedAccount.value?.account_id,
+      granularity: granularity.value
     })
+    daily.value = res.days
+    if (res.granularity !== granularity.value) granularity.value = res.granularity
   } catch (error) {
     console.error('Failed to load openai cache daily:', error)
     appStore.showError(t('admin.openaiCache.loadFailed'))

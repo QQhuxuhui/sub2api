@@ -45,23 +45,31 @@ func scanOpenAICacheBucket(b *service.OpenAICacheTokenBucket) []any {
 	return []any{&b.Requests, &b.ZeroCacheReqs, &b.Input, &b.CacheRead, &b.CacheCreation, &b.RawInput, &b.RawCacheRead, &b.BilledCost, &b.CostDelta}
 }
 
-func (r *openAICacheStatsRepository) ListOpenAICacheAccountUsage(ctx context.Context, startTime, endTime time.Time) ([]service.OpenAICacheAccountUsage, error) {
+// ListOpenAICacheUsage 返回 [startTime, endTime) 内按 (时间桶, 账号) 的聚合。
+// bucketSeconds <= 0 表示整段一个桶（桶起点 = startTime）；否则桶从 startTime 起每
+// bucketSeconds 一格（与用户时区的自然日零点对齐，不依赖库会话时区）。
+func (r *openAICacheStatsRepository) ListOpenAICacheUsage(ctx context.Context, startTime, endTime time.Time, bucketSeconds int) ([]service.OpenAICacheUsageRow, error) {
+	if bucketSeconds <= 0 {
+		bucketSeconds = int(endTime.Sub(startTime).Seconds()) + 1
+	}
 	query := `
-		SELECT account_id,` + openAICacheBucketSelect("TRUE") + `,` + openAICacheBucketSelect(openAICacheTextRequestPredicate) + `
+		SELECT $1::timestamptz + FLOOR(EXTRACT(EPOCH FROM (created_at - $1::timestamptz)) / $3) * ($3 * INTERVAL '1 second') AS bucket_start,
+		       account_id,` + openAICacheBucketSelect("TRUE") + `,` + openAICacheBucketSelect(openAICacheTextRequestPredicate) + `
 		FROM usage_logs
 		WHERE created_at >= $1 AND created_at < $2
 		  AND account_id IN (SELECT id FROM accounts WHERE platform = 'openai')
-		GROUP BY account_id
+		GROUP BY bucket_start, account_id
+		ORDER BY bucket_start, account_id
 	`
-	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime)
+	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, bucketSeconds)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var out []service.OpenAICacheAccountUsage
+	var out []service.OpenAICacheUsageRow
 	for rows.Next() {
-		var u service.OpenAICacheAccountUsage
-		dest := append([]any{&u.AccountID}, scanOpenAICacheBucket(&u.All)...)
+		var u service.OpenAICacheUsageRow
+		dest := append([]any{&u.Bucket, &u.AccountID}, scanOpenAICacheBucket(&u.All)...)
 		dest = append(dest, scanOpenAICacheBucket(&u.Text)...)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err

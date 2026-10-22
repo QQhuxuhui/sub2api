@@ -18,6 +18,12 @@ export default {
       costDeltaHint: 'Concession = expected − billed, both in customer billing terms (not upstream cost).',
       requests: 'Requests'
     },
+    granularity: 'Granularity',
+    granularityDay: 'Day',
+    granularityHour: 'Hour',
+    granularity5Min: '5 min',
+    granularityMinute: 'Minute',
+    granularityMinuteHint: 'Minute granularity is available for ranges up to 2 days',
     chart: {
       title: 'Daily trend',
       titleFor: 'Daily trend: {name}',
@@ -27,10 +33,12 @@ export default {
       costDelta: 'Concession',
       expectedCost: 'Expected',
       billedCost: 'Billed',
-      empty: 'No data in range'
+      empty: 'No data in range',
+      tableHidden: 'Trend table is shown only for 300 points or fewer'
     },
     table: {
       account: 'Account',
+      accountStatus: 'Status',
       type: 'Type',
       simulation: 'Simulation',
       requests: 'Requests',

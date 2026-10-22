@@ -25,9 +25,9 @@ func TestOpenAICacheStatsUsesActualCostAndExcludesWebSocketText(t *testing.T) {
 	defer db.Close()
 	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 0, 1)
-	mock.ExpectQuery("account cache stats").WithArgs(start, end).
-		WillReturnRows(sqlmock.NewRows([]string{"account_id"}))
-	_, err = NewOpenAICacheStatsRepository(db).ListOpenAICacheAccountUsage(context.Background(), start, end)
+	mock.ExpectQuery("account cache stats").WithArgs(start, end, 300).
+		WillReturnRows(sqlmock.NewRows([]string{"bucket_start", "account_id"}))
+	_, err = NewOpenAICacheStatsRepository(db).ListOpenAICacheUsage(context.Background(), start, end, 300)
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

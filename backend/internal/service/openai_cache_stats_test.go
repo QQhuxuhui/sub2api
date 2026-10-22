@@ -36,17 +36,24 @@ func (r *cacheStatsAccountRepo) ListAllWithFilters(_ context.Context, platform, 
 type cacheStatsUsageRepo struct {
 	OpenAICacheStatsRepository
 	usage []OpenAICacheAccountUsage
-	// byChunk 按分片起点返回不同结果；calls 记录每次查询的 [start,end)。
+	// byChunk 按分片起点返回不同结果（桶起点 = 分片起点）；calls 记录每次查询的 [start,end)。
 	byChunk map[time.Time][]OpenAICacheAccountUsage
 	calls   [][2]time.Time
+	buckets []int
 }
 
-func (r *cacheStatsUsageRepo) ListOpenAICacheAccountUsage(_ context.Context, start, end time.Time) ([]OpenAICacheAccountUsage, error) {
+func (r *cacheStatsUsageRepo) ListOpenAICacheUsage(_ context.Context, start, end time.Time, bucketSeconds int) ([]OpenAICacheUsageRow, error) {
 	r.calls = append(r.calls, [2]time.Time{start, end})
+	r.buckets = append(r.buckets, bucketSeconds)
+	src := r.usage
 	if r.byChunk != nil {
-		return r.byChunk[start.UTC()], nil
+		src = r.byChunk[start.UTC()]
 	}
-	return r.usage, nil
+	rows := make([]OpenAICacheUsageRow, 0, len(src))
+	for _, u := range src {
+		rows = append(rows, OpenAICacheUsageRow{Bucket: start, AccountID: u.AccountID, All: u.All, Text: u.Text})
+	}
+	return rows, nil
 }
 
 func TestOpenAICacheStatsListAccountsIncludesInactiveBeyondPageLimit(t *testing.T) {
@@ -169,4 +176,67 @@ func TestOpenAICacheStatsChunksSharedBetweenAccountsAndDaily(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, repo.calls, 21)
 	require.True(t, repo.calls[20][0].Equal(now) && repo.calls[20][1].Equal(now.Add(time.Hour)))
+}
+
+func TestOpenAICacheStatsTrendGranularities(t *testing.T) {
+	sh, _ := time.LoadLocation("Asia/Shanghai")
+	now := time.Date(2026, 10, 22, 18, 0, 0, 0, sh)
+	d0 := time.Date(2026, 10, 21, 0, 0, 0, 0, sh)
+	d1 := d0.AddDate(0, 0, 1)
+	d2 := d0.AddDate(0, 0, 2)
+	// 仓库按 5 分钟桶返回：昨天 00:00 与 00:05 两个桶，今天 09:00 一个桶。
+	repo := &bucketCacheStatsRepo{rows: []OpenAICacheUsageRow{
+		{Bucket: d0, AccountID: 1, All: OpenAICacheTokenBucket{Requests: 1, Input: 100, CacheRead: 900}},
+		{Bucket: d0.Add(5 * time.Minute), AccountID: 1, All: OpenAICacheTokenBucket{Requests: 2, Input: 500, CacheRead: 500}},
+		{Bucket: d0.Add(5 * time.Minute), AccountID: 2, All: OpenAICacheTokenBucket{Requests: 4, Input: 400, CacheRead: 600}},
+		{Bucket: d1.Add(9 * time.Hour), AccountID: 1, All: OpenAICacheTokenBucket{Requests: 3, Input: 300, CacheRead: 700}},
+	}}
+	svc := NewOpenAICacheStatsService(repo, &cacheStatsAccountRepo{}, nil)
+	svc.now = func() time.Time { return now }
+
+	day, err := svc.ListTrend(context.Background(), d0, d2, sh, 0, OpenAICacheGranularityDay)
+	require.NoError(t, err)
+	require.Len(t, day, 2)
+	require.Equal(t, "2026-10-21", day[0].Date)
+	require.Equal(t, int64(7), day[0].All.Requests)
+	require.Equal(t, int64(3), day[1].All.Requests)
+	require.Equal(t, []int{300, 300}, repo.buckets[:2], "基础桶 5 分钟")
+
+	hour, err := svc.ListTrend(context.Background(), d0, d2, sh, 0, OpenAICacheGranularityHour)
+	require.NoError(t, err)
+	require.Len(t, hour, 2, "只有有数据的小时出行")
+	require.Equal(t, "10-21 00:00", hour[0].Date)
+	require.Equal(t, int64(7), hour[0].All.Requests)
+	require.Equal(t, "10-22 09:00", hour[1].Date)
+
+	five, err := svc.ListTrend(context.Background(), d0, d2, sh, 1, OpenAICacheGranularity5Min)
+	require.NoError(t, err)
+	require.Len(t, five, 3)
+	require.Equal(t, "10-21 00:05", five[1].Date)
+	require.Equal(t, int64(2), five[1].All.Requests, "单账号过滤")
+
+	callsBefore := len(repo.buckets)
+	minute, err := svc.ListTrend(context.Background(), d1, d2, sh, 0, OpenAICacheGranularityMinute)
+	require.NoError(t, err)
+	require.NotEmpty(t, minute)
+	require.Equal(t, 60, repo.buckets[callsBefore], "分钟级单独按 60 秒桶查")
+	require.Equal(t, OpenAICacheGranularity5Min, NormalizeOpenAICacheGranularity(OpenAICacheGranularityMinute, 72*time.Hour), "超过 2 天自动降级")
+	require.Equal(t, OpenAICacheGranularityDay, NormalizeOpenAICacheGranularity("junk", time.Hour))
+}
+
+type bucketCacheStatsRepo struct {
+	OpenAICacheStatsRepository
+	rows    []OpenAICacheUsageRow
+	buckets []int
+}
+
+func (r *bucketCacheStatsRepo) ListOpenAICacheUsage(_ context.Context, start, end time.Time, bucketSeconds int) ([]OpenAICacheUsageRow, error) {
+	r.buckets = append(r.buckets, bucketSeconds)
+	var out []OpenAICacheUsageRow
+	for _, row := range r.rows {
+		if !row.Bucket.Before(start) && row.Bucket.Before(end) {
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }

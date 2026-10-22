@@ -43,6 +43,13 @@ export interface OpenAICacheAccountRow {
   status: string
   is_shadow: boolean
   schedulable: boolean
+  error_message?: string
+  rate_limit_reset_at?: string | null
+  overload_until?: string | null
+  temp_unschedulable_until?: string | null
+  temp_unschedulable_reason?: string
+  expires_at?: string | null
+  last_used_at?: string | null
   simulation: OpenAICacheSimConfigView
   all: OpenAICacheRateView
   text: OpenAICacheRateView
@@ -69,8 +76,11 @@ export interface OpenAICacheAccountsResult {
   accounts: OpenAICacheAccountRow[]
 }
 
+export type OpenAICacheGranularity = 'day' | 'hour' | '5min' | 'minute'
+
 export interface OpenAICacheDailyRow {
   date: string
+  bucket_start: string
   all: OpenAICacheRateView
   text: OpenAICacheRateView
   billed_cost: number
@@ -89,9 +99,14 @@ export async function listAccounts(params: OpenAICacheRangeParams): Promise<Open
   return data
 }
 
-export async function listDaily(params: OpenAICacheRangeParams & { account_id?: number }): Promise<OpenAICacheDailyRow[]> {
-  const { data } = await apiClient.get<{ days: OpenAICacheDailyRow[] }>('/admin/openai-cache/daily', { params })
-  return data.days || []
+export async function listDaily(
+  params: OpenAICacheRangeParams & { account_id?: number; granularity?: OpenAICacheGranularity }
+): Promise<{ days: OpenAICacheDailyRow[]; granularity: OpenAICacheGranularity }> {
+  const { data } = await apiClient.get<{ days: OpenAICacheDailyRow[]; granularity: OpenAICacheGranularity }>(
+    '/admin/openai-cache/daily',
+    { params }
+  )
+  return { days: data.days || [], granularity: data.granularity || 'day' }
 }
 
 export const openaiCacheAPI = { listAccounts, listDaily }

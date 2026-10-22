@@ -44,16 +44,55 @@ func cacheRatePct(cached, total int64) *float64 {
 	return &v
 }
 
-// OpenAICacheAccountUsage 是单个账号在时间范围内的汇总（仓库返回）。
+// OpenAICacheAccountUsage 是单个账号在时间范围内的汇总。
 type OpenAICacheAccountUsage struct {
 	AccountID int64
 	All       OpenAICacheTokenBucket
 	Text      OpenAICacheTokenBucket
 }
 
-// OpenAICacheStatsRepository 读取 usage_logs 的缓存口径聚合（一段时间内按账号）。
+// OpenAICacheUsageRow 是仓库返回的一行：某个时间桶内某账号的汇总。
+type OpenAICacheUsageRow struct {
+	Bucket    time.Time
+	AccountID int64
+	All       OpenAICacheTokenBucket
+	Text      OpenAICacheTokenBucket
+}
+
+// OpenAICacheStatsRepository 读取 usage_logs 的缓存口径聚合（按时间桶 × 账号）。
 type OpenAICacheStatsRepository interface {
-	ListOpenAICacheAccountUsage(ctx context.Context, startTime, endTime time.Time) ([]OpenAICacheAccountUsage, error)
+	ListOpenAICacheUsage(ctx context.Context, startTime, endTime time.Time, bucketSeconds int) ([]OpenAICacheUsageRow, error)
+}
+
+// 走势颗粒度。
+const (
+	OpenAICacheGranularityDay    = "day"
+	OpenAICacheGranularityHour   = "hour"
+	OpenAICacheGranularity5Min   = "5min"
+	OpenAICacheGranularityMinute = "minute"
+)
+
+const (
+	// openAICacheBaseBucketSeconds 缓存里的基础桶：5 分钟。天/小时/5 分钟都由它合并得到。
+	openAICacheBaseBucketSeconds = 300
+	// openAICacheMinuteBucketSeconds 分钟级单独一套缓存键，只在范围不超过 2 天时允许。
+	openAICacheMinuteBucketSeconds = 60
+	openAICacheMinuteMaxRange      = 48 * time.Hour
+)
+
+// NormalizeOpenAICacheGranularity 校验颗粒度；分钟级在超长范围下自动降到 5 分钟。
+func NormalizeOpenAICacheGranularity(g string, rangeLen time.Duration) string {
+	switch g {
+	case OpenAICacheGranularityHour, OpenAICacheGranularity5Min:
+		return g
+	case OpenAICacheGranularityMinute:
+		if rangeLen > openAICacheMinuteMaxRange {
+			return OpenAICacheGranularity5Min
+		}
+		return g
+	default:
+		return OpenAICacheGranularityDay
+	}
 }
 
 const (
@@ -66,15 +105,15 @@ const (
 	openAICacheMaxChunks    = 92
 )
 
-// openAICacheChunk 是一个自然日（用户时区）分片的聚合结果。
+// openAICacheChunk 是一个自然日（用户时区）分片的聚合结果（基础桶 × 账号的行）。
 type openAICacheChunk struct {
 	start, end time.Time
-	usage      []OpenAICacheAccountUsage
+	rows       []OpenAICacheUsageRow
 }
 
 type openAICacheChunkEntry struct {
 	loadedAt time.Time
-	usage    []OpenAICacheAccountUsage
+	rows     []OpenAICacheUsageRow
 }
 
 // OpenAICacheAccountRow 是管理页「上游缓存」一行。
@@ -85,6 +124,14 @@ type OpenAICacheAccountRow struct {
 	Status      string `json:"status"`
 	IsShadow    bool   `json:"is_shadow"`
 	Schedulable bool   `json:"schedulable"`
+	// 状态明细，供前端复用账号页的状态指示（错误 / 限流 / 过载 / 临时不可调度 / 过期）。
+	ErrorMessage            string     `json:"error_message,omitempty"`
+	RateLimitResetAt        *time.Time `json:"rate_limit_reset_at,omitempty"`
+	OverloadUntil           *time.Time `json:"overload_until,omitempty"`
+	TempUnschedulableUntil  *time.Time `json:"temp_unschedulable_until,omitempty"`
+	TempUnschedulableReason string     `json:"temp_unschedulable_reason,omitempty"`
+	ExpiresAt               *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt              *time.Time `json:"last_used_at,omitempty"`
 
 	Simulation OpenAICacheSimConfigView `json:"simulation"`
 
@@ -135,9 +182,11 @@ type OpenAICacheWindowView struct {
 	UpdatedAt   *string  `json:"updated_at,omitempty"`
 }
 
-// OpenAICacheDailyRow 是按天一行。
+// OpenAICacheDailyRow 是走势的一个时间桶（天 / 小时 / 5 分钟 / 分钟）。
 type OpenAICacheDailyRow struct {
+	// Date 是展示标签（天：2006-01-02；更细：01-02 15:04），BucketStart 是桶起点。
 	Date         string              `json:"date"`
+	BucketStart  time.Time           `json:"bucket_start"`
 	All          OpenAICacheRateView `json:"all"`
 	Text         OpenAICacheRateView `json:"text"`
 	BilledCost   float64             `json:"billed_cost"`
@@ -208,15 +257,15 @@ func openAICacheChunkKey(c openAICacheChunk) string {
 	return strconv.FormatInt(c.start.Unix(), 10) + ":" + strconv.FormatInt(c.end.Unix(), 10)
 }
 
-// loadChunks 读取（或从缓存取）每个分片的按账号聚合。
-func (s *OpenAICacheStatsService) loadChunks(ctx context.Context, chunks []openAICacheChunk) ([]openAICacheChunk, error) {
+// loadChunks 读取（或从缓存取）每个分片在 baseSeconds 桶下的按账号聚合。
+func (s *OpenAICacheStatsService) loadChunks(ctx context.Context, chunks []openAICacheChunk, baseSeconds int) ([]openAICacheChunk, error) {
 	out := make([]openAICacheChunk, len(chunks))
 	for i, c := range chunks {
-		usage, err := s.loadChunk(ctx, c)
+		rows, err := s.loadChunk(ctx, c, baseSeconds)
 		if err != nil {
 			return nil, err
 		}
-		out[i] = openAICacheChunk{start: c.start, end: c.end, usage: usage}
+		out[i] = openAICacheChunk{start: c.start, end: c.end, rows: rows}
 	}
 	return out, nil
 }
@@ -224,14 +273,14 @@ func (s *OpenAICacheStatsService) loadChunks(ctx context.Context, chunks []openA
 // loadChunk 读取一个自然日分片。已结束的日子整段查一次；进行中的日子（含 now）按小时
 // 再切：当天的新页还没被 vacuum 标成全可见，index-only 仍要回表，整天实时查要秒级，
 // 而已过去的整点小时几乎不再变化，可以缓存 10 分钟，只有当前小时每 45 秒重查。
-func (s *OpenAICacheStatsService) loadChunk(ctx context.Context, c openAICacheChunk) ([]OpenAICacheAccountUsage, error) {
+func (s *OpenAICacheStatsService) loadChunk(ctx context.Context, c openAICacheChunk, baseSeconds int) ([]OpenAICacheUsageRow, error) {
 	now := s.now()
 	if c.end.Before(now) {
-		return s.loadChunkCached(ctx, c, openAICacheClosedChunkTTL)
+		return s.loadChunkCached(ctx, c, baseSeconds, openAICacheClosedChunkTTL)
 	}
 	// 小时片的终点取整点而不是 now：键稳定，45 秒 TTL 才真正起作用（未来时刻没有行，
-	// 查到整点与查到 now 结果一致）。
-	byID := make(map[int64]OpenAICacheAccountUsage)
+	// 查到整点与查到 now 结果一致）。小时片内的桶仍以自然日零点为基准对齐。
+	var out []OpenAICacheUsageRow
 	for cur := c.start; cur.Before(c.end) && cur.Before(now); {
 		next := cur.Truncate(time.Hour).Add(time.Hour)
 		if next.After(c.end) {
@@ -241,56 +290,46 @@ func (s *OpenAICacheStatsService) loadChunk(ctx context.Context, c openAICacheCh
 		if !next.Before(now) {
 			ttl = openAICacheOpenChunkTTL
 		}
-		usage, err := s.loadChunkCached(ctx, openAICacheChunk{start: cur, end: next}, ttl)
+		rows, err := s.loadChunkCached(ctx, openAICacheChunk{start: cur, end: next}, baseSeconds, ttl)
 		if err != nil {
 			return nil, err
 		}
-		for _, u := range usage {
-			acc := byID[u.AccountID]
-			acc.AccountID = u.AccountID
-			addBucket(&acc.All, u.All)
-			addBucket(&acc.Text, u.Text)
-			byID[u.AccountID] = acc
-		}
+		out = append(out, rows...)
 		cur = next
 	}
-	out := make([]OpenAICacheAccountUsage, 0, len(byID))
-	for _, u := range byID {
-		out = append(out, u)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].AccountID < out[j].AccountID })
 	return out, nil
 }
 
-func (s *OpenAICacheStatsService) loadChunkCached(ctx context.Context, c openAICacheChunk, ttl time.Duration) ([]OpenAICacheAccountUsage, error) {
-	key := openAICacheChunkKey(c)
+func (s *OpenAICacheStatsService) loadChunkCached(ctx context.Context, c openAICacheChunk, baseSeconds int, ttl time.Duration) ([]OpenAICacheUsageRow, error) {
+	key := openAICacheChunkKey(c) + ":" + strconv.Itoa(baseSeconds)
 	now := s.now()
 	s.mu.Lock()
 	if entry, ok := s.cache[key]; ok && now.Sub(entry.loadedAt) < ttl {
 		s.mu.Unlock()
-		return entry.usage, nil
+		return entry.rows, nil
 	}
 	s.mu.Unlock()
 
 	v, err, _ := s.sf.Do(key, func() (any, error) {
-		usage, err := s.repo.ListOpenAICacheAccountUsage(ctx, c.start, c.end)
+		rows, err := s.repo.ListOpenAICacheUsage(ctx, c.start, c.end, baseSeconds)
 		if err != nil {
 			return nil, err
 		}
 		s.mu.Lock()
-		s.cache[key] = openAICacheChunkEntry{loadedAt: s.now(), usage: usage}
+		s.cache[key] = openAICacheChunkEntry{loadedAt: s.now(), rows: rows}
 		s.evictExpiredLocked(s.now())
 		s.mu.Unlock()
-		return usage, nil
+		return rows, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return v.([]OpenAICacheAccountUsage), nil
+	return v.([]OpenAICacheUsageRow), nil
 }
 
 func (s *OpenAICacheStatsService) evictExpiredLocked(now time.Time) {
-	if len(s.cache) < 512 {
+	// 细桶条目一天约几万行，过期就清，不等条目数攒多。
+	if len(s.cache) < 64 {
 		return
 	}
 	for k, e := range s.cache {
@@ -303,7 +342,7 @@ func (s *OpenAICacheStatsService) evictExpiredLocked(now time.Time) {
 func sumChunkByAccount(chunks []openAICacheChunk) map[int64]OpenAICacheAccountUsage {
 	byID := make(map[int64]OpenAICacheAccountUsage)
 	for _, c := range chunks {
-		for _, u := range c.usage {
+		for _, u := range c.rows {
 			acc := byID[u.AccountID]
 			acc.AccountID = u.AccountID
 			addBucket(&acc.All, u.All)
@@ -312,6 +351,27 @@ func sumChunkByAccount(chunks []openAICacheChunk) map[int64]OpenAICacheAccountUs
 		}
 	}
 	return byID
+}
+
+// openAICacheTrendBucket 把基础桶起点归到目标颗粒度的桶起点（用户时区）。
+func openAICacheTrendBucket(t time.Time, granularity string, loc *time.Location) time.Time {
+	l := t.In(loc)
+	switch granularity {
+	case OpenAICacheGranularityDay:
+		return time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, loc)
+	case OpenAICacheGranularityHour:
+		return time.Date(l.Year(), l.Month(), l.Day(), l.Hour(), 0, 0, 0, loc)
+	default:
+		return t
+	}
+}
+
+func openAICacheTrendLabel(t time.Time, granularity string, loc *time.Location) string {
+	l := t.In(loc)
+	if granularity == OpenAICacheGranularityDay {
+		return l.Format("2006-01-02")
+	}
+	return l.Format("01-02 15:04")
 }
 
 func addBucket(dst *OpenAICacheTokenBucket, src OpenAICacheTokenBucket) {
@@ -335,7 +395,7 @@ func (s *OpenAICacheStatsService) ListAccounts(ctx context.Context, startTime, e
 	if err != nil {
 		return nil, err
 	}
-	chunks, err := s.loadChunks(ctx, splitOpenAICacheRange(startTime, endTime, loc))
+	chunks, err := s.loadChunks(ctx, splitOpenAICacheRange(startTime, endTime, loc), openAICacheBaseBucketSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -348,20 +408,27 @@ func (s *OpenAICacheStatsService) ListAccounts(ctx context.Context, startTime, e
 		u := usageByID[account.ID]
 		cfg := account.OpenAICacheSimulation()
 		row := OpenAICacheAccountRow{
-			AccountID:     account.ID,
-			Name:          account.Name,
-			Type:          account.Type,
-			Status:        account.Status,
-			IsShadow:      account.IsShadow(),
-			Schedulable:   account.Schedulable,
-			Simulation:    openAICacheSimConfigView(cfg),
-			All:           openAICacheRateView(u.All),
-			Text:          openAICacheRateView(u.Text),
-			Requests:      u.All.Requests,
-			ZeroCacheReqs: u.All.ZeroCacheReqs,
-			BilledCost:    u.All.BilledCost,
-			CostDelta:     u.All.CostDelta,
-			ExpectedCost:  u.All.BilledCost + u.All.CostDelta,
+			AccountID:               account.ID,
+			Name:                    account.Name,
+			Type:                    account.Type,
+			Status:                  account.Status,
+			IsShadow:                account.IsShadow(),
+			Schedulable:             account.Schedulable,
+			ErrorMessage:            account.ErrorMessage,
+			RateLimitResetAt:        account.RateLimitResetAt,
+			OverloadUntil:           account.OverloadUntil,
+			TempUnschedulableUntil:  account.TempUnschedulableUntil,
+			TempUnschedulableReason: account.TempUnschedulableReason,
+			ExpiresAt:               account.ExpiresAt,
+			LastUsedAt:              account.LastUsedAt,
+			Simulation:              openAICacheSimConfigView(cfg),
+			All:                     openAICacheRateView(u.All),
+			Text:                    openAICacheRateView(u.Text),
+			Requests:                u.All.Requests,
+			ZeroCacheReqs:           u.All.ZeroCacheReqs,
+			BilledCost:              u.All.BilledCost,
+			CostDelta:               u.All.CostDelta,
+			ExpectedCost:            u.All.BilledCost + u.All.CostDelta,
 		}
 		if u.All.Requests > 0 {
 			row.ZeroCachePct = float64(u.All.ZeroCacheReqs) * 100 / float64(u.All.Requests)
@@ -404,33 +471,70 @@ func (s *OpenAICacheStatsService) ListAccounts(ctx context.Context, startTime, e
 	return result, nil
 }
 
-// ListDaily 返回按用户时区自然日的汇总；accountID 为 0 时为全站 OpenAI。
-func (s *OpenAICacheStatsService) ListDaily(ctx context.Context, startTime, endTime time.Time, loc *time.Location, accountID int64) ([]OpenAICacheDailyRow, error) {
+// ListTrend 返回按 granularity（day / hour / 5min / minute）分桶的走势；accountID 为 0 时为全站 OpenAI。
+// 桶边界按用户时区：天与小时按自然日/整点，5 分钟与分钟从自然日零点起等分。
+func (s *OpenAICacheStatsService) ListTrend(ctx context.Context, startTime, endTime time.Time, loc *time.Location, accountID int64, granularity string) ([]OpenAICacheDailyRow, error) {
 	if loc == nil {
 		loc = time.UTC
 	}
-	chunks, err := s.loadChunks(ctx, splitOpenAICacheRange(startTime, endTime, loc))
+	granularity = NormalizeOpenAICacheGranularity(granularity, endTime.Sub(startTime))
+	base := openAICacheBaseBucketSeconds
+	if granularity == OpenAICacheGranularityMinute {
+		base = openAICacheMinuteBucketSeconds
+	}
+	chunks, err := s.loadChunks(ctx, splitOpenAICacheRange(startTime, endTime, loc), base)
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]OpenAICacheDailyRow, 0, len(chunks))
+	type agg struct{ all, text OpenAICacheTokenBucket }
+	byBucket := make(map[int64]*agg)
+	var order []time.Time
 	for _, c := range chunks {
-		var all, text OpenAICacheTokenBucket
-		for _, u := range c.usage {
+		for _, u := range c.rows {
 			if accountID > 0 && u.AccountID != accountID {
 				continue
 			}
-			addBucket(&all, u.All)
-			addBucket(&text, u.Text)
+			b := openAICacheTrendBucket(u.Bucket, granularity, loc)
+			key := b.Unix()
+			a, ok := byBucket[key]
+			if !ok {
+				a = &agg{}
+				byBucket[key] = a
+				order = append(order, b)
+			}
+			addBucket(&a.all, u.All)
+			addBucket(&a.text, u.Text)
 		}
+	}
+	// 天颗粒度保持原行为：范围内每一天都出一行（没有数据也给零），便于画图对齐。
+	if granularity == OpenAICacheGranularityDay {
+		order = order[:0]
+		for _, c := range chunks {
+			b := openAICacheTrendBucket(c.start, granularity, loc)
+			if _, ok := byBucket[b.Unix()]; !ok {
+				byBucket[b.Unix()] = &agg{}
+			}
+			order = append(order, b)
+		}
+	}
+	sort.Slice(order, func(i, j int) bool { return order[i].Before(order[j]) })
+	rows := make([]OpenAICacheDailyRow, 0, len(order))
+	for _, b := range order {
+		a := byBucket[b.Unix()]
 		rows = append(rows, OpenAICacheDailyRow{
-			Date:         c.start.In(loc).Format("2006-01-02"),
-			All:          openAICacheRateView(all),
-			Text:         openAICacheRateView(text),
-			BilledCost:   all.BilledCost,
-			CostDelta:    all.CostDelta,
-			ExpectedCost: all.BilledCost + all.CostDelta,
+			Date:         openAICacheTrendLabel(b, granularity, loc),
+			BucketStart:  b,
+			All:          openAICacheRateView(a.all),
+			Text:         openAICacheRateView(a.text),
+			BilledCost:   a.all.BilledCost,
+			CostDelta:    a.all.CostDelta,
+			ExpectedCost: a.all.BilledCost + a.all.CostDelta,
 		})
 	}
 	return rows, nil
+}
+
+// ListDaily 等价于 ListTrend(day)。
+func (s *OpenAICacheStatsService) ListDaily(ctx context.Context, startTime, endTime time.Time, loc *time.Location, accountID int64) ([]OpenAICacheDailyRow, error) {
+	return s.ListTrend(ctx, startTime, endTime, loc, accountID, OpenAICacheGranularityDay)
 }

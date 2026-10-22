@@ -18,6 +18,12 @@ export default {
       costDeltaHint: '让利 = 本该收 − 实收，均为客户计费口径，不是上游成本。',
       requests: '请求数'
     },
+    granularity: '颗粒度',
+    granularityDay: '按天',
+    granularityHour: '按小时',
+    granularity5Min: '按 5 分钟',
+    granularityMinute: '按分钟',
+    granularityMinuteHint: '分钟级只在范围不超过 2 天时可选',
     chart: {
       title: '按天走势',
       titleFor: '按天走势：{name}',
@@ -27,10 +33,12 @@ export default {
       costDelta: '让利',
       expectedCost: '本该收',
       billedCost: '实收',
-      empty: '范围内没有数据'
+      empty: '范围内没有数据',
+      tableHidden: '走势明细只在 300 个点以内展示'
     },
     table: {
       account: '账号',
+      accountStatus: '状态',
       type: '类型',
       simulation: '模拟',
       requests: '请求数',
