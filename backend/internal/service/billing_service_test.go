@@ -1913,3 +1913,117 @@ func TestComputeTokenBreakdown_NonExplicitZeroImagePrice_FallsBackToOutput(t *te
 	// textOutputTokens = 200 - 50 = 150
 	require.InDelta(t, 150*15e-6, bd.OutputCost, 1e-12)
 }
+
+// ---- ultrafast 档位：目录给了专属单价时不能再和 priority 共用 2 倍系数 ----
+
+func newTestBillingServiceWithUltrafastCatalog() *BillingService {
+	return NewBillingService(&config.Config{}, &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			// 与线上目录 gpt-6.1-sol 一致：基础 $2/$10/$0.1，priority 2 倍，ultrafast 6 倍，272k 以上 2x/1.5x。
+			"gpt-6.1-sol": {
+				InputCostPerToken:                2e-6,
+				InputCostPerTokenPriority:        4e-6,
+				InputCostPerTokenUltrafast:       12e-6,
+				OutputCostPerToken:               10e-6,
+				OutputCostPerTokenPriority:       20e-6,
+				OutputCostPerTokenUltrafast:      60e-6,
+				CacheCreationInputTokenCost:      2.5e-6,
+				CacheReadInputTokenCost:          0.1e-6,
+				CacheReadInputTokenCostPriority:  0.2e-6,
+				CacheReadInputTokenCostUltrafast: 0.6e-6,
+				LongContextInputTokenThreshold:   272000,
+				LongContextInputCostMultiplier:   2.0,
+				LongContextOutputCostMultiplier:  1.5,
+			},
+			// 目录没给 ultrafast 单价的模型：保持旧行为，ultrafast 按 2 倍兜底。
+			"gpt-6-sol": {
+				InputCostPerToken:          2e-6,
+				InputCostPerTokenPriority:  4e-6,
+				OutputCostPerToken:         10e-6,
+				OutputCostPerTokenPriority: 20e-6,
+				CacheReadInputTokenCost:    0.2e-6,
+			},
+		},
+	})
+}
+
+func TestBillingServiceGetModelPricing_UsesDynamicUltrafastFields(t *testing.T) {
+	svc := newTestBillingServiceWithUltrafastCatalog()
+	pricing, err := svc.GetModelPricing("gpt-6.1-sol")
+	require.NoError(t, err)
+	require.InDelta(t, 12e-6, pricing.InputPricePerTokenUltrafast, 1e-15)
+	require.InDelta(t, 60e-6, pricing.OutputPricePerTokenUltrafast, 1e-15)
+	require.InDelta(t, 0.6e-6, pricing.CacheReadPricePerTokenUltrafast, 1e-15)
+	require.True(t, useUltrafastServiceTierPricing("ultrafast", pricing))
+	require.False(t, useUltrafastServiceTierPricing("priority", pricing))
+
+	plain, err := svc.GetModelPricing("gpt-6-sol")
+	require.NoError(t, err)
+	require.Zero(t, plain.InputPricePerTokenUltrafast)
+	require.False(t, useUltrafastServiceTierPricing("ultrafast", plain))
+}
+
+func TestCalculateCostWithServiceTier_UltrafastUsesCatalogUltrafastPricing(t *testing.T) {
+	svc := newTestBillingServiceWithUltrafastCatalog()
+	// 合计 150k 上下文，低于 272k，不触发长上下文倍率。
+	tokens := UsageTokens{InputTokens: 100_000, OutputTokens: 10_000, CacheReadTokens: 50_000}
+
+	base, err := svc.CalculateCostWithServiceTier("gpt-6.1-sol", tokens, 1.0, "")
+	require.NoError(t, err)
+	priority, err := svc.CalculateCostWithServiceTier("gpt-6.1-sol", tokens, 1.0, "priority")
+	require.NoError(t, err)
+	ultrafast, err := svc.CalculateCostWithServiceTier("gpt-6.1-sol", tokens, 1.0, "ultrafast")
+	require.NoError(t, err)
+
+	// 100k 输入 $0.2 / 10k 输出 $0.1 / 50k 缓存读 $0.005
+	require.False(t, base.LongContextBillingApplied)
+	require.InDelta(t, 0.2, base.InputCost, 1e-9)
+	require.InDelta(t, 0.4, priority.InputCost, 1e-9)
+	require.InDelta(t, 1.2, ultrafast.InputCost, 1e-9)
+	require.InDelta(t, 0.6, ultrafast.OutputCost, 1e-9)
+	require.InDelta(t, 0.03, ultrafast.CacheReadCost, 1e-9)
+	require.InDelta(t, base.TotalCost*6, ultrafast.TotalCost, 1e-9)
+	require.InDelta(t, priority.TotalCost*3, ultrafast.TotalCost, 1e-9, "ultrafast 不再被当成 priority 的 2 倍")
+}
+
+func TestCalculateCostWithServiceTier_UltrafastStacksLongContextMultiplier(t *testing.T) {
+	svc := newTestBillingServiceWithUltrafastCatalog()
+	// 300k 上下文 > 272k：输入 12→24、缓存 0.6→1.2、输出 60→90，与目录 *_above_272k_tokens_ultrafast 一致。
+	tokens := UsageTokens{InputTokens: 100_000, CacheReadTokens: 200_000, OutputTokens: 10_000}
+	cost, err := svc.CalculateCostWithServiceTier("gpt-6.1-sol", tokens, 1.0, "ultrafast")
+	require.NoError(t, err)
+	require.True(t, cost.LongContextBillingApplied)
+	require.InDelta(t, 100_000*24e-6, cost.InputCost, 1e-9)
+	require.InDelta(t, 200_000*1.2e-6, cost.CacheReadCost, 1e-9)
+	require.InDelta(t, 10_000*90e-6, cost.OutputCost, 1e-9)
+}
+
+func TestCalculateCostWithServiceTier_UltrafastFallsBackToTierMultiplierWithoutCatalogPrice(t *testing.T) {
+	svc := newTestBillingServiceWithUltrafastCatalog()
+	tokens := UsageTokens{InputTokens: 1000, OutputTokens: 100, CacheReadTokens: 200}
+	base, err := svc.CalculateCostWithServiceTier("gpt-6-sol", tokens, 1.0, "")
+	require.NoError(t, err)
+	ultrafast, err := svc.CalculateCostWithServiceTier("gpt-6-sol", tokens, 1.0, "ultrafast")
+	require.NoError(t, err)
+	require.InDelta(t, base.TotalCost*2, ultrafast.TotalCost, 1e-12, "目录无 ultrafast 单价时沿用 2 倍兜底，行为不变")
+}
+
+func TestApplyChannelTokenPriceOverrides_KeepsUltrafastRatio(t *testing.T) {
+	svc := newTestBillingServiceWithUltrafastCatalog()
+	pricing, err := svc.GetModelPricing("gpt-6.1-sol")
+	require.NoError(t, err)
+	// 渠道把基础输入价从 $2 改成 $3：priority 应跟着变成 $6，ultrafast 变成 $18。
+	in := 3e-6
+	applyChannelTokenPriceOverrides(pricing, &ChannelModelPricing{InputPrice: &in})
+	require.InDelta(t, 3e-6, pricing.InputPricePerToken, 1e-15)
+	require.InDelta(t, 6e-6, pricing.InputPricePerTokenPriority, 1e-15)
+	require.InDelta(t, 18e-6, pricing.InputPricePerTokenUltrafast, 1e-15)
+}
+
+func TestGetModelPricing_Gpt6AstraFallbackExposesUltrafastPrices(t *testing.T) {
+	svc := newTestBillingService()
+	pricing, err := svc.GetModelPricing("gpt-6-astra")
+	require.NoError(t, err)
+	require.InDelta(t, 60e-6, pricing.InputPricePerTokenUltrafast, 1e-15)
+	require.InDelta(t, 300e-6, pricing.OutputPricePerTokenUltrafast, 1e-15)
+}
