@@ -10,6 +10,9 @@ import (
 )
 
 // openAICacheStatsRepository 读取 usage_logs 的缓存口径聚合（管理页「上游缓存」）。
+// 只提供「一段时间内按账号聚合」一种查询：service 层按自然日分片调用并缓存，
+// 账号表与按天走势都从同一份分片结果推导，避免对 usage_logs 扫两遍。
+// 走 idx_usage_logs_created_at_cache_cover 覆盖索引做 index-only scan（迁移 244）。
 type openAICacheStatsRepository struct {
 	sql sqlExecutor
 }
@@ -64,44 +67,6 @@ func (r *openAICacheStatsRepository) ListOpenAICacheAccountUsage(ctx context.Con
 			return nil, err
 		}
 		out = append(out, u)
-	}
-	return out, rows.Err()
-}
-
-func (r *openAICacheStatsRepository) ListOpenAICacheDailyUsage(ctx context.Context, startTime, endTime time.Time, accountID int64) ([]service.OpenAICacheDailyUsage, error) {
-	// The handler parses the range in the user's timezone. Group in that same
-	// timezone rather than the database connection's session timezone.
-	tzName := startTime.Location().String()
-	if tzName == "" || tzName == "Local" {
-		tzName = resolveUsageStatsTimezone()
-	}
-	args := []any{startTime, endTime, tzName}
-	accountCond := "account_id IN (SELECT id FROM accounts WHERE platform = 'openai')"
-	if accountID > 0 {
-		accountCond = "account_id = $4"
-		args = append(args, accountID)
-	}
-	query := `
-		SELECT TO_CHAR(created_at AT TIME ZONE $3, 'YYYY-MM-DD') AS date,` + openAICacheBucketSelect("TRUE") + `,` + openAICacheBucketSelect(openAICacheTextRequestPredicate) + `
-		FROM usage_logs
-		WHERE created_at >= $1 AND created_at < $2 AND ` + accountCond + `
-		GROUP BY date
-		ORDER BY date
-	`
-	rows, err := r.sql.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []service.OpenAICacheDailyUsage
-	for rows.Next() {
-		var d service.OpenAICacheDailyUsage
-		dest := append([]any{&d.Date}, scanOpenAICacheBucket(&d.All)...)
-		dest = append(dest, scanOpenAICacheBucket(&d.Text)...)
-		if err := rows.Scan(dest...); err != nil {
-			return nil, err
-		}
-		out = append(out, d)
 	}
 	return out, rows.Err()
 }

@@ -36,9 +36,16 @@ func (r *cacheStatsAccountRepo) ListAllWithFilters(_ context.Context, platform, 
 type cacheStatsUsageRepo struct {
 	OpenAICacheStatsRepository
 	usage []OpenAICacheAccountUsage
+	// byChunk 按分片起点返回不同结果；calls 记录每次查询的 [start,end)。
+	byChunk map[time.Time][]OpenAICacheAccountUsage
+	calls   [][2]time.Time
 }
 
-func (r *cacheStatsUsageRepo) ListOpenAICacheAccountUsage(context.Context, time.Time, time.Time) ([]OpenAICacheAccountUsage, error) {
+func (r *cacheStatsUsageRepo) ListOpenAICacheAccountUsage(_ context.Context, start, end time.Time) ([]OpenAICacheAccountUsage, error) {
+	r.calls = append(r.calls, [2]time.Time{start, end})
+	if r.byChunk != nil {
+		return r.byChunk[start.UTC()], nil
+	}
 	return r.usage, nil
 }
 
@@ -58,7 +65,7 @@ func TestOpenAICacheStatsListAccountsIncludesInactiveBeyondPageLimit(t *testing.
 		{AccountID: 1002, All: OpenAICacheTokenBucket{Requests: 3, BilledCost: 4, CostDelta: 2}},
 	}
 	svc := NewOpenAICacheStatsService(&cacheStatsUsageRepo{usage: usage}, &cacheStatsAccountRepo{accounts: accounts}, nil)
-	result, err := svc.ListAccounts(context.Background(), time.Now().Add(-time.Hour), time.Now())
+	result, err := svc.ListAccounts(context.Background(), time.Now().Add(-time.Hour), time.Now(), time.UTC)
 	require.NoError(t, err)
 	require.Len(t, result.Accounts, 1002)
 	require.Equal(t, 1002, result.Summary.Accounts)
@@ -68,4 +75,98 @@ func TestOpenAICacheStatsListAccountsIncludesInactiveBeyondPageLimit(t *testing.
 	require.Equal(t, int64(1002), result.Accounts[0].AccountID)
 	require.Equal(t, StatusError, result.Accounts[0].Status)
 	require.Equal(t, StatusDisabled, result.Accounts[1].Status)
+}
+
+func TestSplitOpenAICacheRangeByUserCalendarDay(t *testing.T) {
+	sh, _ := time.LoadLocation("Asia/Shanghai")
+	start := time.Date(2026, 10, 20, 0, 0, 0, 0, sh)
+	end := time.Date(2026, 10, 23, 0, 0, 0, 0, sh)
+	chunks := splitOpenAICacheRange(start, end, sh)
+	require.Len(t, chunks, 3)
+	for i, c := range chunks {
+		require.True(t, c.start.Equal(start.AddDate(0, 0, i)), "chunk %d start", i)
+		require.True(t, c.end.Equal(start.AddDate(0, 0, i+1)), "chunk %d end", i)
+	}
+	// 非零点起点：第一片到下一个零点为止。
+	odd := splitOpenAICacheRange(time.Date(2026, 10, 20, 13, 0, 0, 0, sh), time.Date(2026, 10, 21, 6, 0, 0, 0, sh), sh)
+	require.Len(t, odd, 2)
+	require.True(t, odd[0].end.Equal(time.Date(2026, 10, 21, 0, 0, 0, 0, sh)))
+	require.True(t, odd[1].end.Equal(time.Date(2026, 10, 21, 6, 0, 0, 0, sh)))
+	// 纽约夏令时切换日（2026-03-08 只有 23 小时）仍按自然日切。
+	ny, _ := time.LoadLocation("America/New_York")
+	dst := splitOpenAICacheRange(time.Date(2026, 3, 7, 0, 0, 0, 0, ny), time.Date(2026, 3, 10, 0, 0, 0, 0, ny), ny)
+	require.Len(t, dst, 3)
+	require.Equal(t, 23*time.Hour, dst[1].end.Sub(dst[1].start))
+	require.Empty(t, splitOpenAICacheRange(end, start, sh))
+}
+
+func TestOpenAICacheStatsChunksSharedBetweenAccountsAndDaily(t *testing.T) {
+	sh, _ := time.LoadLocation("Asia/Shanghai")
+	now := time.Date(2026, 10, 22, 18, 0, 0, 0, sh)
+	d0 := time.Date(2026, 10, 21, 0, 0, 0, 0, sh)
+	d1 := d0.AddDate(0, 0, 1)
+	d2 := d0.AddDate(0, 0, 2) // 与 handler 一致：end 是所选日期次日零点，不是 now
+	repo := &cacheStatsUsageRepo{byChunk: map[time.Time][]OpenAICacheAccountUsage{
+		d0.UTC(): {
+			{AccountID: 1, All: OpenAICacheTokenBucket{Requests: 10, Input: 100, CacheRead: 900, RawInput: 400, RawCacheRead: 600, BilledCost: 5, CostDelta: 1}, Text: OpenAICacheTokenBucket{Requests: 8}},
+			{AccountID: 2, All: OpenAICacheTokenBucket{Requests: 5, Input: 500, CacheRead: 500, RawInput: 500, RawCacheRead: 500, BilledCost: 2}},
+		},
+		d1.UTC(): {
+			{AccountID: 1, All: OpenAICacheTokenBucket{Requests: 20, Input: 200, CacheRead: 800, RawInput: 200, RawCacheRead: 800, BilledCost: 7}},
+		},
+	}}
+	accounts := &cacheStatsAccountRepo{accounts: []Account{{ID: 1, Platform: PlatformOpenAI, Status: StatusActive}, {ID: 2, Platform: PlatformOpenAI, Status: StatusActive}}}
+	svc := NewOpenAICacheStatsService(repo, accounts, nil)
+	svc.now = func() time.Time { return now }
+
+	// 今天按小时切：00:00~18:00 共 18 个小时片，其中整点 00:00 那片起点与 d1 相同，
+	// byChunk 只给 00:00 那一小时返回数据，其余小时为空。
+	result, err := svc.ListAccounts(context.Background(), d0, d2, sh)
+	require.NoError(t, err)
+	require.Len(t, repo.calls, 1+18, "昨天一片 + 今天 18 个小时片")
+	require.True(t, repo.calls[0][0].Equal(d0) && repo.calls[0][1].Equal(d1), "昨天整段一片")
+	require.True(t, repo.calls[1][0].Equal(d1) && repo.calls[1][1].Equal(d1.Add(time.Hour)), "今天第一片是 00:00~01:00")
+	require.True(t, repo.calls[18][0].Equal(now.Add(-time.Hour)) && repo.calls[18][1].Equal(now), "最后一片是 17:00~18:00")
+	byID := map[int64]OpenAICacheAccountRow{}
+	for _, r := range result.Accounts {
+		byID[r.AccountID] = r
+	}
+	require.Equal(t, int64(30), byID[1].Requests)
+	require.Equal(t, 12.0, byID[1].BilledCost)
+	require.Equal(t, 1.0, byID[1].CostDelta)
+	require.InDelta(t, 85.0, *byID[1].All.DisplayRate, 1e-9)
+	require.InDelta(t, 70.0, *byID[1].All.RawRate, 1e-9)
+	require.Equal(t, int64(5), byID[2].Requests)
+	require.Equal(t, int64(35), result.Summary.All.Requests)
+
+	// 按天（全站 / 单账号）复用缓存，不再查库；日期按用户时区。
+	days, err := svc.ListDaily(context.Background(), d0, d2, sh, 0)
+	require.NoError(t, err)
+	require.Len(t, repo.calls, 19)
+	require.Equal(t, []string{"2026-10-21", "2026-10-22"}, []string{days[0].Date, days[1].Date})
+	require.Equal(t, int64(15), days[0].All.Requests)
+	require.Equal(t, int64(20), days[1].All.Requests)
+	acc2, err := svc.ListDaily(context.Background(), d0, d2, sh, 2)
+	require.NoError(t, err)
+	require.Equal(t, int64(5), acc2[0].All.Requests)
+	require.Equal(t, int64(0), acc2[1].All.Requests)
+
+	// 一分钟后：17:00~18:00 已成为「已过去的整点小时」命中缓存（created_at 是落库时刻，
+	// 整点前的小时不会再有新行），只有新的当前小时片 18:00~19:00 首次查询（终点取整点，键稳定）。
+	svc.now = func() time.Time { return now.Add(time.Minute) }
+	_, err = svc.ListDaily(context.Background(), d0, d2, sh, 0)
+	require.NoError(t, err)
+	require.Len(t, repo.calls, 20)
+	require.True(t, repo.calls[19][0].Equal(now) && repo.calls[19][1].Equal(now.Add(time.Hour)))
+	// 30 秒内再查：当前小时片命中 45 秒缓存，不查库。
+	svc.now = func() time.Time { return now.Add(90 * time.Second) }
+	_, err = svc.ListAccounts(context.Background(), d0, d2, sh)
+	require.NoError(t, err)
+	require.Len(t, repo.calls, 20)
+	// 超过 45 秒：只重查当前小时片。
+	svc.now = func() time.Time { return now.Add(2 * time.Minute) }
+	_, err = svc.ListDaily(context.Background(), d0, d2, sh, 0)
+	require.NoError(t, err)
+	require.Len(t, repo.calls, 21)
+	require.True(t, repo.calls[20][0].Equal(now) && repo.calls[20][1].Equal(now.Add(time.Hour)))
 }

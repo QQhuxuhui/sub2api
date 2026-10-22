@@ -218,9 +218,10 @@ const formatLD = (d: Date) => {
   const day = String(d.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
-const now = new Date()
-const startDate = ref(formatLD(new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000)))
-const endDate = ref(formatLD(now))
+// 默认只看今天：usage_logs 一天百万行级，范围越大越慢；历史天数按需再拉。
+const today = formatLD(new Date())
+const startDate = ref(today)
+const endDate = ref(today)
 
 const THRESHOLD_KEY = 'openai-cache-threshold'
 const readThreshold = (): number => {

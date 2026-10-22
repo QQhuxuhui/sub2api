@@ -49,7 +49,7 @@ func (h *OpenAICacheHandler) ListAccounts(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := h.statsService.ListAccounts(c.Request.Context(), startTime, endTime)
+	result, err := h.statsService.ListAccounts(c.Request.Context(), startTime, endTime, startTime.Location())
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -72,7 +72,7 @@ func (h *OpenAICacheHandler) ListDaily(c *gin.Context) {
 		}
 		accountID = id
 	}
-	rows, err := h.statsService.ListDaily(c.Request.Context(), startTime, endTime, accountID)
+	rows, err := h.statsService.ListDaily(c.Request.Context(), startTime, endTime, startTime.Location(), accountID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
