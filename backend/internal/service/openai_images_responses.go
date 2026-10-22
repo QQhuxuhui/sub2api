@@ -1388,7 +1388,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 		firstMeta.Model = strings.TrimSpace(fallbackModel)
 	}
 
-	responseBody, err := buildOpenAIImagesAPIResponse(results, createdAt, usageRaw, modelRewrite.applyImageMeta(firstMeta), responseFormat)
+	responseBody, err := buildOpenAIImagesAPIResponse(results, createdAt, modelRewrite.applyUsageJSON(usageRaw), modelRewrite.applyImageMeta(firstMeta), responseFormat)
 	if err != nil {
 		return OpenAIUsage{}, 0, nil, err
 	}
@@ -1565,7 +1565,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 				if _, exists := emitted[key]; exists {
 					continue
 				}
-				payload := buildOpenAIImagesStreamCompletedPayload(eventName, modelRewrite.applyImageMeta(img), format, createdAt, usageRaw)
+				payload := buildOpenAIImagesStreamCompletedPayload(eventName, modelRewrite.applyImageMeta(img), format, createdAt, modelRewrite.applyUsageJSON(usageRaw))
 				emitted[key] = struct{}{}
 				s.tryWriteOpenAIImagesStreamEvent(c, flusher, &clientDisconnected, &lastDownstreamWriteAt, eventName, payload)
 			}

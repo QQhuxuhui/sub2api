@@ -343,6 +343,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_BusyKeepsSticky(
 	require.False(t, selection.Acquired)
 	require.NotNil(t, selection.WaitPlan)
 	require.Equal(t, int64(21), selection.WaitPlan.AccountID)
+	require.Equal(t, AccountWaitKindSticky, selection.WaitPlan.Kind)
 }
 
 func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_CapabilityMismatchKeepsSticky(t *testing.T) {

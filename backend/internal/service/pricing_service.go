@@ -59,8 +59,10 @@ var (
 	openAIGPT6AstraFallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken:                   1e-05,
 		InputCostPerTokenPriority:           2e-05,
+		InputCostPerTokenUltrafast:          60e-6,
 		OutputCostPerToken:                  5e-05,
 		OutputCostPerTokenPriority:          1e-04,
+		OutputCostPerTokenUltrafast:         300e-6,
 		CacheCreationInputTokenCost:         1.25e-05,
 		CacheCreationInputTokenCostPriority: 2.5e-05,
 		CacheReadInputTokenCost:             1e-06,

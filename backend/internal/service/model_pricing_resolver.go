@@ -333,20 +333,25 @@ func intervalToModelPricing(iv *PricingInterval, base *ModelPricing, chPricing *
 	}
 	if iv.InputPrice != nil {
 		pricing.InputPricePerTokenPriority = channelTierOverridePrice(pricing.InputPricePerToken, pricing.InputPricePerTokenPriority, *iv.InputPrice)
+		pricing.InputPricePerTokenUltrafast = channelTierOverridePrice(pricing.InputPricePerToken, pricing.InputPricePerTokenUltrafast, *iv.InputPrice)
 		pricing.InputPricePerToken = *iv.InputPrice
 	} else if iv.InputMultiplier != nil {
 		pricing.InputPricePerToken = applyMultiplier(pricing.InputPricePerToken, iv.InputMultiplier)
 		pricing.InputPricePerTokenPriority = applyMultiplier(pricing.InputPricePerTokenPriority, iv.InputMultiplier)
+		pricing.InputPricePerTokenUltrafast = applyMultiplier(pricing.InputPricePerTokenUltrafast, iv.InputMultiplier)
 	}
 	if iv.OutputPrice != nil {
 		pricing.OutputPricePerTokenPriority = channelTierOverridePrice(pricing.OutputPricePerToken, pricing.OutputPricePerTokenPriority, *iv.OutputPrice)
+		pricing.OutputPricePerTokenUltrafast = channelTierOverridePrice(pricing.OutputPricePerToken, pricing.OutputPricePerTokenUltrafast, *iv.OutputPrice)
 		pricing.OutputPricePerToken = *iv.OutputPrice
 	} else if iv.OutputMultiplier != nil {
 		pricing.OutputPricePerToken = applyMultiplier(pricing.OutputPricePerToken, iv.OutputMultiplier)
 		pricing.OutputPricePerTokenPriority = applyMultiplier(pricing.OutputPricePerTokenPriority, iv.OutputMultiplier)
+		pricing.OutputPricePerTokenUltrafast = applyMultiplier(pricing.OutputPricePerTokenUltrafast, iv.OutputMultiplier)
 	}
 	if iv.CacheWritePrice != nil {
 		pricing.CacheCreationPricePerTokenPriority = channelTierOverridePrice(pricing.CacheCreationPricePerToken, pricing.CacheCreationPricePerTokenPriority, *iv.CacheWritePrice)
+		pricing.CacheCreationPricePerTokenUltrafast = channelTierOverridePrice(pricing.CacheCreationPricePerToken, pricing.CacheCreationPricePerTokenUltrafast, *iv.CacheWritePrice)
 		pricing.CacheCreationPricePerToken = *iv.CacheWritePrice
 		pricing.CacheCreationPriceExplicit = true
 		pricing.CacheCreation5mPrice = *iv.CacheWritePrice
@@ -356,6 +361,7 @@ func intervalToModelPricing(iv *PricingInterval, base *ModelPricing, chPricing *
 	} else if iv.CacheWriteMultiplier != nil {
 		pricing.CacheCreationPricePerToken = applyMultiplier(pricing.CacheCreationPricePerToken, iv.CacheWriteMultiplier)
 		pricing.CacheCreationPricePerTokenPriority = applyMultiplier(pricing.CacheCreationPricePerTokenPriority, iv.CacheWriteMultiplier)
+		pricing.CacheCreationPricePerTokenUltrafast = applyMultiplier(pricing.CacheCreationPricePerTokenUltrafast, iv.CacheWriteMultiplier)
 		pricing.CacheCreation5mPrice = applyMultiplier(pricing.CacheCreation5mPrice, iv.CacheWriteMultiplier)
 		pricing.CacheCreation1hPrice = applyMultiplier(pricing.CacheCreation1hPrice, iv.CacheWriteMultiplier)
 	}
@@ -365,10 +371,12 @@ func intervalToModelPricing(iv *PricingInterval, base *ModelPricing, chPricing *
 	}
 	if iv.CacheReadPrice != nil {
 		pricing.CacheReadPricePerTokenPriority = channelTierOverridePrice(pricing.CacheReadPricePerToken, pricing.CacheReadPricePerTokenPriority, *iv.CacheReadPrice)
+		pricing.CacheReadPricePerTokenUltrafast = channelTierOverridePrice(pricing.CacheReadPricePerToken, pricing.CacheReadPricePerTokenUltrafast, *iv.CacheReadPrice)
 		pricing.CacheReadPricePerToken = *iv.CacheReadPrice
 	} else if iv.CacheReadMultiplier != nil {
 		pricing.CacheReadPricePerToken = applyMultiplier(pricing.CacheReadPricePerToken, iv.CacheReadMultiplier)
 		pricing.CacheReadPricePerTokenPriority = applyMultiplier(pricing.CacheReadPricePerTokenPriority, iv.CacheReadMultiplier)
+		pricing.CacheReadPricePerTokenUltrafast = applyMultiplier(pricing.CacheReadPricePerTokenUltrafast, iv.CacheReadMultiplier)
 	}
 	// 渠道定价存在时，ImageOutputPrice 显式覆盖；图片输入价用渠道级配置
 	// （区间不携带图片输入价，与 image_output 一致）。

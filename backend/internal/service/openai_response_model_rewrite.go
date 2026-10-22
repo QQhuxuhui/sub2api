@@ -72,20 +72,21 @@ type openAIResponseModelRewrite struct {
 // openAICacheWriteUsagePaths 是上游 usage 里可能出现的缓存写入字段，与
 // openAICacheCreationTokensFromUsage 识别的位置一一对应；非流式体 / Chat
 // Completions 在 usage.*，Responses 事件在 response.usage.*。
+var openAICacheWriteUsageFields = []string{
+	"input_tokens_details.cache_write_tokens",
+	"input_tokens_details.cache_creation_tokens",
+	"prompt_tokens_details.cache_write_tokens",
+	"prompt_tokens_details.cache_creation_tokens",
+	"cache_write_tokens",
+	"cache_creation_input_tokens",
+	"cache_write_input_tokens",
+	"cache_creation_tokens",
+}
+
 var openAICacheWriteUsagePaths = func() []string {
-	fields := []string{
-		"input_tokens_details.cache_write_tokens",
-		"input_tokens_details.cache_creation_tokens",
-		"prompt_tokens_details.cache_write_tokens",
-		"prompt_tokens_details.cache_creation_tokens",
-		"cache_write_tokens",
-		"cache_creation_input_tokens",
-		"cache_write_input_tokens",
-		"cache_creation_tokens",
-	}
-	paths := make([]string, 0, len(fields)*2)
-	for _, prefix := range []string{"usage.", "response.usage."} {
-		for _, field := range fields {
+	paths := make([]string, 0, len(openAICacheWriteUsageFields)*3)
+	for _, prefix := range []string{"usage.", "response.usage.", "message.usage."} {
+		for _, field := range openAICacheWriteUsageFields {
 			paths = append(paths, prefix+field)
 		}
 	}
@@ -100,11 +101,15 @@ func containsCacheWriteHint[T string | []byte](data T) bool {
 
 // stripOpenAICacheWriteUsage 删除 usage 里的缓存写入字段；没有这些字段时原样返回同一切片。
 func stripOpenAICacheWriteUsage(data []byte) []byte {
+	return stripOpenAICacheWritePaths(data, openAICacheWriteUsagePaths)
+}
+
+func stripOpenAICacheWritePaths(data []byte, paths []string) []byte {
 	if !containsCacheWriteHint(data) {
 		return data
 	}
 	updated := data
-	for _, path := range openAICacheWriteUsagePaths {
+	for _, path := range paths {
 		if !gjson.GetBytes(updated, path).Exists() {
 			continue
 		}

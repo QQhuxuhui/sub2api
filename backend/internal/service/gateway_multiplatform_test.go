@@ -2935,6 +2935,7 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.WaitPlan)
+		require.Equal(t, "routing", result.WaitPlan.Kind)
 		require.Equal(t, int64(1), result.Account.ID)
 	})
 

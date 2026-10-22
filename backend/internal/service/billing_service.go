@@ -144,12 +144,9 @@ func usePriorityServiceTierPricing(serviceTier string, pricing *ModelPricing) bo
 // useUltrafastServiceTierPricing 判断 ultrafast 档是否有目录专属单价可用。
 // OpenAI 目录里 ultrafast 是独立一档（gpt-6.1-sol 输入 $12/M，是 priority $4/M 的 3 倍），
 // 不能和 priority 共用 2 倍系数；目录没给 ultrafast 单价的模型仍沿用旧的 2 倍兜底。
-// 渠道显式配置了 Fast 倍率时与 priority 同样让位给倍率路径。
+// 渠道 Fast 倍率仅适用于 priority/fast，不覆盖 ultrafast 的独立目录价。
 func useUltrafastServiceTierPricing(serviceTier string, pricing *ModelPricing) bool {
 	if pricing == nil || normalizeBillingServiceTier(serviceTier) != OpenAIFastTierUltrafast {
-		return false
-	}
-	if pricing.FastMultiplier != nil {
 		return false
 	}
 	return pricing.InputPricePerTokenUltrafast > 0 || pricing.OutputPricePerTokenUltrafast > 0 ||

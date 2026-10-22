@@ -133,14 +133,15 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	// 5. Convert response
 	responseModel := openAIClientVisibleModel(c, account, originalModel)
 	if clientStream {
-		return s.streamChatCompletionsAsAnthropic(c, resp, originalModel, responseModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		return s.streamChatCompletionsAsAnthropic(c, resp, account, originalModel, responseModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 	}
-	return s.bufferChatCompletionsAsAnthropic(c, resp, originalModel, responseModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	return s.bufferChatCompletionsAsAnthropic(c, resp, account, originalModel, responseModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 	c *gin.Context,
 	resp *http.Response,
+	account *Account,
 	originalModel string,
 	responseModel string,
 	billingModel string,
@@ -149,17 +150,21 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 	serviceTier *string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	rewrite := cacheWriteResponseRewrite(account)
 	requestID := resp.Header.Get("x-request-id")
 	ccResp, usage, err := s.readCCUpstreamJSONResponse(c, resp, writeAnthropicError)
 	if err != nil {
 		return nil, err
 	}
+	ccResp.Usage = rewrite.applyChatUsage(ccResp.Usage)
 	anthropicResp := apicompat.ChatCompletionsResponseToAnthropic(ccResp, responseModel)
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
-	c.JSON(http.StatusOK, anthropicResp)
+	if err := rewrite.writeJSON(c, http.StatusOK, anthropicResp); err != nil {
+		return nil, err
+	}
 
 	return &OpenAIForwardResult{
 		RequestID:                   requestID,
@@ -179,6 +184,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	c *gin.Context,
 	resp *http.Response,
+	account *Account,
 	originalModel string,
 	responseModel string,
 	billingModel string,
@@ -187,6 +193,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	serviceTier *string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	rewrite := cacheWriteResponseRewrite(account)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -197,6 +204,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	// 仅跳过写出，保证 finalize 阶段的 usage 汇总不受断开影响。
 	emitChunk := func(chunk *apicompat.ChatCompletionsChunk) {
 		// CC chunk → Anthropic events (direct, single state machine)
+		chunk.Usage = rewrite.applyChatUsage(chunk.Usage)
 		anthropicEvents := apicompat.ChatCompletionsChunkToAnthropicEvents(chunk, anthropicState)
 		if clientDisconnected {
 			return
@@ -207,7 +215,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 				continue
 			}
 			writeStreamHeaders()
-			if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+			if _, err := fmt.Fprint(c.Writer, rewrite.applySSEBody(sse)); err != nil {
 				clientDisconnected = true
 				break
 			}
@@ -250,7 +258,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 				continue
 			}
 			writeStreamHeaders()
-			if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+			if _, err := fmt.Fprint(c.Writer, rewrite.applySSEBody(sse)); err != nil {
 				clientDisconnected = true
 				break
 			}

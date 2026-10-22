@@ -161,12 +161,14 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
 
+	usage := extractOpenAIEmbeddingsUsage(respBody)
+	respBody = cacheWriteResponseRewrite(account).applyJSON(respBody)
 	writeOpenAIEmbeddingsUpstreamResponse(c, resp, respBody, s.responseHeaderFilter)
 
 	return &OpenAIForwardResult{
 		RequestID:       firstNonEmptyString(resp.Header.Get("x-request-id"), resp.Header.Get("request-id")),
 		UpstreamHeaders: resp.Header,
-		Usage:           extractOpenAIEmbeddingsUsage(respBody),
+		Usage:           usage,
 		Model:           originalModel,
 		BillingModel:    billingModel,
 		UpstreamModel:   upstreamModel,

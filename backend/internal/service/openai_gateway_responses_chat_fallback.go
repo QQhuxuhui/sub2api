@@ -123,14 +123,15 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 
 	if clientStream {
-		return s.streamChatCompletionsAsResponses(c, resp, originalModel, openAIClientVisibleModel(c, account, originalModel), customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		return s.streamChatCompletionsAsResponses(c, resp, account, originalModel, openAIClientVisibleModel(c, account, originalModel), customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 	}
-	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, openAIClientVisibleModel(c, account, originalModel), customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	return s.bufferChatCompletionsAsResponses(c, resp, account, originalModel, openAIClientVisibleModel(c, account, originalModel), customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	c *gin.Context,
 	resp *http.Response,
+	account *Account,
 	originalModel string,
 	responseModel string,
 	customTools map[string]bool,
@@ -143,18 +144,22 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	serviceTier *string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	rewrite := cacheWriteResponseRewrite(account)
 	requestID := resp.Header.Get("x-request-id")
 	ccResp, usage, err := s.readCCUpstreamJSONResponse(c, resp, writeOpenAIResponsesFallbackError)
 	if err != nil {
 		return nil, err
 	}
+	ccResp.Usage = rewrite.applyChatUsage(ccResp.Usage)
 	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, responseModel, customTools, functionTools, toolSearch, namespaceTools)
 	s.cacheReasoningItemsFromOutput(responsesResp.Output)
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
-	c.JSON(http.StatusOK, responsesResp)
+	if err := rewrite.writeJSON(c, http.StatusOK, responsesResp); err != nil {
+		return nil, err
+	}
 
 	return &OpenAIForwardResult{
 		RequestID:                   requestID,
@@ -174,6 +179,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	c *gin.Context,
 	resp *http.Response,
+	account *Account,
 	originalModel string,
 	responseModel string,
 	customTools map[string]bool,
@@ -186,6 +192,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	serviceTier *string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	rewrite := cacheWriteResponseRewrite(account)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -223,6 +230,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	scan := s.scanCCStream(c, resp, "openai responses chat fallback", requestID, startTime, func(chunk *apicompat.ChatCompletionsChunk) {
+		chunk.Usage = rewrite.applyChatUsage(chunk.Usage)
 		events := apicompat.ChatCompletionsChunkToResponsesEvents(chunk, state)
 		s.cacheReasoningItemsFromEvents(events)
 		writeEvents(events)

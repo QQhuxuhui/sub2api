@@ -654,13 +654,17 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	// accumulated delta events so the client receives the full content.
 	acc.SupplementResponseOutput(finalResponse)
 
+	rewrite := cacheWriteResponseRewrite(account)
+	finalResponse.Usage = rewrite.applyResponsesUsage(finalResponse.Usage)
 	anthropicResp := apicompat.ResponsesToAnthropic(finalResponse, openAIClientVisibleModel(c, account, originalModel))
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
 	c.Header("Content-Type", "application/json; charset=utf-8")
-	c.JSON(http.StatusOK, anthropicResp)
+	if err := rewrite.writeJSON(c, http.StatusOK, anthropicResp); err != nil {
+		return nil, err
+	}
 
 	result := &OpenAIForwardResult{
 		RequestID:                     requestID,
@@ -929,6 +933,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	rewrite := cacheWriteResponseRewrite(account)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -1098,6 +1103,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 
 		// Convert to Anthropic events
+		rewrite.applyResponsesEventUsage(&event)
 		events := apicompat.ResponsesEventToAnthropicEvents(&event, state)
 		if !clientDisconnected {
 			for _, evt := range events {
@@ -1110,7 +1116,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					continue
 				}
 				writeStreamHeaders()
-				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+				if _, err := fmt.Fprint(c.Writer, rewrite.applySSEBody(sse)); err != nil {
 					clientDisconnected = true
 					logger.L().Info("openai messages stream: client disconnected, continuing to drain upstream for billing",
 						zap.String("request_id", requestID),
@@ -1141,7 +1147,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					continue
 				}
 				writeStreamHeaders()
-				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+				if _, err := fmt.Fprint(c.Writer, rewrite.applySSEBody(sse)); err != nil {
 					clientDisconnected = true
 					logger.L().Info("openai messages stream: client disconnected during final flush",
 						zap.String("request_id", requestID),

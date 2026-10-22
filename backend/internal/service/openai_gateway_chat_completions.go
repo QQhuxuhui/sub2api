@@ -609,6 +609,8 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	// accumulated delta events so the client receives the full content.
 	acc.SupplementResponseOutput(finalResponse)
 
+	rewrite := cacheWriteResponseRewrite(account)
+	finalResponse.Usage = rewrite.applyResponsesUsage(finalResponse.Usage)
 	chatResp := apicompat.ResponsesToChatCompletions(finalResponse, openAIClientVisibleModel(c, account, originalModel))
 
 	if s.responseHeaderFilter != nil {
@@ -619,7 +621,9 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	// writeContentType 仅在头不存在时才设置，无法覆盖。这里显式 Set 强制改回 JSON，
 	// 否则下游"看头判流式"的中间层（如 new-api）会把本应聚合的 JSON 当成 SSE 处理。
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	c.JSON(http.StatusOK, chatResp)
+	if err := rewrite.writeJSON(c, http.StatusOK, chatResp); err != nil {
+		return nil, err
+	}
 
 	result := &OpenAIForwardResult{
 		RequestID:                     requestID,
@@ -698,6 +702,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	startTime time.Time,
 	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
+	rewrite := cacheWriteResponseRewrite(account)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -875,6 +880,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			return true
 		}
 
+		rewrite.applyResponsesEventUsage(&event)
 		chunks := apicompat.ResponsesEventToChatChunks(&event, state)
 		if !clientDisconnected {
 			for _, chunk := range chunks {

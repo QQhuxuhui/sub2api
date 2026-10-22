@@ -501,6 +501,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 				MaxConcurrency: account.Concurrency,
 				Timeout:        cfg.StickySessionWaitTimeout,
 				MaxWaiting:     cfg.StickySessionMaxWaiting,
+				Kind:           AccountWaitKindSticky,
 			},
 		}), nil
 	}

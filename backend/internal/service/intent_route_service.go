@@ -33,7 +33,9 @@ const (
 	intentRouteBreakerThreshold = 5
 	intentRouteBreakerCooldown  = 30 * time.Second
 
-	intentRouteSessionKeyPrefix = "intent_route:s:"
+	// v2 excludes legacy sessions whose pins may have come from keywords.
+	// Separate keys also isolate writes from old workers during rolling upgrades.
+	intentRouteSessionKeyPrefix = "intent_route:s:v2:"
 	intentRouteEventsKey        = "intent_route:events"
 )
 
