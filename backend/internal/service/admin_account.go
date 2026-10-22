@@ -360,6 +360,10 @@ func ValidateOpenAILongContextBillingExtra(platform string, extra map[string]any
 	if platform != PlatformOpenAI {
 		return nil
 	}
+	// 缓存写入抹除开关走同一个入口校验：所有 Create / Update / Bulk 路径都经过这里。
+	if err := ValidateOpenAIStripCacheCreationExtra(platform, extra); err != nil {
+		return err
+	}
 	raw, exists := extra[openAILongContextBillingEnabledKey]
 	if !exists {
 		return nil
@@ -373,11 +377,32 @@ func ValidateOpenAILongContextBillingExtra(platform string, extra map[string]any
 	return nil
 }
 
+// ValidateOpenAIStripCacheCreationExtra validates the OpenAI cache-write strip flag when present.
+func ValidateOpenAIStripCacheCreationExtra(platform string, extra map[string]any) error {
+	if platform != PlatformOpenAI {
+		return nil
+	}
+	raw, exists := extra[openAIStripCacheCreationKey]
+	if !exists {
+		return nil
+	}
+	if _, ok := raw.(bool); !ok {
+		return infraerrors.BadRequest(
+			"OPENAI_STRIP_CACHE_CREATION_INVALID",
+			"openai_strip_cache_creation must be a boolean",
+		)
+	}
+	return nil
+}
+
 func normalizeOpenAILongContextBillingExtra(platform string, extra map[string]any) (map[string]any, error) {
 	if platform != PlatformOpenAI {
 		return extra, nil
 	}
 	if err := ValidateOpenAILongContextBillingExtra(platform, extra); err != nil {
+		return nil, err
+	}
+	if err := ValidateOpenAIStripCacheCreationExtra(platform, extra); err != nil {
 		return nil, err
 	}
 
@@ -403,6 +428,12 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 	if !provided {
 		if hasCurrent {
 			normalized[openAILongContextBillingEnabledKey] = current
+		}
+	}
+	// 缓存写入抹除开关同理：调用方没带这个键时沿用账号现值，不要被整体替换 Extra 时冲掉。
+	if _, provided := input.Extra[openAIStripCacheCreationKey]; !provided {
+		if current, ok := account.Extra[openAIStripCacheCreationKey].(bool); ok {
+			normalized[openAIStripCacheCreationKey] = current
 		}
 	}
 	return normalized, nil
@@ -918,7 +949,9 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	delete(updates, OllamaCloudUsageSessionExtraKey)
 	delete(updates, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(updates, OllamaCloudUsageSnapshotExtraKey)
-	if _, exists := updates[openAILongContextBillingEnabledKey]; exists {
+	_, hasLongContext := updates[openAILongContextBillingEnabledKey]
+	_, hasStripCacheCreation := updates[openAIStripCacheCreationKey]
+	if hasLongContext || hasStripCacheCreation {
 		account, err := s.accountRepo.GetByID(ctx, id)
 		if err != nil {
 			return err
@@ -1457,6 +1490,7 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 		Schedulable:     true,
 		Extra: map[string]any{
 			openAILongContextBillingEnabledKey: parent.IsOpenAILongContextBillingEnabled(),
+			openAIStripCacheCreationKey:        parent.StripsOpenAICacheCreation(),
 		},
 	}
 

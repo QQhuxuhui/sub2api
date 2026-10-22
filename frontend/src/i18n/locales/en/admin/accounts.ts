@@ -600,6 +600,9 @@ export default {
         longContextBilling: 'API long-context pricing',
         longContextBillingDesc:
           'Disabled by default. Enable only when this account\'s upstream charges OpenAI API long-context rates above the model threshold.',
+        stripCacheCreation: 'Strip cache-write usage',
+        stripCacheCreationDesc:
+          'Enabled by default. OpenAI never bills prompt-cache writes, but some relays report uncached input as cache writes. When enabled those tokens are neither logged nor billed, and the cache-write fields are removed from the usage sent downstream.',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',

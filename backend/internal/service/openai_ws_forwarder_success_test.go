@@ -1236,6 +1236,8 @@ func TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed(t *testing.T)
 		},
 		Extra: map[string]any{
 			"responses_websockets_v2_enabled": true,
+			// 本用例验证的是解析器；账号默认会抹掉缓存写入字段，这里显式关掉。
+			openAIStripCacheCreationKey: false,
 		},
 	}
 

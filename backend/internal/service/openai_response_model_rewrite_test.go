@@ -105,13 +105,18 @@ func TestOpenAIResponseModelRewrite_RoundTripMappingDoesNotExposeIntermediateNam
 	require.NotContains(t, string(out), rewriteTestChannelModel)
 }
 
-// 没有客户端请求名（请求体无 model、WS 轮次无模型）时不开启强制，保持原样透传。
-func TestOpenAIResponseModelRewrite_NoClientModelStaysInactive(t *testing.T) {
+// 没有客户端请求名（请求体无 model、WS 轮次无模型）时不改写 model，保持原样透传；
+// 账号默认开着的缓存写入抹除不受影响，所以 active 仍可能为 true。
+func TestOpenAIResponseModelRewrite_NoClientModelDoesNotRewriteModel(t *testing.T) {
 	c, _ := newRewriteTestContext(t, "")
 	rw := newOpenAIResponseModelRewrite(c, openAIRewriteTestAccount(AccountTypeOAuth), "", "")
-	require.False(t, rw.active())
+	require.False(t, rw.rewritesModel())
+	require.False(t, rw.force)
 	body := []byte(`{"model":"gpt-5.4-2026-03-05"}`)
 	require.Equal(t, string(body), string(rw.applyJSON(body)))
+
+	off := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{openAIStripCacheCreationKey: false}}
+	require.False(t, newOpenAIResponseModelRewrite(c, off, "", "").active(), "既不改 model 也不抹缓存写入时完全不介入")
 }
 
 func TestOpenAIResponseModelRewrite_NonOpenAIKeepsExactMatchSemantics(t *testing.T) {

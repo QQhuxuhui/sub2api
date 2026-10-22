@@ -177,6 +177,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 	logServiceTierBillingDowngrade("service.openai_gateway", account, result.RequestID, ApplyOpenAIServiceTierBillingResolution(billingAccount, result))
 
+	// 账号开了「抹掉缓存写入」时，上游回报的 cache_write / cache_creation 既不记也不计费：
+	// OpenAI 自己不对缓存写入收费，这类数字只来自按别家口径记账的中转。
+	if account.StripsOpenAICacheCreation() && result.Usage.CacheCreationInputTokens != 0 {
+		result.Usage.CacheCreationInputTokens = 0
+	}
+
 	// OpenAI input_tokens 是总输入，包含缓存读取和缓存写入明细。
 	// 将三类 token 拆成互斥桶，避免缓存写入同时按普通输入和 cache_write 重复计费。
 	actualInputTokens := result.Usage.InputTokens - result.Usage.CacheReadInputTokens - result.Usage.CacheCreationInputTokens

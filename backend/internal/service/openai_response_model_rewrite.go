@@ -64,6 +64,55 @@ type openAIResponseModelRewrite struct {
 	from  string
 	to    string
 	force bool
+	// stripCacheWrite 为 true 时，把发给客户端的 usage 里缓存写入相关字段删掉
+	// （账号开关 StripsOpenAICacheCreation）。与 model 改写共用同一批改写点。
+	stripCacheWrite bool
+}
+
+// openAICacheWriteUsagePaths 是上游 usage 里可能出现的缓存写入字段，与
+// openAICacheCreationTokensFromUsage 识别的位置一一对应；非流式体 / Chat
+// Completions 在 usage.*，Responses 事件在 response.usage.*。
+var openAICacheWriteUsagePaths = func() []string {
+	fields := []string{
+		"input_tokens_details.cache_write_tokens",
+		"input_tokens_details.cache_creation_tokens",
+		"prompt_tokens_details.cache_write_tokens",
+		"prompt_tokens_details.cache_creation_tokens",
+		"cache_write_tokens",
+		"cache_creation_input_tokens",
+		"cache_write_input_tokens",
+		"cache_creation_tokens",
+	}
+	paths := make([]string, 0, len(fields)*2)
+	for _, prefix := range []string{"usage.", "response.usage."} {
+		for _, field := range fields {
+			paths = append(paths, prefix+field)
+		}
+	}
+	return paths
+}()
+
+// containsCacheWriteHint 是热路径上的字符串预检：没有这两个子串的事件不可能带缓存写入字段。
+func containsCacheWriteHint[T string | []byte](data T) bool {
+	s := string(data)
+	return strings.Contains(s, "cache_write") || strings.Contains(s, "cache_creation")
+}
+
+// stripOpenAICacheWriteUsage 删除 usage 里的缓存写入字段；没有这些字段时原样返回同一切片。
+func stripOpenAICacheWriteUsage(data []byte) []byte {
+	if !containsCacheWriteHint(data) {
+		return data
+	}
+	updated := data
+	for _, path := range openAICacheWriteUsagePaths {
+		if !gjson.GetBytes(updated, path).Exists() {
+			continue
+		}
+		if next, err := sjson.DeleteBytes(updated, path); err == nil {
+			updated = next
+		}
+	}
+	return updated
 }
 
 // openAIClientRequestedModel 返回客户端请求体里原本的模型名（handler 经
@@ -91,10 +140,11 @@ func newOpenAIResponseModelRewrite(c *gin.Context, account *Account, originalMod
 	originalModel = strings.TrimSpace(originalModel)
 	upstreamModel = strings.TrimSpace(upstreamModel)
 	if account != nil && account.Platform == PlatformOpenAI {
+		strip := account.StripsOpenAICacheCreation()
 		if clientModel := openAIClientVisibleModel(c, account, originalModel); clientModel != "" {
-			return openAIResponseModelRewrite{to: clientModel, force: true}
+			return openAIResponseModelRewrite{to: clientModel, force: true, stripCacheWrite: strip}
 		}
-		return openAIResponseModelRewrite{}
+		return openAIResponseModelRewrite{stripCacheWrite: strip}
 	}
 	if originalModel != "" && upstreamModel != "" && originalModel != upstreamModel {
 		return openAIResponseModelRewrite{from: upstreamModel, to: originalModel}
@@ -108,16 +158,24 @@ func (r openAIResponseModelRewrite) forcedOnly() openAIResponseModelRewrite {
 	if r.force {
 		return r
 	}
-	return openAIResponseModelRewrite{}
+	return openAIResponseModelRewrite{stripCacheWrite: r.stripCacheWrite}
+}
+
+// rewritesModel 报告是否要改写 model 字段（强制或等值替换）。
+func (r openAIResponseModelRewrite) rewritesModel() bool {
+	return r.to != "" && (r.force || r.from != "")
 }
 
 func (r openAIResponseModelRewrite) active() bool {
-	return r.to != "" && (r.force || r.from != "")
+	return r.rewritesModel() || r.stripCacheWrite
 }
 
 // mayApply 是快速预判，避免对绝大多数不含 model 的事件做 JSON 解析。
 func (r openAIResponseModelRewrite) mayApply(data string) bool {
-	if !r.active() {
+	if r.stripCacheWrite && containsCacheWriteHint(data) {
+		return true
+	}
+	if !r.rewritesModel() {
 		return false
 	}
 	if r.force {
@@ -127,7 +185,10 @@ func (r openAIResponseModelRewrite) mayApply(data string) bool {
 }
 
 func (r openAIResponseModelRewrite) mayApplyBytes(data []byte) bool {
-	if !r.active() {
+	if r.stripCacheWrite && containsCacheWriteHint(data) {
+		return true
+	}
+	if !r.rewritesModel() {
 		return false
 	}
 	if r.force {
@@ -143,7 +204,7 @@ func (r openAIResponseModelRewrite) appliesToWSEvent(eventType string) bool {
 	if !r.active() {
 		return false
 	}
-	return r.force || openAIWSEventMayContainModel(eventType)
+	return r.force || r.stripCacheWrite || openAIWSEventMayContainModel(eventType)
 }
 
 // applyJSON 改写一个 JSON 文档（非流式响应体、SSE data 负载或 WS 帧）。
@@ -151,21 +212,27 @@ func (r openAIResponseModelRewrite) applyJSON(data []byte) []byte {
 	if !r.mayApplyBytes(data) {
 		return data
 	}
-	if !r.force {
-		return replaceOpenAIWSMessageModel(data, r.from, r.to)
-	}
-	values := gjson.GetManyBytes(data, openAIForcedResponseModelPaths...)
 	updated := data
-	for i, value := range values {
-		if value.Type != gjson.String || value.Str == r.to {
-			continue
+	switch {
+	case !r.rewritesModel():
+	case !r.force:
+		updated = replaceOpenAIWSMessageModel(updated, r.from, r.to)
+	default:
+		values := gjson.GetManyBytes(updated, openAIForcedResponseModelPaths...)
+		for i, value := range values {
+			if value.Type != gjson.String || value.Str == r.to {
+				continue
+			}
+			if next, err := sjson.SetBytes(updated, openAIForcedResponseModelPaths[i], r.to); err == nil {
+				updated = next
+			}
 		}
-		if next, err := sjson.SetBytes(updated, openAIForcedResponseModelPaths[i], r.to); err == nil {
-			updated = next
+		for _, headersPath := range openAIForcedResponseModelHeaderPaths {
+			updated = r.rewriteEmbeddedModelHeaders(updated, headersPath)
 		}
 	}
-	for _, headersPath := range openAIForcedResponseModelHeaderPaths {
-		updated = r.rewriteEmbeddedModelHeaders(updated, headersPath)
+	if r.stripCacheWrite {
+		updated = stripOpenAICacheWriteUsage(updated)
 	}
 	return updated
 }
@@ -215,7 +282,7 @@ func (r openAIResponseModelRewrite) applySSELine(line string) string {
 	if !ok || data == "" || data == "[DONE]" {
 		return line
 	}
-	if !r.force {
+	if !r.force && !r.stripCacheWrite {
 		return replaceOpenAIModelInSSELine(line, r.from, r.to)
 	}
 	trimmed := strings.TrimSpace(data)

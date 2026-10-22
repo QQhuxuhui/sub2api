@@ -88,6 +88,10 @@ type OpenAIEndpointCapability string
 
 const openAILongContextBillingEnabledKey = "openai_long_context_billing_enabled"
 
+// openAIStripCacheCreationKey 是 OpenAI 账号 Extra 里的布尔开关：是否抹掉上游回报的
+// 缓存写入（cache_write / cache_creation）token。缺省即开启。
+const openAIStripCacheCreationKey = "openai_strip_cache_creation"
+
 const (
 	OpenAIEndpointCapabilityChatCompletions OpenAIEndpointCapability = "chat_completions"
 	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
@@ -1306,6 +1310,22 @@ func (a *Account) IsOpenAILongContextBillingEnabled() bool {
 	}
 	enabled, ok := a.Extra[openAILongContextBillingEnabledKey].(bool)
 	return ok && enabled
+}
+
+// StripsOpenAICacheCreation 报告是否抹掉该 OpenAI 账号上游回报的缓存写入 token：
+// 用量记录里不记、不计费，发给下游的 usage 里也删掉对应字段。
+// OpenAI 自己从不对提示缓存写入收费；有些中转按 Anthropic 口径把未命中缓存的输入
+// 报成 cache_creation，不抹掉就会按缓存写入价（比输入价还高）计给下游。
+// 默认开启：Extra 里没有这个键视为开启，只有显式 false 才关闭。非 OpenAI 平台恒为 false。
+func (a *Account) StripsOpenAICacheCreation() bool {
+	if a == nil || !a.IsOpenAI() {
+		return false
+	}
+	if a.Extra == nil {
+		return true
+	}
+	enabled, ok := a.Extra[openAIStripCacheCreationKey].(bool)
+	return !ok || enabled
 }
 
 func (a *Account) IsAnthropic() bool {
