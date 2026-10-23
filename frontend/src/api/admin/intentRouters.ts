@@ -3,7 +3,7 @@ import { apiClient } from '../client'
 export interface IntentRule {
   name: string
   description: string
-  /** Matched against the latest user message on every turn, before the classifier. */
+  /** Matched against the two latest user messages on every turn, before the classifier. */
   keywords?: string[]
   account_ids: number[]
   enabled: boolean

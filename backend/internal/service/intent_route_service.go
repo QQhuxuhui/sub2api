@@ -105,6 +105,10 @@ func (c *intentRouterConfig) hasKeywords() bool {
 	return false
 }
 
+// intentKeywordUserTurns is how many of the latest user messages keywords are
+// matched against.
+const intentKeywordUserTurns = 2
+
 // matchKeywords returns the first active rule, in configured order, that has a
 // keyword occurring in text (case-insensitive), and the keyword that matched.
 func (c *intentRouterConfig) matchKeywords(text string) (domain.IntentRule, string, bool) {
@@ -317,14 +321,19 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 
 	// Keywords decide one turn at a time and leave no trace in the conversation
 	// store: a hit sends this request to the rule's accounts, the next turn is
-	// judged on its own latest message, and a turn without a keyword goes back
+	// judged on its own latest user messages, and a turn without a keyword goes back
 	// to ordinary scheduling (or, on a router that also classifies, to whatever
 	// the conversation was classified as). The routed accounts are a scarce
 	// resource; remembering a hit would keep every later turn of the
 	// conversation on them.
-	if rule, keyword, ok := cfg.matchKeywords(view.lastUserText(0)); ok {
-		s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "keyword", Intent: rule.Name, Detail: keyword})
-		return s.newDecision(cfg, rule, "", 0, 0)
+	//
+	// The last intentKeywordUserTurns user messages are searched, newest first,
+	// so a keyword in the newer one wins over the rule order.
+	for _, text := range view.recentUserTexts(intentKeywordUserTurns) {
+		if rule, keyword, ok := cfg.matchKeywords(text); ok {
+			s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "keyword", Intent: rule.Name, Detail: keyword})
+			return s.newDecision(cfg, rule, "", 0, 0)
+		}
 	}
 	rules := cfg.classifierRules()
 	if len(rules) == 0 {

@@ -18,7 +18,7 @@ func TestIntentRouter_LegacyKeywordSessionIsReclassified(t *testing.T) {
 		in.Rules[1].Keywords = []string{"笑话"}
 	})
 	ctx := context.Background()
-	req := f.request(userTurns("讲个笑话", "please fix my Go code"))
+	req := f.request(userTurns("讲个笑话", "ok", "please fix my Go code"))
 	cfg := f.svc.config(ctx, f.groupID)
 	require.Len(t, cfg.classifierRules(), 1)
 	_, accepted := cfg.rule("chat")

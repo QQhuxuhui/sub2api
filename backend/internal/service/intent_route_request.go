@@ -32,24 +32,38 @@ type intentRequestView struct {
 // is not what the user asked, so it is removed first; a turn holding nothing
 // else counts as having no text.
 func (v intentRequestView) lastUserText(maxChars int) string {
+	if texts := v.recentUserTexts(1); len(texts) > 0 {
+		return truncateRunes(texts[0], maxChars)
+	}
+	return ""
+}
+
+// recentUserTexts returns the texts of up to n most recent user turns that
+// have any, newest first, read the same way as lastUserText. Assistant turns
+// are never included.
+func (v intentRequestView) recentUserTexts(n int) []string {
+	var texts []string
 	turns := v.turns()
-	for i := len(turns) - 1; i >= 0; i-- {
+	for i := len(turns) - 1; i >= 0 && len(texts) < n; i-- {
 		if !isIntentUserRole(turns[i].Get("role").String()) {
 			continue
 		}
 		if text := stripIntentInjectedText(intentTurnText(turns[i])); text != "" {
-			return truncateRunes(text, maxChars)
+			texts = append(texts, text)
 		}
+	}
+	if len(texts) > 0 {
+		return texts
 	}
 	// Responses API / legacy completions with a bare string prompt.
 	for _, path := range []string{"input", "prompt"} {
 		if r := gjson.GetBytes(v.body, path); r.Type == gjson.String {
 			if text := stripIntentInjectedText(r.String()); text != "" {
-				return truncateRunes(text, maxChars)
+				return []string{text}
 			}
 		}
 	}
-	return ""
+	return nil
 }
 
 // intentInjectedBlocks match tagged blocks that clients such as Claude Code
