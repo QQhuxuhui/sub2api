@@ -123,3 +123,20 @@ func TestOpenAIStreamingPassthroughPlaceholderThenBusyFailsOver(t *testing.T) {
 	require.Empty(t, recorder.Body.String())
 	require.Empty(t, writer.flushBodyLengths)
 }
+
+// Seen on 2026-10-24: ideagates sends response.queued and CPA sends
+// response.metadata seconds before failing.
+func TestOpenAIStreamingStatusEventsThenFailureFailOver(t *testing.T) {
+	for _, status := range []string{
+		"event: response.queued\n" + `data: {"type":"response.queued","response":{"id":"resp_q","status":"queued"}}` + "\n\n",
+		"event: response.metadata\n" + `data: {"type":"response.metadata","response_id":"resp_m","metadata":{"openai_chatgpt_moderation_metadata":{}}}` + "\n\n",
+	} {
+		svc, c, rec, resp := newPlaceholderStreamTest(t, status+openAIBusyFailedEvent)
+
+		_, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 115, Platform: PlatformOpenAI, Name: "relay"}, time.Now(), "model", "model")
+
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr, status)
+		require.Empty(t, rec.Body.String())
+	}
+}
