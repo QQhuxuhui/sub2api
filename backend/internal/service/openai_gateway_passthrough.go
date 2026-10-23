@@ -1163,7 +1163,7 @@ func openAIStreamAddedEventStartsClientOutput(payload []byte, eventType string) 
 
 func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	trimmed := strings.TrimSpace(data)
-	if trimmed == "" {
+	if trimmed == "" || openAIStreamEventIsPlaceholder(trimmed, eventType) {
 		return false
 	}
 	switch strings.TrimSpace(eventType) {
@@ -1207,6 +1207,9 @@ func openAIStreamDataStartsVisibleOutput(data, eventType string) bool {
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
 		eventType = strings.TrimSpace(gjson.Get(trimmed, "type").String())
+	}
+	if openAIStreamEventIsPlaceholder(trimmed, eventType) {
+		return false
 	}
 	if strings.HasSuffix(eventType, ".delta") {
 		delta := gjson.Get(trimmed, "delta")
@@ -1258,7 +1261,7 @@ func openAIStreamDataStartsSemanticTTFT(data, eventType string) bool {
 		payload := []byte(trimmed)
 		return !openAIStreamFailedEventShouldFailover(payload, extractOpenAISSEErrorMessage(payload))
 	default:
-		return !openAIStreamEventIsPreamble(eventType)
+		return !openAIStreamEventIsPreamble(eventType) && !openAIStreamEventIsPlaceholder(trimmed, eventType)
 	}
 }
 

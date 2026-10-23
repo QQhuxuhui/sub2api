@@ -253,6 +253,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	capacityFailoverSuppressedLogged := false
 	failedMessage := ""
 	clientOutputStarted := false
+	// The event that first counted as client output, for diagnosing failures
+	// that arrive after the stream was committed and so cannot fail over.
+	commitEventType, commitEventData := "", ""
+	commitEventMs := int64(0)
 	codexFailureTerminal := account != nil && account.IsOpenAIOAuthLike()
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
 	var streamEarlyErr error
@@ -566,6 +570,14 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						// the terminal event on the existing stream, but retain the upstream
 						// request ID and payload for operations diagnostics.
 						s.recordOpenAIStreamUpstreamError(c, account, false, upstreamRequestID, "stream_failed", dataBytes, failedMessage)
+						logger.FromContext(ctx).Warn("openai.stream_failed_after_commit",
+							zap.Int64("account_id", account.ID),
+							zap.String("message", failedMessage),
+							zap.String("commit_event_type", commitEventType),
+							zap.String("commit_event_data", commitEventData),
+							zap.Int64("commit_ms", commitEventMs),
+							zap.Int64("failed_ms", time.Since(startTime).Milliseconds()),
+						)
 					}
 				}
 				if !outputStarted {
@@ -673,6 +685,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				eventStartsTTFTOutput = eventStartsTTFTOutput || startsTTFTOutput
 				if startsClientOutput {
 					firstOutputScanGuard.Store(false)
+					if commitEventType == "" {
+						commitEventType, commitEventData = eventType, truncateString(data, 300)
+						commitEventMs = time.Since(startTime).Milliseconds()
+					}
 				}
 			}
 			if startsClientOutput && !openAIStreamEventTypeIsTerminal(eventType) {
