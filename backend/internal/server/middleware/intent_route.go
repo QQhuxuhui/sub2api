@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -69,11 +70,15 @@ func applyIntentRoute(c *gin.Context, router *service.IntentRouterService) {
 			return
 		}
 
+		clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string)
 		decision := router.Decide(ctx, service.IntentRouteInput{
-			GroupID:  *apiKey.GroupID,
-			APIKeyID: apiKey.ID,
-			Header:   c.Request.Header,
-			Body:     body,
+			GroupID:         *apiKey.GroupID,
+			APIKeyID:        apiKey.ID,
+			Header:          c.Request.Header,
+			Body:            body,
+			UserID:          apiKey.UserID,
+			ClientRequestID: clientRequestID,
+			Endpoint:        c.Request.URL.Path,
 		})
 		if decision != nil {
 			c.Request = c.Request.WithContext(service.WithIntentRouteDecision(ctx, decision))

@@ -138,3 +138,39 @@ func (h *IntentRouterHandler) Events(c *gin.Context) {
 	}
 	response.Success(c, events)
 }
+
+func intentRouteHitQueryFrom(c *gin.Context) service.IntentRouteHitQuery {
+	atoi := func(key string) int { n, _ := strconv.Atoi(c.Query(key)); return n }
+	atoi64 := func(key string) int64 { n, _ := strconv.ParseInt(c.Query(key), 10, 64); return n }
+	return service.IntentRouteHitQuery{
+		GroupID:  atoi64("group_id"),
+		UserID:   atoi64("user_id"),
+		Keyword:  c.Query("keyword"),
+		Hours:    atoi("hours"),
+		Page:     atoi("page"),
+		PageSize: atoi("page_size"),
+	}
+}
+
+// Hits lists keyword hits, newest first, with the usage of each request.
+// GET /api/v1/admin/intent-routers/hits
+func (h *IntentRouterHandler) Hits(c *gin.Context) {
+	q := intentRouteHitQueryFrom(c)
+	hits, total, err := h.router.ListHits(c.Request.Context(), q)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"items": hits, "total": total})
+}
+
+// HitStats sums keyword hits per keyword.
+// GET /api/v1/admin/intent-routers/hits/stats
+func (h *IntentRouterHandler) HitStats(c *gin.Context) {
+	stats, err := h.router.KeywordHitStats(c.Request.Context(), intentRouteHitQueryFrom(c))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, stats)
+}

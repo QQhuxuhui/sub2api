@@ -174,6 +174,8 @@ func registerIntentRouterRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		routers.GET("", h.Admin.IntentRouter.List)
 		routers.GET("/events", h.Admin.IntentRouter.Events)
+		routers.GET("/hits", h.Admin.IntentRouter.Hits)
+		routers.GET("/hits/stats", h.Admin.IntentRouter.HitStats)
 		routers.GET("/:group_id", h.Admin.IntentRouter.Get)
 		routers.PUT("/:group_id", h.Admin.IntentRouter.Save)
 		routers.DELETE("/:group_id", h.Admin.IntentRouter.Delete)

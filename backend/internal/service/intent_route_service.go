@@ -12,8 +12,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/tidwall/gjson"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -206,6 +208,11 @@ type IntentRouteInput struct {
 	APIKeyID int64
 	Header   http.Header
 	Body     []byte
+
+	// For the keyword hit log only.
+	UserID          int64
+	ClientRequestID string
+	Endpoint        string
 }
 
 // IntentRouterService classifies requests of groups that opted in and turns the
@@ -219,6 +226,7 @@ type IntentRouterService struct {
 	entClient  *dbent.Client
 	store      intentRouteStore
 	classifier intentClassifier
+	hits       intentRouteHitSink // nil keeps no hit log
 
 	configs      atomic.Pointer[map[int64]*intentRouterConfig]
 	configLoaded atomic.Int64 // unix nanos of the last successful load
@@ -246,9 +254,16 @@ func NewIntentRouterService(entClient *dbent.Client, rdb *redis.Client, cfg *con
 	if rdb != nil {
 		store = &redisIntentRouteStore{rdb: rdb}
 	}
+	var hits intentRouteHitSink
+	if entClient != nil {
+		log := newIntentRouteHitLog(entClient)
+		log.Start()
+		hits = log
+	}
 	return &IntentRouterService{
 		entClient: entClient,
 		store:     store,
+		hits:      hits,
 		classifier: &httpIntentClassifier{
 			// The per-request context carries the real deadline.
 			client:      &http.Client{Timeout: 30 * time.Second},
@@ -329,9 +344,10 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 	//
 	// The last intentKeywordUserTurns user messages are searched, newest first,
 	// so a keyword in the newer one wins over the rule order.
-	for _, text := range view.recentUserTexts(intentKeywordUserTurns) {
+	for turn, text := range view.recentUserTexts(intentKeywordUserTurns) {
 		if rule, keyword, ok := cfg.matchKeywords(text); ok {
 			s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "keyword", Intent: rule.Name, Detail: keyword})
+			s.recordHit(in, view, rule.Name, keyword, turn, text)
 			return s.newDecision(cfg, rule, "", 0, 0)
 		}
 	}
@@ -517,6 +533,32 @@ func (s *IntentRouterService) record(event IntentRouteEvent) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = s.store.AppendEvent(ctx, event)
+	})
+}
+
+// recordHit keeps a keyword hit for later review; see intent_route_hits.go.
+func (s *IntentRouterService) recordHit(in IntentRouteInput, view intentRequestView, rule, keyword string, turn int, text string) {
+	if s.hits == nil {
+		return
+	}
+	requestID := ""
+	if id := strings.TrimSpace(in.ClientRequestID); id != "" {
+		// The form usage_logs.request_id takes, so the hit joins to its usage.
+		requestID = "client:" + id
+	}
+	s.hits.add(IntentRouteHit{
+		Time:         s.now(),
+		GroupID:      in.GroupID,
+		UserID:       in.UserID,
+		APIKeyID:     in.APIKeyID,
+		RequestID:    requestID,
+		Endpoint:     in.Endpoint,
+		Model:        gjson.GetBytes(view.body, "model").String(),
+		Rule:         rule,
+		Keyword:      keyword,
+		UserTurn:     turn,
+		MessageChars: utf8.RuneCountInString(text),
+		Excerpt:      intentHitExcerpt(text, keyword, intentRouteHitExcerpt),
 	})
 }
 

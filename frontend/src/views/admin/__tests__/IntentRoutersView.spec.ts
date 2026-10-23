@@ -4,6 +4,7 @@ import IntentRoutersView from '../IntentRoutersView.vue'
 
 const api = vi.hoisted(() => ({
   list: vi.fn(), save: vi.fn(), remove: vi.fn(), test: vi.fn(), clearCache: vi.fn(), events: vi.fn(),
+  hits: vi.fn(), hitStats: vi.fn(),
 }))
 const admin = vi.hoisted(() => ({ getAllIncludingInactive: vi.fn(), listAccounts: vi.fn() }))
 const toast = vi.hoisted(() => ({ showSuccess: vi.fn(), showError: vi.fn() }))
@@ -36,6 +37,21 @@ async function mountView() {
   return wrapper
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
+function keywordStat(keyword: string) {
+  return { keyword, hits: 1, users: 1, api_keys: 1, avg_chars: 10, avg_input_tokens: 100, total_cost: 0, last_hit: '2026-10-23T09:00:00Z' }
+}
+
+function hitRow(excerpt: string) {
+  return { id: 1, time: '2026-10-23T09:00:00Z', group_id: 1, user_id: 1, keyword: 'coding', excerpt, user_turn: 0, message_chars: 10 }
+}
+
 describe('IntentRoutersView', () => {
   beforeEach(() => {
     Object.values(api).forEach((fn) => fn.mockReset())
@@ -52,6 +68,93 @@ describe('IntentRoutersView', () => {
     ] })
     api.list.mockResolvedValue({ data: [savedRouter] })
     api.events.mockResolvedValue({ data: [] })
+    api.hitStats.mockResolvedValue({ data: [] })
+    api.hits.mockResolvedValue({ data: { items: [], total: 0 } })
+  })
+
+  it('keeps statistics and details on the newest group when requests finish out of order', async () => {
+    api.list.mockResolvedValue({ data: [savedRouter, { ...savedRouter, group_id: 2 }] })
+    const wrapper = await mountView()
+    const old = deferred<{ data: ReturnType<typeof keywordStat>[] }>()
+    const current = deferred<{ data: ReturnType<typeof keywordStat>[] }>()
+    api.hitStats.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
+    api.hits.mockImplementation(async (q: { group_id: number }) => ({ data: { items: [hitRow(`detail-${q.group_id}`)], total: 1 } }))
+    const group = wrapper.get('[data-test="intent-hits"]').findAll('select')[0]
+    await group.setValue(1)
+    await group.setValue(2)
+    current.resolve({ data: [keywordStat('group-two')] })
+    await flushPromises()
+    old.resolve({ data: [keywordStat('group-one')] })
+    await flushPromises()
+    const section = wrapper.get('[data-test="intent-hits"]')
+    expect(section.text()).toContain('group-two')
+    expect(section.text()).toContain('detail-2')
+    expect(section.text()).not.toContain('group-one')
+    wrapper.unmount()
+  })
+
+  it('ignores stale detail responses after a newer keyword is selected', async () => {
+    api.hitStats.mockResolvedValue({ data: [keywordStat('one'), keywordStat('two')] })
+    const wrapper = await mountView()
+    const old = deferred<{ data: { items: ReturnType<typeof hitRow>[]; total: number } }>()
+    const current = deferred<{ data: { items: ReturnType<typeof hitRow>[]; total: number } }>()
+    api.hits.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
+    const rows = wrapper.get('[data-test="intent-hits"]').findAll('tbody')[0].findAll('tr')
+    await rows[0].get('button').trigger('click')
+    await rows[1].get('button').trigger('click')
+    current.resolve({ data: { items: [hitRow('newest-details')], total: 1 } })
+    await flushPromises()
+    old.resolve({ data: { items: [hitRow('stale-details')], total: 2 } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('newest-details')
+    expect(wrapper.text()).not.toContain('stale-details')
+    wrapper.unmount()
+  })
+
+  it('does not show errors from an obsolete filter or an unmounted view', async () => {
+    const wrapper = await mountView()
+    const old = deferred<never>()
+    api.hitStats.mockReturnValueOnce(old.promise).mockResolvedValueOnce({ data: [] })
+    const hours = wrapper.get('[data-test="intent-hits"]').findAll('select')[1]
+    await hours.setValue(1)
+    await hours.setValue(168)
+    await flushPromises()
+    old.reject(new Error('obsolete error'))
+    await flushPromises()
+    expect(toast.showError).not.toHaveBeenCalled()
+    const gone = deferred<never>()
+    api.hitStats.mockReturnValueOnce(gone.promise)
+    await hours.setValue(720)
+    wrapper.unmount()
+    gone.reject(new Error('unmounted'))
+    await flushPromises()
+    expect(toast.showError).not.toHaveBeenCalled()
+  })
+
+  it('reviews keyword hits: flags long-context keywords and drills into one keyword', async () => {
+    api.hitStats.mockResolvedValue({ data: [
+      { keyword: '动画', hits: 900, users: 2, api_keys: 2, avg_chars: 3000, avg_input_tokens: 95000, total_cost: 812.5, last_hit: '2026-10-23T09:00:00Z' },
+      { keyword: 'reply with ok.\n<<<', hits: 12, users: 1, api_keys: 1, avg_chars: 40, avg_input_tokens: 60, total_cost: 0.01, last_hit: '2026-10-23T09:00:00Z' },
+    ] })
+    api.hits.mockResolvedValue({ data: { items: [
+      { id: 7, time: '2026-10-23T09:00:00Z', group_id: 1, user_id: 14, api_key_id: 3, request_id: 'client:x', endpoint: '/v1/responses', model: 'gpt-6-astra',
+        rule: 'coding', keyword: '动画', user_turn: 1, message_chars: 3000, excerpt: '…给按钮加个动画效果…', account_id: 21, input_tokens: 95000, total_cost: 0.9 },
+    ], total: 1 } })
+    const wrapper = await mountView()
+
+    expect(api.hitStats).toHaveBeenCalledWith({ group_id: undefined, hours: 24 })
+    const section = wrapper.get('[data-test="intent-hits"]')
+    const rows = section.findAll('tbody')[0].findAll('tr')
+    expect(rows[0].text()).toContain('intentRouter.hits.suspect')
+    expect(rows[1].text()).not.toContain('intentRouter.hits.suspect')
+    expect(rows[1].text()).toContain('reply with ok.\\n<<<') // the line break is shown, not rendered
+    expect(section.get('mark').text()).toBe('动画')
+    expect(section.text()).toContain('intentRouter.hits.turnPrevious')
+    expect(section.text()).toContain('#21 claude-coding')
+
+    await rows[0].get('button').trigger('click')
+    await flushPromises()
+    expect(api.hits).toHaveBeenLastCalledWith({ group_id: undefined, hours: 24, keyword: '动画', page: 1, page_size: 50 })
   })
 
   it('opens the configured group, shows its rules and flags accounts that vanished', async () => {
