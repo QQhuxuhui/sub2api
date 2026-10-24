@@ -139,15 +139,33 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 	if err != nil {
 		return nil, err
 	}
+	matchTarget := target
+	networkSwitched := false
 	if expectedNetwork := chainverify.NormalizeNetwork(target.Network); expectedNetwork != "" && expectedNetwork != network {
-		return nil, infraerrors.BadRequest("NETWORK_MISMATCH", fmt.Sprintf(
-			"the transaction is on %s but the order quote is for %s", network, expectedNetwork))
+		// The gateway reports only the parent order, so a payer who switched
+		// chains in the cashier shows up here as a mismatch. An admin who picks
+		// that chain explicitly may settle it, but only against the addresses
+		// configured on the instance: the parent's own address is a quote for
+		// another chain and proves nothing about this one.
+		if len(target.TrustedAddresses) == 0 {
+			return nil, infraerrors.BadRequest("NETWORK_MISMATCH", fmt.Sprintf(
+				"the transaction is on %s but the order quote is for %s", network, expectedNetwork))
+		}
+		switched := *target
+		switched.ReceiveAddress = ""
+		matchTarget = &switched
+		networkSwitched = true
 	}
-	matched, received := matchSettlementTransfers(transfers, network, target)
+	matched, received := matchSettlementTransfers(transfers, network, matchTarget)
+	if len(matched) == 0 && networkSwitched && !hasSettlementAddress(transfers, network, matchTarget) {
+		return nil, infraerrors.BadRequest("NETWORK_MISMATCH", fmt.Sprintf(
+			"the transaction is on %s, the order quote is for %s, and it does not pay any receiving address configured on the payment instance",
+			network, chainverify.NormalizeNetwork(target.Network)))
+	}
 	if len(matched) == 0 {
-		if hasSettlementAddress(transfers, network, target) {
+		if hasSettlementAddress(transfers, network, matchTarget) {
 			return nil, infraerrors.BadRequest("TOKEN_MISMATCH", fmt.Sprintf(
-				"the transaction reaches the order address but uses %s instead of %s", settlementTransferTokens(transfers, network, target), target.Token))
+				"the transaction reaches the order address but uses %s instead of %s", settlementTransferTokens(transfers, network, matchTarget), target.Token))
 		}
 		return nil, infraerrors.BadRequest("ADDRESS_MISMATCH", manualSettleAddressMismatchMessage(transfers, target))
 	}
@@ -258,6 +276,8 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 		"expectedAmount":  expected.String(),
 		"shortfall":       shortfall.String(),
 		"blockTime":       first.BlockTime.UTC().Format(time.RFC3339),
+		"quoteNetwork":    target.Network,
+		"networkSwitched": networkSwitched,
 		"previous_status": previousStatus,
 		"tradeNo":         tradeNo,
 	}); err != nil {

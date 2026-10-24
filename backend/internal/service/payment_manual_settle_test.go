@@ -164,6 +164,54 @@ func TestAdminSettleOrderByTxHashSettlesShortPaidExpiredOrder(t *testing.T) {
 	require.Contains(t, audit.Detail, `"shortfall":"0.01"`)
 }
 
+// Seen on 2026-10-24: the order was quoted on tron, the payer switched to
+// BSC in the cashier and sent a fee-short amount to the instance's EVM address.
+func TestAdminSettleOrderByTxHashSettlesTransferOnNetworkSwitchedInCashier(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusExpired, "4.355")
+	f.provider.target = &payment.OnChainSettlementTarget{
+		Network: "tron", Token: "USDT", ReceiveAddress: "TP525BEN7X9N1pfkVdc9Pv1W43M2LzU6pe", ExpectedAmount: "4.48",
+		TrustedAddresses: []string{"TP525BEN7X9N1pfkVdc9Pv1W43M2LzU6pe", manualSettleAddress},
+	}
+
+	_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash, DryRun: true})
+	requireManualSettleReason(t, err, "TX_NOT_FOUND")
+	require.Equal(t, []string{"tron"}, f.fetcher.probed, "without an explicit network only the quoted chain is searched")
+
+	result, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash, Network: "bsc", Operator: "admin:7"})
+	require.NoError(t, err)
+	require.True(t, result.Settled)
+	require.Equal(t, "binance", result.Network)
+	require.Equal(t, "tron", result.ExpectedNetwork)
+	require.Equal(t, "0.125", result.Shortfall)
+	require.Equal(t, 30.0, f.userRepo.getByIDUser.Balance)
+
+	audit, err := f.client.PaymentAuditLog.Query().Where(
+		paymentauditlog.OrderIDEQ(strconv.FormatInt(f.order.ID, 10)),
+		paymentauditlog.ActionEQ(auditActionManualSettled),
+	).Only(ctx)
+	require.NoError(t, err)
+	require.Contains(t, audit.Detail, `"networkSwitched":true`)
+	require.Contains(t, audit.Detail, `"quoteNetwork":"tron"`)
+
+	_, err = f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash, Network: "bsc"})
+	requireManualSettleReason(t, err, "INVALID_STATUS")
+}
+
+func TestAdminSettleOrderByTxHashSwitchedNetworkNeedsConfiguredAddress(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusExpired, "4.48")
+	f.provider.target.TrustedAddresses = []string{"0x2222222222222222222222222222222222222222"}
+	f.fetcher.byNetwork["polygon"] = []chainverify.Transfer{{
+		Network: "polygon", TxHash: manualSettleTxHash, Token: "USDT", To: manualSettleAddress,
+		Amount: decimal.RequireFromString("4.48"), BlockTime: f.order.CreatedAt.Add(time.Minute), Confirmations: 99,
+	}}
+
+	_, err := f.svc.AdminSettleOrderByTxHash(ctx, f.order.ID, ManualSettleRequest{TxHash: manualSettleTxHash, Network: "polygon"})
+	requireManualSettleReason(t, err, "NETWORK_MISMATCH")
+	require.Zero(t, f.userRepo.getByIDUser.Balance, "the quoted chain's address does not vouch for another chain")
+}
+
 func TestAdminSettleOrderByTxHashRejectsReusedHash(t *testing.T) {
 	ctx := context.Background()
 	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
