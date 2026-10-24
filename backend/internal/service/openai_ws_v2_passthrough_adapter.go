@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/erroridentity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
@@ -133,6 +134,8 @@ func openAIWSPassthroughPolicyModelFromSessionFrame(account *Account, payload []
 }
 
 type openAIWSPassthroughUsageMeta struct {
+	identitySnapshot         func() *erroridentity.Scrubber
+	identity                 atomic.Pointer[erroridentity.Scrubber]
 	serviceTier              atomic.Pointer[string]
 	reasoningEffort          atomic.Pointer[string]
 	requestedReasoningEffort atomic.Pointer[string]
@@ -206,6 +209,9 @@ func (m *openAIWSPassthroughUsageMeta) storeTurnModels(requestModel string, upst
 	upstreamModel := strings.TrimSpace(gjson.GetBytes(upstreamPayload, "model").String())
 	if upstreamModel == "" {
 		upstreamModel = requestModel
+	}
+	if m.identitySnapshot != nil {
+		m.identity.Store(m.identitySnapshot())
 	}
 	m.requestModel.Store(openAIWSTrimmedStringPtr(requestModel))
 	m.upstreamModel.Store(openAIWSTrimmedStringPtr(upstreamModel))
@@ -769,6 +775,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstClientMessage = accountScopedFirst
 	}
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
+	usageMeta.identitySnapshot = s.ErrorIdentitySnapshot
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
 		return fmt.Errorf("apply openai fast policy on first ws frame: %w", policyErr)
@@ -960,6 +967,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		interTurnStarted:     make(chan struct{}, 1),
 		restoreResponseModel: func(payload []byte) []byte {
 			requestModel, upstreamModel := usageMeta.turnModels("")
+			if account.Platform == PlatformOpenAI {
+				payload = usageMeta.identity.Load().JSON(payload, requestModel, false)
+			}
 			modelRewrite := newOpenAIResponseModelRewrite(nil, account, requestModel, upstreamModel)
 			if !modelRewrite.mayApplyBytes(payload) {
 				return payload

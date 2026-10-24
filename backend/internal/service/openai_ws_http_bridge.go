@@ -433,6 +433,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
+	scrubError := s.newErrorIdentityTurn(account, originalModel)
+	originalWriter := writeClientMessage
+	writeClientMessage = func(payload []byte) error { return originalWriter(scrubError(payload)) }
 	responseModelObserver := &upstreamResponseModelObserver{}
 
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)

@@ -1,0 +1,101 @@
+{
+  "rule_version": "2026-10-23-v1",
+  "targets_sha256": "f1a7e53dea83487e4e4cb497c51d52ad6f0cc4dff6a777bfe0f8f13b123751ba",
+  "rule_hits": [
+    52,
+    100,
+    27,
+    123,
+    123,
+    3,
+    1,
+    1,
+    15,
+    24,
+    1,
+    24,
+    6
+  ],
+  "samples": {
+    "http_200": {
+      "rows": 245,
+      "changed": 190,
+      "empty_bodies": 0,
+      "non_json_rows": 0,
+      "categories": {
+        "azure": {
+          "before": 0,
+          "after": 0
+        },
+        "chatgpt": {
+          "before": 0,
+          "after": 0
+        },
+        "codex2api": {
+          "before": 0,
+          "after": 0
+        },
+        "internal_header": {
+          "before": 0,
+          "after": 0
+        },
+        "mapped_model": {
+          "before": 190,
+          "after": 0
+        },
+        "organization": {
+          "before": 0,
+          "after": 0
+        },
+        "providers": {
+          "before": 0,
+          "after": 0
+        },
+        "sse_preview": {
+          "before": 0,
+          "after": 0
+        }
+      }
+    },
+    "non_200": {
+      "rows": 703717,
+      "changed": 360,
+      "empty_bodies": 0,
+      "non_json_rows": 464570,
+      "categories": {
+        "azure": {
+          "before": 127,
+          "after": 0
+        },
+        "chatgpt": {
+          "before": 127,
+          "after": 0
+        },
+        "codex2api": {
+          "before": 8,
+          "after": 0
+        },
+        "internal_header": {
+          "before": 24,
+          "after": 0
+        },
+        "mapped_model": {
+          "before": 185,
+          "after": 0
+        },
+        "organization": {
+          "before": 1,
+          "after": 0
+        },
+        "providers": {
+          "before": 15,
+          "after": 0
+        },
+        "sse_preview": {
+          "before": 6,
+          "after": 0
+        }
+      }
+    }
+  }
+}

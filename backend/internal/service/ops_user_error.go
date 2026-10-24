@@ -1,6 +1,10 @@
 package service
 
-import "time"
+import (
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/erroridentity"
+)
 
 // UserErrorRequest 是面向终端用户的"错误请求"精简脱敏视图（白名单）。
 // 严禁包含 account / api_key_prefix / upstream_endpoint / user_email 等
@@ -90,7 +94,7 @@ func CategoryToFilter(category string) (phases []string, errorTypes []string) {
 }
 
 // ToUserErrorRequest 把内部 OpsErrorLog 裁剪为用户安全视图。
-func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
+func ToUserErrorRequest(e *OpsErrorLog, scrubbers ...*erroridentity.Scrubber) *UserErrorRequest {
 	if e == nil {
 		return nil
 	}
@@ -102,6 +106,10 @@ func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
 	if e.ClientIP != nil {
 		clientIP = *e.ClientIP
 	}
+	message := e.Message
+	if len(scrubbers) > 0 && e.Platform == PlatformOpenAI {
+		message = scrubbers[0].Text(message, e.RequestedModel)
+	}
 	return &UserErrorRequest{
 		ID:              e.ID,
 		CreatedAt:       e.CreatedAt,
@@ -110,7 +118,7 @@ func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
 		StatusCode:      e.StatusCode,
 		Category:        MapUserErrorCategory(e.Phase, e.Type),
 		Platform:        e.Platform,
-		Message:         e.Message,
+		Message:         message,
 		KeyName:         e.APIKeyName,
 		KeyDeleted:      e.APIKeyDeleted,
 		ClientIP:        clientIP,
@@ -131,14 +139,18 @@ type UserErrorRequestDetail struct {
 }
 
 // ToUserErrorRequestDetail 把内部 OpsErrorLogDetail 裁剪为用户安全详情视图。
-func ToUserErrorRequestDetail(e *OpsErrorLogDetail) *UserErrorRequestDetail {
+func ToUserErrorRequestDetail(e *OpsErrorLogDetail, scrubbers ...*erroridentity.Scrubber) *UserErrorRequestDetail {
 	if e == nil {
 		return nil
 	}
-	base := ToUserErrorRequest(&e.OpsErrorLog)
+	base := ToUserErrorRequest(&e.OpsErrorLog, scrubbers...)
+	body := e.ErrorBody
+	if len(scrubbers) > 0 && e.Platform == PlatformOpenAI {
+		body = string(scrubbers[0].Body([]byte(body), e.RequestedModel, e.StatusCode >= 400))
+	}
 	return &UserErrorRequestDetail{
 		UserErrorRequest:   *base,
-		ErrorBody:          e.ErrorBody,
+		ErrorBody:          body,
 		UpstreamStatusCode: e.UpstreamStatusCode,
 	}
 }

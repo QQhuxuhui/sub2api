@@ -745,6 +745,7 @@ func ProvideOpsService(
 	}
 	svc.authCacheInvalidationWorker = authCacheInvalidationWorker
 	svc.apiKeyService = apiKeyService
+	openAIGatewayService.startErrorIdentity()
 	svc.StartRuntimeSettingsRefresh(context.Background())
 	return svc
 }

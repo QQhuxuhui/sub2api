@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -119,6 +120,7 @@ type schedulerActiveGroupIDLister interface {
 }
 
 type SchedulerSnapshotService struct {
+	errorIdentityRefresh         atomic.Pointer[func()]
 	cache                        SchedulerCache
 	outboxRepo                   SchedulerOutboxRepository
 	accountRepo                  AccountRepository
@@ -464,7 +466,17 @@ func (s *SchedulerSnapshotService) cleanupConsumedOutbox(watermark int64) {
 	}
 }
 
+func (s *SchedulerSnapshotService) setErrorIdentityRefresh(refresh func()) {
+	s.errorIdentityRefresh.Store(&refresh)
+}
+
 func (s *SchedulerSnapshotService) handleOutboxEvent(ctx context.Context, event SchedulerOutboxEvent, seen map[batchSeenKey]struct{}) error {
+	if event.EventType == SchedulerOutboxEventAccountChanged || event.EventType == SchedulerOutboxEventAccountBulkChanged || event.EventType == SchedulerOutboxEventFullRebuild {
+		if refresh := s.errorIdentityRefresh.Load(); refresh != nil {
+			(*refresh)()
+		}
+	}
+
 	switch event.EventType {
 	case SchedulerOutboxEventAccountLastUsed:
 		return s.handleLastUsedEvent(ctx, event.Payload)

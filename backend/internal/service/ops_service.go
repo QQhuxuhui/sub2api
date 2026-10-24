@@ -730,8 +730,9 @@ func (s *OpsService) ListUserErrorRequests(ctx context.Context, userID int64, fi
 		return nil, err
 	}
 	items := make([]*UserErrorRequest, 0, len(list.Errors))
+	scrubber := s.ErrorIdentitySnapshot()
 	for _, e := range list.Errors {
-		if r := ToUserErrorRequest(e); r != nil {
+		if r := ToUserErrorRequest(e, scrubber); r != nil {
 			items = append(items, r)
 		}
 	}
@@ -786,7 +787,7 @@ func (s *OpsService) GetUserErrorRequestDetail(ctx context.Context, userID, id i
 	if !ownedDirectly {
 		return nil, infraerrors.NotFound("OPS_ERROR_NOT_FOUND", "ops error log not found")
 	}
-	return ToUserErrorRequestDetail(detail), nil
+	return ToUserErrorRequestDetail(detail, s.ErrorIdentitySnapshot()), nil
 }
 
 func (s *OpsService) UpdateErrorResolution(ctx context.Context, errorID int64, resolved bool, resolvedByUserID *int64) error {
