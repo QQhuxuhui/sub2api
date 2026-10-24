@@ -41,9 +41,12 @@ type IntentRouteHit struct {
 	Rule      string    `json:"rule"`
 	Keyword   string    `json:"keyword"`
 	// UserTurn is 0 when the latest user message matched, 1 for the one before.
-	UserTurn     int    `json:"user_turn"`
-	MessageChars int    `json:"message_chars"`
-	Excerpt      string `json:"excerpt"`
+	UserTurn     int `json:"user_turn"`
+	MessageChars int `json:"message_chars"`
+	// NewestChars is the length of the latest user message; it equals
+	// MessageChars when UserTurn is 0.
+	NewestChars int    `json:"newest_chars"`
+	Excerpt     string `json:"excerpt"`
 
 	// From the request's usage log, when one was written.
 	AccountID   *int64   `json:"account_id,omitempty"`
@@ -217,7 +220,7 @@ func (s *IntentRouterService) Stop(ctx context.Context) error {
 	return nil
 }
 
-const intentRouteHitColumns = 12
+const intentRouteHitColumns = 13
 
 func (l *intentRouteHitLog) write(batch []IntentRouteHit) {
 	if len(batch) == 0 {
@@ -286,7 +289,7 @@ func intentHitDBText(text string) string {
 
 func (l *intentRouteHitLog) insert(ctx context.Context, batch []IntentRouteHit) error {
 	var b strings.Builder
-	b.WriteString(`INSERT INTO intent_route_hits (created_at, group_id, user_id, api_key_id, request_id, endpoint, model, rule_name, keyword, user_turn, message_chars, excerpt) VALUES `)
+	b.WriteString(`INSERT INTO intent_route_hits (created_at, group_id, user_id, api_key_id, request_id, endpoint, model, rule_name, keyword, user_turn, message_chars, newest_chars, excerpt) VALUES `)
 	args := make([]any, 0, len(batch)*intentRouteHitColumns)
 	for i, h := range batch {
 		if i > 0 {
@@ -302,7 +305,7 @@ func (l *intentRouteHitLog) insert(ctx context.Context, batch []IntentRouteHit) 
 		b.WriteByte(')')
 		args = append(args, h.Time, h.GroupID, h.UserID, h.APIKeyID, truncateRunes(intentHitDBText(h.RequestID), 160),
 			truncateRunes(intentHitDBText(h.Endpoint), 128), truncateRunes(intentHitDBText(h.Model), 255), truncateRunes(intentHitDBText(h.Rule), 64),
-			intentHitDBText(h.Keyword), h.UserTurn, h.MessageChars, intentHitDBText(h.Excerpt))
+			intentHitDBText(h.Keyword), h.UserTurn, h.MessageChars, h.NewestChars, intentHitDBText(h.Excerpt))
 	}
 	_, err := l.db.ExecContext(ctx, b.String(), args...)
 	return err
@@ -418,7 +421,7 @@ func (s *IntentRouterService) ListHits(ctx context.Context, q IntentRouteHitQuer
 	page := max(q.Page, 1)
 	args = append(args, size, (page-1)*size)
 	rows, err = s.entClient.QueryContext(ctx, `SELECT h.id, h.created_at, h.group_id, h.user_id, h.api_key_id, h.request_id,
-		h.endpoint, h.model, h.rule_name, h.keyword, h.user_turn, h.message_chars, h.excerpt,
+		h.endpoint, h.model, h.rule_name, h.keyword, h.user_turn, h.message_chars, h.newest_chars, h.excerpt,
 		u.account_id, u.input_tokens, u.total_cost
 		FROM intent_route_hits h `+intentRouteHitUsageJoin+` `+where+
 		fmt.Sprintf(` ORDER BY h.id DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
@@ -432,7 +435,7 @@ func (s *IntentRouterService) ListHits(ctx context.Context, q IntentRouteHitQuer
 		var account, tokens sql.NullInt64
 		var cost sql.NullFloat64
 		if err := rows.Scan(&h.ID, &h.Time, &h.GroupID, &h.UserID, &h.APIKeyID, &h.RequestID,
-			&h.Endpoint, &h.Model, &h.Rule, &h.Keyword, &h.UserTurn, &h.MessageChars, &h.Excerpt,
+			&h.Endpoint, &h.Model, &h.Rule, &h.Keyword, &h.UserTurn, &h.MessageChars, &h.NewestChars, &h.Excerpt,
 			&account, &tokens, &cost); err != nil {
 			return nil, 0, fmt.Errorf("scan intent route hit: %w", err)
 		}

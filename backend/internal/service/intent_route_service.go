@@ -111,6 +111,13 @@ func (c *intentRouterConfig) hasKeywords() bool {
 // matched against.
 const intentKeywordUserTurns = 2
 
+// intentKeywordFollowUpChars: the user message before the latest one is only
+// searched when the latest one is shorter than this many runes. Users resend a
+// short "继续" after a dropped connection; a longer latest message is a new
+// request of its own, and an older keyword (often inside a coding agent's
+// context) must not route it.
+const intentKeywordFollowUpChars = 15
+
 // matchKeywords returns the first active rule, in configured order, that has a
 // keyword occurring in text (case-insensitive), and the keyword that matched.
 func (c *intentRouterConfig) matchKeywords(text string) (domain.IntentRule, string, bool) {
@@ -343,11 +350,16 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 	// conversation on them.
 	//
 	// The last intentKeywordUserTurns user messages are searched, newest first,
-	// so a keyword in the newer one wins over the rule order.
-	for turn, text := range view.recentUserTexts(intentKeywordUserTurns) {
+	// so a keyword in the newer one wins over the rule order. An older message
+	// is only searched while the newer ones are short follow-ups.
+	texts := view.recentUserTexts(intentKeywordUserTurns)
+	for turn, text := range texts {
+		if turn > 0 && utf8.RuneCountInString(texts[turn-1]) >= intentKeywordFollowUpChars {
+			break
+		}
 		if rule, keyword, ok := cfg.matchKeywords(text); ok {
 			s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "keyword", Intent: rule.Name, Detail: keyword})
-			s.recordHit(in, view, rule.Name, keyword, turn, text)
+			s.recordHit(in, view, rule.Name, keyword, turn, text, texts[0])
 			return s.newDecision(cfg, rule, "", 0, 0)
 		}
 	}
@@ -537,7 +549,7 @@ func (s *IntentRouterService) record(event IntentRouteEvent) {
 }
 
 // recordHit keeps a keyword hit for later review; see intent_route_hits.go.
-func (s *IntentRouterService) recordHit(in IntentRouteInput, view intentRequestView, rule, keyword string, turn int, text string) {
+func (s *IntentRouterService) recordHit(in IntentRouteInput, view intentRequestView, rule, keyword string, turn int, text, newest string) {
 	if s.hits == nil {
 		return
 	}
@@ -558,6 +570,7 @@ func (s *IntentRouterService) recordHit(in IntentRouteInput, view intentRequestV
 		Keyword:      keyword,
 		UserTurn:     turn,
 		MessageChars: utf8.RuneCountInString(text),
+		NewestChars:  utf8.RuneCountInString(newest),
 		Excerpt:      intentHitExcerpt(text, keyword, intentRouteHitExcerpt),
 	})
 }

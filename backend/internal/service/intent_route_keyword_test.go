@@ -84,8 +84,11 @@ func TestIntentRouter_KeywordsLookAtTheLatestTwoUserMessages(t *testing.T) {
 	f := newIntentRouteFixture(t)
 	f.saveRouter(t, withKeywords([]string{"traceback"}, []string{"joke"}))
 
-	d := f.svc.Decide(ctx, f.request(userTurns("here is a TraceBack", "what does it mean")))
-	require.Equal(t, "coding", d.Intent, "the user message before the latest one counts")
+	d := f.svc.Decide(ctx, f.request(userTurns("here is a TraceBack", "what is it?")))
+	require.Equal(t, "coding", d.Intent, "after a short follow-up the user message before it counts")
+
+	d = f.svc.Decide(ctx, f.request(userTurns("画一只鹈鹕 traceback", "继续")))
+	require.Equal(t, "coding", d.Intent, "a resent 继续 keeps the earlier request's route")
 
 	f.classifier.answers = []string{"chat"}
 	d = f.svc.Decide(ctx, f.request(userTurns("here is a traceback", "never mind", "hello")))
@@ -94,6 +97,20 @@ func TestIntentRouter_KeywordsLookAtTheLatestTwoUserMessages(t *testing.T) {
 
 	d = f.svc.Decide(ctx, f.request(userTurns("here is a traceback", "tell me a joke")))
 	require.Equal(t, "chat", d.Intent, "the newer message wins over the rule order")
+}
+
+func TestIntentRouter_LongLatestMessageHidesTheOneBefore(t *testing.T) {
+	ctx := context.Background()
+	f := newIntentRouteFixture(t)
+	f.saveRouter(t, keywordOnly([]string{"traceback"}, []string{"joke"}))
+
+	// A latest message of 15 runes or more is a request of its own.
+	requireNoPreference(t, f.svc.Decide(ctx, f.request(userTurns("here is a traceback", "refactor this func"))))
+	requireNoPreference(t, f.svc.Decide(ctx, f.request(userTurns("here is a traceback", "改下函数命名然后再补充一些测试"))))
+	require.Equal(t, "coding", f.svc.Decide(ctx, f.request(userTurns("here is a traceback", "改下函数命名然后再补充些测试"))).Intent,
+		"14 runes is still a follow-up: runes are counted, not bytes")
+	require.Equal(t, "chat", f.svc.Decide(ctx, f.request(userTurns("here is a traceback", "now tell me a long joke please"))).Intent,
+		"a keyword in a long latest message still routes")
 }
 
 func TestIntentRouter_KeywordsIgnoreAssistantMessages(t *testing.T) {

@@ -79,7 +79,7 @@ func (d *scriptedHitDB) ExecContext(ctx context.Context, query string, args ...a
 		}
 	}
 	for i := 0; i < len(args); i += intentRouteHitColumns {
-		d.stored = append(d.stored, args[i+11].(string))
+		d.stored = append(d.stored, args[i+intentRouteHitColumns-1].(string))
 	}
 	return nil, nil
 }
@@ -108,7 +108,7 @@ func TestIntentHitBatchRetriesRolledBackTransaction(t *testing.T) {
 
 func TestIntentHitBatchIsolatesBadRows(t *testing.T) {
 	db := &scriptedHitDB{fail: func(_ int, args []any) error {
-		for i := 11; i < len(args); i += intentRouteHitColumns {
+		for i := intentRouteHitColumns - 1; i < len(args); i += intentRouteHitColumns {
 			if args[i] == "bad" {
 				return hitSQLError("22001")
 			}
@@ -251,7 +251,7 @@ func TestIntentRouter_KeywordHitIsLogged(t *testing.T) {
 	f.svc.hits = sink
 	f.saveRouter(t, keywordOnly([]string{"traceback"}, []string{"joke"}))
 
-	in := f.request(`{"model":"gpt-6-astra",` + strings.TrimPrefix(userTurns("here is a TraceBack from prod", "what does it mean"), "{"))
+	in := f.request(`{"model":"gpt-6-astra",` + strings.TrimPrefix(userTurns("here is a TraceBack from prod", "what is it?"), "{"))
 	in.UserID, in.ClientRequestID, in.Endpoint = 7, "abc-123", "/v1/chat/completions"
 	require.Equal(t, "coding", f.svc.Decide(ctx, in).Intent)
 
@@ -260,7 +260,7 @@ func TestIntentRouter_KeywordHitIsLogged(t *testing.T) {
 	require.Equal(t, IntentRouteHit{
 		Time: f.now, GroupID: f.groupID, UserID: 7, APIKeyID: 11, RequestID: "client:abc-123",
 		Endpoint: "/v1/chat/completions", Model: "gpt-6-astra", Rule: "coding", Keyword: "traceback",
-		UserTurn: 1, MessageChars: len("here is a TraceBack from prod"), Excerpt: "here is a TraceBack from prod",
+		UserTurn: 1, MessageChars: len("here is a TraceBack from prod"), NewestChars: len("what is it?"), Excerpt: "here is a TraceBack from prod",
 	}, hit, "the earlier user message matched, and the excerpt keeps its original case")
 
 	f.svc.Decide(ctx, f.request(userTurns("hello there")))
@@ -281,7 +281,7 @@ func TestIntentRouteHitLog_WritesOneInsertPerBatch(t *testing.T) {
 		{Time: at, GroupID: 3, Keyword: "draw a", Excerpt: "x"},
 		{Time: at, GroupID: 4, Keyword: "动画", UserTurn: 1},
 	})
-	require.Contains(t, db.query, "($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12), ($13,")
+	require.Contains(t, db.query, "($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13), ($14,")
 	require.Len(t, db.args, 2*intentRouteHitColumns)
 	require.Equal(t, int64(4), db.args[intentRouteHitColumns+1])
 	require.Equal(t, "动画", db.args[intentRouteHitColumns+8])
