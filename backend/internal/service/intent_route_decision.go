@@ -2,16 +2,23 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
+
+// ErrIntentRouteUnavailable means the request matched an intent rule but none
+// of the rule's accounts can take it right now. It wraps ErrNoAvailableAccounts
+// so callers unaware of it still treat it as a capacity failure.
+var ErrIntentRouteUnavailable = fmt.Errorf("%w: routed accounts busy or unavailable", ErrNoAvailableAccounts)
 
 // IntentRouteDecision is the outcome of classifying one request. It is made
 // once, before the account failover loop, and travels in the request context
 // so every selection attempt of the request sees the same targets.
 //
-// It is a preference, never a restriction: when none of the target accounts
-// can serve the request, selection continues exactly as if intent routing did
-// not exist.
+// A matched rule is binding: when none of its accounts can serve the request,
+// selection fails with ErrIntentRouteUnavailable (reported to the client as a
+// rate limit) instead of falling back to the group's own accounts. A decision
+// without a matched rule (scope only) never restricts selection.
 type IntentRouteDecision struct {
 	GroupID int64
 	Intent  string

@@ -61,7 +61,10 @@ func TestGatewayIntentRoute_WithoutDecisionNothingChanges(t *testing.T) {
 	require.Equal(t, int64(1), result.Account.ID, "ordinary priority selection")
 }
 
-func TestGatewayIntentRoute_FallsBackToOrdinarySelection(t *testing.T) {
+// A matched rule is binding: when none of its accounts can take the request,
+// selection fails with ErrIntentRouteUnavailable instead of handing the request
+// to the group's own accounts.
+func TestGatewayIntentRoute_UnavailableTargetsFailTheRequest(t *testing.T) {
 	cases := map[string]struct {
 		foreign  Account
 		excluded map[int64]struct{}
@@ -82,8 +85,8 @@ func TestGatewayIntentRoute_FallsBackToOrdinarySelection(t *testing.T) {
 			ctx := WithIntentRouteDecision(context.Background(), decision)
 
 			result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "", "claude-3-5-sonnet-20241022", tc.excluded, "", 0)
-			require.NoError(t, err, "routing trouble must never surface as a request error")
-			require.Equal(t, int64(1), result.Account.ID, "the group's own accounts take over")
+			require.ErrorIs(t, err, ErrIntentRouteUnavailable)
+			require.Nil(t, result, "the group's own accounts must not take over")
 			require.Zero(t, decision.SelectedAccountID())
 		})
 	}

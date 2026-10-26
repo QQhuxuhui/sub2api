@@ -14,7 +14,9 @@ import (
 // deliberately live in another group. Privacy, capability, transport, model,
 // quota and profit rules of the request still apply.
 //
-// ok=false means ordinary scheduling must take over.
+// ok=false with a nil error means ordinary scheduling must take over. When the
+// turn matched a rule but none of its accounts can take it, the error is
+// ErrIntentRouteUnavailable and the request must fail rather than fall back.
 func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 	ctx context.Context,
 	groupID *int64,
@@ -26,11 +28,11 @@ func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 	requiredImageCapability OpenAIImagesCapability,
 	requireCompact bool,
 	platform string,
-) (*AccountSelectionResult, OpenAIAccountScheduleDecision, bool) {
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, bool, error) {
 	none := OpenAIAccountScheduleDecision{}
 	route := IntentRouteDecisionFromContext(ctx)
 	if route == nil || s == nil {
-		return nil, none, false
+		return nil, none, false, nil
 	}
 	route.clearSelected()
 
@@ -53,7 +55,7 @@ func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 		if store := s.getOpenAIWSStateStore(); store != nil {
 			if bound, err := store.GetResponseAccount(ctx, derefGroupID(groupID), prev); err == nil && bound > 0 {
 				if !route.inScope(bound) {
-					return nil, none, false
+					return nil, none, false, nil
 				}
 				boundAccountID = bound
 				candidates = []int64{bound}
@@ -61,7 +63,7 @@ func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 		}
 	}
 	if len(candidates) == 0 {
-		return nil, none, false
+		return nil, none, false, nil
 	}
 
 	// Same request-scoped context the ordinary path installs before filtering.
@@ -71,7 +73,7 @@ func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
 	}
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
-		return nil, none, false
+		return nil, none, false, nil
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	checker := &defaultOpenAIAccountScheduler{service: s, stats: s.openaiAccountStats}
@@ -136,11 +138,16 @@ func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 			Layer:               openAIAccountScheduleLayerIntentRoute,
 			SelectedAccountID:   account.ID,
 			SelectedAccountType: account.Type,
-		}, true
+		}, true, nil
+	}
+	if len(route.AccountIDs) > 0 {
+		slog.Info("intent_route.unavailable",
+			"group_id", derefGroupID(groupID), "intent", route.Intent, "model", requestedModel, "excluded", len(excludedIDs))
+		return nil, none, false, ErrIntentRouteUnavailable
 	}
 	slog.Debug("intent_route.fallback",
 		"group_id", derefGroupID(groupID), "intent", route.Intent, "model", requestedModel)
-	return nil, none, false
+	return nil, none, false, nil
 }
 
 // openAIAccountScheduleLayerIntentRoute labels selections made by intent routing

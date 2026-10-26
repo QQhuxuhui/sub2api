@@ -175,6 +175,15 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		}
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(requestCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
+			if isIntentRouteUnavailable(err) {
+				if streamStarted {
+					// A slot-wait heartbeat already committed HTTP 200.
+					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", intentRouteUnavailableMessage, true)
+				} else {
+					h.responsesErrorResponse(c, http.StatusTooManyRequests, "rate_limit_error", intentRouteUnavailableMessage)
+				}
+				return
+			}
 			if len(fs.FailedAccountIDs) == 0 {
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, effectiveAPIKeyPlatform(c, apiKey))
 				cls = classifySelectionFailureError(err, cls)

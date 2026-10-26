@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -32,6 +33,18 @@ type noAccountErrorClassification struct {
 	ErrType       string
 	Message       string
 	ModelNotFound bool // true when this is a 404 model_not_found classification
+}
+
+// intentRouteUnavailableMessage is what a client sees when its request matched
+// an intent rule whose accounts are all busy or unavailable. It deliberately
+// reads like an ordinary rate limit: intent routing is never disclosed.
+const intentRouteUnavailableMessage = "All available accounts are currently rate-limited. Please retry later."
+
+// isIntentRouteUnavailable reports a selection failure that must reach the
+// client as 429 rate_limit_error (intentRouteUnavailableMessage) right away,
+// without failover or the no-account diagnosis.
+func isIntentRouteUnavailable(err error) bool {
+	return errors.Is(err, service.ErrIntentRouteUnavailable)
 }
 
 var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited|rate_limited)=(\d+)`)

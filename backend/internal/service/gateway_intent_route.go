@@ -11,8 +11,10 @@ import (
 // (schedulability, model support, quotas, concurrency slots, session limits)
 // goes through the same checks ordinary selection uses.
 //
-// ok=false means "no routed account can take this request right now" and the
-// caller must carry on with ordinary selection.
+// A nil result with a nil error means the turn has no preference and the caller
+// must carry on with ordinary selection. When the turn matched a rule but none
+// of its accounts can take it, the error is ErrIntentRouteUnavailable and the
+// request must fail rather than fall back.
 func (s *GatewayService) selectIntentRoutedAccount(
 	ctx context.Context,
 	groupID *int64,
@@ -20,21 +22,21 @@ func (s *GatewayService) selectIntentRoutedAccount(
 	sessionHash string,
 	requestedModel string,
 	excludedIDs map[int64]struct{},
-) (*AccountSelectionResult, bool) {
+) (*AccountSelectionResult, error) {
 	decision := IntentRouteDecisionFromContext(ctx)
 	if decision == nil {
-		return nil, false
+		return nil, nil
 	}
 	decision.clearSelected()
 	if len(decision.AccountIDs) == 0 {
 		// Scope only: this turn has no preference, and these protocols bind no
 		// server-side state to an account that would have to be honored.
-		return nil, false
+		return nil, nil
 	}
 
 	platform, hasForcePlatform, err := s.resolvePlatform(ctx, groupID, group, requestedModel)
 	if err != nil {
-		return nil, false
+		return nil, nil
 	}
 	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
 	// Channel pricing of the key's own group still governs which upstream
@@ -72,11 +74,11 @@ func (s *GatewayService) selectIntentRoutedAccount(
 		decision.markSelected(account.ID)
 		slog.Debug("intent_route.selected",
 			"group_id", derefGroupID(groupID), "intent", decision.Intent, "account_id", account.ID, "model", requestedModel)
-		return result, true
+		return result, nil
 	}
-	slog.Debug("intent_route.fallback",
-		"group_id", derefGroupID(groupID), "intent", decision.Intent, "model", requestedModel)
-	return nil, false
+	slog.Info("intent_route.unavailable",
+		"group_id", derefGroupID(groupID), "intent", decision.Intent, "model", requestedModel, "excluded", len(excludedIDs))
+	return nil, ErrIntentRouteUnavailable
 }
 
 func (s *GatewayService) isIntentRoutedAccountUsable(ctx context.Context, account *Account, platform string, useMixed bool, requestedModel string) bool {

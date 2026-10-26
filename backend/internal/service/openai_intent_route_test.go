@@ -65,10 +65,14 @@ func TestOpenAIIntentRoute_SendsRequestToAccountOutsideTheGroup(t *testing.T) {
 	require.Equal(t, int64(49001), route.SelectedAccountID())
 }
 
-func TestOpenAIIntentRoute_FallsBackToOrdinarySelection(t *testing.T) {
+// A matched rule is binding: when none of its accounts can take the request,
+// selection fails with ErrIntentRouteUnavailable instead of handing the request
+// to the group's own accounts.
+func TestOpenAIIntentRoute_UnavailableTargetsFailTheRequest(t *testing.T) {
 	cases := map[string]struct {
 		foreign  Account
 		excluded map[int64]struct{}
+		busy     bool
 	}{
 		"target failed earlier in this request": {foreign: foreignOpenAIAccount(), excluded: map[int64]struct{}{49001: {}}},
 		"target paused":                         {foreign: func() Account { a := foreignOpenAIAccount(); a.Schedulable = false; return a }()},
@@ -78,17 +82,31 @@ func TestOpenAIIntentRoute_FallsBackToOrdinarySelection(t *testing.T) {
 			a.Credentials = map[string]any{"model_mapping": map[string]any{"only-this-model": "only-this-model"}}
 			return a
 		}()},
+		"target has no free slot": {foreign: foreignOpenAIAccount(), busy: true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			svc, groupID := newIntentRouteOpenAIFixture(t, tc.foreign)
+			if tc.busy {
+				svc.concurrencyService = NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{49001: false}})
+			}
 			route := &IntentRouteDecision{Intent: "coding", AccountIDs: []int64{49001}}
-			selection, decision := selectOpenAIForIntentTest(t, svc, WithIntentRouteDecision(context.Background(), route), groupID, tc.excluded)
-			require.Equal(t, int64(41001), selection.Account.ID, "the group's own accounts take over")
-			require.NotEqual(t, openAIAccountScheduleLayerIntentRoute, decision.Layer)
+			selection, _, err := svc.SelectAccountWithScheduler(WithIntentRouteDecision(context.Background(), route), groupID, "", "", "gpt-5.1", tc.excluded, OpenAIUpstreamTransportAny, false)
+			require.ErrorIs(t, err, ErrIntentRouteUnavailable)
+			require.ErrorIs(t, err, ErrNoAvailableAccounts, "callers unaware of intent routing still see a capacity failure")
+			require.Nil(t, selection, "the group's own accounts must not take over")
 			require.Zero(t, route.SelectedAccountID())
 		})
 	}
+}
+
+func TestOpenAIIntentRoute_ScopeOnlyDecisionStillFallsBack(t *testing.T) {
+	foreign := foreignOpenAIAccount()
+	foreign.Schedulable = false
+	svc, groupID := newIntentRouteOpenAIFixture(t, foreign)
+	route := &IntentRouteDecision{ScopeAccountIDs: []int64{49001}}
+	selection, _ := selectOpenAIForIntentTest(t, svc, WithIntentRouteDecision(context.Background(), route), groupID, nil)
+	require.Equal(t, int64(41001), selection.Account.ID, "a turn that matched no rule is scheduled as usual")
 }
 
 // A Responses follow-up carries previous_response_id, and only the account
