@@ -105,7 +105,7 @@ export default {
       promptHint: '作为 user 消息发出；系统会自动在末尾追加输出「答案：xxx」的要求，不用自己写。',
       system: 'System 提示（可选）',
       expected: '标准答案',
-      expectedHint: '多个可接受答案用 || 分隔，如 42||四十二',
+      expectedHint: "多个可接受答案用 {'||'} 分隔，如 42{'||'}四十二",
       judge: '判分方式',
       weight: '权重',
       tolerance: '允许误差',

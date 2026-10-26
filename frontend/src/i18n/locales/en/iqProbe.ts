@@ -105,7 +105,7 @@ export default {
       promptHint: 'Sent as the user message. The "答案：xxx" output instruction is appended automatically.',
       system: 'System prompt (optional)',
       expected: 'Expected answer',
-      expectedHint: 'Separate accepted alternatives with ||, e.g. 42||forty-two',
+      expectedHint: "Separate accepted alternatives with {'||'}, e.g. 42{'||'}forty-two",
       judge: 'Judge',
       weight: 'Weight',
       tolerance: 'Tolerance',
