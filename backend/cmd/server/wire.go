@@ -129,6 +129,7 @@ func provideCleanup(
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
 	intentRouter *service.IntentRouterService,
+	iqProbeRunner *service.IQProbeRunner,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -142,6 +143,10 @@ func provideCleanup(
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
 			{"IntentRouter", func() error { return intentRouter.Stop(ctx) }},
+			{"IQProbeRunner", func() error {
+				iqProbeRunner.Stop()
+				return nil
+			}},
 			{"PluginManager", func() error {
 				if pluginManager != nil {
 					pluginManager.Stop()

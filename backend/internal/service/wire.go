@@ -626,6 +626,13 @@ func ProvideScheduledTestService(
 	return NewScheduledTestService(planRepo, resultRepo)
 }
 
+// ProvideIQProbeRunner creates and starts the intelligence probe runner.
+func ProvideIQProbeRunner(svc *IQProbeService) *IQProbeRunner {
+	r := NewIQProbeRunner(svc)
+	r.Start()
+	return r
+}
+
 // ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
 func ProvideScheduledTestRunnerService(
 	planRepo ScheduledTestPlanRepository,
@@ -940,6 +947,8 @@ var ProviderSet = wire.NewSet(
 	NewModelPlazaService,
 	NewContentModerationService,
 	NewIntentRouterService,
+	NewIQProbeService,
+	ProvideIQProbeRunner,
 	NewAffiliateService,
 	ProvidePaymentConfigService,
 	ProvidePaymentService,

@@ -838,6 +838,7 @@ const adminNavItems = computed((): NavItem[] => {
     },
     { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
     { path: '/admin/openai-cache', label: t('nav.openaiCache'), icon: ChartIcon, hideInSimpleMode: true },
+    { path: '/admin/iq-probe', label: t('iqProbe.nav'), icon: SignalIcon, hideInSimpleMode: true },
     { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true }
   ]
 

@@ -34,6 +34,10 @@ func (s *AccountTestService) testCNProviderAdaptiveConnection(c *gin.Context, ac
 
 	// The existing Chat probe owns the SSE lifecycle. Suppress intermediate
 	// completion events until every native adaptive endpoint has passed.
+	// Probe runs ask the question once, through Chat Completions only.
+	if accountTestObserveOnly(c.Request.Context()) {
+		return s.testCNProviderChatCompletionsConnection(c, account, modelID, prompt)
+	}
 	c.Set(accountTestSuppressCompletionContextKey, true)
 	defer c.Set(accountTestSuppressCompletionContextKey, false)
 	if err := s.testCNProviderChatCompletionsConnection(c, account, modelID, prompt); err != nil {
@@ -67,6 +71,7 @@ func (s *AccountTestService) testCNProviderAdaptiveAnthropicConnection(c *gin.Co
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create adaptive Anthropic test payload")
 	}
+	accountProbeFrom(ctx).applyToAnthropicPayload(payload)
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "status", Text: "正在通过原生 /v1/messages 测试自适应 Anthropic 端点"})
@@ -95,7 +100,7 @@ func (s *AccountTestService) testCNProviderAdaptiveAnthropicConnection(c *gin.Co
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("Adaptive Anthropic endpoint returned %d: %s", resp.StatusCode, string(body))
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && !accountTestObserveOnly(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)
@@ -132,6 +137,7 @@ func (s *AccountTestService) processCNProviderAdaptiveAnthropicStream(c *gin.Con
 		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 			continue
 		}
+		s.observeProbe(c, data)
 		switch eventType, _ := data["type"].(string); eventType {
 		case "content_block_delta":
 			if delta, ok := data["delta"].(map[string]any); ok {
@@ -165,6 +171,7 @@ func (s *AccountTestService) testCNProviderAdaptiveResponsesConnection(c *gin.Co
 	// DeepSeek / Kimi native Responses endpoints are stateless and do not need
 	// the OpenAI probe's synthetic instructions.
 	delete(payload, "instructions")
+	accountProbeFrom(ctx).applyToResponsesPayload(payload, false)
 	payloadBytes, _ := json.Marshal(payload)
 	payloadBytes = normalizeDeepSeekResponsesRequestBody(account, payloadBytes)
 
@@ -189,7 +196,7 @@ func (s *AccountTestService) testCNProviderAdaptiveResponsesConnection(c *gin.Co
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("Adaptive Responses endpoint returned %d: %s", resp.StatusCode, string(body))
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && !accountTestObserveOnly(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)
@@ -250,6 +257,7 @@ func (s *AccountTestService) testCNProviderAnthropicConnection(c *gin.Context, a
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Anthropic test payload")
 	}
+	accountProbeFrom(ctx).applyToAnthropicPayload(payload)
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
@@ -278,7 +286,7 @@ func (s *AccountTestService) testCNProviderAnthropicConnection(c *gin.Context, a
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("Anthropic endpoint returned %d: %s", resp.StatusCode, string(body))
-		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && s.accountRepo != nil {
+		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && s.accountRepo != nil && !accountTestObserveOnly(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)

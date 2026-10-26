@@ -122,6 +122,7 @@ func RegisterAdminRoutes(
 		// 风控中心
 		registerContentModerationRoutes(admin, h)
 		registerIntentRouterRoutes(admin, h)
+		registerIQProbeRoutes(admin, h)
 
 		// 独立提示词输入审计
 		registerPromptAuditRoutes(admin, h)
@@ -165,6 +166,31 @@ func registerAdminComplianceRoutes(admin *gin.RouterGroup, h *handler.Handlers) 
 	{
 		compliance.GET("", h.Admin.Compliance.GetStatus)
 		compliance.POST("/accept", h.Admin.Compliance.Accept)
+	}
+}
+
+// registerIQProbeRoutes：账号+模型的周期性智力探测。
+func registerIQProbeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	g := admin.Group("/iq-probe")
+	{
+		g.GET("/sets", h.Admin.IQProbe.ListSets)
+		g.POST("/sets", h.Admin.IQProbe.CreateSet)
+		g.POST("/sets/import", h.Admin.IQProbe.ImportSet)
+		g.PUT("/sets/:id", h.Admin.IQProbe.UpdateSet)
+		g.DELETE("/sets/:id", h.Admin.IQProbe.DeleteSet)
+		g.GET("/sets/:id/export", h.Admin.IQProbe.ExportSet)
+		g.GET("/sets/:id/questions", h.Admin.IQProbe.ListQuestions)
+		g.POST("/sets/:id/questions", h.Admin.IQProbe.CreateQuestion)
+		g.PUT("/questions/:id", h.Admin.IQProbe.UpdateQuestion)
+		g.DELETE("/questions/:id", h.Admin.IQProbe.DeleteQuestion)
+		g.GET("/monitors", h.Admin.IQProbe.ListMonitors)
+		g.POST("/monitors", h.Admin.IQProbe.CreateMonitors)
+		g.PUT("/monitors/:id", h.Admin.IQProbe.UpdateMonitor)
+		g.DELETE("/monitors/:id", h.Admin.IQProbe.DeleteMonitor)
+		g.POST("/monitors/:id/run", h.Admin.IQProbe.RunMonitor)
+		g.GET("/monitors/:id/matrix", h.Admin.IQProbe.GetMatrix)
+		g.GET("/runs", h.Admin.IQProbe.ListRuns)
+		g.GET("/answers/:id", h.Admin.IQProbe.GetAnswer)
 	}
 }
 

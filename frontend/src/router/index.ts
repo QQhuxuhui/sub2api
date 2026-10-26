@@ -475,6 +475,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/iq-probe',
+    name: 'AdminIQProbe',
+    component: () => import('@/views/admin/IQProbeView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'IQ Probe',
+      titleKey: 'iqProbe.title',
+      descriptionKey: 'iqProbe.description'
+    }
+  },
+  {
     path: '/admin/channels',
     redirect: '/admin/channels/pricing'
   },

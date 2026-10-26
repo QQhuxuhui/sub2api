@@ -1,0 +1,81 @@
+{
+  "name": "示例：推理与计数（GPT 档位区分）",
+  "description": "10 道有唯一答案的推理 / 计数 / 运算题，答案已用程序逐题验算。用于对照真号与可疑号的得分差；正式使用前请先用已知真号跑几轮校准基线。",
+  "questions": [
+    {
+      "title": "多步四则运算",
+      "prompt": "计算 (37 × 48 − 19² − 15) ÷ 7 的值。",
+      "expected_answer": "200",
+      "judge_type": "numeric",
+      "weight": 1,
+      "note": "37×48=1776，19²=361"
+    },
+    {
+      "title": "字母计数",
+      "prompt": "字符串 \"mississippimississippi\" 中一共有多少个字母 s？",
+      "expected_answer": "8",
+      "judge_type": "numeric",
+      "weight": 2,
+      "note": "分词器盲区，小模型常数错"
+    },
+    {
+      "title": "字符串倒序",
+      "prompt": "把字符串 Kq7mZp2X 按字符倒序输出，保持每个字符的大小写不变。",
+      "expected_answer": "X2pZm7qK",
+      "judge_type": "exact",
+      "weight": 1
+    },
+    {
+      "title": "星期推算",
+      "prompt": "已知 2026 年 10 月 26 日是星期一。那么 2027 年 3 月 1 日是星期几？\nA. 星期六\nB. 星期日\nC. 星期一\nD. 星期二\n只需回答选项字母。",
+      "expected_answer": "C",
+      "judge_type": "choice",
+      "weight": 1,
+      "note": "相隔 126 天，2027 年 2 月 28 天"
+    },
+    {
+      "title": "模幂运算",
+      "prompt": "求 7 的 222 次方除以 13 的余数。",
+      "expected_answer": "12",
+      "judge_type": "numeric",
+      "weight": 1
+    },
+    {
+      "title": "质数计数",
+      "prompt": "100 到 200 之间有多少个质数？",
+      "expected_answer": "21",
+      "judge_type": "numeric",
+      "weight": 1
+    },
+    {
+      "title": "真话假话",
+      "prompt": "甲、乙、丙三人中恰好只有一人说真话。\n甲说：“乙在说谎。”\n乙说：“丙在说谎。”\n丙说：“甲和乙都在说谎。”\n谁说了真话？\nA. 甲\nB. 乙\nC. 丙\nD. 无法确定\n只需回答选项字母。",
+      "expected_answer": "B",
+      "judge_type": "choice",
+      "weight": 1,
+      "note": "穷举唯一解：只有乙说真话"
+    },
+    {
+      "title": "骨牌铺法",
+      "prompt": "用 1×2 的多米诺骨牌铺满一个 2×10 的棋盘，骨牌不能重叠也不能留空，一共有多少种不同的铺法？",
+      "expected_answer": "89",
+      "judge_type": "numeric",
+      "weight": 2,
+      "note": "斐波那契递推"
+    },
+    {
+      "title": "数位和计数",
+      "prompt": "各位数字之和等于 15 的三位数一共有多少个？",
+      "expected_answer": "69",
+      "judge_type": "numeric",
+      "weight": 2
+    },
+    {
+      "title": "容斥计数",
+      "prompt": "在 1 到 1000（含）的整数中，既不能被 3 整除、也不能被 5 整除、也不能被 7 整除的有多少个？",
+      "expected_answer": "457",
+      "judge_type": "numeric",
+      "weight": 2
+    }
+  ]
+}

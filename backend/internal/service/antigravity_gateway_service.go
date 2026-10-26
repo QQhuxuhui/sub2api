@@ -363,11 +363,20 @@ func (s *AntigravityGatewayService) TestConnection(ctx context.Context, account 
 		return nil, fmt.Errorf("model %s not in whitelist", modelID)
 	}
 
-	// 构建请求体
+	// 构建请求体（智力探测时换成探测题目）
+	probe := accountProbeFrom(ctx)
 	var requestBody []byte
-	if strings.HasPrefix(modelID, "gemini-") {
+	switch {
+	case probe != nil && strings.HasPrefix(modelID, "gemini-"):
+		requestBody, err = s.buildGeminiProbeRequest(projectID, mappedModel, probe)
+	case probe != nil:
+		claudeReq := probe.buildAntigravityClaudeRequest(mappedModel)
+		mappedModel = applyThinkingModelSuffix(mappedModel, claudeReq.Thinking != nil)
+		claudeReq.Model = mappedModel
+		requestBody, err = antigravity.TransformClaudeToGemini(claudeReq, projectID, mappedModel)
+	case strings.HasPrefix(modelID, "gemini-"):
 		requestBody, err = s.buildGeminiTestRequest(projectID, mappedModel)
-	} else {
+	default:
 		requestBody, err = s.buildClaudeTestRequest(projectID, mappedModel)
 	}
 	if err != nil {
@@ -381,6 +390,11 @@ func (s *AntigravityGatewayService) TestConnection(ctx context.Context, account 
 	}
 
 	// 复用 antigravityRetryLoop：完整的重试 / credits overages / 智能重试
+	// 智力探测只观察：不把 429 写成模型限流
+	loopRepo := s.accountRepo
+	if probe != nil {
+		loopRepo = nil
+	}
 	prefix := fmt.Sprintf("[antigravity-Test] account=%d(%s)", account.ID, account.Name)
 	p := antigravityRetryLoopParams{
 		ctx:            ctx,
@@ -393,7 +407,7 @@ func (s *AntigravityGatewayService) TestConnection(ctx context.Context, account 
 		c:              nil, // 无 gin.Context → 跳过 ops 追踪
 		httpUpstream:   s.httpUpstream,
 		settingService: s.settingService,
-		accountRepo:    s.accountRepo,
+		accountRepo:    loopRepo,
 		requestedModel: modelID,
 		handleError:    testConnectionHandleError,
 	}
@@ -413,17 +427,37 @@ func (s *AntigravityGatewayService) TestConnection(ctx context.Context, account 
 	}
 	defer func() { _ = result.resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(io.LimitReader(result.resp.Body, s.upstreamErrorBodyReadLimit()))
+	readLimit := s.upstreamErrorBodyReadLimit()
+	isProbeSuccess := probe != nil && result.resp.StatusCode < 400
+	if isProbeSuccess {
+		readLimit = accountProbeMaxUpstreamBytes
+	}
+	respBody, err := io.ReadAll(io.LimitReader(result.resp.Body, readLimit+1))
 	if err != nil {
 		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+	if int64(len(respBody)) > readLimit {
+		if isProbeSuccess {
+			return nil, fmt.Errorf("probe response exceeds %d bytes", readLimit)
+		}
+		respBody = respBody[:readLimit]
 	}
 
 	if result.resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("API 返回 %d: %s", result.resp.StatusCode, string(respBody))
 	}
 
+	probe.observeBody(respBody)
 	text := extractTextFromSSEResponse(respBody)
 	return &TestConnectionResult{Text: text, MappedModel: mappedModel}, nil
+}
+
+// buildGeminiProbeRequest 构建智力探测用的 Gemini 请求，保留身份提示词
+func (s *AntigravityGatewayService) buildGeminiProbeRequest(projectID, model string, probe *accountProbeContext) ([]byte, error) {
+	payload := map[string]any{}
+	probe.applyToGeminiPayload(payload, antigravity.GetDefaultIdentityPatch())
+	payloadBytes, _ := json.Marshal(payload)
+	return s.wrapV1InternalRequest(projectID, model, payloadBytes)
 }
 
 // testConnectionHandleError 是 TestConnection 使用的轻量 handleError 回调。
