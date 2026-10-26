@@ -31,7 +31,14 @@
           <tr v-if="!loading && runs.length === 0">
             <td colspan="9" class="px-3 py-6 text-center text-gray-500">{{ t('iqProbe.runs.empty') }}</td>
           </tr>
-          <tr v-for="r in runs" :key="r.id">
+          <tr
+            v-for="r in runs"
+            :key="r.id"
+            :data-test="`iq-run-row-${r.id}`"
+            class="cursor-pointer hover:bg-gray-50 dark:hover:bg-dark-800"
+            :title="t('iqProbe.runs.clickHint')"
+            @click="openRun(r)"
+          >
             <td class="whitespace-nowrap px-3 py-2">
               {{ formatDateTime(r.started_at) }}
               <span v-if="r.trigger === 'manual'" class="ml-1 text-xs text-gray-400">{{ t('iqProbe.detail.manual') }}</span>
@@ -51,6 +58,7 @@
       </table>
     </div>
     <Pagination v-if="total > pageSize" :page="page" :total="total" :page-size="pageSize" :show-page-size-selector="false" @update:page="reload" />
+    <IQProbeRunDialog :show="selectedRun !== null" :run="selectedRun" @close="selectedRun = null" />
   </div>
 </template>
 
@@ -59,6 +67,7 @@ import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Pagination from '@/components/common/Pagination.vue'
 import IQProbeScoreBadge from './IQProbeScoreBadge.vue'
+import IQProbeRunDialog from './IQProbeRunDialog.vue'
 import { iqProbeAPI } from '@/api/admin/iqProbe'
 import type { IQProbeMonitor, IQProbeRun, IQProbeRunStatus } from '@/api/admin/iqProbe'
 import { useAppStore } from '@/stores/app'
@@ -78,6 +87,11 @@ const page = ref(1)
 const status = ref('')
 const monitorId = ref(0)
 const loading = ref(false)
+const selectedRun = ref<IQProbeRun | null>(null)
+
+function openRun(run: IQProbeRun) {
+  selectedRun.value = run
+}
 
 async function reload(p: number) {
   page.value = p

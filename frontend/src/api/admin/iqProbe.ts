@@ -121,7 +121,7 @@ export interface IQProbeAnswer {
   weight: number
   verdict: IQProbeVerdict
   extracted_answer: string
-  /** Only filled by getAnswer. */
+  /** Filled by getAnswer and listRunAnswers; the matrix listing omits it. */
   response_text?: string
   error_message: string
   upstream_model: string
@@ -198,13 +198,20 @@ export const iqProbeAPI = {
     return apiClient.delete(`/admin/iq-probe/monitors/${id}`)
   },
   runMonitor(id: number) {
-    return apiClient.post<{ started: boolean }>(`/admin/iq-probe/monitors/${id}/run`)
+    return apiClient.post<{ started: boolean; run_id: number }>(`/admin/iq-probe/monitors/${id}/run`)
   },
   matrix(id: number, limit = 30) {
     return apiClient.get<IQProbeMatrix>(`/admin/iq-probe/monitors/${id}/matrix`, { params: { limit } })
   },
   listRuns(query: IQProbeRunQuery) {
     return apiClient.get<PaginatedResponse<IQProbeRun>>('/admin/iq-probe/runs', { params: query })
+  },
+  getRun(id: number) {
+    return apiClient.get<IQProbeRun>(`/admin/iq-probe/runs/${id}`)
+  },
+  /** Every answer of one round, full replies included. */
+  listRunAnswers(runId: number) {
+    return apiClient.get<IQProbeAnswer[]>(`/admin/iq-probe/runs/${runId}/answers`)
   },
   getAnswer(id: number) {
     return apiClient.get<IQProbeAnswer>(`/admin/iq-probe/answers/${id}`)

@@ -310,11 +310,12 @@ func (h *IQProbeHandler) RunMonitor(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.svc.RunNow(c.Request.Context(), id); err != nil {
+	runID, err := h.svc.RunNow(c.Request.Context(), id)
+	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, gin.H{"started": true})
+	response.Success(c, gin.H{"started": true, "run_id": runID})
 }
 
 // GetMatrix GET /api/v1/admin/iq-probe/monitors/:id/matrix?limit=30
@@ -334,6 +335,20 @@ func (h *IQProbeHandler) GetMatrix(c *gin.Context) {
 
 // ---- runs ----
 
+// GetRun GET /api/v1/admin/iq-probe/runs/:id
+func (h *IQProbeHandler) GetRun(c *gin.Context) {
+	id, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+	run, err := h.svc.GetRun(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, run)
+}
+
 // ListRuns GET /api/v1/admin/iq-probe/runs?monitor_id=&status=&page=&page_size=
 func (h *IQProbeHandler) ListRuns(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
@@ -352,6 +367,20 @@ func (h *IQProbeHandler) ListRuns(c *gin.Context) {
 		return
 	}
 	response.Paginated(c, runs, total, filter.Page, filter.PageSize)
+}
+
+// ListRunAnswers GET /api/v1/admin/iq-probe/runs/:id/answers (includes full replies)
+func (h *IQProbeHandler) ListRunAnswers(c *gin.Context) {
+	id, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+	answers, err := h.svc.ListRunAnswers(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, answers)
 }
 
 // GetAnswer GET /api/v1/admin/iq-probe/answers/:id (includes the full reply)

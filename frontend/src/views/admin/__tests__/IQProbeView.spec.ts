@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import IQProbeView from '../IQProbeView.vue'
 
@@ -6,7 +6,7 @@ const api = vi.hoisted(() => ({
   listSets: vi.fn(), createSet: vi.fn(), updateSet: vi.fn(), removeSet: vi.fn(), exportSet: vi.fn(), importSet: vi.fn(),
   listQuestions: vi.fn(), createQuestion: vi.fn(), updateQuestion: vi.fn(), removeQuestion: vi.fn(),
   listMonitors: vi.fn(), createMonitors: vi.fn(), updateMonitor: vi.fn(), removeMonitor: vi.fn(), runMonitor: vi.fn(),
-  matrix: vi.fn(), listRuns: vi.fn(), getAnswer: vi.fn(),
+  matrix: vi.fn(), listRuns: vi.fn(), getRun: vi.fn(), listRunAnswers: vi.fn(), getAnswer: vi.fn(),
 }))
 const admin = vi.hoisted(() => ({ getAllIncludingInactive: vi.fn(), listAccounts: vi.fn(), getAvailableModels: vi.fn() }))
 const toast = vi.hoisted(() => ({ showSuccess: vi.fn(), showError: vi.fn() }))
@@ -46,6 +46,7 @@ async function mountView() {
 }
 
 describe('IQProbeView', () => {
+  afterEach(() => vi.useRealTimers())
   beforeEach(() => {
     Object.values(api).forEach((fn) => fn.mockReset())
     Object.values(admin).forEach((fn) => fn.mockReset())
@@ -62,7 +63,7 @@ describe('IQProbeView', () => {
   })
 
   it('lists monitors with score, alert state and starts a manual round', async () => {
-    api.runMonitor.mockResolvedValue({ data: { started: true } })
+    api.runMonitor.mockResolvedValue({ data: { started: true, run_id: 77 } })
     const wrapper = await mountView()
 
     const row = wrapper.get('[data-test="iq-monitor-row-9"]')
@@ -75,6 +76,90 @@ describe('IQProbeView', () => {
     await flushPromises()
     expect(api.runMonitor).toHaveBeenCalledWith(9)
     expect(wrapper.get('[data-test="iq-monitor-run-9"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('unlocks a completed manual round even when an edit leaves last_run_at unchanged', async () => {
+    vi.useFakeTimers()
+    api.runMonitor.mockResolvedValue({ data: { started: true, run_id: 77 } })
+    api.getRun.mockResolvedValueOnce({ data: { id: 77, status: 'running' } })
+      .mockResolvedValue({ data: { id: 77, status: 'scored' } })
+    const wrapper = await mountView()
+    try {
+      await wrapper.get('[data-test="iq-monitor-run-9"]').trigger('click')
+      await flushPromises()
+      api.listMonitors.mockResolvedValue({ data: [{ ...monitor, model: 'changed-model', enabled: false }] })
+      await vi.advanceTimersByTimeAsync(5000)
+      await flushPromises()
+      expect(wrapper.get('[data-test="iq-monitor-run-9"]').attributes('disabled')).toBeDefined()
+      await vi.advanceTimersByTimeAsync(5000)
+      await flushPromises()
+      expect(api.getRun).toHaveBeenCalledWith(77)
+      expect(wrapper.get('[data-test="iq-monitor-run-9"]').attributes('disabled')).toBeUndefined()
+      const calls = api.listMonitors.mock.calls.length
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(api.listMonitors).toHaveBeenCalledTimes(calls)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('loads the final score after observing the round complete', async () => {
+    vi.useFakeTimers()
+    api.runMonitor.mockResolvedValue({ data: { started: true, run_id: 77 } })
+    const wrapper = await mountView()
+    try {
+      await wrapper.get('[data-test="iq-monitor-run-9"]').trigger('click')
+      await flushPromises()
+      api.getRun.mockImplementation(async () => {
+        api.listMonitors.mockResolvedValue({ data: [{ ...monitor, last_score: 1, last_status: 'scored' }] })
+        return { data: { id: 77, status: 'scored' } }
+      })
+      await vi.advanceTimersByTimeAsync(5000)
+      await flushPromises()
+      expect(wrapper.get('[data-test="iq-monitor-row-9"]').text()).toContain('100%')
+      expect(wrapper.get('[data-test="iq-monitor-run-9"]').attributes('disabled')).toBeUndefined()
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('keeps polling after a run lookup fails and unlocks on retry', async () => {
+    vi.useFakeTimers()
+    api.runMonitor.mockResolvedValue({ data: { started: true, run_id: 77 } })
+    api.getRun.mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValue({ data: { id: 77, status: 'invalid' } })
+    const wrapper = await mountView()
+    try {
+      await wrapper.get('[data-test="iq-monitor-run-9"]').trigger('click')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(5000)
+      await flushPromises()
+      expect(wrapper.get('[data-test="iq-monitor-run-9"]').attributes('disabled')).toBeDefined()
+      await vi.advanceTimersByTimeAsync(5000)
+      await flushPromises()
+      expect(wrapper.get('[data-test="iq-monitor-run-9"]').attributes('disabled')).toBeUndefined()
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('applies completion when polling requests take longer than the interval', async () => {
+    vi.useFakeTimers()
+    api.runMonitor.mockResolvedValue({ data: { started: true, run_id: 77 } })
+    api.getRun.mockImplementation(() => new Promise((resolve) => {
+      setTimeout(() => resolve({ data: { id: 77, status: 'scored' } }), 6000)
+    }))
+    const wrapper = await mountView()
+    try {
+      await wrapper.get('[data-test="iq-monitor-run-9"]').trigger('click')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(11000)
+      await flushPromises()
+      expect(wrapper.get('[data-test="iq-monitor-run-9"]').attributes('disabled')).toBeUndefined()
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('creates one monitor per picked account from a group', async () => {
@@ -115,6 +200,48 @@ describe('IQProbeView', () => {
     await flushPromises()
 
     expect(api.createQuestion).toHaveBeenCalledWith(3, expect.objectContaining({ prompt: '17*23=?', expected_answer: '391', judge_type: 'exact', enabled: true }))
+  })
+
+  it('keeps the current group accounts when the previous group answers later', async () => {
+    admin.getAllIncludingInactive.mockResolvedValue([{ id: 4, name: '组4', platform: 'openai' }, { id: 6, name: '组6', platform: 'openai' }])
+    let resolveOld!: (value: unknown) => void
+    admin.listAccounts.mockImplementation((_page: number, _size: number, filter: { group: string }) => filter.group === '4'
+      ? new Promise((resolve) => { resolveOld = resolve })
+      : Promise.resolve({ items: [{ id: 82, name: 'astra-82', platform: 'openai', type: 'apikey', status: 'active' }] }))
+    const wrapper = await mountView()
+
+    await wrapper.get('[data-test="iq-monitor-add"]').trigger('click')
+    await wrapper.get('[data-test="iq-monitor-group"]').setValue(4)
+    await wrapper.get('[data-test="iq-monitor-group"]').setValue(6)
+    await flushPromises()
+    expect(wrapper.find('[data-test="iq-monitor-account-82"]').exists()).toBe(true)
+
+    resolveOld({ items: [{ id: 42, name: 'cpa-codex', platform: 'openai', type: 'apikey', status: 'active' }] })
+    await flushPromises()
+    expect(wrapper.find('[data-test="iq-monitor-account-82"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="iq-monitor-account-42"]').exists()).toBe(false)
+  })
+
+  it('keeps the models of the current first account when an older request finishes later', async () => {
+    let resolveOld!: (value: unknown) => void
+    admin.getAvailableModels.mockImplementation((id: number) => id === 42
+      ? new Promise((resolve) => { resolveOld = resolve })
+      : Promise.resolve([{ id: 'gpt-plus-only' }]))
+    const wrapper = await mountView()
+
+    await wrapper.get('[data-test="iq-monitor-add"]').trigger('click')
+    await wrapper.get('[data-test="iq-monitor-group"]').setValue(4)
+    await flushPromises()
+    await wrapper.get('[data-test="iq-monitor-account-42"]').setValue(true)
+    await wrapper.get('[data-test="iq-monitor-account-42"]').setValue(false)
+    await wrapper.get('[data-test="iq-monitor-account-48"]').setValue(true)
+    await flushPromises()
+
+    resolveOld([{ id: 'gpt-codex-only' }])
+    await flushPromises()
+    const options = wrapper.findAll('[data-test="iq-monitor-model"] option, datalist option').map((o) => o.attributes('value') ?? o.text())
+    expect(options).toContain('gpt-plus-only')
+    expect(options).not.toContain('gpt-codex-only')
   })
 
   it('keeps the selected set questions when an older request finishes later', async () => {
@@ -167,5 +294,34 @@ describe('IQProbeView', () => {
     expect(toast.showSuccess).toHaveBeenCalledWith('iqProbe.monitorDialog.created:{"created":0,"skipped":1}')
     expect(toast.showError).not.toHaveBeenCalled()
     expect(wrapper.find('[data-test="iq-monitor-save"]').exists()).toBe(false)
+  })
+
+  it('opens a run and shows every answer with its reply', async () => {
+    const run = {
+      id: 77, monitor_id: 9, account_id: 42, model: 'gpt-5.5', set_id: 3, trigger: 'schedule', status: 'scored', score: 0.5,
+      total_count: 2, correct_count: 1, wrong_count: 1, format_error_count: 0, error_count: 0, input_tokens: 200, output_tokens: 40,
+      cost_usd: 0.0012, message: '', started_at: '2026-10-26T08:00:00Z', finished_at: '2026-10-26T08:01:00Z',
+      account_name: 'cpa-codex', set_name: 'GPT 高难',
+    }
+    api.listRuns.mockResolvedValue({ data: { items: [run], total: 1, page: 1, page_size: 50, pages: 1 } })
+    api.listRunAnswers.mockResolvedValue({ data: [
+      { id: 1, run_id: 77, question_id: 5, question_title: '骨牌铺法', expected_answer: '89', judge_type: 'numeric', weight: 2, verdict: 'wrong',
+        extracted_answer: '144', response_text: '递推……\n答案：144', error_message: '', upstream_model: 'gpt-5.5', response_model: 'gpt-5.4-mini',
+        input_tokens: 100, output_tokens: 20, reasoning_tokens: 0, latency_ms: 3200, first_token_ms: 900, cost_usd: 0.0006, created_at: '' },
+    ] })
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="iq-tab-runs"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="iq-run-row-77"]').trigger('click')
+    await flushPromises()
+
+    expect(api.listRunAnswers).toHaveBeenCalledWith(77)
+    const answer = wrapper.get('[data-test="iq-run-answer-1"]')
+    expect(answer.text()).toContain('骨牌铺法')
+    expect(answer.text()).toContain('144')
+    expect(answer.text()).toContain('gpt-5.4-mini')
+    expect(answer.get('details').attributes('open')).toBeDefined()
+    expect(answer.get('pre').text()).toContain('答案：144')
   })
 })

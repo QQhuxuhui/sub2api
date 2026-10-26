@@ -150,6 +150,9 @@ const accountsLoading = ref(false)
 const accountIds = ref<number[]>([])
 const modelOptions = ref<string[]>([])
 const saving = ref(false)
+// A late reply for an earlier group / account must not overwrite the current one.
+let accountsSeq = 0
+let modelsSeq = 0
 
 const blank = (): IQProbeMonitorInput => ({
   group_id: null,
@@ -180,6 +183,9 @@ watch(
   () => props.show,
   (open) => {
     if (!open) return
+    accountsSeq++
+    modelsSeq++
+    accountsLoading.value = false
     Object.assign(form, blank())
     groupId.value = null
     groupAccounts.value = []
@@ -208,17 +214,24 @@ watch(
 )
 
 async function loadGroupAccounts() {
+  const seq = ++accountsSeq
+  modelsSeq++
   accountIds.value = []
+  groupAccounts.value = []
   modelOptions.value = []
-  if (groupId.value === null) return
+  if (groupId.value === null) {
+    accountsLoading.value = false
+    return
+  }
   accountsLoading.value = true
   try {
     const res = await adminAPI.accounts.list(1, 500, { group: String(groupId.value), lite: '1' })
+    if (seq !== accountsSeq) return
     groupAccounts.value = (res.items ?? []).map((a) => ({ id: a.id, name: a.name, platform: a.platform, type: a.type, status: a.status }))
   } catch (err) {
-    appStore.showError(extractI18nErrorMessage(err, t, 'iqProbe.errors', t('common.error')))
+    if (seq === accountsSeq) appStore.showError(extractI18nErrorMessage(err, t, 'iqProbe.errors', t('common.error')))
   } finally {
-    accountsLoading.value = false
+    if (seq === accountsSeq) accountsLoading.value = false
   }
 }
 
@@ -230,14 +243,19 @@ function toggleAll() {
 function onAccountsChanged() {
   const first = accountIds.value[0]
   if (first !== undefined) void loadModels(first)
+  else {
+    modelsSeq++
+    modelOptions.value = []
+  }
 }
 
 async function loadModels(accountId: number) {
+  const seq = ++modelsSeq
   try {
     const models = await adminAPI.accounts.getAvailableModels(accountId)
-    modelOptions.value = models.map((m) => m.id)
+    if (seq === modelsSeq) modelOptions.value = models.map((m) => m.id)
   } catch {
-    modelOptions.value = []
+    if (seq === modelsSeq) modelOptions.value = []
   }
 }
 

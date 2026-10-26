@@ -190,6 +190,8 @@ func registerIQProbeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		g.POST("/monitors/:id/run", h.Admin.IQProbe.RunMonitor)
 		g.GET("/monitors/:id/matrix", h.Admin.IQProbe.GetMatrix)
 		g.GET("/runs", h.Admin.IQProbe.ListRuns)
+		g.GET("/runs/:id", h.Admin.IQProbe.GetRun)
+		g.GET("/runs/:id/answers", h.Admin.IQProbe.ListRunAnswers)
 		g.GET("/answers/:id", h.Admin.IQProbe.GetAnswer)
 	}
 }

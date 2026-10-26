@@ -34,6 +34,7 @@ var (
 	ErrIQProbeSetInUse         = infraerrors.Conflict("IQ_PROBE_SET_IN_USE", "question set is used by monitors")
 	ErrIQProbeMonitorDuplicate = infraerrors.Conflict("IQ_PROBE_MONITOR_DUPLICATE", "monitor already exists for this account, model and question set")
 	ErrIQProbeMonitorBusy      = infraerrors.Conflict("IQ_PROBE_MONITOR_BUSY", "monitor is already running")
+	ErrIQProbeRunNotFound      = infraerrors.NotFound("IQ_PROBE_RUN_NOT_FOUND", "probe round not found")
 )
 
 // IQProbeService manages question sets, monitors and probe rounds.
@@ -361,7 +362,7 @@ func (s *IQProbeService) UpdateMonitor(ctx context.Context, m *IQProbeMonitor) (
 		m.NextRunAt = &next
 	}
 	// Changing what is being measured restarts the alert streaks.
-	if m.Model != existing.Model || m.SetID != existing.SetID || m.ReasoningEffort != existing.ReasoningEffort {
+	if !iqProbeMeasuresSame(m, existing) {
 		m.ConsecutiveLow, m.ConsecutiveInvalid, m.AlertState = 0, 0, IQProbeAlertOK
 	} else {
 		m.ConsecutiveLow, m.ConsecutiveInvalid, m.AlertState = existing.ConsecutiveLow, existing.ConsecutiveInvalid, existing.AlertState
@@ -431,6 +432,20 @@ func (s *IQProbeService) ListRuns(ctx context.Context, filter IQProbeRunFilter) 
 	return s.repo.ListRuns(ctx, filter)
 }
 
+func (s *IQProbeService) GetRun(ctx context.Context, id int64) (*IQProbeRun, error) {
+	if id <= 0 {
+		return nil, ErrIQProbeRunNotFound
+	}
+	runs, _, err := s.repo.ListRuns(ctx, IQProbeRunFilter{RunID: id, Page: 1, PageSize: 1})
+	if err != nil {
+		return nil, err
+	}
+	if len(runs) == 0 {
+		return nil, ErrIQProbeRunNotFound
+	}
+	return runs[0], nil
+}
+
 // IQProbeMatrix is the rounds × questions grid of one monitor.
 type IQProbeMatrix struct {
 	Runs    []*IQProbeRun    `json:"runs"`
@@ -459,26 +474,34 @@ func (s *IQProbeService) GetMatrix(ctx context.Context, monitorID int64, limit i
 	return &IQProbeMatrix{Runs: runs, Answers: answers}, nil
 }
 
+// ListRunAnswers returns every answer of one round, full replies included
+// (each is capped at iqProbeMaxResponseBytes when stored).
+func (s *IQProbeService) ListRunAnswers(ctx context.Context, runID int64) ([]*IQProbeAnswer, error) {
+	return s.repo.ListAnswersByRuns(ctx, []int64{runID}, true)
+}
+
 func (s *IQProbeService) GetAnswer(ctx context.Context, id int64) (*IQProbeAnswer, error) {
 	return s.repo.GetAnswer(ctx, id)
 }
 
 // RunNow starts a manual round in the background and returns immediately.
-func (s *IQProbeService) RunNow(ctx context.Context, monitorID int64) error {
+func (s *IQProbeService) RunNow(ctx context.Context, monitorID int64) (int64, error) {
 	m, err := s.repo.GetMonitor(ctx, monitorID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !s.tryMarkRunning(m.ID) {
-		return ErrIQProbeMonitorBusy
+		return 0, ErrIQProbeMonitorBusy
 	}
-	go func() {
-		defer s.unmarkRunning(m.ID)
-		s.sem <- struct{}{}
-		defer func() { <-s.sem }()
-		s.runRound(context.Background(), m, "manual")
-	}()
-	return nil
+	// Claimed synchronously so a round already running on another instance is
+	// reported to the caller instead of being started twice.
+	run, err := s.startRound(ctx, m, "manual")
+	if err != nil {
+		s.unmarkRunning(m.ID)
+		return 0, err
+	}
+	go s.executeRound(context.Background(), m, run)
+	return run.ID, nil
 }
 
 func (s *IQProbeService) tryMarkRunning(id int64) bool {
@@ -523,48 +546,57 @@ func (s *IQProbeService) RunDue(ctx context.Context) {
 			s.unmarkRunning(m.ID)
 			continue
 		}
-		go func(m *IQProbeMonitor) {
-			defer s.unmarkRunning(m.ID)
-			s.sem <- struct{}{}
-			defer func() { <-s.sem }()
-			s.runRound(context.Background(), m, "schedule")
-		}(m)
+		// A manual round may still be running on another instance; this slot
+		// is then skipped (next_run_at has already moved on).
+		run, err := s.startRound(ctx, m, "schedule")
+		if err != nil {
+			if !errors.Is(err, ErrIQProbeMonitorBusy) {
+				logger.LegacyPrintf("service.iq_probe", "[IQProbe] monitor=%d create run failed: %v", m.ID, err)
+			}
+			s.unmarkRunning(m.ID)
+			continue
+		}
+		go s.executeRound(context.Background(), m, run)
 	}
 }
 
-// runRound asks every enabled question of the monitor's set, one at a time,
-// then scores the round, updates the monitor and fires alerts.
-func (s *IQProbeService) runRound(ctx context.Context, m *IQProbeMonitor, trigger string) {
+// startRound records a running round, which doubles as the cross-instance
+// run lock of the monitor (ErrIQProbeMonitorBusy when one is already running).
+func (s *IQProbeService) startRound(ctx context.Context, m *IQProbeMonitor, trigger string) (*IQProbeRun, error) {
 	run := &IQProbeRun{
 		MonitorID: m.ID, AccountID: m.AccountID, Model: m.Model, SetID: m.SetID,
 		Trigger: trigger, Status: IQProbeRunRunning, StartedAt: time.Now(),
 	}
 	runID, err := s.repo.CreateRun(ctx, run)
 	if err != nil {
-		logger.LegacyPrintf("service.iq_probe", "[IQProbe] monitor=%d create run failed: %v", m.ID, err)
-		return
+		return nil, err
 	}
 	run.ID = runID
+	return run, nil
+}
+
+// runRound asks every enabled question of the monitor's set, one at a time,
+// then scores the round, updates the monitor and fires alerts.
+func (s *IQProbeService) runRound(ctx context.Context, m *IQProbeMonitor, run *IQProbeRun) error {
 
 	skip := func(msg string) {
 		run.Status = IQProbeRunSkipped
 		run.Message = msg
-		s.finishRound(ctx, m, run)
 	}
 
 	account, err := s.accountRepo.GetByID(ctx, m.AccountID)
 	if err != nil {
 		skip("账号不存在")
-		return
+		return ctx.Err()
 	}
 	if !account.IsSchedulable() {
 		skip(fmt.Sprintf("账号当前不可调度（状态 %s），本轮跳过", account.Status))
-		return
+		return nil
 	}
 	questions, err := s.repo.ListQuestions(ctx, m.SetID)
 	if err != nil {
 		skip("读取题目失败: " + err.Error())
-		return
+		return ctx.Err()
 	}
 	enabled := questions[:0]
 	for _, q := range questions {
@@ -574,12 +606,20 @@ func (s *IQProbeService) runRound(ctx context.Context, m *IQProbeMonitor, trigge
 	}
 	if len(enabled) == 0 {
 		skip("题组没有启用的题目")
-		return
+		return nil
 	}
 
 	answers := make([]*IQProbeAnswer, 0, len(enabled))
 	for _, q := range enabled {
+		// Recheck ownership before each upstream call, including after a long
+		// process pause. A retired worker must not start another question.
+		if err := s.heartbeatRun(ctx, run.ID); err != nil {
+			return err
+		}
 		a := s.askQuestion(ctx, m, q)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		a.RunID = run.ID
 		if err := s.repo.InsertAnswer(ctx, a); err != nil {
 			logger.LegacyPrintf("service.iq_probe", "[IQProbe] run=%d insert answer failed: %v", run.ID, err)
@@ -590,7 +630,7 @@ func (s *IQProbeService) runRound(ctx context.Context, m *IQProbeMonitor, trigge
 		answers = append(answers, a)
 	}
 	iqProbeScoreRun(run, answers)
-	s.finishRound(ctx, m, run)
+	return nil
 }
 
 func (s *IQProbeService) askQuestion(ctx context.Context, m *IQProbeMonitor, q *IQProbeQuestion) *IQProbeAnswer {
@@ -647,22 +687,42 @@ func truncateIQProbeText(s string) string {
 func (s *IQProbeService) finishRound(ctx context.Context, m *IQProbeMonitor, run *IQProbeRun) {
 	now := time.Now()
 	run.FinishedAt = &now
-	if err := s.repo.FinishRun(ctx, run); err != nil {
-		logger.LegacyPrintf("service.iq_probe", "[IQProbe] run=%d finish failed: %v", run.ID, err)
-	}
 
-	// Re-read so concurrent edits to thresholds are honoured.
-	if fresh, err := s.repo.GetMonitor(ctx, m.ID); err == nil {
+	// Preserve history after a configuration edit, but only apply the score
+	// and streaks to the configuration this round actually measured.
+	var state *IQProbeMonitorRunState
+	var alert string
+	fresh, err := s.repo.GetMonitor(ctx, m.ID)
+	if err != nil {
+		if !errors.Is(err, ErrIQProbeMonitorNotFound) {
+			logger.LegacyPrintf("service.iq_probe", "[IQProbe] monitor=%d reload failed: %v", m.ID, err)
+		}
+	} else if iqProbeMeasuresSame(m, fresh) {
+		next, notification := nextIQProbeAlertState(fresh, run)
+		next.LastRunAt = run.StartedAt
+		next.Model, next.SetID, next.ReasoningEffort = m.Model, m.SetID, m.ReasoningEffort
+		state, alert = &next, notification
 		m = fresh
 	}
-	state, alert := nextIQProbeAlertState(m, run)
-	state.LastRunAt = run.StartedAt
-	if err := s.repo.UpdateMonitorRunState(ctx, m.ID, state); err != nil {
-		logger.LegacyPrintf("service.iq_probe", "[IQProbe] monitor=%d update state failed: %v", m.ID, err)
+
+	// Commit history and monitor state together. A terminal round observed by
+	// the UI must already have its score visible, and the cross-instance lock
+	// stays held until both writes commit. A retired worker updates neither.
+	applied, err := s.repo.FinishRun(ctx, run, state)
+	if err != nil {
+		logger.LegacyPrintf("service.iq_probe", "[IQProbe] run=%d finish failed: %v", run.ID, err)
+		return
 	}
-	if alert != "" {
+	if applied && state != nil && alert != "" {
 		s.sendAlert(ctx, m, run, alert)
 	}
+}
+
+// iqProbeMeasuresSame reports whether two versions of a monitor measure the
+// same thing: the same model, question set and reasoning effort. Changing any
+// of them restarts the alert streaks (UpdateMonitor) and orphans a running round.
+func iqProbeMeasuresSame(a, b *IQProbeMonitor) bool {
+	return a.Model == b.Model && a.SetID == b.SetID && a.ReasoningEffort == b.ReasoningEffort
 }
 
 // nextIQProbeAlertState advances the streak counters for one finished round

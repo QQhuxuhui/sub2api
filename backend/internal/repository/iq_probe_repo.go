@@ -304,13 +304,24 @@ func (r *iqProbeRepository) ClaimMonitor(ctx context.Context, id int64, expected
 	return n == 1, nil
 }
 
-func (r *iqProbeRepository) UpdateMonitorRunState(ctx context.Context, id int64, st service.IQProbeMonitorRunState) error {
-	_, err := r.db.ExecContext(ctx, `
+func (r *iqProbeRepository) UpdateMonitorRunState(ctx context.Context, id int64, st service.IQProbeMonitorRunState) (bool, error) {
+	return updateIQProbeMonitorRunState(ctx, r.db, id, st)
+}
+
+func updateIQProbeMonitorRunState(ctx context.Context, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, id int64, st service.IQProbeMonitorRunState) (bool, error) {
+	res, err := db.ExecContext(ctx, `
 		UPDATE iq_probe_monitors SET last_run_at = $2, last_status = $3, last_score = $4,
 			consecutive_low = $5, consecutive_invalid = $6, alert_state = $7
-		WHERE id = $1`,
-		id, st.LastRunAt, st.LastStatus, st.LastScore, st.ConsecutiveLow, st.ConsecutiveInvalid, st.AlertState)
-	return err
+		WHERE id = $1 AND model = $8 AND set_id = $9 AND reasoning_effort = $10`,
+		id, st.LastRunAt, st.LastStatus, st.LastScore, st.ConsecutiveLow, st.ConsecutiveInvalid, st.AlertState,
+		st.Model, st.SetID, st.ReasoningEffort)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // ---- runs & answers ----
@@ -321,19 +332,55 @@ func (r *iqProbeRepository) CreateRun(ctx context.Context, run *service.IQProbeR
 		INSERT INTO iq_probe_runs (monitor_id, account_id, model, set_id, trigger, status, started_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
 		run.MonitorID, run.AccountID, run.Model, run.SetID, run.Trigger, run.Status, run.StartedAt).Scan(&id)
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+		// uq_iq_probe_runs_monitor_running: a round of this monitor is already running.
+		return 0, service.ErrIQProbeMonitorBusy
+	}
 	return id, err
 }
 
-func (r *iqProbeRepository) FinishRun(ctx context.Context, run *service.IQProbeRun) error {
-	_, err := r.db.ExecContext(ctx, `
+func (r *iqProbeRepository) HeartbeatRun(ctx context.Context, runID int64) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `UPDATE iq_probe_runs SET heartbeat_at = NOW() WHERE id = $1 AND status = 'running'`, runID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+func (r *iqProbeRepository) FinishRun(ctx context.Context, run *service.IQProbeRun, state *service.IQProbeMonitorRunState) (bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `
 		UPDATE iq_probe_runs SET status = $2, score = $3, total_count = $4, correct_count = $5, wrong_count = $6,
 			format_error_count = $7, error_count = $8, earned_weight = $9, total_weight = $10,
 			input_tokens = $11, output_tokens = $12, cost_usd = $13, message = $14, finished_at = $15
-		WHERE id = $1`,
+		WHERE id = $1 AND status = 'running'`,
 		run.ID, run.Status, run.Score, run.TotalCount, run.CorrectCount, run.WrongCount,
 		run.FormatErrorCount, run.ErrorCount, run.EarnedWeight, run.TotalWeight,
 		run.InputTokens, run.OutputTokens, run.CostUSD, run.Message, run.FinishedAt)
-	return err
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil || n == 0 {
+		return false, err
+	}
+	applied := true
+	if state != nil {
+		applied, err = updateIQProbeMonitorRunState(ctx, tx, run.MonitorID, *state)
+		if err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return applied, nil
 }
 
 func (r *iqProbeRepository) InsertAnswer(ctx context.Context, a *service.IQProbeAnswer) error {
@@ -351,9 +398,13 @@ func (r *iqProbeRepository) InsertAnswer(ctx context.Context, a *service.IQProbe
 func (r *iqProbeRepository) ListRuns(ctx context.Context, f service.IQProbeRunFilter) ([]*service.IQProbeRun, int64, error) {
 	var where []string
 	var args []any
+	if f.RunID > 0 {
+		args = append(args, f.RunID)
+		where = append(where, "r.id = $"+itoa(len(args)))
+	}
 	if f.MonitorID > 0 {
 		args = append(args, f.MonitorID)
-		where = append(where, "r.monitor_id = $1")
+		where = append(where, "r.monitor_id = $"+itoa(len(args)))
 	}
 	if f.Status != "" {
 		args = append(args, f.Status)
@@ -480,7 +531,7 @@ func (r *iqProbeRepository) ListScorePoints(ctx context.Context, since time.Time
 func (r *iqProbeRepository) MarkStaleRunsInvalid(ctx context.Context, before time.Time) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE iq_probe_runs SET status = 'invalid', message = '运行中断（实例重启或超时）', finished_at = NOW()
-		WHERE status = 'running' AND started_at < $1`, before)
+		WHERE status = 'running' AND heartbeat_at < $1`, before)
 	return err
 }
 

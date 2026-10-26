@@ -98,8 +98,11 @@ func TestIQProbeRoundEndToEnd(t *testing.T) {
 	require.Len(t, created, 1)
 	monitorID := created[0].ID
 
-	require.NoError(t, svc.RunNow(ctx, monitorID))
-	require.ErrorIs(t, svc.RunNow(ctx, monitorID), service.ErrIQProbeMonitorBusy)
+	runID, err := svc.RunNow(ctx, monitorID)
+	require.NoError(t, err)
+	require.Positive(t, runID)
+	_, err = svc.RunNow(ctx, monitorID)
+	require.ErrorIs(t, err, service.ErrIQProbeMonitorBusy)
 
 	var m *service.IQProbeMonitor
 	require.Eventually(t, func() bool {
@@ -112,6 +115,12 @@ func TestIQProbeRoundEndToEnd(t *testing.T) {
 	require.InDelta(t, 1.0/3.0, *m.LastScore, 1e-9, "1 of weight 3; the failed request is outside the denominator")
 	require.Equal(t, service.IQProbeAlertLow, m.AlertState)
 	require.Equal(t, 1, m.ConsecutiveLow)
+	completedRun, err := svc.GetRun(ctx, runID)
+	require.NoError(t, err)
+	require.Equal(t, runID, completedRun.ID)
+	require.Equal(t, service.IQProbeRunScored, completedRun.Status)
+	_, err = svc.GetRun(ctx, -1)
+	require.ErrorIs(t, err, service.ErrIQProbeRunNotFound)
 
 	require.Len(t, upstream.prompts, 3)
 	for _, p := range upstream.prompts {

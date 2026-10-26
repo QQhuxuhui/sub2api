@@ -155,7 +155,13 @@ export default {
       breakdown: '对 / 错 / 格式 / 失败',
       breakdownValue: '{c} / {w} / {f} / {e}',
       message: '说明',
-      empty: '没有运行记录'
+      empty: '没有运行记录',
+      clickHint: '点击查看本轮每道题的结果'
+    },
+    runDialog: {
+      title: '本轮结果：{name} / {model}',
+      reply: '原始回复',
+      noAnswers: '本轮没有答题记录（被跳过、明细已过 30 天清理，或仍在运行）'
     },
     errors: {
       IQ_PROBE_SET_NOT_FOUND: '题组不存在',

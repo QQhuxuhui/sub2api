@@ -155,6 +155,7 @@ type IQProbeScorePoint struct {
 }
 
 type IQProbeRunFilter struct {
+	RunID     int64
 	MonitorID int64
 	Status    string
 	Page      int
@@ -169,6 +170,12 @@ type IQProbeMonitorRunState struct {
 	ConsecutiveLow     int
 	ConsecutiveInvalid int
 	AlertState         string
+	// What the round measured. The state is only written while the monitor
+	// still measures the same thing, so a round started before an edit cannot
+	// leave its score or streaks on the new configuration.
+	Model           string
+	SetID           int64
+	ReasoningEffort string
 }
 
 type IQProbeRepository interface {
@@ -193,10 +200,19 @@ type IQProbeRepository interface {
 	// ClaimMonitor moves next_run_at forward only for an enabled, still-due
 	// monitor whose timestamp equals expected (or is NULL when expected is nil).
 	ClaimMonitor(ctx context.Context, id int64, expected *time.Time, next time.Time) (bool, error)
-	UpdateMonitorRunState(ctx context.Context, id int64, state IQProbeMonitorRunState) error
+	// UpdateMonitorRunState reports false when the monitor is gone or no
+	// longer has the state's model / set / reasoning effort.
+	UpdateMonitorRunState(ctx context.Context, id int64, state IQProbeMonitorRunState) (bool, error)
 
+	// CreateRun inserts a running round. It fails with ErrIQProbeMonitorBusy
+	// while another round of the same monitor is running on any instance.
 	CreateRun(ctx context.Context, run *IQProbeRun) (int64, error)
-	FinishRun(ctx context.Context, run *IQProbeRun) error
+	// HeartbeatRun returns false once maintenance or completion released the lock.
+	HeartbeatRun(ctx context.Context, runID int64) (bool, error)
+	// FinishRun atomically completes a still-running round and applies optional
+	// monitor state. False means ownership was lost or the state no longer fits
+	// the monitor's configuration; callers must not send an alert in that case.
+	FinishRun(ctx context.Context, run *IQProbeRun, state *IQProbeMonitorRunState) (bool, error)
 	InsertAnswer(ctx context.Context, a *IQProbeAnswer) error
 	ListRuns(ctx context.Context, filter IQProbeRunFilter) ([]*IQProbeRun, int64, error)
 	ListAnswersByRuns(ctx context.Context, runIDs []int64, withText bool) ([]*IQProbeAnswer, error)

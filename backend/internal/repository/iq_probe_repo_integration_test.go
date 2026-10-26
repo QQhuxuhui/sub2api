@@ -105,12 +105,63 @@ func TestIQProbeRepositoryLifecycle(t *testing.T) {
 	run := &service.IQProbeRun{MonitorID: m.ID, AccountID: account.ID, Model: m.Model, SetID: set.ID, Trigger: "schedule", Status: service.IQProbeRunRunning, StartedAt: time.Now()}
 	run.ID, err = repo.CreateRun(ctx, run)
 	require.NoError(t, err)
+	second := *run
+	second.Trigger = "manual"
+	_, err = repo.CreateRun(ctx, &second)
+	require.ErrorIs(t, err, service.ErrIQProbeMonitorBusy, "one running round per monitor, across instances")
+	// A live round can be older than the stale threshold, including time queued
+	// for a concurrency slot. Its heartbeat, not its start time, owns the lock.
+	_, err = integrationDB.ExecContext(ctx, "UPDATE iq_probe_runs SET started_at = NOW() - INTERVAL '4 hours' WHERE id = $1", run.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.MarkStaleRunsInvalid(ctx, time.Now().Add(-2*time.Hour)))
+	_, err = repo.CreateRun(ctx, &second)
+	require.ErrorIs(t, err, service.ErrIQProbeMonitorBusy, "maintenance must preserve a live old round")
+	_, err = integrationDB.ExecContext(ctx, "UPDATE iq_probe_runs SET started_at = $2 WHERE id = $1", run.ID, run.StartedAt)
+	require.NoError(t, err)
 	require.NoError(t, repo.InsertAnswer(ctx, &service.IQProbeAnswer{RunID: run.ID, QuestionID: q1.ID, QuestionTitle: "a", ExpectedAnswer: "2", JudgeType: "numeric", Weight: 1, Verdict: service.IQProbeVerdictCorrect, ExtractedAnswer: "2", ResponseText: "答案：2", InputTokens: 10, OutputTokens: 3}))
 	score := 1.0
 	finished := time.Now()
 	run.Status, run.Score, run.CorrectCount, run.TotalCount, run.FinishedAt = service.IQProbeRunScored, &score, 1, 1, &finished
-	require.NoError(t, repo.FinishRun(ctx, run))
-	require.NoError(t, repo.UpdateMonitorRunState(ctx, m.ID, service.IQProbeMonitorRunState{LastRunAt: run.StartedAt, LastStatus: run.Status, LastScore: &score, AlertState: service.IQProbeAlertOK}))
+	completed, err := repo.FinishRun(ctx, run, nil)
+	require.NoError(t, err)
+	require.True(t, completed)
+	nextRunID, err := repo.CreateRun(ctx, &second)
+	require.NoError(t, err, "a finished round releases the monitor")
+	// A refreshed heartbeat preserves an old worker; an abandoned heartbeat
+	// is reclaimed and neither renewal nor late completion can revive it.
+	_, err = integrationDB.ExecContext(ctx, "UPDATE iq_probe_runs SET heartbeat_at = NOW() - INTERVAL '4 hours' WHERE id = $1", nextRunID)
+	require.NoError(t, err)
+	owned, err := repo.HeartbeatRun(ctx, nextRunID)
+	require.NoError(t, err)
+	require.True(t, owned)
+	require.NoError(t, repo.MarkStaleRunsInvalid(ctx, time.Now().Add(-2*time.Hour)))
+	_, err = repo.CreateRun(ctx, &second)
+	require.ErrorIs(t, err, service.ErrIQProbeMonitorBusy)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE iq_probe_runs SET heartbeat_at = NOW() - INTERVAL '4 hours' WHERE id = $1", nextRunID)
+	require.NoError(t, err)
+	require.NoError(t, repo.MarkStaleRunsInvalid(ctx, time.Now().Add(-2*time.Hour)))
+	owned, err = repo.HeartbeatRun(ctx, nextRunID)
+	require.NoError(t, err)
+	require.False(t, owned)
+	late := *run
+	late.ID = nextRunID
+	completed, err = repo.FinishRun(ctx, &late, nil)
+	require.NoError(t, err)
+	require.False(t, completed)
+	successorID, err := repo.CreateRun(ctx, &second)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "DELETE FROM iq_probe_runs WHERE id = $1", successorID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "DELETE FROM iq_probe_runs WHERE id = $1", nextRunID)
+	require.NoError(t, err)
+	applied, err := repo.UpdateMonitorRunState(ctx, m.ID, service.IQProbeMonitorRunState{LastRunAt: run.StartedAt, LastStatus: run.Status, LastScore: &score,
+		Model: "another-model", SetID: m.SetID, ReasoningEffort: m.ReasoningEffort})
+	require.NoError(t, err)
+	require.False(t, applied, "a round of an older configuration must not be written back")
+	applied, err = repo.UpdateMonitorRunState(ctx, m.ID, service.IQProbeMonitorRunState{LastRunAt: run.StartedAt, LastStatus: run.Status, LastScore: &score, AlertState: service.IQProbeAlertOK,
+		Model: m.Model, SetID: m.SetID, ReasoningEffort: m.ReasoningEffort})
+	require.NoError(t, err)
+	require.True(t, applied)
 
 	runs, total, err := repo.ListRuns(ctx, service.IQProbeRunFilter{MonitorID: m.ID, Status: service.IQProbeRunScored, Page: 1, PageSize: 10})
 	require.NoError(t, err)
@@ -138,6 +189,8 @@ func TestIQProbeRepositoryLifecycle(t *testing.T) {
 	// Stale running rounds are closed; pruning removes old rows.
 	stale := &service.IQProbeRun{MonitorID: m.ID, AccountID: account.ID, Model: m.Model, SetID: set.ID, Trigger: "schedule", Status: service.IQProbeRunRunning, StartedAt: time.Now().Add(-3 * time.Hour)}
 	stale.ID, err = repo.CreateRun(ctx, stale)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE iq_probe_runs SET heartbeat_at = $2 WHERE id = $1", stale.ID, stale.StartedAt)
 	require.NoError(t, err)
 	require.NoError(t, repo.MarkStaleRunsInvalid(ctx, time.Now().Add(-2*time.Hour)))
 	var status string

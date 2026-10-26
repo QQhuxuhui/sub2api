@@ -155,7 +155,13 @@ export default {
       breakdown: 'Right / wrong / format / failed',
       breakdownValue: '{c} / {w} / {f} / {e}',
       message: 'Note',
-      empty: 'No runs'
+      empty: 'No runs',
+      clickHint: 'Click to see every answer of this round'
+    },
+    runDialog: {
+      title: 'Round result: {name} / {model}',
+      reply: 'Raw reply',
+      noAnswers: 'No answers for this round (skipped, details pruned after 30 days, or still running)'
     },
     errors: {
       IQ_PROBE_SET_NOT_FOUND: 'Question set not found',

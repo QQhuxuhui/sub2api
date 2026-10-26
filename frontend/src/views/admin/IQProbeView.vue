@@ -152,9 +152,11 @@ const loading = ref(true)
 const monitors = ref<IQProbeMonitor[]>([])
 const sets = ref<IQProbeQuestionSet[]>([])
 const groups = ref<Array<{ id: number; name: string; platform: string }>>([])
-/** Monitors with a manual round in flight; polled until their last_run_at moves. */
-const running = ref(new Map<number, string | null>())
+/** Monitor ID -> manual round ID. Configuration edits do not change this identity. */
+const running = ref(new Map<number, number>())
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let monitorRequestSeq = 0
+let appliedMonitorRequest = 0
 
 const monitorDialog = reactive<{ show: boolean; editing: IQProbeMonitor | null }>({ show: false, editing: null })
 const detail = reactive<{ show: boolean; monitor: IQProbeMonitor | null }>({ show: false, monitor: null })
@@ -172,15 +174,28 @@ function alertClass(state: IQProbeAlertState) {
 }
 
 async function loadMonitors() {
+  const seq = ++monitorRequestSeq
   try {
-    monitors.value = (await iqProbeAPI.listMonitors()).data ?? []
-    for (const [id, lastRun] of running.value) {
-      const m = monitors.value.find((x) => x.id === id)
-      if (!m || m.last_run_at !== lastRun) running.value.delete(id)
-    }
+    const tracked = [...running.value]
+    const states = await Promise.allSettled(tracked.map(([, runId]) => iqProbeAPI.getRun(runId)))
+    // Fetch the score after observing completion so the final poll cannot
+    // freeze a snapshot taken before that round finished.
+    const current = (await iqProbeAPI.listMonitors()).data ?? []
+    // A newer in-flight poll must not starve a valid result on slow networks.
+    // Only responses older than one already applied are discarded.
+    if (seq <= appliedMonitorRequest) return
+    appliedMonitorRequest = seq
+    monitors.value = current
+    tracked.forEach(([id, runId], i) => {
+      const state = states[i]
+      const removed = !current.some((m) => m.id === id)
+      const finished = state.status === 'fulfilled' && state.value.data.status !== 'running'
+      if ((removed || finished) && running.value.get(id) === runId) running.value.delete(id)
+      else if (state.status === 'rejected' && !removed) appStore.showError(errorText(state.reason))
+    })
     if (running.value.size === 0) stopPolling()
   } catch (err) {
-    appStore.showError(errorText(err))
+    if (seq > appliedMonitorRequest) appStore.showError(errorText(err))
   }
 }
 
@@ -235,8 +250,8 @@ async function toggleMonitor(m: IQProbeMonitor, enabled: boolean) {
 
 async function runNow(m: IQProbeMonitor) {
   try {
-    await iqProbeAPI.runMonitor(m.id)
-    running.value.set(m.id, m.last_run_at)
+    const { data } = await iqProbeAPI.runMonitor(m.id)
+    running.value.set(m.id, data.run_id)
     appStore.showSuccess(t('iqProbe.monitors.runStarted'))
     startPolling()
   } catch (err) {
@@ -276,5 +291,8 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  appliedMonitorRequest = ++monitorRequestSeq
+  stopPolling()
+})
 </script>
