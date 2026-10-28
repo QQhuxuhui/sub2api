@@ -233,7 +233,8 @@ type IntentRouterService struct {
 	entClient  *dbent.Client
 	store      intentRouteStore
 	classifier intentClassifier
-	hits       intentRouteHitSink // nil keeps no hit log
+	hits       intentRouteHitSink  // nil keeps no hit log
+	capture    *intentRouteCapture // nil captures no misses
 
 	configs      atomic.Pointer[map[int64]*intentRouterConfig]
 	configLoaded atomic.Int64 // unix nanos of the last successful load
@@ -271,6 +272,7 @@ func NewIntentRouterService(entClient *dbent.Client, rdb *redis.Client, cfg *con
 		entClient: entClient,
 		store:     store,
 		hits:      hits,
+		capture:   newIntentRouteCaptureFromEnv(),
 		classifier: &httpIntentClassifier{
 			// The per-request context carries the real deadline.
 			client:      &http.Client{Timeout: 30 * time.Second},
@@ -362,6 +364,9 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 			s.recordHit(in, view, rule.Name, keyword, turn, text, texts[0])
 			return s.newDecision(cfg, rule, "", 0, 0)
 		}
+	}
+	if s.capture.watching(in.APIKeyID) {
+		s.capture.add(in, view, texts)
 	}
 	rules := cfg.classifierRules()
 	if len(rules) == 0 {
