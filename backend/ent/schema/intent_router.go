@@ -42,6 +42,9 @@ func (IntentRouter) Fields() []ent.Field {
 		field.Int("max_input_chars").Default(2000),
 		field.JSON("rules", []domain.IntentRule{}).Optional().
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
+		// Requests for these models skip intent routing entirely.
+		field.Strings("excluded_models").Optional().
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 		field.String("jev_api_key").Default("").Sensitive().MaxLen(512),
 		field.JSON("jev", domain.IntentJevConfig{}).Optional().
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),

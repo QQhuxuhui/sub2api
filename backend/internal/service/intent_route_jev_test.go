@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -154,19 +155,77 @@ func TestIntentJev_LongConversationsAreNotSent(t *testing.T) {
 	require.Equal(t, 1, judge.calls)
 }
 
+// jevUserWithKeys creates a user with API keys and returns their IDs.
+func jevUserWithKeys(t *testing.T, f *intentRouteFixture, email string, keys int) (int64, []int64) {
+	t.Helper()
+	ctx := context.Background()
+	u, err := f.client.User.Create().SetEmail(email).SetPasswordHash("hash").SetUsername(email).Save(ctx)
+	require.NoError(t, err)
+	var ids []int64
+	for i := 0; i < keys; i++ {
+		k, err := f.client.APIKey.Create().SetUserID(u.ID).SetKey(fmt.Sprintf("sk-%s-%d", email, i)).SetName(fmt.Sprintf("%s-key-%d", email, i)).Save(ctx)
+		require.NoError(t, err)
+		ids = append(ids, k.ID)
+	}
+	return u.ID, ids
+}
+
 func TestIntentJev_ListedScope(t *testing.T) {
-	f, judge, _ := newJevFixture(t, 0.99, func(j *domain.IntentJevConfig) {
-		j.Scope, j.UserIDs, j.APIKeyIDs = domain.IntentJevScopeListed, []int64{14}, []int64{77}
-	})
+	f := newIntentRouteFixture(t)
+	judge := &scriptedProbeJudge{p: 0.99}
+	f.svc.judge, f.svc.jevStats = judge, newMemoryIntentJevStats()
+	alice, aliceKeys := jevUserWithKeys(t, f, "alice@x.com", 3)
+	bob, bobKeys := jevUserWithKeys(t, f, "bob@x.com", 2)
+	carol, carolKeys := jevUserWithKeys(t, f, "carol@x.com", 1)
+	// Alice narrowed to one key; Bob with no key chosen: all of his.
+	view := f.saveRouterView(t, jevOn(func(j *domain.IntentJevConfig) {
+		j.Scope, j.UserIDs = domain.IntentJevScopeListed, []int64{alice, bob}
+		j.APIKeys = []domain.IntentJevAPIKey{{ID: aliceKeys[1]}}
+	}))
+	require.Equal(t, []domain.IntentJevAPIKey{{ID: aliceKeys[1], UserID: alice}}, view.Jev.APIKeys, "the owner is filled in by the server")
+	require.Equal(t, []IntentJevUserLabel{{ID: alice, Email: "alice@x.com", Username: "alice@x.com"}, {ID: bob, Email: "bob@x.com", Username: "bob@x.com"}}, view.JevScope.Users)
+	require.Equal(t, []IntentJevAPIKeyLabel{{ID: aliceKeys[1], Name: "alice@x.com-key-1", UserID: alice}}, view.JevScope.APIKeys)
+
 	ctx := context.Background()
 	body := []byte(userTurns("Reply OK"))
+	judged := func(userID, keyID int64) bool {
+		before := judge.calls
+		f.svc.Decide(ctx, IntentRouteInput{GroupID: f.groupID, UserID: userID, APIKeyID: keyID, Body: body})
+		return judge.calls > before
+	}
+	require.True(t, judged(alice, aliceKeys[1]), "alice's chosen key")
+	require.False(t, judged(alice, aliceKeys[0]), "alice's other keys are not covered")
+	require.True(t, judged(bob, bobKeys[0]), "bob: no key chosen, all of his")
+	require.True(t, judged(bob, bobKeys[1]))
+	require.False(t, judged(carol, carolKeys[0]), "carol is not listed")
+	require.False(t, judged(carol, aliceKeys[1]), "a listed key does not cover another user")
+}
 
-	requireNoPreference(t, f.svc.Decide(ctx, IntentRouteInput{GroupID: f.groupID, UserID: 3, APIKeyID: 5, Body: body}))
-	require.Zero(t, judge.calls, "neither the user nor the key is listed")
-
-	require.Equal(t, "coding", f.svc.Decide(ctx, IntentRouteInput{GroupID: f.groupID, UserID: 14, APIKeyID: 5, Body: body}).Intent)
-	require.Equal(t, "coding", f.svc.Decide(ctx, IntentRouteInput{GroupID: f.groupID, UserID: 3, APIKeyID: 77, Body: body}).Intent)
-	require.Equal(t, 2, judge.calls)
+func TestIntentJev_ScopeValidation(t *testing.T) {
+	f := newIntentRouteFixture(t)
+	alice, aliceKeys := jevUserWithKeys(t, f, "alice@x.com", 1)
+	_, bobKeys := jevUserWithKeys(t, f, "bob@x.com", 1)
+	save := func(mutate func(*domain.IntentJevConfig)) error {
+		in := IntentRouterInput{Enabled: true, Rules: []domain.IntentRule{
+			{Name: "coding", Enabled: true, AccountIDs: []int64{f.accountID(t, "coding-1")}},
+			{Name: "chat", Enabled: true, AccountIDs: []int64{f.accountID(t, "pool-a")}},
+		}}
+		jevOn(mutate)(&in)
+		_, err := f.svc.SaveRouter(context.Background(), f.groupID, in)
+		return err
+	}
+	require.Equal(t, "INTENT_JEV_SCOPE_EMPTY", infraerrors.Reason(save(func(j *domain.IntentJevConfig) {
+		j.Scope, j.APIKeys = domain.IntentJevScopeListed, []domain.IntentJevAPIKey{{ID: aliceKeys[0]}}
+	})), "keys alone are not a scope: choose their user")
+	require.Equal(t, "INTENT_JEV_API_KEY_USER_NOT_LISTED", infraerrors.Reason(save(func(j *domain.IntentJevConfig) {
+		j.Scope, j.UserIDs, j.APIKeys = domain.IntentJevScopeListed, []int64{alice}, []domain.IntentJevAPIKey{{ID: bobKeys[0]}}
+	})))
+	require.Equal(t, "INTENT_JEV_API_KEY_NOT_FOUND", infraerrors.Reason(save(func(j *domain.IntentJevConfig) {
+		j.Scope, j.UserIDs, j.APIKeys = domain.IntentJevScopeListed, []int64{alice}, []domain.IntentJevAPIKey{{ID: 999999}}
+	})))
+	require.NoError(t, save(func(j *domain.IntentJevConfig) {
+		j.Scope, j.UserIDs, j.APIKeys = domain.IntentJevScopeListed, []int64{alice}, []domain.IntentJevAPIKey{{ID: aliceKeys[0]}, {ID: aliceKeys[0]}}
+	}))
 }
 
 func TestIntentJev_TemporaryFailuresPauseWithBackoff(t *testing.T) {
@@ -562,6 +621,12 @@ func TestHTTPIntentProbeJudge_Live(t *testing.T) {
 		require.Equal(t, c.probe, answer.P >= intentJevDefaultThreshold, c.text)
 		require.Positive(t, answer.Tokens)
 	}
+}
+
+func (f *intentRouteFixture) saveRouterView(t *testing.T, mutate func(*IntentRouterInput)) *IntentRouterView {
+	t.Helper()
+	f.saveRouter(t, mutate)
+	return f.svc.mustRouter(t, f.groupID)
 }
 
 func (s *IntentRouterService) mustRouter(t *testing.T, groupID int64) *IntentRouterView {

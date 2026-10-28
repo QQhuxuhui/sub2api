@@ -37,6 +37,8 @@ const (
 	FieldMaxInputChars = "max_input_chars"
 	// FieldRules holds the string denoting the rules field in the database.
 	FieldRules = "rules"
+	// FieldExcludedModels holds the string denoting the excluded_models field in the database.
+	FieldExcludedModels = "excluded_models"
 	// FieldJevAPIKey holds the string denoting the jev_api_key field in the database.
 	FieldJevAPIKey = "jev_api_key"
 	// FieldJev holds the string denoting the jev field in the database.
@@ -60,6 +62,7 @@ var Columns = []string{
 	FieldCacheTTLSeconds,
 	FieldMaxInputChars,
 	FieldRules,
+	FieldExcludedModels,
 	FieldJevAPIKey,
 	FieldJev,
 }

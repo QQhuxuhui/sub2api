@@ -57,55 +57,12 @@
                 <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.enabledHint') }}</span>
               </span>
             </label>
-
             <div>
-              <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('intentRouter.classifier.title') }}</h2>
-              <p class="mt-1 text-sm leading-6 text-gray-500 dark:text-gray-400">{{ t('intentRouter.classifier.intro') }}</p>
-              <div class="mt-3 grid gap-4 md:grid-cols-2">
-                <div>
-                  <label class="input-label">{{ t('intentRouter.classifier.baseUrl') }}</label>
-                  <input v-model.trim="form.classifier_base_url" type="url" class="input" :placeholder="t('intentRouter.classifier.baseUrlPlaceholder')" />
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.classifier.baseUrlHint') }}</p>
-                </div>
-                <div>
-                  <label class="input-label">{{ t('intentRouter.classifier.protocol') }}</label>
-                  <select v-model="form.classifier_protocol" class="input">
-                    <option value="openai_chat">{{ t('intentRouter.classifier.protocolOpenAI') }}</option>
-                    <option value="gemini">{{ t('intentRouter.classifier.protocolGemini') }}</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="input-label">{{ t('intentRouter.classifier.model') }}</label>
-                  <input v-model.trim="form.classifier_model" data-test="intent-model" type="text" class="input" :placeholder="t('intentRouter.classifier.modelPlaceholder')" />
-                </div>
-                <div>
-                  <label class="input-label">{{ t('intentRouter.classifier.apiKey') }}</label>
-                  <input
-                    v-model.trim="form.classifier_api_key"
-                    data-test="intent-api-key"
-                    type="password"
-                    autocomplete="new-password"
-                    class="input"
-                    :placeholder="keyConfigured ? t('intentRouter.classifier.apiKeyKeep') : t('intentRouter.classifier.apiKeyPlaceholder')"
-                  />
-                </div>
-                <div>
-                  <label class="input-label">{{ t('intentRouter.classifier.timeout') }}</label>
-                  <input v-model.number="form.classifier_timeout_ms" type="number" min="300" max="15000" step="100" class="input" />
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.classifier.timeoutHint') }}</p>
-                </div>
-                <div>
-                  <label class="input-label">{{ t('intentRouter.classifier.cacheTtl') }}</label>
-                  <input v-model.number="cacheTtlMinutes" data-test="intent-cache-minutes" type="number" min="1" max="10080" class="input" />
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.classifier.cacheTtlHint') }}</p>
-                </div>
-                <div>
-                  <label class="input-label">{{ t('intentRouter.classifier.maxInput') }}</label>
-                  <input v-model.number="form.max_input_chars" type="number" min="100" max="20000" step="100" class="input" />
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.classifier.maxInputHint') }}</p>
-                </div>
-              </div>
+              <label class="input-label">{{ t('intentRouter.excludedModels') }}</label>
+              <textarea v-model="form.excludedModelsText" data-test="intent-excluded-models" rows="2" class="input font-mono text-sm" :placeholder="t('intentRouter.excludedModelsPlaceholder')"></textarea>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.excludedModelsHint') }}</p>
             </div>
+
           </div>
 
           <!-- Jev probe detection -->
@@ -168,6 +125,8 @@
                   <option value="">{{ t('intentRouter.jev.rulePlaceholder') }}</option>
                   <option v-for="name in ruleNames" :key="name" :value="name">{{ name }}</option>
                 </select>
+                <p v-if="jevRuleAccounts.length" data-test="intent-jev-rule-accounts" class="mt-1 text-xs text-gray-700 dark:text-gray-300">{{ t('intentRouter.jev.ruleAccounts', { accounts: jevRuleAccounts.map(accountLabel).join('、') }) }}</p>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.ruleHint') }}</p>
               </div>
               <div>
                 <label class="input-label">{{ t('intentRouter.jev.apiKey') }}</label>
@@ -225,13 +184,64 @@
               </div>
               <div v-if="form.jev.scope === 'listed'" class="mt-3 grid gap-4 md:grid-cols-2">
                 <div>
-                  <label class="input-label">{{ t('intentRouter.jev.userIds') }}</label>
-                  <input v-model="form.jevUserIDsText" data-test="intent-jev-users" type="text" class="input" :placeholder="t('intentRouter.jev.idsPlaceholder')" />
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.userIdsHint') }}</p>
+                  <label class="input-label">{{ t('intentRouter.jev.scopeUsers') }}</label>
+                  <div class="relative">
+                    <input v-model="jevUserQuery" data-test="intent-jev-user-search" type="text" class="input" :placeholder="t('intentRouter.jev.scopeUserSearch')" @input="searchJevUsers" />
+                    <div v-if="jevUserResults.length" class="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800">
+                      <button
+                        v-for="u in jevUserResults"
+                        :key="u.id"
+                        type="button"
+                        :data-test="`intent-jev-user-option-${u.id}`"
+                        class="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-dark-700"
+                        @click="addJevUser(u)"
+                      >#{{ u.id }} {{ u.email }}</button>
+                    </div>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <span v-for="u in form.jevUsers" :key="u.id" :data-test="`intent-jev-user-${u.id}`" class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs dark:bg-dark-700">
+                      #{{ u.id }} {{ u.email || t('intentRouter.jev.scopeDeleted') }}
+                      <button type="button" class="text-gray-500 hover:text-red-600" :aria-label="t('intentRouter.jev.scopeRemove')" @click="removeJevUser(u.id)">×</button>
+                    </span>
+                  </div>
                 </div>
                 <div>
-                  <label class="input-label">{{ t('intentRouter.jev.apiKeyIds') }}</label>
-                  <input v-model="form.jevAPIKeyIDsText" data-test="intent-jev-keys" type="text" class="input" :placeholder="t('intentRouter.jev.idsPlaceholder')" />
+                  <label class="input-label">{{ t('intentRouter.jev.scopeKeys') }}</label>
+                  <div class="relative">
+                    <input
+                      v-model="jevKeyQuery"
+                      data-test="intent-jev-key-search"
+                      type="text"
+                      class="input"
+                      :disabled="!form.jevUsers.length"
+                      :placeholder="form.jevUsers.length ? t('intentRouter.jev.scopeKeyPlaceholder') : t('intentRouter.jev.scopeKeyChooseUserFirst')"
+                      @focus="openJevKeyPicker"
+                      @input="searchJevKeys"
+                    />
+                    <div v-if="jevKeyPickerOpen && form.jevUsers.length" data-test="intent-jev-key-results" class="absolute z-10 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800">
+                      <template v-for="u in form.jevUsers" :key="u.id">
+                        <div class="bg-gray-50 px-3 py-1 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-400">#{{ u.id }} {{ u.email }}</div>
+                        <button
+                          v-for="k in jevKeyChoices(u.id)"
+                          :key="k.id"
+                          type="button"
+                          :data-test="`intent-jev-key-option-${k.id}`"
+                          class="block w-full px-3 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-dark-700"
+                          @click="addJevKey(k)"
+                        >{{ k.name }}（#{{ k.id }}）</button>
+                        <p v-if="!jevKeyChoices(u.id).length" class="px-3 py-1.5 text-xs text-gray-400">{{ t('intentRouter.jev.scopeKeyNone') }}</p>
+                        <p v-else-if="(jevUserKeys[u.id] ?? []).length >= JEV_KEY_PAGE" class="px-3 py-1 text-xs text-gray-400">{{ t('intentRouter.jev.scopeKeyMore', { n: JEV_KEY_PAGE }) }}</p>
+                      </template>
+                      <button type="button" class="block w-full border-t border-gray-100 px-3 py-1.5 text-right text-xs text-gray-500 hover:text-gray-700 dark:border-dark-600" @click="jevKeyPickerOpen = false">{{ t('intentRouter.jev.scopeKeyClose') }}</button>
+                    </div>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <span v-for="k in form.jevKeys" :key="k.id" :data-test="`intent-jev-key-${k.id}`" class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs dark:bg-dark-700">
+                      {{ k.name || t('intentRouter.jev.scopeDeleted') }}（#{{ k.id }} · {{ jevUserEmail(k.user_id) }}）
+                      <button type="button" class="text-gray-500 hover:text-red-600" :aria-label="t('intentRouter.jev.scopeRemove')" @click="removeJevKey(k.id)">×</button>
+                    </span>
+                  </div>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.scopeKeysHint') }}</p>
                 </div>
               </div>
             </div>
@@ -255,10 +265,6 @@
                 <div>
                   <label class="input-label">{{ t('intentRouter.rules.name') }}</label>
                   <input v-model.trim="rule.name" data-test="intent-rule-name" type="text" maxlength="40" class="input" :placeholder="t('intentRouter.rules.namePlaceholder')" />
-                </div>
-                <div>
-                  <label class="input-label">{{ t('intentRouter.rules.description') }}</label>
-                  <textarea v-model.trim="rule.description" data-test="intent-rule-description" rows="2" maxlength="500" class="input" :placeholder="t('intentRouter.rules.descriptionPlaceholder')"></textarea>
                 </div>
               </div>
 
@@ -512,7 +518,9 @@ import { extractI18nErrorMessage } from '@/utils/apiError'
 interface GroupOption { id: number; name: string; platform: string }
 interface AccountOption { id: number; name: string; platform: string }
 interface RuleForm { uid: number; name: string; description: string; keywordsText: string; originalKeywords: string[]; account_ids: number[]; enabled: boolean; search: string }
-type FormState = Omit<IntentRouterInput, 'rules' | 'jev_set_balance_usd'> & { rules: RuleForm[]; jevUserIDsText: string; jevAPIKeyIDsText: string; jevBalanceText: string }
+interface JevUserForm { id: number; email: string }
+interface JevKeyForm { id: number; name: string; user_id: number }
+type FormState = Omit<IntentRouterInput, 'rules' | 'jev_set_balance_usd' | 'excluded_models'> & { excludedModelsText: string; rules: RuleForm[]; jevUsers: JevUserForm[]; jevKeys: JevKeyForm[]; jevBalanceText: string }
 
 const ACCOUNT_PAGE_SIZE = 1000
 const ACCOUNT_MAX_PAGES = 10
@@ -565,12 +573,13 @@ const blankForm = (): FormState => ({
   rules: [],
   jev_api_key: '',
   jev: blankJev(),
-  jevUserIDsText: '',
-  jevAPIKeyIDsText: '',
+  jevUsers: [],
+  jevKeys: [],
+  excludedModelsText: '',
   jevBalanceText: '',
 })
 function blankJev(): IntentJevConfig {
-  return { enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_key_ids: [], sample_percent: 100, low_balance_usd: 1, balance_usd: 0 }
+  return { enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, low_balance_usd: 1, balance_usd: 0 }
 }
 const form = reactive<FormState>(blankForm())
 const baseline = ref('')
@@ -578,16 +587,12 @@ const baseline = ref('')
 const accountsById = computed(() => new Map(accounts.value.map((a) => [a.id, a])))
 const selectedGroup = computed(() => groups.value.find((g) => g.id === selectedGroupId.value) ?? null)
 const savedRouter = computed(() => (selectedGroupId.value ? routers.value[selectedGroupId.value] ?? null : null))
-const keyConfigured = computed(() => savedRouter.value?.classifier_api_key_configured === true)
 const jevKeyConfigured = computed(() => savedRouter.value?.jev_api_key_configured === true)
 const ruleNames = computed(() => form.rules.map((rule) => rule.name.trim()).filter(Boolean))
+const jevRuleAccounts = computed(() => form.rules.find((rule) => rule.name.trim() === form.jev.rule)?.account_ids ?? [])
 const filteredGroups = computed(() => {
   const q = groupSearch.value.toLowerCase()
   return q ? groups.value.filter((g) => g.name.toLowerCase().includes(q) || String(g.id) === q) : groups.value
-})
-const cacheTtlMinutes = computed({
-  get: () => Math.round(form.cache_ttl_seconds / 60),
-  set: (minutes: number) => { form.cache_ttl_seconds = Math.round((Number(minutes) || 0) * 60) },
 })
 const dirty = computed(() => snapshot() !== baseline.value)
 
@@ -604,23 +609,95 @@ function toInput(): IntentRouterInput {
     rules: form.rules.map(({ name, description, keywordsText, originalKeywords, account_ids, enabled }) => ({
       name, description, keywords: restoreOriginalControls(parseKeywords(keywordsText), originalKeywords), account_ids: [...account_ids], enabled,
     })),
+    excluded_models: form.excludedModelsText.split(/[\n,，、]+/).map((m) => m.trim()).filter(Boolean),
     jev_api_key: form.jev_api_key,
     jev: {
       ...form.jev,
       threshold: Number(form.jev.threshold) || 0,
       max_turns: Number(form.jev.max_turns) || 0,
       timeout_ms: Number(form.jev.timeout_ms) || 0,
-      user_ids: parseIDs(form.jevUserIDsText),
-      api_key_ids: parseIDs(form.jevAPIKeyIDsText),
+      user_ids: form.jevUsers.map((u) => u.id),
+      api_keys: form.jevKeys.map((k) => ({ id: k.id })),
       sample_percent: Number(form.jev.sample_percent) || 0,
       low_balance_usd: Number(form.jev.low_balance_usd) || 0,
     },
     ...(String(form.jevBalanceText).trim() !== '' ? { jev_set_balance_usd: Number(form.jevBalanceText) } : {}),
   }
 }
-// IDs are typed comma, space or newline separated; anything else is ignored.
-function parseIDs(text: string): number[] {
-  return [...new Set(text.split(/[\s,，、]+/).map((part) => Number(part)).filter((id) => Number.isInteger(id) && id > 0))]
+// Jev scope pickers: users are searched like on the usage page; keys come
+// from the chosen users, so nobody has to look IDs up.
+const jevUserQuery = ref('')
+const jevUserResults = ref<{ id: number; email: string }[]>([])
+const jevUserKeys = ref<Record<number, { id: number; name: string; user_id: number }[]>>({})
+let jevUserSearchTimer: ReturnType<typeof setTimeout> | null = null
+let jevUserSearchSeq = 0
+function searchJevUsers() {
+  if (jevUserSearchTimer) clearTimeout(jevUserSearchTimer)
+  const query = jevUserQuery.value.trim()
+  const seq = ++jevUserSearchSeq
+  if (!query) {
+    jevUserResults.value = []
+    return
+  }
+  jevUserSearchTimer = setTimeout(async () => {
+    try {
+      const users = await adminAPI.usage.searchUsers(query)
+      if (seq === jevUserSearchSeq) jevUserResults.value = users.filter((u) => !u.deleted && !form.jevUsers.some((x) => x.id === u.id))
+    } catch {
+      if (seq === jevUserSearchSeq) jevUserResults.value = []
+    }
+  }, 250)
+}
+function addJevUser(u: { id: number; email: string }) {
+  if (!form.jevUsers.some((x) => x.id === u.id)) form.jevUsers.push({ id: u.id, email: u.email })
+  jevUserQuery.value = ''
+  jevUserResults.value = []
+}
+function removeJevUser(id: number) {
+  form.jevUsers = form.jevUsers.filter((u) => u.id !== id)
+  form.jevKeys = form.jevKeys.filter((k) => k.user_id !== id)
+}
+// The key search returns a user's 30 newest keys matching the name typed
+// (all of them when nothing is typed); older keys are found by name.
+const JEV_KEY_PAGE = 30
+const jevKeyQuery = ref('')
+const jevKeyPickerOpen = ref(false)
+let jevKeySearchTimer: ReturnType<typeof setTimeout> | null = null
+let jevKeySearchSeq = 0
+function openJevKeyPicker() {
+  jevKeyPickerOpen.value = true
+  searchJevKeys()
+}
+function searchJevKeys() {
+  if (jevKeySearchTimer) clearTimeout(jevKeySearchTimer)
+  const seq = ++jevKeySearchSeq
+  const query = jevKeyQuery.value.trim()
+  jevKeySearchTimer = setTimeout(async () => {
+    const users = form.jevUsers.map((u) => u.id)
+    const results = await Promise.all(users.map(async (id) => {
+      try {
+        return [id, await adminAPI.usage.searchApiKeys(id, query || undefined)] as const
+      } catch {
+        return [id, []] as const
+      }
+    }))
+    if (seq !== jevKeySearchSeq) return
+    const next = { ...jevUserKeys.value }
+    for (const [id, keys] of results) next[id] = [...keys]
+    jevUserKeys.value = next
+  }, 250)
+}
+function jevKeyChoices(userId: number) {
+  return (jevUserKeys.value[userId] ?? []).filter((k) => !form.jevKeys.some((x) => x.id === k.id))
+}
+function addJevKey(key: { id: number; name: string; user_id: number }) {
+  if (!form.jevKeys.some((k) => k.id === key.id)) form.jevKeys.push({ id: key.id, name: key.name, user_id: key.user_id })
+}
+function removeJevKey(id: number) {
+  form.jevKeys = form.jevKeys.filter((k) => k.id !== id)
+}
+function jevUserEmail(userId: number) {
+  return form.jevUsers.find((u) => u.id === userId)?.email || `#${userId}`
 }
 // Keywords are typed one per line or comma-separated (ASCII or Chinese commas).
 function parseKeywords(text: string): string[] {
@@ -676,9 +753,12 @@ function fillForm(router: IntentRouter | null) {
     form.classifier_timeout_ms = router.classifier_timeout_ms
     form.cache_ttl_seconds = router.cache_ttl_seconds
     form.max_input_chars = router.max_input_chars
+    form.excludedModelsText = (router.excluded_models ?? []).join('\n')
     form.jev = { ...blankJev(), ...(router.jev ?? {}) }
-    form.jevUserIDsText = (router.jev?.user_ids ?? []).join(', ')
-    form.jevAPIKeyIDsText = (router.jev?.api_key_ids ?? []).join(', ')
+    const userLabels = new Map((router.jev_scope?.users ?? []).map((u) => [u.id, u.email]))
+    const keyLabels = new Map((router.jev_scope?.api_keys ?? []).map((k) => [k.id, k.name]))
+    form.jevUsers = (router.jev?.user_ids ?? []).map((id) => ({ id, email: userLabels.get(id) ?? '' }))
+    form.jevKeys = (router.jev?.api_keys ?? []).map((k) => ({ id: k.id, user_id: k.user_id ?? 0, name: keyLabels.get(k.id) ?? '' }))
     form.rules = (router.rules ?? []).map(({ keywords, ...rule }) => ({
       ...rule, keywordsText: formatKeywords(keywords ?? []), originalKeywords: [...(keywords ?? [])], account_ids: [...(rule.account_ids ?? [])], uid: nextUid++, search: '',
     }))

@@ -6,7 +6,7 @@ const api = vi.hoisted(() => ({
   list: vi.fn(), save: vi.fn(), remove: vi.fn(), test: vi.fn(), clearCache: vi.fn(), events: vi.fn(),
   hits: vi.fn(), hitStats: vi.fn(), jevStatus: vi.fn(),
 }))
-const admin = vi.hoisted(() => ({ getAllIncludingInactive: vi.fn(), listAccounts: vi.fn() }))
+const admin = vi.hoisted(() => ({ getAllIncludingInactive: vi.fn(), listAccounts: vi.fn(), searchUsers: vi.fn(), searchApiKeys: vi.fn() }))
 const toast = vi.hoisted(() => ({ showSuccess: vi.fn(), showError: vi.fn() }))
 
 vi.mock('vue-i18n', async () => {
@@ -18,7 +18,10 @@ vi.mock('vue-i18n', async () => {
 })
 vi.mock('@/api/admin/intentRouters', () => ({ intentRoutersAPI: api, default: api }))
 vi.mock('@/api/admin', () => ({
-  adminAPI: { groups: { getAllIncludingInactive: admin.getAllIncludingInactive }, accounts: { list: admin.listAccounts } },
+  adminAPI: {
+    groups: { getAllIncludingInactive: admin.getAllIncludingInactive }, accounts: { list: admin.listAccounts },
+    usage: { searchUsers: admin.searchUsers, searchApiKeys: admin.searchApiKeys },
+  },
 }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => toast }))
 
@@ -167,10 +170,10 @@ describe('IntentRoutersView', () => {
     const rule = wrapper.get('[data-test="intent-rule-0"]').text()
     expect(rule).toContain('#21 claude-coding')
     expect(rule).toContain('intentRouter.rules.missingAccount')
-    // The stored key is never sent to the browser.
-    expect((wrapper.get('[data-test="intent-api-key"]').element as HTMLInputElement).value).toBe('')
-    expect(wrapper.get('[data-test="intent-api-key"]').attributes('placeholder')).toBe('intentRouter.classifier.apiKeyKeep')
-    expect((wrapper.get('[data-test="intent-cache-minutes"]').element as HTMLInputElement).value).toBe('120')
+    // The model-classifier settings are no longer shown (Jev replaced them).
+    expect(wrapper.find('[data-test="intent-model"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="intent-api-key"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="intent-rule-description"]').exists()).toBe(false)
   })
 
   it('only offers accounts that can serve the group, and saves the edited document', async () => {
@@ -181,7 +184,6 @@ describe('IntentRoutersView', () => {
     expect(wrapper.find('[data-test="intent-account-option-31"]').exists()).toBe(false) // an OpenAI account, a Claude group
     await wrapper.get('[data-test="intent-account-search"]').setValue('chat')
     await wrapper.get('[data-test="intent-account-option-22"]').trigger('click')
-    await wrapper.get('[data-test="intent-cache-minutes"]').setValue('30')
     await wrapper.get('[data-test="intent-save"]').trigger('click')
     await flushPromises()
 
@@ -189,7 +191,8 @@ describe('IntentRoutersView', () => {
     const [groupId, input] = api.save.mock.calls[0]
     expect(groupId).toBe(1)
     expect(input.rules).toEqual([{ name: 'coding', description: 'code', keywords: [], account_ids: [21, 99, 22], enabled: true }])
-    expect(input.cache_ttl_seconds).toBe(1800)
+    // Hidden classifier settings and rule descriptions are saved back unchanged.
+    expect(input).toMatchObject({ classifier_model: 'flash-lite', classifier_timeout_ms: 3000, cache_ttl_seconds: 7200, max_input_chars: 2000 })
     expect(input.classifier_api_key).toBe('') // blank keeps the stored key
     expect(toast.showSuccess).toHaveBeenCalledWith('intentRouter.actions.saved')
   })
@@ -205,7 +208,7 @@ describe('IntentRoutersView', () => {
     expect(wrapper.get('[data-test="intent-test-result"]').text()).toContain('intentRouter.test.resultIntent')
     expect(wrapper.get('[data-test="intent-test-result"]').text()).toContain('#21 claude-coding')
 
-    await wrapper.get('[data-test="intent-model"]').setValue('another-model')
+    await wrapper.get('[data-test="intent-jev-threshold"]').setValue('0.6')
     expect(wrapper.get('[data-test="intent-test-run"]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('intentRouter.test.saveFirst')
   })
@@ -233,7 +236,7 @@ describe('IntentRoutersView', () => {
 
     const field = wrapper.get('[data-test="intent-rule-keywords"]')
     expect((field.element as HTMLTextAreaElement).value).toBe('"foo, bar", "say ""hello""", 编译')
-    await wrapper.get('[data-test="intent-model"]').setValue('another-model')
+    await wrapper.get('[data-test="intent-jev-threshold"]').setValue('0.6')
     await wrapper.get('[data-test="intent-save"]').trigger('click')
     await flushPromises()
     expect(api.save.mock.calls[0][1].rules[0].keywords).toEqual(keywords)
@@ -244,7 +247,7 @@ describe('IntentRoutersView', () => {
     api.list.mockResolvedValue({ data: [{ ...savedRouter, rules: [{ ...savedRouter.rules[0], keywords }] }] })
     api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
     const wrapper = await mountView()
-    await wrapper.get('[data-test="intent-model"]').setValue('another-model')
+    await wrapper.get('[data-test="intent-jev-threshold"]').setValue('0.6')
     await wrapper.get('[data-test="intent-save"]').trigger('click')
     await flushPromises()
     expect(api.save.mock.calls[0][1].rules[0].keywords).toEqual(keywords)
@@ -277,37 +280,91 @@ describe('IntentRoutersView', () => {
     expect((wrapper.get('[data-test="intent-jev-enabled"]').element as HTMLInputElement).checked).toBe(false)
     expect((wrapper.get('[data-test="intent-jev-threshold"]').element as HTMLInputElement).value).toBe('0.5')
     expect(wrapper.get('[data-test="intent-jev-api-key"]').attributes('placeholder')).toBe('intentRouter.jev.apiKeyPlaceholder')
-    expect(wrapper.find('[data-test="intent-jev-users"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="intent-jev-user-search"]').exists()).toBe(false)
 
     await wrapper.get('[data-test="intent-save"]').trigger('click')
     await flushPromises()
     const [, input] = api.save.mock.calls[0]
-    expect(input.jev).toEqual({ enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_key_ids: [], sample_percent: 100, low_balance_usd: 1, balance_usd: 0 })
+    expect(input.jev).toEqual({ enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, low_balance_usd: 1, balance_usd: 0 })
     expect(input.jev_api_key).toBe('')
     expect(input).not.toHaveProperty('jev_set_balance_usd') // an empty balance field changes nothing
   })
 
-  it('turns Jev on for listed users and keys, offering the rules as targets', async () => {
+  it('turns Jev on for users picked by search, narrowing one of them to a chosen key', async () => {
+    vi.useFakeTimers()
     api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input, jev_api_key_configured: true } }))
+    admin.searchUsers.mockResolvedValue([{ id: 14, email: 'buyer@qq.com', deleted: false }, { id: 3, email: 'gone@x.com', deleted: true }])
+    // Newest 30 when nothing is typed; older keys only by name.
+    const newest = Array.from({ length: 30 }, (_, i) => ({ id: 100 + i, name: `k${i}`, user_id: 14 }))
+    admin.searchApiKeys.mockImplementation(async (userId: number, q?: string) => (userId !== 14 ? []
+      : q ? [{ id: 22, name: '好蓝', user_id: 14 }] : newest))
     const wrapper = await mountView()
     await wrapper.get('[data-test="intent-jev-enabled"]').setValue(true)
     const rule = wrapper.get('[data-test="intent-jev-rule"]')
     expect(rule.findAll('option').map((o) => o.text())).toEqual(['intentRouter.jev.rulePlaceholder', 'coding'])
+    expect(wrapper.find('[data-test="intent-jev-rule-accounts"]').exists()).toBe(false)
     await rule.setValue('coding')
+    // The chosen rule is only a destination: its accounts are shown right there.
+    expect(wrapper.get('[data-test="intent-jev-rule-accounts"]').text()).toContain('#21 claude-coding')
     await wrapper.get('[data-test="intent-jev-api-key"]').setValue('jev-secret')
     await wrapper.get('[data-test="intent-jev-threshold"]').setValue('0.7')
     await wrapper.get('[data-test="intent-jev-scope-listed"]').setValue(true)
-    await wrapper.get('[data-test="intent-jev-users"]').setValue('14, 14 abc，3')
-    await wrapper.get('[data-test="intent-jev-keys"]').setValue('22 37')
+    expect((wrapper.get('[data-test="intent-jev-key-search"]').element as HTMLInputElement).disabled).toBe(true)
+
+    await wrapper.get('[data-test="intent-jev-user-search"]').setValue('qq')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    expect(admin.searchUsers).toHaveBeenCalledWith('qq')
+    expect(wrapper.find('[data-test="intent-jev-user-option-3"]').exists()).toBe(false) // deleted users are not offered
+    await wrapper.get('[data-test="intent-jev-user-option-14"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="intent-jev-user-14"]').text()).toContain('buyer@qq.com')
+
+    const keySearch = wrapper.get('[data-test="intent-jev-key-search"]')
+    await keySearch.trigger('focus')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    expect(admin.searchApiKeys).toHaveBeenLastCalledWith(14, undefined)
+    const results = wrapper.get('[data-test="intent-jev-key-results"]')
+    expect(results.findAll('[data-test^="intent-jev-key-option-"]')).toHaveLength(30)
+    expect(results.text()).toContain('intentRouter.jev.scopeKeyMore')
+    expect(wrapper.find('[data-test="intent-jev-key-option-22"]').exists()).toBe(false) // older than the newest 30…
+
+    await keySearch.setValue('好蓝') // …so it is found by name
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    expect(admin.searchApiKeys).toHaveBeenLastCalledWith(14, '好蓝')
+    await wrapper.get('[data-test="intent-jev-key-option-22"]').trigger('click')
+    expect(wrapper.get('[data-test="intent-jev-key-22"]').text()).toContain('buyer@qq.com')
+    expect(wrapper.find('[data-test="intent-jev-key-option-22"]').exists()).toBe(false) // chosen keys are not offered again
+
     await wrapper.get('[data-test="intent-save"]').trigger('click')
     await flushPromises()
-
     const [, input] = api.save.mock.calls[0]
     expect(input.jev_api_key).toBe('jev-secret')
-    expect(input.jev).toMatchObject({ enabled: true, rule: 'coding', threshold: 0.7, scope: 'listed', user_ids: [14, 3], api_key_ids: [22, 37] })
-    // After saving, the key field is blank again and says a key is stored.
+    expect(input.jev).toMatchObject({ enabled: true, rule: 'coding', threshold: 0.7, scope: 'listed', user_ids: [14], api_keys: [{ id: 22 }] })
     expect((wrapper.get('[data-test="intent-jev-api-key"]').element as HTMLInputElement).value).toBe('')
     expect(wrapper.get('[data-test="intent-jev-api-key"]').attributes('placeholder')).toBe('intentRouter.classifier.apiKeyKeep')
+    vi.useRealTimers()
+  })
+
+  it('shows saved scope users and keys by name, and drops a removed user\'s keys', async () => {
+    const router = { ...savedRouter, jev_api_key_configured: true,
+      jev: { enabled: true, rule: 'coding', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'listed', user_ids: [14, 8], api_keys: [{ id: 22, user_id: 14 }], sample_percent: 100, low_balance_usd: 1, balance_usd: 0 },
+      jev_scope: { users: [{ id: 14, email: 'buyer@qq.com', username: '' }], api_keys: [{ id: 22, name: '好蓝', user_id: 14 }] } }
+    api.list.mockResolvedValue({ data: [router] })
+    admin.searchApiKeys.mockResolvedValue([])
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...router, ...input } }))
+    const wrapper = await mountView()
+    expect(wrapper.get('[data-test="intent-jev-user-14"]').text()).toContain('buyer@qq.com')
+    expect(wrapper.get('[data-test="intent-jev-user-8"]').text()).toContain('intentRouter.jev.scopeDeleted')
+    expect(wrapper.get('[data-test="intent-jev-key-22"]').text()).toContain('好蓝')
+
+    await wrapper.get('[data-test="intent-jev-user-14"]').get('button').trigger('click')
+    expect(wrapper.find('[data-test="intent-jev-key-22"]').exists()).toBe(false)
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].jev).toMatchObject({ user_ids: [8], api_keys: [] })
   })
 
   it('shows Jev status, daily usage and a low estimated balance', async () => {
@@ -330,7 +387,7 @@ describe('IntentRoutersView', () => {
   })
 
   it('sends a newly entered balance once, and follows a switch-off made by the server', async () => {
-    const enabledRouter = { ...savedRouter, jev_api_key_configured: true, jev: { enabled: true, rule: 'coding', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_key_ids: [], sample_percent: 80, low_balance_usd: 1, balance_usd: 0 } }
+    const enabledRouter = { ...savedRouter, jev_api_key_configured: true, jev: { enabled: true, rule: 'coding', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 80, low_balance_usd: 1, balance_usd: 0 } }
     api.list.mockResolvedValue({ data: [enabledRouter] })
     api.jevStatus.mockResolvedValue({ data: { state: 'auto_disabled', auto_disabled_status: 402, auto_disabled_detail: 'payment required', auto_disabled_at: '2026-10-29T06:00:00Z', days: [], usd_per_mtok: 0.042, cny_per_usd: 7 } })
     api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...enabledRouter, ...input } }))
@@ -350,7 +407,7 @@ describe('IntentRoutersView', () => {
   })
 
   it('ignores a switched-off status that was requested before the admin re-enabled and saved', async () => {
-    const jev = { enabled: false, rule: 'coding', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_key_ids: [], sample_percent: 100, low_balance_usd: 1, balance_usd: 0, auto_disabled_status: 402, auto_disabled_at: '2026-10-29T06:00:00Z' }
+    const jev = { enabled: false, rule: 'coding', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, low_balance_usd: 1, balance_usd: 0, auto_disabled_status: 402, auto_disabled_at: '2026-10-29T06:00:00Z' }
     const router = { ...savedRouter, jev_api_key_configured: true, jev }
     api.list.mockResolvedValue({ data: [router] })
     const stale = deferred<{ data: unknown }>()
@@ -370,6 +427,18 @@ describe('IntentRoutersView', () => {
     await wrapper.get('[data-test="intent-save"]').trigger('click')
     await flushPromises()
     expect(api.save.mock.calls[1][1].jev.enabled).toBe(true)
+  })
+
+  it('edits the models that skip intent routing as one text field', async () => {
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, excluded_models: ['codex-auto-review'] }] })
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+    const field = wrapper.get('[data-test="intent-excluded-models"]')
+    expect((field.element as HTMLTextAreaElement).value).toBe('codex-auto-review')
+    await field.setValue('codex-auto-review\n gemini-* ，, \n')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].excluded_models).toEqual(['codex-auto-review', 'gemini-*'])
   })
 
   it('shows the Jev probability of a try-it result', async () => {
@@ -408,20 +477,20 @@ describe('IntentRoutersView', () => {
     api.save.mockImplementation(() => new Promise((resolve) => { finishSave = resolve }))
     const wrapper = await mountView()
 
-    await wrapper.get('[data-test="intent-model"]').setValue('edited-for-group-1')
+    await wrapper.get('[data-test="intent-jev-threshold"]').setValue('0.8')
     await wrapper.get('[data-test="intent-save"]').trigger('click') // save of group 1 is in flight…
     await wrapper.get('[data-test="intent-group-2"]').trigger('click') // …and the admin moves on to group 2
-    expect((wrapper.get('[data-test="intent-model"]').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('[data-test="intent-jev-threshold"]').element as HTMLInputElement).value).toBe('0.5')
 
-    finishSave({ data: { ...savedRouter, classifier_model: 'edited-for-group-1' } })
+    finishSave({ data: { ...savedRouter, jev: { enabled: false, rule: '', threshold: 0.8, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, low_balance_usd: 1, balance_usd: 0 } } })
     await flushPromises()
 
     // Group 2's blank form is untouched, so saving now cannot write group 1's rules into it.
-    expect((wrapper.get('[data-test="intent-model"]').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('[data-test="intent-jev-threshold"]').element as HTMLInputElement).value).toBe('0.5')
     expect(wrapper.find('[data-test="intent-rule-0"]').exists()).toBe(false)
     // Group 1 did get its result.
     await wrapper.get('[data-test="intent-group-1"]').trigger('click')
-    expect((wrapper.get('[data-test="intent-model"]').element as HTMLInputElement).value).toBe('edited-for-group-1')
+    expect((wrapper.get('[data-test="intent-jev-threshold"]').element as HTMLInputElement).value).toBe('0.8')
   })
 
   it('drops a try-it result that arrives after switching groups', async () => {

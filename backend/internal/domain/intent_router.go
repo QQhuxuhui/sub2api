@@ -33,6 +33,13 @@ const (
 	IntentJevScopeListed = "listed"
 )
 
+// IntentJevAPIKey is an API key Jev is narrowed to. UserID is filled in by
+// the server from the key itself.
+type IntentJevAPIKey struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
 // IntentJevConfig sends keyword misses to TypeSafe Jev, which judges whether a
 // request is a test of the model itself (benchmark puzzle, fingerprinting
 // question, drawing benchmark, connectivity check) rather than real work. A
@@ -50,10 +57,12 @@ type IntentJevConfig struct {
 	MaxTurns  int    `json:"max_turns"`
 	TimeoutMS int    `json:"timeout_ms"`
 	Model     string `json:"model"`
-	// Scope is IntentJevScopeAll or IntentJevScopeListed.
-	Scope     string  `json:"scope"`
-	UserIDs   []int64 `json:"user_ids"`
-	APIKeyIDs []int64 `json:"api_key_ids"`
+	// Scope is IntentJevScopeAll or IntentJevScopeListed. A listed scope
+	// covers the listed users — all their API keys, or only the ones in
+	// APIKeys when any of theirs are listed there.
+	Scope   string            `json:"scope"`
+	UserIDs []int64           `json:"user_ids"`
+	APIKeys []IntentJevAPIKey `json:"api_keys"`
 	// SamplePercent (1-100) of the eligible requests are sent to Jev; the rest
 	// are scheduled as a keyword miss without asking, to cap the cost.
 	SamplePercent int `json:"sample_percent"`

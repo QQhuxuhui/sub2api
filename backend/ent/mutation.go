@@ -29583,6 +29583,8 @@ type IntentRouterMutation struct {
 	addmax_input_chars       *int
 	rules                    *[]domain.IntentRule
 	appendrules              []domain.IntentRule
+	excluded_models          *[]string
+	appendexcluded_models    []string
 	jev_api_key              *string
 	jev                      *domain.IntentJevConfig
 	clearedFields            map[string]struct{}
@@ -30230,6 +30232,71 @@ func (m *IntentRouterMutation) ResetRules() {
 	delete(m.clearedFields, intentrouter.FieldRules)
 }
 
+// SetExcludedModels sets the "excluded_models" field.
+func (m *IntentRouterMutation) SetExcludedModels(s []string) {
+	m.excluded_models = &s
+	m.appendexcluded_models = nil
+}
+
+// ExcludedModels returns the value of the "excluded_models" field in the mutation.
+func (m *IntentRouterMutation) ExcludedModels() (r []string, exists bool) {
+	v := m.excluded_models
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExcludedModels returns the old "excluded_models" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldExcludedModels(ctx context.Context) (v []string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExcludedModels is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExcludedModels requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExcludedModels: %w", err)
+	}
+	return oldValue.ExcludedModels, nil
+}
+
+// AppendExcludedModels adds s to the "excluded_models" field.
+func (m *IntentRouterMutation) AppendExcludedModels(s []string) {
+	m.appendexcluded_models = append(m.appendexcluded_models, s...)
+}
+
+// AppendedExcludedModels returns the list of values that were appended to the "excluded_models" field in this mutation.
+func (m *IntentRouterMutation) AppendedExcludedModels() ([]string, bool) {
+	if len(m.appendexcluded_models) == 0 {
+		return nil, false
+	}
+	return m.appendexcluded_models, true
+}
+
+// ClearExcludedModels clears the value of the "excluded_models" field.
+func (m *IntentRouterMutation) ClearExcludedModels() {
+	m.excluded_models = nil
+	m.appendexcluded_models = nil
+	m.clearedFields[intentrouter.FieldExcludedModels] = struct{}{}
+}
+
+// ExcludedModelsCleared returns if the "excluded_models" field was cleared in this mutation.
+func (m *IntentRouterMutation) ExcludedModelsCleared() bool {
+	_, ok := m.clearedFields[intentrouter.FieldExcludedModels]
+	return ok
+}
+
+// ResetExcludedModels resets all changes to the "excluded_models" field.
+func (m *IntentRouterMutation) ResetExcludedModels() {
+	m.excluded_models = nil
+	m.appendexcluded_models = nil
+	delete(m.clearedFields, intentrouter.FieldExcludedModels)
+}
+
 // SetJevAPIKey sets the "jev_api_key" field.
 func (m *IntentRouterMutation) SetJevAPIKey(s string) {
 	m.jev_api_key = &s
@@ -30349,7 +30416,7 @@ func (m *IntentRouterMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *IntentRouterMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 15)
 	if m.created_at != nil {
 		fields = append(fields, intentrouter.FieldCreatedAt)
 	}
@@ -30385,6 +30452,9 @@ func (m *IntentRouterMutation) Fields() []string {
 	}
 	if m.rules != nil {
 		fields = append(fields, intentrouter.FieldRules)
+	}
+	if m.excluded_models != nil {
+		fields = append(fields, intentrouter.FieldExcludedModels)
 	}
 	if m.jev_api_key != nil {
 		fields = append(fields, intentrouter.FieldJevAPIKey)
@@ -30424,6 +30494,8 @@ func (m *IntentRouterMutation) Field(name string) (ent.Value, bool) {
 		return m.MaxInputChars()
 	case intentrouter.FieldRules:
 		return m.Rules()
+	case intentrouter.FieldExcludedModels:
+		return m.ExcludedModels()
 	case intentrouter.FieldJevAPIKey:
 		return m.JevAPIKey()
 	case intentrouter.FieldJev:
@@ -30461,6 +30533,8 @@ func (m *IntentRouterMutation) OldField(ctx context.Context, name string) (ent.V
 		return m.OldMaxInputChars(ctx)
 	case intentrouter.FieldRules:
 		return m.OldRules(ctx)
+	case intentrouter.FieldExcludedModels:
+		return m.OldExcludedModels(ctx)
 	case intentrouter.FieldJevAPIKey:
 		return m.OldJevAPIKey(ctx)
 	case intentrouter.FieldJev:
@@ -30557,6 +30631,13 @@ func (m *IntentRouterMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRules(v)
+		return nil
+	case intentrouter.FieldExcludedModels:
+		v, ok := value.([]string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExcludedModels(v)
 		return nil
 	case intentrouter.FieldJevAPIKey:
 		v, ok := value.(string)
@@ -30656,6 +30737,9 @@ func (m *IntentRouterMutation) ClearedFields() []string {
 	if m.FieldCleared(intentrouter.FieldRules) {
 		fields = append(fields, intentrouter.FieldRules)
 	}
+	if m.FieldCleared(intentrouter.FieldExcludedModels) {
+		fields = append(fields, intentrouter.FieldExcludedModels)
+	}
 	if m.FieldCleared(intentrouter.FieldJev) {
 		fields = append(fields, intentrouter.FieldJev)
 	}
@@ -30675,6 +30759,9 @@ func (m *IntentRouterMutation) ClearField(name string) error {
 	switch name {
 	case intentrouter.FieldRules:
 		m.ClearRules()
+		return nil
+	case intentrouter.FieldExcludedModels:
+		m.ClearExcludedModels()
 		return nil
 	case intentrouter.FieldJev:
 		m.ClearJev()
@@ -30722,6 +30809,9 @@ func (m *IntentRouterMutation) ResetField(name string) error {
 		return nil
 	case intentrouter.FieldRules:
 		m.ResetRules()
+		return nil
+	case intentrouter.FieldExcludedModels:
+		m.ResetExcludedModels()
 		return nil
 	case intentrouter.FieldJevAPIKey:
 		m.ResetJevAPIKey()

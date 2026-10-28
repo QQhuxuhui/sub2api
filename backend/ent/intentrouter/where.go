@@ -634,6 +634,16 @@ func RulesNotNil() predicate.IntentRouter {
 	return predicate.IntentRouter(sql.FieldNotNull(FieldRules))
 }
 
+// ExcludedModelsIsNil applies the IsNil predicate on the "excluded_models" field.
+func ExcludedModelsIsNil() predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldIsNull(FieldExcludedModels))
+}
+
+// ExcludedModelsNotNil applies the NotNil predicate on the "excluded_models" field.
+func ExcludedModelsNotNil() predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldNotNull(FieldExcludedModels))
+}
+
 // JevAPIKeyEQ applies the EQ predicate on the "jev_api_key" field.
 func JevAPIKeyEQ(v string) predicate.IntentRouter {
 	return predicate.IntentRouter(sql.FieldEQ(FieldJevAPIKey, v))

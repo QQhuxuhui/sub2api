@@ -167,7 +167,9 @@ type intentJevConfig struct {
 	SamplePercent int
 	AllUsers      bool
 	UserIDs       map[int64]struct{}
-	APIKeyIDs     map[int64]struct{}
+	// UserKeys narrows a listed user to some of their keys; a user without
+	// an entry is covered with all of them.
+	UserKeys map[int64]map[int64]struct{}
 }
 
 func newIntentJevConfig(apiKey string, in domain.IntentJevConfig) intentJevConfig {
@@ -184,13 +186,16 @@ func newIntentJevConfig(apiKey string, in domain.IntentJevConfig) intentJevConfi
 		SamplePercent: in.SamplePercent,
 		AllUsers:      in.Scope != domain.IntentJevScopeListed,
 		UserIDs:       make(map[int64]struct{}, len(in.UserIDs)),
-		APIKeyIDs:     make(map[int64]struct{}, len(in.APIKeyIDs)),
+		UserKeys:      make(map[int64]map[int64]struct{}),
 	}
 	for _, id := range in.UserIDs {
 		cfg.UserIDs[id] = struct{}{}
 	}
-	for _, id := range in.APIKeyIDs {
-		cfg.APIKeyIDs[id] = struct{}{}
+	for _, key := range in.APIKeys {
+		if cfg.UserKeys[key.UserID] == nil {
+			cfg.UserKeys[key.UserID] = make(map[int64]struct{})
+		}
+		cfg.UserKeys[key.UserID][key.ID] = struct{}{}
 	}
 	return cfg
 }
@@ -223,8 +228,8 @@ func intentJevWithDefaults(jev domain.IntentJevConfig) domain.IntentJevConfig {
 	if jev.UserIDs == nil {
 		jev.UserIDs = []int64{}
 	}
-	if jev.APIKeyIDs == nil {
-		jev.APIKeyIDs = []int64{}
+	if jev.APIKeys == nil {
+		jev.APIKeys = []domain.IntentJevAPIKey{}
 	}
 	return jev
 }
@@ -234,11 +239,15 @@ func (j *intentJevConfig) covers(userID, apiKeyID int64) bool {
 	if j.AllUsers {
 		return true
 	}
-	if _, ok := j.UserIDs[userID]; ok && userID > 0 {
+	if _, ok := j.UserIDs[userID]; !ok || userID <= 0 {
+		return false
+	}
+	keys := j.UserKeys[userID]
+	if len(keys) == 0 {
 		return true
 	}
-	_, ok := j.APIKeyIDs[apiKeyID]
-	return ok && apiKeyID > 0
+	_, ok := keys[apiKeyID]
+	return ok
 }
 
 // jevRule is the active rule probes are routed to, if Jev is usable at all.

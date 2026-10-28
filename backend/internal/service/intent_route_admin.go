@@ -10,7 +10,9 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/account"
+	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/intentrouter"
+	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -29,24 +31,65 @@ const (
 	intentJevMaxTimeoutMS         = 5000
 	intentJevMaxTurnsLimit        = 50
 	intentJevMaxScopeIDs          = 500
+	intentRouteMaxExcludedModels  = 200
 )
+
+func excludedModelsOrEmpty(models []string) []string {
+	if models == nil {
+		return []string{}
+	}
+	return models
+}
+
+// normalizeIntentExcludedModels trims the excluded models and drops empty
+// ones and case-insensitive duplicates, keeping the configured order.
+func normalizeIntentExcludedModels(models []string) ([]string, error) {
+	if len(models) > intentRouteMaxExcludedModels {
+		return nil, infraerrors.BadRequest("INTENT_TOO_MANY_EXCLUDED_MODELS", fmt.Sprintf("at most %d excluded models", intentRouteMaxExcludedModels))
+	}
+	seen := make(map[string]struct{}, len(models))
+	out := make([]string, 0, len(models))
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if strings.TrimSuffix(model, "*") == "" {
+			return nil, infraerrors.BadRequest("INTENT_EXCLUDED_MODEL_ALL", "\"*\" would exclude every model; switch the router off instead")
+		}
+		if len([]rune(model)) > 128 {
+			return nil, infraerrors.BadRequest("INTENT_EXCLUDED_MODEL_TOO_LONG", "excluded model names are limited to 128 characters")
+		}
+		key := strings.ToLower(model)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, model)
+	}
+	return out, nil
+}
 
 // IntentRouterView is a router as the admin UI sees it. The classifier API key
 // never leaves the server; the UI only learns whether one is stored.
 type IntentRouterView struct {
-	GroupID                    int64                  `json:"group_id"`
-	Enabled                    bool                   `json:"enabled"`
-	ClassifierBaseURL          string                 `json:"classifier_base_url"`
-	ClassifierAPIKeyConfigured bool                   `json:"classifier_api_key_configured"`
-	ClassifierProtocol         string                 `json:"classifier_protocol"`
-	ClassifierModel            string                 `json:"classifier_model"`
-	ClassifierTimeoutMS        int                    `json:"classifier_timeout_ms"`
-	CacheTTLSeconds            int                    `json:"cache_ttl_seconds"`
-	MaxInputChars              int                    `json:"max_input_chars"`
-	Rules                      []domain.IntentRule    `json:"rules"`
-	JevAPIKeyConfigured        bool                   `json:"jev_api_key_configured"`
-	Jev                        domain.IntentJevConfig `json:"jev"`
-	UpdatedAt                  time.Time              `json:"updated_at"`
+	GroupID                    int64               `json:"group_id"`
+	Enabled                    bool                `json:"enabled"`
+	ClassifierBaseURL          string              `json:"classifier_base_url"`
+	ClassifierAPIKeyConfigured bool                `json:"classifier_api_key_configured"`
+	ClassifierProtocol         string              `json:"classifier_protocol"`
+	ClassifierModel            string              `json:"classifier_model"`
+	ClassifierTimeoutMS        int                 `json:"classifier_timeout_ms"`
+	CacheTTLSeconds            int                 `json:"cache_ttl_seconds"`
+	MaxInputChars              int                 `json:"max_input_chars"`
+	Rules                      []domain.IntentRule `json:"rules"`
+	// ExcludedModels skip intent routing entirely; a trailing * matches a prefix.
+	ExcludedModels      []string `json:"excluded_models"`
+	JevAPIKeyConfigured bool     `json:"jev_api_key_configured"`
+	// JevScope names the users and keys Jev is scoped to, for display.
+	JevScope  IntentJevScopeLabels   `json:"jev_scope"`
+	Jev       domain.IntentJevConfig `json:"jev"`
+	UpdatedAt time.Time              `json:"updated_at"`
 }
 
 // IntentRouterInput is a full router document. An empty ClassifierAPIKey keeps
@@ -61,6 +104,7 @@ type IntentRouterInput struct {
 	CacheTTLSeconds     int                 `json:"cache_ttl_seconds"`
 	MaxInputChars       int                 `json:"max_input_chars"`
 	Rules               []domain.IntentRule `json:"rules"`
+	ExcludedModels      []string            `json:"excluded_models"`
 	// JevAPIKey, like ClassifierAPIKey, keeps the stored key when empty.
 	JevAPIKey string                 `json:"jev_api_key"`
 	Jev       domain.IntentJevConfig `json:"jev"`
@@ -101,10 +145,113 @@ func intentRouterViewFromEnt(row *dbent.IntentRouter) *IntentRouterView {
 		CacheTTLSeconds:            row.CacheTTLSeconds,
 		MaxInputChars:              row.MaxInputChars,
 		Rules:                      rules,
+		ExcludedModels:             excludedModelsOrEmpty(row.ExcludedModels),
 		JevAPIKeyConfigured:        strings.TrimSpace(row.JevAPIKey) != "",
 		Jev:                        intentJevWithDefaults(row.Jev),
 		UpdatedAt:                  row.UpdatedAt,
 	}
+}
+
+// IntentJevScopeLabels names the users and API keys of a Jev scope; IDs no
+// longer found (deleted) are left out, so the page can flag them.
+type IntentJevScopeLabels struct {
+	Users   []IntentJevUserLabel   `json:"users"`
+	APIKeys []IntentJevAPIKeyLabel `json:"api_keys"`
+}
+
+type IntentJevUserLabel struct {
+	ID       int64  `json:"id"`
+	Email    string `json:"email"`
+	Username string `json:"username"`
+}
+
+type IntentJevAPIKeyLabel struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	UserID int64  `json:"user_id"`
+}
+
+// resolveIntentJevKeys fills in the owner of every listed API key and checks
+// that each key exists and belongs to a listed user.
+func (s *IntentRouterService) resolveIntentJevKeys(ctx context.Context, jev *domain.IntentJevConfig) error {
+	if len(jev.APIKeys) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(jev.APIKeys))
+	for _, key := range jev.APIKeys {
+		ids = append(ids, key.ID)
+	}
+	rows, err := s.entClient.APIKey.Query().Where(apikey.IDIn(ids...)).All(ctx)
+	if err != nil {
+		return fmt.Errorf("load jev api keys: %w", err)
+	}
+	owners := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		owners[row.ID] = row.UserID
+	}
+	listed := make(map[int64]struct{}, len(jev.UserIDs))
+	for _, id := range jev.UserIDs {
+		listed[id] = struct{}{}
+	}
+	for i := range jev.APIKeys {
+		owner, ok := owners[jev.APIKeys[i].ID]
+		if !ok {
+			return infraerrors.BadRequest("INTENT_JEV_API_KEY_NOT_FOUND", fmt.Sprintf("API key %d does not exist", jev.APIKeys[i].ID)).
+				WithMetadata(map[string]string{"api_key_id": fmt.Sprint(jev.APIKeys[i].ID)})
+		}
+		if _, ok := listed[owner]; !ok {
+			return infraerrors.BadRequest("INTENT_JEV_API_KEY_USER_NOT_LISTED", fmt.Sprintf("API key %d belongs to user %d, who is not chosen", jev.APIKeys[i].ID, owner)).
+				WithMetadata(map[string]string{"api_key_id": fmt.Sprint(jev.APIKeys[i].ID), "user_id": fmt.Sprint(owner)})
+		}
+		jev.APIKeys[i].UserID = owner
+	}
+	return nil
+}
+
+// withJevScopeLabels names the users and keys of the views' Jev scopes, with
+// one query for each kind across all views.
+func (s *IntentRouterService) withJevScopeLabels(ctx context.Context, views ...*IntentRouterView) error {
+	var userIDs, keyIDs []int64
+	for _, v := range views {
+		userIDs = append(userIDs, v.Jev.UserIDs...)
+		for _, key := range v.Jev.APIKeys {
+			keyIDs = append(keyIDs, key.ID)
+		}
+	}
+	users := map[int64]IntentJevUserLabel{}
+	keys := map[int64]IntentJevAPIKeyLabel{}
+	if len(userIDs) > 0 {
+		rows, err := s.entClient.User.Query().Where(user.IDIn(userIDs...)).All(ctx)
+		if err != nil {
+			return fmt.Errorf("load jev users: %w", err)
+		}
+		for _, row := range rows {
+			users[row.ID] = IntentJevUserLabel{ID: row.ID, Email: row.Email, Username: row.Username}
+		}
+	}
+	if len(keyIDs) > 0 {
+		rows, err := s.entClient.APIKey.Query().Where(apikey.IDIn(keyIDs...)).All(ctx)
+		if err != nil {
+			return fmt.Errorf("load jev api keys: %w", err)
+		}
+		for _, row := range rows {
+			keys[row.ID] = IntentJevAPIKeyLabel{ID: row.ID, Name: row.Name, UserID: row.UserID}
+		}
+	}
+	for _, v := range views {
+		v.JevScope = IntentJevScopeLabels{Users: []IntentJevUserLabel{}, APIKeys: []IntentJevAPIKeyLabel{}}
+		for _, id := range v.Jev.UserIDs {
+			if label, ok := users[id]; ok {
+				v.JevScope.Users = append(v.JevScope.Users, label)
+			}
+		}
+		for _, key := range v.Jev.APIKeys {
+			if label, ok := keys[key.ID]; ok {
+				v.JevScope.APIKeys = append(v.JevScope.APIKeys, label)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *IntentRouterService) ListRouters(ctx context.Context) ([]*IntentRouterView, error) {
@@ -115,6 +262,9 @@ func (s *IntentRouterService) ListRouters(ctx context.Context) ([]*IntentRouterV
 	views := make([]*IntentRouterView, 0, len(rows))
 	for _, row := range rows {
 		views = append(views, intentRouterViewFromEnt(row))
+	}
+	if err := s.withJevScopeLabels(ctx, views...); err != nil {
+		return nil, err
 	}
 	return views, nil
 }
@@ -127,7 +277,11 @@ func (s *IntentRouterService) GetRouter(ctx context.Context, groupID int64) (*In
 	if err != nil {
 		return nil, fmt.Errorf("get intent router: %w", err)
 	}
-	return intentRouterViewFromEnt(row), nil
+	view := intentRouterViewFromEnt(row)
+	if err := s.withJevScopeLabels(ctx, view); err != nil {
+		return nil, err
+	}
+	return view, nil
 }
 
 // SaveRouter creates or replaces the router of a group.
@@ -155,7 +309,7 @@ func (s *IntentRouterService) SaveRouter(ctx context.Context, groupID int64, in 
 			SetClassifierProtocol(in.ClassifierProtocol).SetClassifierModel(in.ClassifierModel).
 			SetClassifierTimeoutMs(in.ClassifierTimeoutMS).SetCacheTTLSeconds(in.CacheTTLSeconds).
 			SetMaxInputChars(in.MaxInputChars).SetRules(in.Rules).
-			SetJevAPIKey(in.JevAPIKey).SetJev(in.Jev).Save(ctx)
+			SetJevAPIKey(in.JevAPIKey).SetJev(in.Jev).SetExcludedModels(in.ExcludedModels).Save(ctx)
 	} else {
 		saved, err = s.entClient.IntentRouter.UpdateOneID(existing.ID).
 			SetEnabled(in.Enabled).
@@ -163,7 +317,7 @@ func (s *IntentRouterService) SaveRouter(ctx context.Context, groupID int64, in 
 			SetClassifierProtocol(in.ClassifierProtocol).SetClassifierModel(in.ClassifierModel).
 			SetClassifierTimeoutMs(in.ClassifierTimeoutMS).SetCacheTTLSeconds(in.CacheTTLSeconds).
 			SetMaxInputChars(in.MaxInputChars).SetRules(in.Rules).
-			SetJevAPIKey(in.JevAPIKey).SetJev(in.Jev).Save(ctx)
+			SetJevAPIKey(in.JevAPIKey).SetJev(in.Jev).SetExcludedModels(in.ExcludedModels).Save(ctx)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("save intent router: %w", err)
@@ -176,7 +330,11 @@ func (s *IntentRouterService) SaveRouter(ctx context.Context, groupID int64, in 
 		}
 	}
 	s.InvalidateConfig(ctx)
-	return intentRouterViewFromEnt(saved), nil
+	view := intentRouterViewFromEnt(saved)
+	if err := s.withJevScopeLabels(ctx, view); err != nil {
+		return nil, err
+	}
+	return view, nil
 }
 
 func (s *IntentRouterService) DeleteRouter(ctx context.Context, groupID int64) error {
@@ -231,6 +389,11 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 		return bad("INTENT_INVALID_MAX_INPUT", fmt.Sprintf("max input chars must be %d-%d", intentRouteMinInputChars, intentRouteMaxInputChars))
 	}
 	classifierReady := in.ClassifierModel != "" && in.ClassifierAPIKey != ""
+	excluded, err := normalizeIntentExcludedModels(in.ExcludedModels)
+	if err != nil {
+		return err
+	}
+	in.ExcludedModels = excluded
 	in.JevAPIKey = strings.TrimSpace(in.JevAPIKey)
 	if in.JevAPIKey == "" && existing != nil {
 		in.JevAPIKey = existing.JevAPIKey
@@ -240,6 +403,9 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 		stored = existing.Jev
 	}
 	if err := normalizeIntentJev(&in.Jev, stored, in.JevSetBalanceUSD, in.JevAPIKey, in.Rules, s.now()); err != nil {
+		return err
+	}
+	if err := s.resolveIntentJevKeys(ctx, &in.Jev); err != nil {
 		return err
 	}
 	// The rule Jev routes probes to may have no matcher of its own — also
@@ -372,9 +538,19 @@ func normalizeIntentJev(jev *domain.IntentJevConfig, stored domain.IntentJevConf
 	if jev.UserIDs, err = normalizeIntentJevIDs(jev.UserIDs); err != nil {
 		return err
 	}
-	if jev.APIKeyIDs, err = normalizeIntentJevIDs(jev.APIKeyIDs); err != nil {
-		return err
+	seenKeys := make(map[int64]struct{}, len(jev.APIKeys))
+	keys := make([]domain.IntentJevAPIKey, 0, len(jev.APIKeys))
+	for _, key := range jev.APIKeys {
+		if _, dup := seenKeys[key.ID]; dup || key.ID <= 0 {
+			continue
+		}
+		seenKeys[key.ID] = struct{}{}
+		keys = append(keys, domain.IntentJevAPIKey{ID: key.ID})
 	}
+	if len(keys) > intentJevMaxScopeIDs {
+		return bad("INTENT_JEV_SCOPE_TOO_LARGE", fmt.Sprintf("at most %d API keys", intentJevMaxScopeIDs))
+	}
+	jev.APIKeys = keys
 	if !jev.Enabled {
 		return nil
 	}
@@ -391,8 +567,8 @@ func normalizeIntentJev(jev *domain.IntentJevConfig, stored domain.IntentJevConf
 	if !found {
 		return bad("INTENT_JEV_RULE_REQUIRED", "choose the rule whose accounts serve requests Jev judges to be probes")
 	}
-	if jev.Scope == domain.IntentJevScopeListed && len(jev.UserIDs) == 0 && len(jev.APIKeyIDs) == 0 {
-		return bad("INTENT_JEV_SCOPE_EMPTY", "list at least one user or API key, or apply Jev to everyone")
+	if jev.Scope == domain.IntentJevScopeListed && len(jev.UserIDs) == 0 {
+		return bad("INTENT_JEV_SCOPE_EMPTY", "choose at least one user, or apply Jev to everyone")
 	}
 	return nil
 }

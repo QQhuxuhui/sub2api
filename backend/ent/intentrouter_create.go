@@ -175,6 +175,12 @@ func (_c *IntentRouterCreate) SetRules(v []domain.IntentRule) *IntentRouterCreat
 	return _c
 }
 
+// SetExcludedModels sets the "excluded_models" field.
+func (_c *IntentRouterCreate) SetExcludedModels(v []string) *IntentRouterCreate {
+	_c.mutation.SetExcludedModels(v)
+	return _c
+}
+
 // SetJevAPIKey sets the "jev_api_key" field.
 func (_c *IntentRouterCreate) SetJevAPIKey(v string) *IntentRouterCreate {
 	_c.mutation.SetJevAPIKey(v)
@@ -422,6 +428,10 @@ func (_c *IntentRouterCreate) createSpec() (*IntentRouter, *sqlgraph.CreateSpec)
 		_spec.SetField(intentrouter.FieldRules, field.TypeJSON, value)
 		_node.Rules = value
 	}
+	if value, ok := _c.mutation.ExcludedModels(); ok {
+		_spec.SetField(intentrouter.FieldExcludedModels, field.TypeJSON, value)
+		_node.ExcludedModels = value
+	}
 	if value, ok := _c.mutation.JevAPIKey(); ok {
 		_spec.SetField(intentrouter.FieldJevAPIKey, field.TypeString, value)
 		_node.JevAPIKey = value
@@ -641,6 +651,24 @@ func (u *IntentRouterUpsert) UpdateRules() *IntentRouterUpsert {
 // ClearRules clears the value of the "rules" field.
 func (u *IntentRouterUpsert) ClearRules() *IntentRouterUpsert {
 	u.SetNull(intentrouter.FieldRules)
+	return u
+}
+
+// SetExcludedModels sets the "excluded_models" field.
+func (u *IntentRouterUpsert) SetExcludedModels(v []string) *IntentRouterUpsert {
+	u.Set(intentrouter.FieldExcludedModels, v)
+	return u
+}
+
+// UpdateExcludedModels sets the "excluded_models" field to the value that was provided on create.
+func (u *IntentRouterUpsert) UpdateExcludedModels() *IntentRouterUpsert {
+	u.SetExcluded(intentrouter.FieldExcludedModels)
+	return u
+}
+
+// ClearExcludedModels clears the value of the "excluded_models" field.
+func (u *IntentRouterUpsert) ClearExcludedModels() *IntentRouterUpsert {
+	u.SetNull(intentrouter.FieldExcludedModels)
 	return u
 }
 
@@ -905,6 +933,27 @@ func (u *IntentRouterUpsertOne) UpdateRules() *IntentRouterUpsertOne {
 func (u *IntentRouterUpsertOne) ClearRules() *IntentRouterUpsertOne {
 	return u.Update(func(s *IntentRouterUpsert) {
 		s.ClearRules()
+	})
+}
+
+// SetExcludedModels sets the "excluded_models" field.
+func (u *IntentRouterUpsertOne) SetExcludedModels(v []string) *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.SetExcludedModels(v)
+	})
+}
+
+// UpdateExcludedModels sets the "excluded_models" field to the value that was provided on create.
+func (u *IntentRouterUpsertOne) UpdateExcludedModels() *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.UpdateExcludedModels()
+	})
+}
+
+// ClearExcludedModels clears the value of the "excluded_models" field.
+func (u *IntentRouterUpsertOne) ClearExcludedModels() *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.ClearExcludedModels()
 	})
 }
 
@@ -1340,6 +1389,27 @@ func (u *IntentRouterUpsertBulk) UpdateRules() *IntentRouterUpsertBulk {
 func (u *IntentRouterUpsertBulk) ClearRules() *IntentRouterUpsertBulk {
 	return u.Update(func(s *IntentRouterUpsert) {
 		s.ClearRules()
+	})
+}
+
+// SetExcludedModels sets the "excluded_models" field.
+func (u *IntentRouterUpsertBulk) SetExcludedModels(v []string) *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.SetExcludedModels(v)
+	})
+}
+
+// UpdateExcludedModels sets the "excluded_models" field to the value that was provided on create.
+func (u *IntentRouterUpsertBulk) UpdateExcludedModels() *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.UpdateExcludedModels()
+	})
+}
+
+// ClearExcludedModels clears the value of the "excluded_models" field.
+func (u *IntentRouterUpsertBulk) ClearExcludedModels() *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.ClearExcludedModels()
 	})
 }
 

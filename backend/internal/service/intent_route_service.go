@@ -54,6 +54,40 @@ type intentRouterConfig struct {
 	MaxInputChars      int
 	Rules              []domain.IntentRule
 	Jev                intentJevConfig
+	// ExcludedModels (lower-cased; a trailing * matches a prefix) skip
+	// intent routing entirely.
+	ExcludedModels []string
+}
+
+// excludesModel reports whether requests for model skip intent routing.
+func (c *intentRouterConfig) excludesModel(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if c == nil || model == "" {
+		return false
+	}
+	for _, pattern := range c.ExcludedModels {
+		if prefix, wildcard := strings.CutSuffix(pattern, "*"); wildcard {
+			if strings.HasPrefix(model, prefix) {
+				return true
+			}
+		} else if model == pattern {
+			return true
+		}
+	}
+	return false
+}
+
+// intentRequestModel is the model the client asked for: the body's "model",
+// or for Gemini the path segment after /models/.
+func intentRequestModel(in IntentRouteInput) string {
+	if model := gjson.GetBytes(in.Body, "model").String(); model != "" {
+		return model
+	}
+	if _, rest, ok := strings.Cut(in.Endpoint, "/models/"); ok {
+		model, _, _ := strings.Cut(rest, ":")
+		return model
+	}
+	return ""
 }
 
 // activeRules are the rules a request can actually be routed by.
@@ -337,6 +371,11 @@ func (s *IntentRouterService) Decide(ctx context.Context, in IntentRouteInput) *
 	cfg := s.config(ctx, in.GroupID)
 	if !cfg.usable() {
 		return nil
+	}
+	// Excluded models are scheduled as if the group had no router — except
+	// that the scope still travels, so earlier routed turns can continue.
+	if cfg.excludesModel(intentRequestModel(in)) {
+		return &IntentRouteDecision{GroupID: cfg.GroupID, ScopeAccountIDs: cfg.scopeAccountIDs()}
 	}
 	decision := s.classify(ctx, cfg, in)
 	if decision == nil {
@@ -674,6 +713,11 @@ func intentRouterConfigFromEnt(row *dbent.IntentRouter) *intentRouterConfig {
 		MaxInputChars:      row.MaxInputChars,
 		Rules:              row.Rules,
 		Jev:                newIntentJevConfig(row.JevAPIKey, row.Jev),
+	}
+	for _, model := range row.ExcludedModels {
+		if model = strings.ToLower(strings.TrimSpace(model)); model != "" {
+			cfg.ExcludedModels = append(cfg.ExcludedModels, model)
+		}
 	}
 	if cfg.ClassifierTimeout <= 0 {
 		cfg.ClassifierTimeout = 3 * time.Second

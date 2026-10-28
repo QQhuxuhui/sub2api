@@ -208,6 +208,24 @@ func (_u *IntentRouterUpdate) ClearRules() *IntentRouterUpdate {
 	return _u
 }
 
+// SetExcludedModels sets the "excluded_models" field.
+func (_u *IntentRouterUpdate) SetExcludedModels(v []string) *IntentRouterUpdate {
+	_u.mutation.SetExcludedModels(v)
+	return _u
+}
+
+// AppendExcludedModels appends value to the "excluded_models" field.
+func (_u *IntentRouterUpdate) AppendExcludedModels(v []string) *IntentRouterUpdate {
+	_u.mutation.AppendExcludedModels(v)
+	return _u
+}
+
+// ClearExcludedModels clears the value of the "excluded_models" field.
+func (_u *IntentRouterUpdate) ClearExcludedModels() *IntentRouterUpdate {
+	_u.mutation.ClearExcludedModels()
+	return _u
+}
+
 // SetJevAPIKey sets the "jev_api_key" field.
 func (_u *IntentRouterUpdate) SetJevAPIKey(v string) *IntentRouterUpdate {
 	_u.mutation.SetJevAPIKey(v)
@@ -377,6 +395,17 @@ func (_u *IntentRouterUpdate) sqlSave(ctx context.Context) (_node int, err error
 	}
 	if _u.mutation.RulesCleared() {
 		_spec.ClearField(intentrouter.FieldRules, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.ExcludedModels(); ok {
+		_spec.SetField(intentrouter.FieldExcludedModels, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedExcludedModels(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, intentrouter.FieldExcludedModels, value)
+		})
+	}
+	if _u.mutation.ExcludedModelsCleared() {
+		_spec.ClearField(intentrouter.FieldExcludedModels, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.JevAPIKey(); ok {
 		_spec.SetField(intentrouter.FieldJevAPIKey, field.TypeString, value)
@@ -585,6 +614,24 @@ func (_u *IntentRouterUpdateOne) ClearRules() *IntentRouterUpdateOne {
 	return _u
 }
 
+// SetExcludedModels sets the "excluded_models" field.
+func (_u *IntentRouterUpdateOne) SetExcludedModels(v []string) *IntentRouterUpdateOne {
+	_u.mutation.SetExcludedModels(v)
+	return _u
+}
+
+// AppendExcludedModels appends value to the "excluded_models" field.
+func (_u *IntentRouterUpdateOne) AppendExcludedModels(v []string) *IntentRouterUpdateOne {
+	_u.mutation.AppendExcludedModels(v)
+	return _u
+}
+
+// ClearExcludedModels clears the value of the "excluded_models" field.
+func (_u *IntentRouterUpdateOne) ClearExcludedModels() *IntentRouterUpdateOne {
+	_u.mutation.ClearExcludedModels()
+	return _u
+}
+
 // SetJevAPIKey sets the "jev_api_key" field.
 func (_u *IntentRouterUpdateOne) SetJevAPIKey(v string) *IntentRouterUpdateOne {
 	_u.mutation.SetJevAPIKey(v)
@@ -784,6 +831,17 @@ func (_u *IntentRouterUpdateOne) sqlSave(ctx context.Context) (_node *IntentRout
 	}
 	if _u.mutation.RulesCleared() {
 		_spec.ClearField(intentrouter.FieldRules, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.ExcludedModels(); ok {
+		_spec.SetField(intentrouter.FieldExcludedModels, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedExcludedModels(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, intentrouter.FieldExcludedModels, value)
+		})
+	}
+	if _u.mutation.ExcludedModelsCleared() {
+		_spec.ClearField(intentrouter.FieldExcludedModels, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.JevAPIKey(); ok {
 		_spec.SetField(intentrouter.FieldJevAPIKey, field.TypeString, value)

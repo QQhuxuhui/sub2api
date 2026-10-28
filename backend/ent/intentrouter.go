@@ -43,6 +43,8 @@ type IntentRouter struct {
 	MaxInputChars int `json:"max_input_chars,omitempty"`
 	// Rules holds the value of the "rules" field.
 	Rules []domain.IntentRule `json:"rules,omitempty"`
+	// ExcludedModels holds the value of the "excluded_models" field.
+	ExcludedModels []string `json:"excluded_models,omitempty"`
 	// JevAPIKey holds the value of the "jev_api_key" field.
 	JevAPIKey string `json:"-"`
 	// Jev holds the value of the "jev" field.
@@ -55,7 +57,7 @@ func (*IntentRouter) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case intentrouter.FieldRules, intentrouter.FieldJev:
+		case intentrouter.FieldRules, intentrouter.FieldExcludedModels, intentrouter.FieldJev:
 			values[i] = new([]byte)
 		case intentrouter.FieldEnabled:
 			values[i] = new(sql.NullBool)
@@ -160,6 +162,14 @@ func (_m *IntentRouter) assignValues(columns []string, values []any) error {
 					return fmt.Errorf("unmarshal field rules: %w", err)
 				}
 			}
+		case intentrouter.FieldExcludedModels:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field excluded_models", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.ExcludedModels); err != nil {
+					return fmt.Errorf("unmarshal field excluded_models: %w", err)
+				}
+			}
 		case intentrouter.FieldJevAPIKey:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field jev_api_key", values[i])
@@ -244,6 +254,9 @@ func (_m *IntentRouter) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("rules=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Rules))
+	builder.WriteString(", ")
+	builder.WriteString("excluded_models=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ExcludedModels))
 	builder.WriteString(", ")
 	builder.WriteString("jev_api_key=<sensitive>")
 	builder.WriteString(", ")

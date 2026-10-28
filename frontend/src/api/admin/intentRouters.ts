@@ -22,10 +22,11 @@ export interface IntentJevConfig {
   max_turns: number
   timeout_ms: number
   model: string
-  /** all: every request of the group; listed: only the listed users and API keys. */
+  /** all: every request of the group; listed: only the listed users. */
   scope: 'all' | 'listed'
   user_ids: number[]
-  api_key_ids: number[]
+  /** Narrows a listed user to some of their keys; a user with none listed is covered with all keys. user_id is filled by the server. */
+  api_keys: { id: number; user_id?: number }[]
   /** 1-100: share of eligible requests actually sent to Jev. */
   sample_percent: number
   /** Estimated balance below this is flagged; never switches Jev off. */
@@ -84,9 +85,13 @@ export interface IntentRouter {
   cache_ttl_seconds: number
   max_input_chars: number
   rules: IntentRule[]
+  /** Requests for these models skip intent routing entirely; a trailing * matches a prefix. */
+  excluded_models: string[]
   /** Write-only like the classifier key. */
   jev_api_key_configured: boolean
   jev: IntentJevConfig
+  /** Names of the users and keys in jev; deleted ones are missing. */
+  jev_scope?: { users: { id: number; email: string; username: string }[]; api_keys: { id: number; name: string; user_id: number }[] }
   updated_at: string
 }
 
@@ -101,6 +106,7 @@ export interface IntentRouterInput {
   cache_ttl_seconds: number
   max_input_chars: number
   rules: IntentRule[]
+  excluded_models: string[]
   /** Leave empty to keep the stored key. */
   jev_api_key: string
   jev: IntentJevConfig

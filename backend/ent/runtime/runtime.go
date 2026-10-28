@@ -1343,7 +1343,7 @@ func init() {
 	// intentrouter.DefaultMaxInputChars holds the default value on creation for the max_input_chars field.
 	intentrouter.DefaultMaxInputChars = intentrouterDescMaxInputChars.Default.(int)
 	// intentrouterDescJevAPIKey is the schema descriptor for jev_api_key field.
-	intentrouterDescJevAPIKey := intentrouterFields[10].Descriptor()
+	intentrouterDescJevAPIKey := intentrouterFields[11].Descriptor()
 	// intentrouter.DefaultJevAPIKey holds the default value on creation for the jev_api_key field.
 	intentrouter.DefaultJevAPIKey = intentrouterDescJevAPIKey.Default.(string)
 	// intentrouter.JevAPIKeyValidator is a validator for the "jev_api_key" field. It is called by the builders before save.
