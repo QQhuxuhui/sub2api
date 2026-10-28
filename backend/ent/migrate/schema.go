@@ -1112,6 +1112,8 @@ var (
 		{Name: "cache_ttl_seconds", Type: field.TypeInt, Default: 7200},
 		{Name: "max_input_chars", Type: field.TypeInt, Default: 2000},
 		{Name: "rules", Type: field.TypeJSON, Nullable: true, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "jev_api_key", Type: field.TypeString, Size: 512, Default: ""},
+		{Name: "jev", Type: field.TypeJSON, Nullable: true, SchemaType: map[string]string{"postgres": "jsonb"}},
 	}
 	// IntentRoutersTable holds the schema information for the "intent_routers" table.
 	IntentRoutersTable = &schema.Table{

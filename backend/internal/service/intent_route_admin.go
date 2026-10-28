@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -24,22 +25,28 @@ const (
 	intentRouteMinInputChars      = 100
 	intentRouteMaxInputChars      = 20000
 	intentRouteMaxKeywordsPerRule = 100
+	intentJevMinTimeoutMS         = 200
+	intentJevMaxTimeoutMS         = 5000
+	intentJevMaxTurnsLimit        = 50
+	intentJevMaxScopeIDs          = 500
 )
 
 // IntentRouterView is a router as the admin UI sees it. The classifier API key
 // never leaves the server; the UI only learns whether one is stored.
 type IntentRouterView struct {
-	GroupID                    int64               `json:"group_id"`
-	Enabled                    bool                `json:"enabled"`
-	ClassifierBaseURL          string              `json:"classifier_base_url"`
-	ClassifierAPIKeyConfigured bool                `json:"classifier_api_key_configured"`
-	ClassifierProtocol         string              `json:"classifier_protocol"`
-	ClassifierModel            string              `json:"classifier_model"`
-	ClassifierTimeoutMS        int                 `json:"classifier_timeout_ms"`
-	CacheTTLSeconds            int                 `json:"cache_ttl_seconds"`
-	MaxInputChars              int                 `json:"max_input_chars"`
-	Rules                      []domain.IntentRule `json:"rules"`
-	UpdatedAt                  time.Time           `json:"updated_at"`
+	GroupID                    int64                  `json:"group_id"`
+	Enabled                    bool                   `json:"enabled"`
+	ClassifierBaseURL          string                 `json:"classifier_base_url"`
+	ClassifierAPIKeyConfigured bool                   `json:"classifier_api_key_configured"`
+	ClassifierProtocol         string                 `json:"classifier_protocol"`
+	ClassifierModel            string                 `json:"classifier_model"`
+	ClassifierTimeoutMS        int                    `json:"classifier_timeout_ms"`
+	CacheTTLSeconds            int                    `json:"cache_ttl_seconds"`
+	MaxInputChars              int                    `json:"max_input_chars"`
+	Rules                      []domain.IntentRule    `json:"rules"`
+	JevAPIKeyConfigured        bool                   `json:"jev_api_key_configured"`
+	Jev                        domain.IntentJevConfig `json:"jev"`
+	UpdatedAt                  time.Time              `json:"updated_at"`
 }
 
 // IntentRouterInput is a full router document. An empty ClassifierAPIKey keeps
@@ -54,12 +61,19 @@ type IntentRouterInput struct {
 	CacheTTLSeconds     int                 `json:"cache_ttl_seconds"`
 	MaxInputChars       int                 `json:"max_input_chars"`
 	Rules               []domain.IntentRule `json:"rules"`
+	// JevAPIKey, like ClassifierAPIKey, keeps the stored key when empty.
+	JevAPIKey string                 `json:"jev_api_key"`
+	Jev       domain.IntentJevConfig `json:"jev"`
+	// JevSetBalanceUSD, when present, is the balance just read off the
+	// TypeSafe console: the estimate restarts from it.
+	JevSetBalanceUSD *float64 `json:"jev_set_balance_usd,omitempty"`
 }
 
 // IntentClassifyTestResult is the outcome of trying a text against a router.
 type IntentClassifyTestResult struct {
 	// MatchedBy is "keyword" when a keyword decided (the classifier was not
-	// asked), "classifier" when the model was asked, "" when neither applied.
+	// asked), "jev" when Jev judged the text, "classifier" when the model was
+	// asked, "" when neither applied.
 	MatchedBy  string  `json:"matched_by"`
 	Keyword    string  `json:"keyword,omitempty"`
 	Answer     string  `json:"answer"`
@@ -67,6 +81,8 @@ type IntentClassifyTestResult struct {
 	Understood bool    `json:"understood"`
 	AccountIDs []int64 `json:"account_ids"`
 	LatencyMS  int64   `json:"latency_ms"`
+	// ProbeProbability is Jev's answer when Jev was asked.
+	ProbeProbability *float64 `json:"probe_probability,omitempty"`
 }
 
 func intentRouterViewFromEnt(row *dbent.IntentRouter) *IntentRouterView {
@@ -85,6 +101,8 @@ func intentRouterViewFromEnt(row *dbent.IntentRouter) *IntentRouterView {
 		CacheTTLSeconds:            row.CacheTTLSeconds,
 		MaxInputChars:              row.MaxInputChars,
 		Rules:                      rules,
+		JevAPIKeyConfigured:        strings.TrimSpace(row.JevAPIKey) != "",
+		Jev:                        intentJevWithDefaults(row.Jev),
 		UpdatedAt:                  row.UpdatedAt,
 	}
 }
@@ -136,17 +154,26 @@ func (s *IntentRouterService) SaveRouter(ctx context.Context, groupID int64, in 
 			SetClassifierBaseURL(in.ClassifierBaseURL).SetClassifierAPIKey(in.ClassifierAPIKey).
 			SetClassifierProtocol(in.ClassifierProtocol).SetClassifierModel(in.ClassifierModel).
 			SetClassifierTimeoutMs(in.ClassifierTimeoutMS).SetCacheTTLSeconds(in.CacheTTLSeconds).
-			SetMaxInputChars(in.MaxInputChars).SetRules(in.Rules).Save(ctx)
+			SetMaxInputChars(in.MaxInputChars).SetRules(in.Rules).
+			SetJevAPIKey(in.JevAPIKey).SetJev(in.Jev).Save(ctx)
 	} else {
 		saved, err = s.entClient.IntentRouter.UpdateOneID(existing.ID).
 			SetEnabled(in.Enabled).
 			SetClassifierBaseURL(in.ClassifierBaseURL).SetClassifierAPIKey(in.ClassifierAPIKey).
 			SetClassifierProtocol(in.ClassifierProtocol).SetClassifierModel(in.ClassifierModel).
 			SetClassifierTimeoutMs(in.ClassifierTimeoutMS).SetCacheTTLSeconds(in.CacheTTLSeconds).
-			SetMaxInputChars(in.MaxInputChars).SetRules(in.Rules).Save(ctx)
+			SetMaxInputChars(in.MaxInputChars).SetRules(in.Rules).
+			SetJevAPIKey(in.JevAPIKey).SetJev(in.Jev).Save(ctx)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("save intent router: %w", err)
+	}
+	// A save is the admin's word: forget pauses and any switch-off in flight.
+	s.jevReset(groupID)
+	if in.JevSetBalanceUSD != nil && s.jevStats != nil {
+		if err := s.jevStats.ResetSpent(ctx, groupID); err != nil {
+			slog.Warn("intent_route.jev_reset_spent_failed", "group_id", groupID, "error", err)
+		}
 	}
 	s.InvalidateConfig(ctx)
 	return intentRouterViewFromEnt(saved), nil
@@ -204,6 +231,21 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 		return bad("INTENT_INVALID_MAX_INPUT", fmt.Sprintf("max input chars must be %d-%d", intentRouteMinInputChars, intentRouteMaxInputChars))
 	}
 	classifierReady := in.ClassifierModel != "" && in.ClassifierAPIKey != ""
+	in.JevAPIKey = strings.TrimSpace(in.JevAPIKey)
+	if in.JevAPIKey == "" && existing != nil {
+		in.JevAPIKey = existing.JevAPIKey
+	}
+	var stored domain.IntentJevConfig
+	if existing != nil {
+		stored = existing.Jev
+	}
+	if err := normalizeIntentJev(&in.Jev, stored, in.JevSetBalanceUSD, in.JevAPIKey, in.Rules, s.now()); err != nil {
+		return err
+	}
+	// The rule Jev routes probes to may have no matcher of its own — also
+	// while Jev is off, or a switch-off (by an admin or by the server) would
+	// leave a router that can no longer be saved.
+	jevRule := strings.ToLower(strings.TrimSpace(in.Jev.Rule))
 
 	if len(in.Rules) > intentRouteMaxRules {
 		return bad("INTENT_TOO_MANY_RULES", fmt.Sprintf("at most %d rules", intentRouteMaxRules))
@@ -232,7 +274,7 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 		if err := normalizeIntentKeywords(rule); err != nil {
 			return err
 		}
-		if rule.Description == "" && len(rule.Keywords) == 0 {
+		if rule.Description == "" && len(rule.Keywords) == 0 && key != jevRule {
 			return infraerrors.BadRequest("INTENT_RULE_MATCHER_REQUIRED", "rule \""+rule.Name+"\" needs keywords or a description: keywords are matched directly, the description is what the classifier decides by").
 				WithMetadata(map[string]string{"name": rule.Name})
 		}
@@ -269,17 +311,106 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 		in.Rules = []domain.IntentRule{}
 	}
 	if in.Enabled && !classifierReady {
-		if !intentRulesHaveKeywords(in.Rules) {
-			return bad("INTENT_CLASSIFIER_INCOMPLETE", "an enabled router needs a classifier model and API key, or rules with keywords")
+		if !intentRulesHaveKeywords(in.Rules) && jevRule == "" {
+			return bad("INTENT_CLASSIFIER_INCOMPLETE", "an enabled router needs a classifier model and API key, rules with keywords, or Jev")
 		}
 		for _, rule := range in.Rules {
-			if rule.Enabled && len(rule.Keywords) == 0 {
+			if rule.Enabled && len(rule.Keywords) == 0 && strings.ToLower(rule.Name) != jevRule {
 				return infraerrors.BadRequest("INTENT_RULE_UNREACHABLE", "rule \""+rule.Name+"\" has no keywords and no classifier is configured, so it can never match").
 					WithMetadata(map[string]string{"name": rule.Name})
 			}
 		}
 	}
 	return s.validateIntentRuleAccounts(ctx, accountIDs, groupPlatform)
+}
+
+// normalizeIntentJev applies defaults and checks the Jev settings. Disabled
+// settings are kept (so the admin can switch Jev off and on again) but only
+// need to be well-formed; enabled ones need a key and an existing rule.
+func normalizeIntentJev(jev *domain.IntentJevConfig, stored domain.IntentJevConfig, setBalance *float64, apiKey string, rules []domain.IntentRule, now time.Time) error {
+	bad := func(reason, message string) error { return infraerrors.BadRequest(reason, message) }
+	*jev = intentJevWithDefaults(*jev)
+	jev.Rule = strings.TrimSpace(jev.Rule)
+	// Server-owned fields: the balance baseline changes only through
+	// setBalance, the switch-off record only through the server — and is
+	// cleared once an admin turns Jev on again.
+	jev.BalanceUSD, jev.BalanceSetAt = stored.BalanceUSD, stored.BalanceSetAt
+	jev.AutoDisabledStatus, jev.AutoDisabledDetail, jev.AutoDisabledAt = stored.AutoDisabledStatus, stored.AutoDisabledDetail, stored.AutoDisabledAt
+	jev.Revision = newIntentJevRevision()
+	if jev.Enabled {
+		jev.AutoDisabledStatus, jev.AutoDisabledDetail, jev.AutoDisabledAt = 0, "", nil
+	}
+	if setBalance != nil {
+		if *setBalance < 0 || *setBalance > 1e6 {
+			return bad("INTENT_JEV_INVALID_BALANCE", "jev balance must be 0-1000000 USD")
+		}
+		at := now
+		jev.BalanceUSD, jev.BalanceSetAt = *setBalance, &at
+	}
+	if jev.SamplePercent < 1 || jev.SamplePercent > 100 {
+		return bad("INTENT_JEV_INVALID_SAMPLE", "jev sample percent must be 1-100")
+	}
+	if *jev.LowBalanceUSD < 0 || *jev.LowBalanceUSD > 1e6 {
+		return bad("INTENT_JEV_INVALID_LOW_BALANCE", "jev low balance alert must be 0-1000000 USD")
+	}
+	if jev.Threshold <= 0 || jev.Threshold > 1 {
+		return bad("INTENT_JEV_INVALID_THRESHOLD", "jev threshold must be greater than 0 and at most 1")
+	}
+	if jev.MaxTurns < 1 || jev.MaxTurns > intentJevMaxTurnsLimit {
+		return bad("INTENT_JEV_INVALID_MAX_TURNS", fmt.Sprintf("jev max turns must be 1-%d", intentJevMaxTurnsLimit))
+	}
+	if jev.TimeoutMS < intentJevMinTimeoutMS || jev.TimeoutMS > intentJevMaxTimeoutMS {
+		return bad("INTENT_JEV_INVALID_TIMEOUT", fmt.Sprintf("jev timeout must be %d-%d ms", intentJevMinTimeoutMS, intentJevMaxTimeoutMS))
+	}
+	if len([]rune(jev.Model)) > 64 {
+		return bad("INTENT_JEV_INVALID_MODEL", "jev model name is limited to 64 characters")
+	}
+	if jev.Scope != domain.IntentJevScopeAll && jev.Scope != domain.IntentJevScopeListed {
+		return bad("INTENT_JEV_INVALID_SCOPE", "jev scope must be all or listed")
+	}
+	var err error
+	if jev.UserIDs, err = normalizeIntentJevIDs(jev.UserIDs); err != nil {
+		return err
+	}
+	if jev.APIKeyIDs, err = normalizeIntentJevIDs(jev.APIKeyIDs); err != nil {
+		return err
+	}
+	if !jev.Enabled {
+		return nil
+	}
+	if apiKey == "" {
+		return bad("INTENT_JEV_KEY_REQUIRED", "enter the Jev API key to enable Jev")
+	}
+	found := false
+	for i := range rules {
+		if strings.EqualFold(strings.TrimSpace(rules[i].Name), jev.Rule) {
+			jev.Rule, found = strings.TrimSpace(rules[i].Name), true
+			break
+		}
+	}
+	if !found {
+		return bad("INTENT_JEV_RULE_REQUIRED", "choose the rule whose accounts serve requests Jev judges to be probes")
+	}
+	if jev.Scope == domain.IntentJevScopeListed && len(jev.UserIDs) == 0 && len(jev.APIKeyIDs) == 0 {
+		return bad("INTENT_JEV_SCOPE_EMPTY", "list at least one user or API key, or apply Jev to everyone")
+	}
+	return nil
+}
+
+func normalizeIntentJevIDs(ids []int64) ([]int64, error) {
+	seen := make(map[int64]struct{}, len(ids))
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if _, dup := seen[id]; dup || id <= 0 {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	if len(out) > intentJevMaxScopeIDs {
+		return nil, infraerrors.BadRequest("INTENT_JEV_SCOPE_TOO_LARGE", fmt.Sprintf("at most %d users and %d API keys", intentJevMaxScopeIDs, intentJevMaxScopeIDs))
+	}
+	return out, nil
 }
 
 // normalizeIntentKeywords trims the rule's keywords and drops empty ones and
@@ -389,11 +520,39 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 	if rule, keyword, ok := cfg.matchKeywords(text); ok {
 		return &IntentClassifyTestResult{MatchedBy: "keyword", Keyword: keyword, Intent: rule.Name, Understood: true, AccountIDs: rule.AccountIDs}, nil
 	}
+	// Then Jev — whenever a key is stored, even switched off, so a topped-up
+	// account can be checked before Jev is turned back on. Its scope, turn
+	// limit, sampling and pauses do not apply, and its errors here neither
+	// pause nor switch it off: the admin is asking how this text is judged.
+	var jevResult *IntentClassifyTestResult
+	if cfg.Jev.APIKey != "" && s.judge != nil {
+		started := s.now()
+		judgeCtx, cancel := context.WithTimeout(ctx, cfg.Jev.Timeout)
+		answer, err := s.judge.ProbeProbability(judgeCtx, cfg.Jev.APIKey, cfg.Jev.Model, text)
+		cancel()
+		latency := s.now().Sub(started).Milliseconds()
+		if err != nil {
+			meta := map[string]string{"latency_ms": fmt.Sprint(latency)}
+			if status, account := intentJevAccountProblem(err); account {
+				meta["status"] = fmt.Sprint(status)
+			}
+			return nil, infraerrors.BadRequest("INTENT_JEV_FAILED", "jev call failed: "+truncateRunes(err.Error(), 300)).WithMetadata(meta)
+		}
+		p := answer.P
+		jevResult = &IntentClassifyTestResult{MatchedBy: "jev", Answer: fmt.Sprintf("p=%.2f", p), Understood: true, LatencyMS: latency, ProbeProbability: &p, AccountIDs: []int64{}}
+		if rule, ok := cfg.rule(cfg.Jev.Rule); ok && p >= cfg.Jev.Threshold {
+			jevResult.Intent, jevResult.AccountIDs = rule.Name, rule.AccountIDs
+			return jevResult, nil
+		}
+	}
 	rules := cfg.classifierRules()
 	if len(rules) == 0 {
+		if jevResult != nil {
+			return jevResult, nil
+		}
 		if !cfg.classifierReady() {
 			for _, rule := range cfg.activeRules() {
-				if len(rule.Keywords) == 0 {
+				if len(rule.Keywords) == 0 && rule.Name != cfg.Jev.Rule {
 					return nil, infraerrors.BadRequest("INTENT_CLASSIFIER_INCOMPLETE", "set the classifier model and API key first")
 				}
 			}

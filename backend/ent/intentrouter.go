@@ -42,7 +42,11 @@ type IntentRouter struct {
 	// MaxInputChars holds the value of the "max_input_chars" field.
 	MaxInputChars int `json:"max_input_chars,omitempty"`
 	// Rules holds the value of the "rules" field.
-	Rules        []domain.IntentRule `json:"rules,omitempty"`
+	Rules []domain.IntentRule `json:"rules,omitempty"`
+	// JevAPIKey holds the value of the "jev_api_key" field.
+	JevAPIKey string `json:"-"`
+	// Jev holds the value of the "jev" field.
+	Jev          domain.IntentJevConfig `json:"jev,omitempty"`
 	selectValues sql.SelectValues
 }
 
@@ -51,13 +55,13 @@ func (*IntentRouter) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case intentrouter.FieldRules:
+		case intentrouter.FieldRules, intentrouter.FieldJev:
 			values[i] = new([]byte)
 		case intentrouter.FieldEnabled:
 			values[i] = new(sql.NullBool)
 		case intentrouter.FieldID, intentrouter.FieldGroupID, intentrouter.FieldClassifierTimeoutMs, intentrouter.FieldCacheTTLSeconds, intentrouter.FieldMaxInputChars:
 			values[i] = new(sql.NullInt64)
-		case intentrouter.FieldClassifierBaseURL, intentrouter.FieldClassifierAPIKey, intentrouter.FieldClassifierProtocol, intentrouter.FieldClassifierModel:
+		case intentrouter.FieldClassifierBaseURL, intentrouter.FieldClassifierAPIKey, intentrouter.FieldClassifierProtocol, intentrouter.FieldClassifierModel, intentrouter.FieldJevAPIKey:
 			values[i] = new(sql.NullString)
 		case intentrouter.FieldCreatedAt, intentrouter.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -156,6 +160,20 @@ func (_m *IntentRouter) assignValues(columns []string, values []any) error {
 					return fmt.Errorf("unmarshal field rules: %w", err)
 				}
 			}
+		case intentrouter.FieldJevAPIKey:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field jev_api_key", values[i])
+			} else if value.Valid {
+				_m.JevAPIKey = value.String
+			}
+		case intentrouter.FieldJev:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field jev", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.Jev); err != nil {
+					return fmt.Errorf("unmarshal field jev: %w", err)
+				}
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -226,6 +244,11 @@ func (_m *IntentRouter) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("rules=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Rules))
+	builder.WriteString(", ")
+	builder.WriteString("jev_api_key=<sensitive>")
+	builder.WriteString(", ")
+	builder.WriteString("jev=")
+	builder.WriteString(fmt.Sprintf("%v", _m.Jev))
 	builder.WriteByte(')')
 	return builder.String()
 }

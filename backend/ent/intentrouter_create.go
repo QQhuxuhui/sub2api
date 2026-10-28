@@ -175,6 +175,34 @@ func (_c *IntentRouterCreate) SetRules(v []domain.IntentRule) *IntentRouterCreat
 	return _c
 }
 
+// SetJevAPIKey sets the "jev_api_key" field.
+func (_c *IntentRouterCreate) SetJevAPIKey(v string) *IntentRouterCreate {
+	_c.mutation.SetJevAPIKey(v)
+	return _c
+}
+
+// SetNillableJevAPIKey sets the "jev_api_key" field if the given value is not nil.
+func (_c *IntentRouterCreate) SetNillableJevAPIKey(v *string) *IntentRouterCreate {
+	if v != nil {
+		_c.SetJevAPIKey(*v)
+	}
+	return _c
+}
+
+// SetJev sets the "jev" field.
+func (_c *IntentRouterCreate) SetJev(v domain.IntentJevConfig) *IntentRouterCreate {
+	_c.mutation.SetJev(v)
+	return _c
+}
+
+// SetNillableJev sets the "jev" field if the given value is not nil.
+func (_c *IntentRouterCreate) SetNillableJev(v *domain.IntentJevConfig) *IntentRouterCreate {
+	if v != nil {
+		_c.SetJev(*v)
+	}
+	return _c
+}
+
 // Mutation returns the IntentRouterMutation object of the builder.
 func (_c *IntentRouterCreate) Mutation() *IntentRouterMutation {
 	return _c.mutation
@@ -250,6 +278,10 @@ func (_c *IntentRouterCreate) defaults() {
 		v := intentrouter.DefaultMaxInputChars
 		_c.mutation.SetMaxInputChars(v)
 	}
+	if _, ok := _c.mutation.JevAPIKey(); !ok {
+		v := intentrouter.DefaultJevAPIKey
+		_c.mutation.SetJevAPIKey(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -306,6 +338,14 @@ func (_c *IntentRouterCreate) check() error {
 	}
 	if _, ok := _c.mutation.MaxInputChars(); !ok {
 		return &ValidationError{Name: "max_input_chars", err: errors.New(`ent: missing required field "IntentRouter.max_input_chars"`)}
+	}
+	if _, ok := _c.mutation.JevAPIKey(); !ok {
+		return &ValidationError{Name: "jev_api_key", err: errors.New(`ent: missing required field "IntentRouter.jev_api_key"`)}
+	}
+	if v, ok := _c.mutation.JevAPIKey(); ok {
+		if err := intentrouter.JevAPIKeyValidator(v); err != nil {
+			return &ValidationError{Name: "jev_api_key", err: fmt.Errorf(`ent: validator failed for field "IntentRouter.jev_api_key": %w`, err)}
+		}
 	}
 	return nil
 }
@@ -381,6 +421,14 @@ func (_c *IntentRouterCreate) createSpec() (*IntentRouter, *sqlgraph.CreateSpec)
 	if value, ok := _c.mutation.Rules(); ok {
 		_spec.SetField(intentrouter.FieldRules, field.TypeJSON, value)
 		_node.Rules = value
+	}
+	if value, ok := _c.mutation.JevAPIKey(); ok {
+		_spec.SetField(intentrouter.FieldJevAPIKey, field.TypeString, value)
+		_node.JevAPIKey = value
+	}
+	if value, ok := _c.mutation.Jev(); ok {
+		_spec.SetField(intentrouter.FieldJev, field.TypeJSON, value)
+		_node.Jev = value
 	}
 	return _node, _spec
 }
@@ -593,6 +641,36 @@ func (u *IntentRouterUpsert) UpdateRules() *IntentRouterUpsert {
 // ClearRules clears the value of the "rules" field.
 func (u *IntentRouterUpsert) ClearRules() *IntentRouterUpsert {
 	u.SetNull(intentrouter.FieldRules)
+	return u
+}
+
+// SetJevAPIKey sets the "jev_api_key" field.
+func (u *IntentRouterUpsert) SetJevAPIKey(v string) *IntentRouterUpsert {
+	u.Set(intentrouter.FieldJevAPIKey, v)
+	return u
+}
+
+// UpdateJevAPIKey sets the "jev_api_key" field to the value that was provided on create.
+func (u *IntentRouterUpsert) UpdateJevAPIKey() *IntentRouterUpsert {
+	u.SetExcluded(intentrouter.FieldJevAPIKey)
+	return u
+}
+
+// SetJev sets the "jev" field.
+func (u *IntentRouterUpsert) SetJev(v domain.IntentJevConfig) *IntentRouterUpsert {
+	u.Set(intentrouter.FieldJev, v)
+	return u
+}
+
+// UpdateJev sets the "jev" field to the value that was provided on create.
+func (u *IntentRouterUpsert) UpdateJev() *IntentRouterUpsert {
+	u.SetExcluded(intentrouter.FieldJev)
+	return u
+}
+
+// ClearJev clears the value of the "jev" field.
+func (u *IntentRouterUpsert) ClearJev() *IntentRouterUpsert {
+	u.SetNull(intentrouter.FieldJev)
 	return u
 }
 
@@ -827,6 +905,41 @@ func (u *IntentRouterUpsertOne) UpdateRules() *IntentRouterUpsertOne {
 func (u *IntentRouterUpsertOne) ClearRules() *IntentRouterUpsertOne {
 	return u.Update(func(s *IntentRouterUpsert) {
 		s.ClearRules()
+	})
+}
+
+// SetJevAPIKey sets the "jev_api_key" field.
+func (u *IntentRouterUpsertOne) SetJevAPIKey(v string) *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.SetJevAPIKey(v)
+	})
+}
+
+// UpdateJevAPIKey sets the "jev_api_key" field to the value that was provided on create.
+func (u *IntentRouterUpsertOne) UpdateJevAPIKey() *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.UpdateJevAPIKey()
+	})
+}
+
+// SetJev sets the "jev" field.
+func (u *IntentRouterUpsertOne) SetJev(v domain.IntentJevConfig) *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.SetJev(v)
+	})
+}
+
+// UpdateJev sets the "jev" field to the value that was provided on create.
+func (u *IntentRouterUpsertOne) UpdateJev() *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.UpdateJev()
+	})
+}
+
+// ClearJev clears the value of the "jev" field.
+func (u *IntentRouterUpsertOne) ClearJev() *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.ClearJev()
 	})
 }
 
@@ -1227,6 +1340,41 @@ func (u *IntentRouterUpsertBulk) UpdateRules() *IntentRouterUpsertBulk {
 func (u *IntentRouterUpsertBulk) ClearRules() *IntentRouterUpsertBulk {
 	return u.Update(func(s *IntentRouterUpsert) {
 		s.ClearRules()
+	})
+}
+
+// SetJevAPIKey sets the "jev_api_key" field.
+func (u *IntentRouterUpsertBulk) SetJevAPIKey(v string) *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.SetJevAPIKey(v)
+	})
+}
+
+// UpdateJevAPIKey sets the "jev_api_key" field to the value that was provided on create.
+func (u *IntentRouterUpsertBulk) UpdateJevAPIKey() *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.UpdateJevAPIKey()
+	})
+}
+
+// SetJev sets the "jev" field.
+func (u *IntentRouterUpsertBulk) SetJev(v domain.IntentJevConfig) *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.SetJev(v)
+	})
+}
+
+// UpdateJev sets the "jev" field to the value that was provided on create.
+func (u *IntentRouterUpsertBulk) UpdateJev() *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.UpdateJev()
+	})
+}
+
+// ClearJev clears the value of the "jev" field.
+func (u *IntentRouterUpsertBulk) ClearJev() *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.ClearJev()
 	})
 }
 

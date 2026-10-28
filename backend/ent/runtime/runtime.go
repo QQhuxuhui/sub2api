@@ -1342,6 +1342,12 @@ func init() {
 	intentrouterDescMaxInputChars := intentrouterFields[8].Descriptor()
 	// intentrouter.DefaultMaxInputChars holds the default value on creation for the max_input_chars field.
 	intentrouter.DefaultMaxInputChars = intentrouterDescMaxInputChars.Default.(int)
+	// intentrouterDescJevAPIKey is the schema descriptor for jev_api_key field.
+	intentrouterDescJevAPIKey := intentrouterFields[10].Descriptor()
+	// intentrouter.DefaultJevAPIKey holds the default value on creation for the jev_api_key field.
+	intentrouter.DefaultJevAPIKey = intentrouterDescJevAPIKey.Default.(string)
+	// intentrouter.JevAPIKeyValidator is a validator for the "jev_api_key" field. It is called by the builders before save.
+	intentrouter.JevAPIKeyValidator = intentrouterDescJevAPIKey.Validators[0].(func(string) error)
 	paymentauditlogFields := schema.PaymentAuditLog{}.Fields()
 	_ = paymentauditlogFields
 	// paymentauditlogDescOrderID is the schema descriptor for order_id field.

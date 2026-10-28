@@ -109,6 +109,11 @@ func MaxInputChars(v int) predicate.IntentRouter {
 	return predicate.IntentRouter(sql.FieldEQ(FieldMaxInputChars, v))
 }
 
+// JevAPIKey applies equality check predicate on the "jev_api_key" field. It's identical to JevAPIKeyEQ.
+func JevAPIKey(v string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldEQ(FieldJevAPIKey, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.IntentRouter {
 	return predicate.IntentRouter(sql.FieldEQ(FieldCreatedAt, v))
@@ -627,6 +632,81 @@ func RulesIsNil() predicate.IntentRouter {
 // RulesNotNil applies the NotNil predicate on the "rules" field.
 func RulesNotNil() predicate.IntentRouter {
 	return predicate.IntentRouter(sql.FieldNotNull(FieldRules))
+}
+
+// JevAPIKeyEQ applies the EQ predicate on the "jev_api_key" field.
+func JevAPIKeyEQ(v string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldEQ(FieldJevAPIKey, v))
+}
+
+// JevAPIKeyNEQ applies the NEQ predicate on the "jev_api_key" field.
+func JevAPIKeyNEQ(v string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldNEQ(FieldJevAPIKey, v))
+}
+
+// JevAPIKeyIn applies the In predicate on the "jev_api_key" field.
+func JevAPIKeyIn(vs ...string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldIn(FieldJevAPIKey, vs...))
+}
+
+// JevAPIKeyNotIn applies the NotIn predicate on the "jev_api_key" field.
+func JevAPIKeyNotIn(vs ...string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldNotIn(FieldJevAPIKey, vs...))
+}
+
+// JevAPIKeyGT applies the GT predicate on the "jev_api_key" field.
+func JevAPIKeyGT(v string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldGT(FieldJevAPIKey, v))
+}
+
+// JevAPIKeyGTE applies the GTE predicate on the "jev_api_key" field.
+func JevAPIKeyGTE(v string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldGTE(FieldJevAPIKey, v))
+}
+
+// JevAPIKeyLT applies the LT predicate on the "jev_api_key" field.
+func JevAPIKeyLT(v string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldLT(FieldJevAPIKey, v))
+}
+
+// JevAPIKeyLTE applies the LTE predicate on the "jev_api_key" field.
+func JevAPIKeyLTE(v string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldLTE(FieldJevAPIKey, v))
+}
+
+// JevAPIKeyContains applies the Contains predicate on the "jev_api_key" field.
+func JevAPIKeyContains(v string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldContains(FieldJevAPIKey, v))
+}
+
+// JevAPIKeyHasPrefix applies the HasPrefix predicate on the "jev_api_key" field.
+func JevAPIKeyHasPrefix(v string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldHasPrefix(FieldJevAPIKey, v))
+}
+
+// JevAPIKeyHasSuffix applies the HasSuffix predicate on the "jev_api_key" field.
+func JevAPIKeyHasSuffix(v string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldHasSuffix(FieldJevAPIKey, v))
+}
+
+// JevAPIKeyEqualFold applies the EqualFold predicate on the "jev_api_key" field.
+func JevAPIKeyEqualFold(v string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldEqualFold(FieldJevAPIKey, v))
+}
+
+// JevAPIKeyContainsFold applies the ContainsFold predicate on the "jev_api_key" field.
+func JevAPIKeyContainsFold(v string) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldContainsFold(FieldJevAPIKey, v))
+}
+
+// JevIsNil applies the IsNil predicate on the "jev" field.
+func JevIsNil() predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldIsNull(FieldJev))
+}
+
+// JevNotNil applies the NotNil predicate on the "jev" field.
+func JevNotNil() predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldNotNull(FieldJev))
 }
 
 // And groups predicates with the AND operator between them.

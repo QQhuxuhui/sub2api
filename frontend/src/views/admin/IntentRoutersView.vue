@@ -108,6 +108,135 @@
             </div>
           </div>
 
+          <!-- Jev probe detection -->
+          <div class="card space-y-4 p-5" data-test="intent-jev">
+            <label class="flex items-start gap-3">
+              <input v-model="form.jev.enabled" data-test="intent-jev-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+              <span>
+                <span class="block text-base font-semibold text-gray-900 dark:text-white">{{ t('intentRouter.jev.title') }}</span>
+                <span class="mt-1 block text-sm leading-6 text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.intro') }}</span>
+              </span>
+            </label>
+            <div v-if="jevStatus" data-test="intent-jev-status" class="space-y-3 rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800">
+              <div class="flex flex-wrap items-center gap-2">
+                <span :class="['rounded-full px-2 py-0.5 text-xs', jevStateClass(jevStatus.state)]">{{ t(`intentRouter.jev.status.${jevStatus.state}`) }}</span>
+                <span v-if="jevStatus.state === 'normal' && jevStatus.last_success_at" class="text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.status.lastSuccess', { time: formatTime(jevStatus.last_success_at) }) }}</span>
+                <span v-if="jevStatus.state === 'paused'" class="text-amber-700 dark:text-amber-300">{{ t('intentRouter.jev.status.pausedUntil', { time: formatTime(jevStatus.paused_until ?? ''), reason: jevStatus.reason ?? '' }) }}</span>
+                <button type="button" class="ml-auto text-xs text-primary-600 hover:underline dark:text-primary-400" @click="selectedGroupId && loadJevStatus(selectedGroupId)">{{ t('intentRouter.jev.status.refresh') }}</button>
+              </div>
+              <p v-if="jevStatus.state === 'auto_disabled'" data-test="intent-jev-auto-disabled" class="text-red-700 dark:text-red-300">
+                {{ t('intentRouter.jev.status.autoDisabledAt', { time: jevStatus.auto_disabled_at ? formatTime(jevStatus.auto_disabled_at) : '—', status: jevStatus.auto_disabled_status ?? '—' }) }}
+                {{ jevAutoDisabledHint(jevStatus.auto_disabled_status) }}
+                <span class="block text-xs opacity-80">{{ jevStatus.auto_disabled_detail || jevStatus.reason }}</span>
+              </p>
+              <p v-if="jevStatus.balance" data-test="intent-jev-balance-estimate" :class="jevStatus.balance.low ? 'font-medium text-red-700 dark:text-red-300' : 'text-gray-700 dark:text-gray-300'">
+                {{ t('intentRouter.jev.status.balance', { estimated: formatUSD(jevStatus.balance.estimated_usd), set: formatUSD(jevStatus.balance.set_usd), at: formatTime(jevStatus.balance.set_at), spent: formatUSD(jevStatus.balance.spent_usd) }) }}
+                <span v-if="jevStatus.balance.low"> · {{ t('intentRouter.jev.status.lowBalance') }}</span>
+              </p>
+              <p v-else class="text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.status.noBalance') }}</p>
+              <div class="overflow-x-auto">
+                <table class="min-w-full text-xs">
+                  <thead class="text-left text-gray-500 dark:text-gray-400">
+                    <tr>
+                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.day') }}</th>
+                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.calls') }}</th>
+                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.skipped') }}</th>
+                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.probes') }}</th>
+                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.errors') }}</th>
+                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.tokens') }}</th>
+                      <th class="py-1">{{ t('intentRouter.jev.status.cost') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="text-gray-700 dark:text-gray-300">
+                    <tr v-for="day in jevStatus.days" :key="day.date" :data-test="`intent-jev-day-${day.date}`">
+                      <td class="py-1 pr-4">{{ formatDay(day.date) }}</td>
+                      <td class="py-1 pr-4">{{ day.calls }}</td>
+                      <td class="py-1 pr-4">{{ day.skipped }}</td>
+                      <td class="py-1 pr-4">{{ day.probes }}</td>
+                      <td class="py-1 pr-4">{{ day.errors }}</td>
+                      <td class="py-1 pr-4">{{ day.tokens }}</td>
+                      <td class="py-1">{{ formatUSD(day.cost_usd) }} / {{ formatCNY(day.cost_usd) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="grid gap-4 md:grid-cols-2">
+              <div>
+                <label class="input-label">{{ t('intentRouter.jev.rule') }}</label>
+                <select v-model="form.jev.rule" data-test="intent-jev-rule" class="input">
+                  <option value="">{{ t('intentRouter.jev.rulePlaceholder') }}</option>
+                  <option v-for="name in ruleNames" :key="name" :value="name">{{ name }}</option>
+                </select>
+              </div>
+              <div>
+                <label class="input-label">{{ t('intentRouter.jev.apiKey') }}</label>
+                <input
+                  v-model.trim="form.jev_api_key"
+                  data-test="intent-jev-api-key"
+                  type="password"
+                  autocomplete="new-password"
+                  class="input"
+                  :placeholder="jevKeyConfigured ? t('intentRouter.classifier.apiKeyKeep') : t('intentRouter.jev.apiKeyPlaceholder')"
+                />
+              </div>
+              <div>
+                <label class="input-label">{{ t('intentRouter.jev.threshold') }}</label>
+                <input v-model.number="form.jev.threshold" data-test="intent-jev-threshold" type="number" min="0.05" max="1" step="0.05" class="input" />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.thresholdHint') }}</p>
+              </div>
+              <div>
+                <label class="input-label">{{ t('intentRouter.jev.maxTurns') }}</label>
+                <input v-model.number="form.jev.max_turns" type="number" min="1" max="50" class="input" />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.maxTurnsHint') }}</p>
+              </div>
+              <div>
+                <label class="input-label">{{ t('intentRouter.jev.timeout') }}</label>
+                <input v-model.number="form.jev.timeout_ms" type="number" min="200" max="5000" step="100" class="input" />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.timeoutHint') }}</p>
+              </div>
+              <div>
+                <label class="input-label">{{ t('intentRouter.jev.model') }}</label>
+                <input v-model.trim="form.jev.model" type="text" class="input" placeholder="jev-latest" />
+              </div>
+            </div>
+            <div class="grid gap-4 md:grid-cols-3">
+              <div>
+                <label class="input-label">{{ t('intentRouter.jev.samplePercent') }}</label>
+                <input v-model.number="form.jev.sample_percent" data-test="intent-jev-sample" type="number" min="1" max="100" class="input" />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.samplePercentHint') }}</p>
+              </div>
+              <div>
+                <label class="input-label">{{ t('intentRouter.jev.setBalance') }}</label>
+                <input v-model="form.jevBalanceText" data-test="intent-jev-balance" type="number" min="0" step="0.01" class="input" :placeholder="t('intentRouter.jev.setBalancePlaceholder')" />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.setBalanceHint') }} <a href="https://console.typesafe.ai" target="_blank" rel="noopener noreferrer" class="text-primary-600 hover:underline dark:text-primary-400">console.typesafe.ai</a></p>
+              </div>
+              <div>
+                <label class="input-label">{{ t('intentRouter.jev.lowBalance') }}</label>
+                <input v-model.number="form.jev.low_balance_usd" data-test="intent-jev-low-balance" type="number" min="0" step="0.5" class="input" />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.lowBalanceHint') }}</p>
+              </div>
+            </div>
+            <div>
+              <label class="input-label">{{ t('intentRouter.jev.scope') }}</label>
+              <div class="flex flex-wrap gap-4 text-sm text-gray-700 dark:text-gray-300">
+                <label class="flex items-center gap-2"><input v-model="form.jev.scope" data-test="intent-jev-scope-all" type="radio" value="all" />{{ t('intentRouter.jev.scopeAll') }}</label>
+                <label class="flex items-center gap-2"><input v-model="form.jev.scope" data-test="intent-jev-scope-listed" type="radio" value="listed" />{{ t('intentRouter.jev.scopeListed') }}</label>
+              </div>
+              <div v-if="form.jev.scope === 'listed'" class="mt-3 grid gap-4 md:grid-cols-2">
+                <div>
+                  <label class="input-label">{{ t('intentRouter.jev.userIds') }}</label>
+                  <input v-model="form.jevUserIDsText" data-test="intent-jev-users" type="text" class="input" :placeholder="t('intentRouter.jev.idsPlaceholder')" />
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.userIdsHint') }}</p>
+                </div>
+                <div>
+                  <label class="input-label">{{ t('intentRouter.jev.apiKeyIds') }}</label>
+                  <input v-model="form.jevAPIKeyIDsText" data-test="intent-jev-keys" type="text" class="input" :placeholder="t('intentRouter.jev.idsPlaceholder')" />
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Rules -->
           <div class="card space-y-4 p-5">
             <div class="flex flex-wrap items-start justify-between gap-3">
@@ -216,6 +345,9 @@
               <p class="font-medium text-gray-900 dark:text-white">{{ testSummary }}</p>
               <p v-if="testResult.matched_by === 'keyword'" class="text-gray-500 dark:text-gray-400">
                 {{ t('intentRouter.test.byKeyword', { keyword: testResult.keyword }) }}
+              </p>
+              <p v-else-if="testResult.matched_by === 'jev'" class="text-gray-500 dark:text-gray-400">
+                {{ t('intentRouter.test.byJev', { p: (testResult.probe_probability ?? 0).toFixed(2) }) }} · {{ t('intentRouter.test.latency', { ms: testResult.latency_ms }) }}
               </p>
               <p v-else-if="testResult.matched_by === 'classifier'" class="text-gray-500 dark:text-gray-400">
                 {{ t('intentRouter.test.answer', { answer: testResult.answer || '—' }) }} · {{ t('intentRouter.test.latency', { ms: testResult.latency_ms }) }}
@@ -374,13 +506,13 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import { intentRoutersAPI } from '@/api/admin/intentRouters'
-import type { IntentClassifyTestResult, IntentRouteEvent, IntentRouteHit, IntentRouteKeywordStat, IntentRouter, IntentRouterInput } from '@/api/admin/intentRouters'
+import type { IntentClassifyTestResult, IntentJevConfig, IntentJevStatus, IntentRouteEvent, IntentRouteHit, IntentRouteKeywordStat, IntentRouter, IntentRouterInput } from '@/api/admin/intentRouters'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 
 interface GroupOption { id: number; name: string; platform: string }
 interface AccountOption { id: number; name: string; platform: string }
 interface RuleForm { uid: number; name: string; description: string; keywordsText: string; originalKeywords: string[]; account_ids: number[]; enabled: boolean; search: string }
-type FormState = Omit<IntentRouterInput, 'rules'> & { rules: RuleForm[] }
+type FormState = Omit<IntentRouterInput, 'rules' | 'jev_set_balance_usd'> & { rules: RuleForm[]; jevUserIDsText: string; jevAPIKeyIDsText: string; jevBalanceText: string }
 
 const ACCOUNT_PAGE_SIZE = 1000
 const ACCOUNT_MAX_PAGES = 10
@@ -418,6 +550,7 @@ const selectedGroupId = ref<number | null>(null)
 const testText = ref('')
 const testResult = ref<IntentClassifyTestResult | null>(null)
 const testError = ref('')
+const jevStatus = ref<IntentJevStatus | null>(null)
 
 let nextUid = 1
 const blankForm = (): FormState => ({
@@ -430,7 +563,15 @@ const blankForm = (): FormState => ({
   cache_ttl_seconds: 7200,
   max_input_chars: 2000,
   rules: [],
+  jev_api_key: '',
+  jev: blankJev(),
+  jevUserIDsText: '',
+  jevAPIKeyIDsText: '',
+  jevBalanceText: '',
 })
+function blankJev(): IntentJevConfig {
+  return { enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_key_ids: [], sample_percent: 100, low_balance_usd: 1, balance_usd: 0 }
+}
 const form = reactive<FormState>(blankForm())
 const baseline = ref('')
 
@@ -438,6 +579,8 @@ const accountsById = computed(() => new Map(accounts.value.map((a) => [a.id, a])
 const selectedGroup = computed(() => groups.value.find((g) => g.id === selectedGroupId.value) ?? null)
 const savedRouter = computed(() => (selectedGroupId.value ? routers.value[selectedGroupId.value] ?? null : null))
 const keyConfigured = computed(() => savedRouter.value?.classifier_api_key_configured === true)
+const jevKeyConfigured = computed(() => savedRouter.value?.jev_api_key_configured === true)
+const ruleNames = computed(() => form.rules.map((rule) => rule.name.trim()).filter(Boolean))
 const filteredGroups = computed(() => {
   const q = groupSearch.value.toLowerCase()
   return q ? groups.value.filter((g) => g.name.toLowerCase().includes(q) || String(g.id) === q) : groups.value
@@ -461,7 +604,23 @@ function toInput(): IntentRouterInput {
     rules: form.rules.map(({ name, description, keywordsText, originalKeywords, account_ids, enabled }) => ({
       name, description, keywords: restoreOriginalControls(parseKeywords(keywordsText), originalKeywords), account_ids: [...account_ids], enabled,
     })),
+    jev_api_key: form.jev_api_key,
+    jev: {
+      ...form.jev,
+      threshold: Number(form.jev.threshold) || 0,
+      max_turns: Number(form.jev.max_turns) || 0,
+      timeout_ms: Number(form.jev.timeout_ms) || 0,
+      user_ids: parseIDs(form.jevUserIDsText),
+      api_key_ids: parseIDs(form.jevAPIKeyIDsText),
+      sample_percent: Number(form.jev.sample_percent) || 0,
+      low_balance_usd: Number(form.jev.low_balance_usd) || 0,
+    },
+    ...(String(form.jevBalanceText).trim() !== '' ? { jev_set_balance_usd: Number(form.jevBalanceText) } : {}),
   }
+}
+// IDs are typed comma, space or newline separated; anything else is ignored.
+function parseIDs(text: string): number[] {
+  return [...new Set(text.split(/[\s,，、]+/).map((part) => Number(part)).filter((id) => Number.isInteger(id) && id > 0))]
 }
 // Keywords are typed one per line or comma-separated (ASCII or Chinese commas).
 function parseKeywords(text: string): string[] {
@@ -517,6 +676,9 @@ function fillForm(router: IntentRouter | null) {
     form.classifier_timeout_ms = router.classifier_timeout_ms
     form.cache_ttl_seconds = router.cache_ttl_seconds
     form.max_input_chars = router.max_input_chars
+    form.jev = { ...blankJev(), ...(router.jev ?? {}) }
+    form.jevUserIDsText = (router.jev?.user_ids ?? []).join(', ')
+    form.jevAPIKeyIDsText = (router.jev?.api_key_ids ?? []).join(', ')
     form.rules = (router.rules ?? []).map(({ keywords, ...rule }) => ({
       ...rule, keywordsText: formatKeywords(keywords ?? []), originalKeywords: [...(keywords ?? [])], account_ids: [...(rule.account_ids ?? [])], uid: nextUid++, search: '',
     }))
@@ -529,6 +691,48 @@ function fillForm(router: IntentRouter | null) {
 function selectGroup(id: number) {
   selectedGroupId.value = id
   fillForm(routers.value[id] ?? null)
+  void loadJevStatus(id)
+}
+
+// Every status request and every save takes a new sequence number; only the
+// answer to the latest request may touch the page. An answer that left the
+// server before a save (say "switched off") must not undo that save.
+let jevStatusSeq = 0
+async function loadJevStatus(groupId: number) {
+  const seq = ++jevStatusSeq
+  if (!routers.value[groupId]) {
+    jevStatus.value = null
+    return
+  }
+  try {
+    const status = (await intentRoutersAPI.jevStatus(groupId)).data
+    if (seq !== jevStatusSeq || selectedGroupId.value !== groupId) return
+    jevStatus.value = status
+    // Switched off by the server while this page still shows it on: follow,
+    // or the next save would quietly turn it back on.
+    const router = routers.value[groupId]
+    if (status.state === 'auto_disabled' && router?.jev?.enabled) {
+      const wasClean = !dirty.value
+      routers.value = { ...routers.value, [groupId]: { ...router, jev: { ...router.jev, enabled: false, auto_disabled_status: status.auto_disabled_status, auto_disabled_detail: status.auto_disabled_detail, auto_disabled_at: status.auto_disabled_at } } }
+      if (wasClean) fillForm(routers.value[groupId])
+      else form.jev.enabled = false
+      jevStatus.value = status
+    }
+  } catch {
+    if (seq === jevStatusSeq && selectedGroupId.value === groupId) jevStatus.value = null
+  }
+}
+function formatUSD(value: number) { return `$${value.toFixed(value !== 0 && Math.abs(value) < 0.01 ? 4 : 2)}` }
+function formatCNY(usd: number) { return `¥${(usd * (jevStatus.value?.cny_per_usd ?? 7)).toFixed(usd !== 0 && Math.abs(usd) < 0.01 ? 4 : 2)}` }
+function formatDay(day: string) { return `${day.slice(4, 6)}-${day.slice(6, 8)}` }
+function jevAutoDisabledHint(status?: number) {
+  switch (status) {
+    case 401: return t('intentRouter.jev.status.why401')
+    case 402: return t('intentRouter.jev.status.why402')
+    case 403: return t('intentRouter.jev.status.why403')
+    case 451: return t('intentRouter.jev.status.why451')
+    default: return ''
+  }
 }
 
 function routerStatus(groupId: number): 'on' | 'off' | 'none' {
@@ -590,10 +794,14 @@ async function save() {
   const groupId = selectedGroupId.value
   if (!groupId || busy.value) return
   saving.value = true
+  jevStatusSeq++
   try {
     const res = await intentRoutersAPI.save(groupId, toInput())
     routers.value = { ...routers.value, [groupId]: res.data }
-    if (selectedGroupId.value === groupId) fillForm(res.data)
+    if (selectedGroupId.value === groupId) {
+      fillForm(res.data)
+      void loadJevStatus(groupId)
+    }
     appStore.showSuccess(t('intentRouter.actions.saved'))
   } catch (err) {
     appStore.showError(errorText(err))
@@ -662,10 +870,17 @@ function formatTime(value: string) {
   const d = new Date(value)
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString()
 }
+function jevStateClass(state: IntentJevStatus['state']) {
+  if (state === 'normal') return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+  if (state === 'paused') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+  if (state === 'auto_disabled') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+  return 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
+}
 function eventClass(kind: IntentRouteEvent['kind']) {
   if (kind === 'error') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
   if (kind === 'skipped') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
   if (kind === 'keyword') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+  if (kind === 'jev') return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
   if (kind === 'routed') return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
   return 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
 }

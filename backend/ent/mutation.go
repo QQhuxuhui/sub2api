@@ -29583,6 +29583,8 @@ type IntentRouterMutation struct {
 	addmax_input_chars       *int
 	rules                    *[]domain.IntentRule
 	appendrules              []domain.IntentRule
+	jev_api_key              *string
+	jev                      *domain.IntentJevConfig
 	clearedFields            map[string]struct{}
 	done                     bool
 	oldValue                 func(context.Context) (*IntentRouter, error)
@@ -30228,6 +30230,91 @@ func (m *IntentRouterMutation) ResetRules() {
 	delete(m.clearedFields, intentrouter.FieldRules)
 }
 
+// SetJevAPIKey sets the "jev_api_key" field.
+func (m *IntentRouterMutation) SetJevAPIKey(s string) {
+	m.jev_api_key = &s
+}
+
+// JevAPIKey returns the value of the "jev_api_key" field in the mutation.
+func (m *IntentRouterMutation) JevAPIKey() (r string, exists bool) {
+	v := m.jev_api_key
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldJevAPIKey returns the old "jev_api_key" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldJevAPIKey(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldJevAPIKey is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldJevAPIKey requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldJevAPIKey: %w", err)
+	}
+	return oldValue.JevAPIKey, nil
+}
+
+// ResetJevAPIKey resets all changes to the "jev_api_key" field.
+func (m *IntentRouterMutation) ResetJevAPIKey() {
+	m.jev_api_key = nil
+}
+
+// SetJev sets the "jev" field.
+func (m *IntentRouterMutation) SetJev(djc domain.IntentJevConfig) {
+	m.jev = &djc
+}
+
+// Jev returns the value of the "jev" field in the mutation.
+func (m *IntentRouterMutation) Jev() (r domain.IntentJevConfig, exists bool) {
+	v := m.jev
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldJev returns the old "jev" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldJev(ctx context.Context) (v domain.IntentJevConfig, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldJev is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldJev requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldJev: %w", err)
+	}
+	return oldValue.Jev, nil
+}
+
+// ClearJev clears the value of the "jev" field.
+func (m *IntentRouterMutation) ClearJev() {
+	m.jev = nil
+	m.clearedFields[intentrouter.FieldJev] = struct{}{}
+}
+
+// JevCleared returns if the "jev" field was cleared in this mutation.
+func (m *IntentRouterMutation) JevCleared() bool {
+	_, ok := m.clearedFields[intentrouter.FieldJev]
+	return ok
+}
+
+// ResetJev resets all changes to the "jev" field.
+func (m *IntentRouterMutation) ResetJev() {
+	m.jev = nil
+	delete(m.clearedFields, intentrouter.FieldJev)
+}
+
 // Where appends a list predicates to the IntentRouterMutation builder.
 func (m *IntentRouterMutation) Where(ps ...predicate.IntentRouter) {
 	m.predicates = append(m.predicates, ps...)
@@ -30262,7 +30349,7 @@ func (m *IntentRouterMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *IntentRouterMutation) Fields() []string {
-	fields := make([]string, 0, 12)
+	fields := make([]string, 0, 14)
 	if m.created_at != nil {
 		fields = append(fields, intentrouter.FieldCreatedAt)
 	}
@@ -30299,6 +30386,12 @@ func (m *IntentRouterMutation) Fields() []string {
 	if m.rules != nil {
 		fields = append(fields, intentrouter.FieldRules)
 	}
+	if m.jev_api_key != nil {
+		fields = append(fields, intentrouter.FieldJevAPIKey)
+	}
+	if m.jev != nil {
+		fields = append(fields, intentrouter.FieldJev)
+	}
 	return fields
 }
 
@@ -30331,6 +30424,10 @@ func (m *IntentRouterMutation) Field(name string) (ent.Value, bool) {
 		return m.MaxInputChars()
 	case intentrouter.FieldRules:
 		return m.Rules()
+	case intentrouter.FieldJevAPIKey:
+		return m.JevAPIKey()
+	case intentrouter.FieldJev:
+		return m.Jev()
 	}
 	return nil, false
 }
@@ -30364,6 +30461,10 @@ func (m *IntentRouterMutation) OldField(ctx context.Context, name string) (ent.V
 		return m.OldMaxInputChars(ctx)
 	case intentrouter.FieldRules:
 		return m.OldRules(ctx)
+	case intentrouter.FieldJevAPIKey:
+		return m.OldJevAPIKey(ctx)
+	case intentrouter.FieldJev:
+		return m.OldJev(ctx)
 	}
 	return nil, fmt.Errorf("unknown IntentRouter field %s", name)
 }
@@ -30457,6 +30558,20 @@ func (m *IntentRouterMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetRules(v)
 		return nil
+	case intentrouter.FieldJevAPIKey:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetJevAPIKey(v)
+		return nil
+	case intentrouter.FieldJev:
+		v, ok := value.(domain.IntentJevConfig)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetJev(v)
+		return nil
 	}
 	return fmt.Errorf("unknown IntentRouter field %s", name)
 }
@@ -30541,6 +30656,9 @@ func (m *IntentRouterMutation) ClearedFields() []string {
 	if m.FieldCleared(intentrouter.FieldRules) {
 		fields = append(fields, intentrouter.FieldRules)
 	}
+	if m.FieldCleared(intentrouter.FieldJev) {
+		fields = append(fields, intentrouter.FieldJev)
+	}
 	return fields
 }
 
@@ -30557,6 +30675,9 @@ func (m *IntentRouterMutation) ClearField(name string) error {
 	switch name {
 	case intentrouter.FieldRules:
 		m.ClearRules()
+		return nil
+	case intentrouter.FieldJev:
+		m.ClearJev()
 		return nil
 	}
 	return fmt.Errorf("unknown IntentRouter nullable field %s", name)
@@ -30601,6 +30722,12 @@ func (m *IntentRouterMutation) ResetField(name string) error {
 		return nil
 	case intentrouter.FieldRules:
 		m.ResetRules()
+		return nil
+	case intentrouter.FieldJevAPIKey:
+		m.ResetJevAPIKey()
+		return nil
+	case intentrouter.FieldJev:
+		m.ResetJev()
 		return nil
 	}
 	return fmt.Errorf("unknown IntentRouter field %s", name)

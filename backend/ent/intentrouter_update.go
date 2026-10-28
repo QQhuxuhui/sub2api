@@ -208,6 +208,40 @@ func (_u *IntentRouterUpdate) ClearRules() *IntentRouterUpdate {
 	return _u
 }
 
+// SetJevAPIKey sets the "jev_api_key" field.
+func (_u *IntentRouterUpdate) SetJevAPIKey(v string) *IntentRouterUpdate {
+	_u.mutation.SetJevAPIKey(v)
+	return _u
+}
+
+// SetNillableJevAPIKey sets the "jev_api_key" field if the given value is not nil.
+func (_u *IntentRouterUpdate) SetNillableJevAPIKey(v *string) *IntentRouterUpdate {
+	if v != nil {
+		_u.SetJevAPIKey(*v)
+	}
+	return _u
+}
+
+// SetJev sets the "jev" field.
+func (_u *IntentRouterUpdate) SetJev(v domain.IntentJevConfig) *IntentRouterUpdate {
+	_u.mutation.SetJev(v)
+	return _u
+}
+
+// SetNillableJev sets the "jev" field if the given value is not nil.
+func (_u *IntentRouterUpdate) SetNillableJev(v *domain.IntentJevConfig) *IntentRouterUpdate {
+	if v != nil {
+		_u.SetJev(*v)
+	}
+	return _u
+}
+
+// ClearJev clears the value of the "jev" field.
+func (_u *IntentRouterUpdate) ClearJev() *IntentRouterUpdate {
+	_u.mutation.ClearJev()
+	return _u
+}
+
 // Mutation returns the IntentRouterMutation object of the builder.
 func (_u *IntentRouterUpdate) Mutation() *IntentRouterMutation {
 	return _u.mutation
@@ -269,6 +303,11 @@ func (_u *IntentRouterUpdate) check() error {
 	if v, ok := _u.mutation.ClassifierModel(); ok {
 		if err := intentrouter.ClassifierModelValidator(v); err != nil {
 			return &ValidationError{Name: "classifier_model", err: fmt.Errorf(`ent: validator failed for field "IntentRouter.classifier_model": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.JevAPIKey(); ok {
+		if err := intentrouter.JevAPIKeyValidator(v); err != nil {
+			return &ValidationError{Name: "jev_api_key", err: fmt.Errorf(`ent: validator failed for field "IntentRouter.jev_api_key": %w`, err)}
 		}
 	}
 	return nil
@@ -338,6 +377,15 @@ func (_u *IntentRouterUpdate) sqlSave(ctx context.Context) (_node int, err error
 	}
 	if _u.mutation.RulesCleared() {
 		_spec.ClearField(intentrouter.FieldRules, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.JevAPIKey(); ok {
+		_spec.SetField(intentrouter.FieldJevAPIKey, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Jev(); ok {
+		_spec.SetField(intentrouter.FieldJev, field.TypeJSON, value)
+	}
+	if _u.mutation.JevCleared() {
+		_spec.ClearField(intentrouter.FieldJev, field.TypeJSON)
 	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
@@ -537,6 +585,40 @@ func (_u *IntentRouterUpdateOne) ClearRules() *IntentRouterUpdateOne {
 	return _u
 }
 
+// SetJevAPIKey sets the "jev_api_key" field.
+func (_u *IntentRouterUpdateOne) SetJevAPIKey(v string) *IntentRouterUpdateOne {
+	_u.mutation.SetJevAPIKey(v)
+	return _u
+}
+
+// SetNillableJevAPIKey sets the "jev_api_key" field if the given value is not nil.
+func (_u *IntentRouterUpdateOne) SetNillableJevAPIKey(v *string) *IntentRouterUpdateOne {
+	if v != nil {
+		_u.SetJevAPIKey(*v)
+	}
+	return _u
+}
+
+// SetJev sets the "jev" field.
+func (_u *IntentRouterUpdateOne) SetJev(v domain.IntentJevConfig) *IntentRouterUpdateOne {
+	_u.mutation.SetJev(v)
+	return _u
+}
+
+// SetNillableJev sets the "jev" field if the given value is not nil.
+func (_u *IntentRouterUpdateOne) SetNillableJev(v *domain.IntentJevConfig) *IntentRouterUpdateOne {
+	if v != nil {
+		_u.SetJev(*v)
+	}
+	return _u
+}
+
+// ClearJev clears the value of the "jev" field.
+func (_u *IntentRouterUpdateOne) ClearJev() *IntentRouterUpdateOne {
+	_u.mutation.ClearJev()
+	return _u
+}
+
 // Mutation returns the IntentRouterMutation object of the builder.
 func (_u *IntentRouterUpdateOne) Mutation() *IntentRouterMutation {
 	return _u.mutation
@@ -611,6 +693,11 @@ func (_u *IntentRouterUpdateOne) check() error {
 	if v, ok := _u.mutation.ClassifierModel(); ok {
 		if err := intentrouter.ClassifierModelValidator(v); err != nil {
 			return &ValidationError{Name: "classifier_model", err: fmt.Errorf(`ent: validator failed for field "IntentRouter.classifier_model": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.JevAPIKey(); ok {
+		if err := intentrouter.JevAPIKeyValidator(v); err != nil {
+			return &ValidationError{Name: "jev_api_key", err: fmt.Errorf(`ent: validator failed for field "IntentRouter.jev_api_key": %w`, err)}
 		}
 	}
 	return nil
@@ -697,6 +784,15 @@ func (_u *IntentRouterUpdateOne) sqlSave(ctx context.Context) (_node *IntentRout
 	}
 	if _u.mutation.RulesCleared() {
 		_spec.ClearField(intentrouter.FieldRules, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.JevAPIKey(); ok {
+		_spec.SetField(intentrouter.FieldJevAPIKey, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Jev(); ok {
+		_spec.SetField(intentrouter.FieldJev, field.TypeJSON, value)
+	}
+	if _u.mutation.JevCleared() {
+		_spec.ClearField(intentrouter.FieldJev, field.TypeJSON)
 	}
 	_node = &IntentRouter{config: _u.config}
 	_spec.Assign = _node.assignValues

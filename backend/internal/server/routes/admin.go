@@ -209,6 +209,7 @@ func registerIntentRouterRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		routers.DELETE("/:group_id", h.Admin.IntentRouter.Delete)
 		routers.POST("/:group_id/test", h.Admin.IntentRouter.Test)
 		routers.POST("/:group_id/clear-cache", h.Admin.IntentRouter.ClearCache)
+		routers.GET("/:group_id/jev-status", h.Admin.IntentRouter.JevStatus)
 	}
 }
 

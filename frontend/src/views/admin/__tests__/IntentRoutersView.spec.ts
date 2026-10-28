@@ -4,7 +4,7 @@ import IntentRoutersView from '../IntentRoutersView.vue'
 
 const api = vi.hoisted(() => ({
   list: vi.fn(), save: vi.fn(), remove: vi.fn(), test: vi.fn(), clearCache: vi.fn(), events: vi.fn(),
-  hits: vi.fn(), hitStats: vi.fn(),
+  hits: vi.fn(), hitStats: vi.fn(), jevStatus: vi.fn(),
 }))
 const admin = vi.hoisted(() => ({ getAllIncludingInactive: vi.fn(), listAccounts: vi.fn() }))
 const toast = vi.hoisted(() => ({ showSuccess: vi.fn(), showError: vi.fn() }))
@@ -70,6 +70,7 @@ describe('IntentRoutersView', () => {
     api.events.mockResolvedValue({ data: [] })
     api.hitStats.mockResolvedValue({ data: [] })
     api.hits.mockResolvedValue({ data: { items: [], total: 0 } })
+    api.jevStatus.mockResolvedValue({ data: { state: 'off', days: [], usd_per_mtok: 0.042, cny_per_usd: 7 } })
   })
 
   it('keeps statistics and details on the newest group when requests finish out of order', async () => {
@@ -268,6 +269,118 @@ describe('IntentRoutersView', () => {
     await wrapper.get('[data-test="intent-save"]').trigger('click')
     await flushPromises()
     expect(api.save.mock.calls[0][1].rules[0].keywords).toEqual(['C:\\repo, test'])
+  })
+
+  it('reads a router saved before Jev existed with Jev off and the defaults filled in', async () => {
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+    expect((wrapper.get('[data-test="intent-jev-enabled"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.get('[data-test="intent-jev-threshold"]').element as HTMLInputElement).value).toBe('0.5')
+    expect(wrapper.get('[data-test="intent-jev-api-key"]').attributes('placeholder')).toBe('intentRouter.jev.apiKeyPlaceholder')
+    expect(wrapper.find('[data-test="intent-jev-users"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    const [, input] = api.save.mock.calls[0]
+    expect(input.jev).toEqual({ enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_key_ids: [], sample_percent: 100, low_balance_usd: 1, balance_usd: 0 })
+    expect(input.jev_api_key).toBe('')
+    expect(input).not.toHaveProperty('jev_set_balance_usd') // an empty balance field changes nothing
+  })
+
+  it('turns Jev on for listed users and keys, offering the rules as targets', async () => {
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input, jev_api_key_configured: true } }))
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-jev-enabled"]').setValue(true)
+    const rule = wrapper.get('[data-test="intent-jev-rule"]')
+    expect(rule.findAll('option').map((o) => o.text())).toEqual(['intentRouter.jev.rulePlaceholder', 'coding'])
+    await rule.setValue('coding')
+    await wrapper.get('[data-test="intent-jev-api-key"]').setValue('jev-secret')
+    await wrapper.get('[data-test="intent-jev-threshold"]').setValue('0.7')
+    await wrapper.get('[data-test="intent-jev-scope-listed"]').setValue(true)
+    await wrapper.get('[data-test="intent-jev-users"]').setValue('14, 14 abc，3')
+    await wrapper.get('[data-test="intent-jev-keys"]').setValue('22 37')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+
+    const [, input] = api.save.mock.calls[0]
+    expect(input.jev_api_key).toBe('jev-secret')
+    expect(input.jev).toMatchObject({ enabled: true, rule: 'coding', threshold: 0.7, scope: 'listed', user_ids: [14, 3], api_key_ids: [22, 37] })
+    // After saving, the key field is blank again and says a key is stored.
+    expect((wrapper.get('[data-test="intent-jev-api-key"]').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.get('[data-test="intent-jev-api-key"]').attributes('placeholder')).toBe('intentRouter.classifier.apiKeyKeep')
+  })
+
+  it('shows Jev status, daily usage and a low estimated balance', async () => {
+    api.jevStatus.mockResolvedValue({ data: {
+      state: 'paused', paused_until: '2026-10-29T06:01:00Z', reason: 'jev returned 529: overloaded', usd_per_mtok: 0.042, cny_per_usd: 7,
+      days: [{ date: '20261029', calls: 120, skipped: 30, probes: 40, errors: 2, tokens: 70000, cost_usd: 0.00294 }],
+      balance: { set_usd: 1.2, set_at: '2026-10-28T06:00:00Z', spent_tokens: 10_000_000, spent_usd: 0.42, estimated_usd: 0.78, low_balance_usd: 1, low: true },
+    } })
+    const wrapper = await mountView()
+    const status = wrapper.get('[data-test="intent-jev-status"]')
+    expect(status.text()).toContain('intentRouter.jev.status.paused')
+    expect(status.text()).toContain('jev returned 529')
+    const day = status.get('[data-test="intent-jev-day-20261029"]').text()
+    expect(day).toContain('10-29')
+    expect(day).toContain('$0.0029 / ¥0.0206')
+    const balance = status.get('[data-test="intent-jev-balance-estimate"]')
+    expect(balance.text()).toContain('"estimated":"$0.78"')
+    expect(balance.text()).toContain('intentRouter.jev.status.lowBalance')
+    expect(balance.classes()).toContain('text-red-700')
+  })
+
+  it('sends a newly entered balance once, and follows a switch-off made by the server', async () => {
+    const enabledRouter = { ...savedRouter, jev_api_key_configured: true, jev: { enabled: true, rule: 'coding', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_key_ids: [], sample_percent: 80, low_balance_usd: 1, balance_usd: 0 } }
+    api.list.mockResolvedValue({ data: [enabledRouter] })
+    api.jevStatus.mockResolvedValue({ data: { state: 'auto_disabled', auto_disabled_status: 402, auto_disabled_detail: 'payment required', auto_disabled_at: '2026-10-29T06:00:00Z', days: [], usd_per_mtok: 0.042, cny_per_usd: 7 } })
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...enabledRouter, ...input } }))
+    const wrapper = await mountView()
+
+    expect(wrapper.get('[data-test="intent-jev-auto-disabled"]').text()).toContain('intentRouter.jev.status.why402')
+    expect((wrapper.get('[data-test="intent-jev-enabled"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.get('[data-test="intent-jev-sample"]').element as HTMLInputElement).value).toBe('80')
+
+    await wrapper.get('[data-test="intent-jev-balance"]').setValue('12.5')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    const [, input] = api.save.mock.calls[0]
+    expect(input.jev_set_balance_usd).toBe(12.5)
+    expect(input.jev.enabled).toBe(false) // the stale "on" is not saved back
+    expect((wrapper.get('[data-test="intent-jev-balance"]').element as HTMLInputElement).value).toBe('')
+  })
+
+  it('ignores a switched-off status that was requested before the admin re-enabled and saved', async () => {
+    const jev = { enabled: false, rule: 'coding', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_key_ids: [], sample_percent: 100, low_balance_usd: 1, balance_usd: 0, auto_disabled_status: 402, auto_disabled_at: '2026-10-29T06:00:00Z' }
+    const router = { ...savedRouter, jev_api_key_configured: true, jev }
+    api.list.mockResolvedValue({ data: [router] })
+    const stale = deferred<{ data: unknown }>()
+    api.jevStatus.mockReturnValueOnce(stale.promise).mockResolvedValue({ data: { state: 'normal', days: [], usd_per_mtok: 0.042, cny_per_usd: 7 } })
+    api.save.mockImplementation(async (_id: number, input: { jev: object }) => ({ data: { ...router, ...input, jev: { ...jev, ...input.jev, enabled: true, auto_disabled_status: undefined, auto_disabled_at: undefined } } }))
+    const wrapper = await mountView()
+
+    await wrapper.get('[data-test="intent-jev-enabled"]').setValue(true)
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    // The status asked for before the save now arrives, still saying "switched off".
+    stale.resolve({ data: { state: 'auto_disabled', auto_disabled_status: 402, auto_disabled_at: '2026-10-29T06:00:00Z', days: [], usd_per_mtok: 0.042, cny_per_usd: 7 } })
+    await flushPromises()
+
+    expect((wrapper.get('[data-test="intent-jev-enabled"]').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.find('[data-test="intent-jev-auto-disabled"]').exists()).toBe(false)
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[1][1].jev.enabled).toBe(true)
+  })
+
+  it('shows the Jev probability of a try-it result', async () => {
+    api.test.mockResolvedValue({ data: { matched_by: 'jev', answer: 'p=0.91', intent: 'coding', understood: true, account_ids: [21], latency_ms: 80, probe_probability: 0.912 } })
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-test-text"]').setValue('Reply OK')
+    await wrapper.get('[data-test="intent-test-run"]').trigger('click')
+    await flushPromises()
+    const text = wrapper.get('[data-test="intent-test-result"]').text()
+    expect(text).toContain('intentRouter.test.byJev:{"p":"0.91"}')
+    expect(text).toContain('intentRouter.test.latency:{"ms":80}')
   })
 
   it('says when a keyword decided the try-it result', async () => {

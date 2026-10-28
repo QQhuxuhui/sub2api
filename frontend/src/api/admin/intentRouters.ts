@@ -11,6 +11,67 @@ export interface IntentRule {
 
 export type IntentClassifierProtocol = 'openai_chat' | 'gemini'
 
+/** TypeSafe Jev judges keyword misses of short conversations; probes are routed like a keyword hit of `rule`. */
+export interface IntentJevConfig {
+  enabled: boolean
+  /** Name of the rule whose accounts serve requests judged to be probes. */
+  rule: string
+  /** Probe probability (0-1) at or above which a request counts as a probe. */
+  threshold: number
+  /** Conversations with more items than this are never sent. */
+  max_turns: number
+  timeout_ms: number
+  model: string
+  /** all: every request of the group; listed: only the listed users and API keys. */
+  scope: 'all' | 'listed'
+  user_ids: number[]
+  api_key_ids: number[]
+  /** 1-100: share of eligible requests actually sent to Jev. */
+  sample_percent: number
+  /** Estimated balance below this is flagged; never switches Jev off. */
+  low_balance_usd: number
+  /** Server-owned: the balance last entered and when (set via jev_set_balance_usd). */
+  balance_usd: number
+  balance_set_at?: string
+  /** Server-owned: set when Jev was switched off after an account-level error. */
+  auto_disabled_status?: number
+  auto_disabled_detail?: string
+  auto_disabled_at?: string
+}
+
+export interface IntentJevDayStats {
+  date: string
+  calls: number
+  skipped: number
+  probes: number
+  errors: number
+  tokens: number
+  cost_usd: number
+}
+
+export interface IntentJevStatus {
+  state: 'off' | 'normal' | 'paused' | 'auto_disabled'
+  last_success_at?: string
+  paused_until?: string
+  reason?: string
+  auto_disabled_status?: number
+  auto_disabled_detail?: string
+  auto_disabled_at?: string
+  /** Newest first. */
+  days: IntentJevDayStats[]
+  usd_per_mtok: number
+  cny_per_usd: number
+  balance?: {
+    set_usd: number
+    set_at: string
+    spent_tokens: number
+    spent_usd: number
+    estimated_usd: number
+    low_balance_usd: number
+    low: boolean
+  }
+}
+
 export interface IntentRouter {
   group_id: number
   enabled: boolean
@@ -23,6 +84,9 @@ export interface IntentRouter {
   cache_ttl_seconds: number
   max_input_chars: number
   rules: IntentRule[]
+  /** Write-only like the classifier key. */
+  jev_api_key_configured: boolean
+  jev: IntentJevConfig
   updated_at: string
 }
 
@@ -37,23 +101,30 @@ export interface IntentRouterInput {
   cache_ttl_seconds: number
   max_input_chars: number
   rules: IntentRule[]
+  /** Leave empty to keep the stored key. */
+  jev_api_key: string
+  jev: IntentJevConfig
+  /** The balance just read off the TypeSafe console; the estimate restarts from it. */
+  jev_set_balance_usd?: number
 }
 
 export interface IntentClassifyTestResult {
   /** keyword: decided by a keyword, the classifier was not asked; '' when neither applied. */
-  matched_by: 'keyword' | 'classifier' | ''
+  matched_by: 'keyword' | 'jev' | 'classifier' | ''
   keyword?: string
   answer: string
   intent: string
   understood: boolean
   account_ids: number[]
   latency_ms: number
+  /** Jev's answer when Jev was asked. */
+  probe_probability?: number
 }
 
 export interface IntentRouteEvent {
   time: string
   group_id: number
-  kind: 'keyword' | 'classified' | 'cached' | 'routed' | 'error' | 'skipped'
+  kind: 'keyword' | 'jev' | 'classified' | 'cached' | 'routed' | 'error' | 'skipped'
   intent?: string
   account_id?: number
   latency_ms?: number
@@ -126,6 +197,9 @@ export const intentRoutersAPI = {
   },
   hits(query: IntentRouteHitQuery) {
     return apiClient.get<{ items: IntentRouteHit[]; total: number }>('/admin/intent-routers/hits', { params: query })
+  },
+  jevStatus(groupId: number) {
+    return apiClient.get<IntentJevStatus>(`/admin/intent-routers/${groupId}/jev-status`)
   },
   hitStats(query: IntentRouteHitQuery) {
     return apiClient.get<IntentRouteKeywordStat[]>('/admin/intent-routers/hits/stats', { params: query })

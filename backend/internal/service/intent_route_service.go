@@ -53,6 +53,7 @@ type intentRouterConfig struct {
 	CacheTTL           time.Duration
 	MaxInputChars      int
 	Rules              []domain.IntentRule
+	Jev                intentJevConfig
 }
 
 // activeRules are the rules a request can actually be routed by.
@@ -70,10 +71,13 @@ func (c *intentRouterConfig) activeRules() []domain.IntentRule {
 }
 
 // usable reports whether the router can route anything: it needs active rules
-// and at least one way of matching them — a classifier, or keywords.
+// and at least one way of matching them — a classifier, keywords, or Jev.
 func (c *intentRouterConfig) usable() bool {
 	if c == nil || !c.Enabled {
 		return false
+	}
+	if _, ok := c.jevRule(); ok {
+		return true
 	}
 	return len(c.classifierRules()) > 0 || c.hasKeywords()
 }
@@ -235,6 +239,12 @@ type IntentRouterService struct {
 	classifier intentClassifier
 	hits       intentRouteHitSink  // nil keeps no hit log
 	capture    *intentRouteCapture // nil captures no misses
+	judge      intentProbeJudge    // Jev; nil judges nothing
+	jevStats   intentJevStats      // nil keeps no Jev statistics
+	jevMu      sync.Mutex
+	jevHealth  map[int64]*intentJevHealth
+	// roll returns 0-99 for Jev sampling; tests make it deterministic.
+	roll func() int
 
 	configs      atomic.Pointer[map[int64]*intentRouterConfig]
 	configLoaded atomic.Int64 // unix nanos of the last successful load
@@ -259,8 +269,10 @@ func NewIntentRouterService(entClient *dbent.Client, rdb *redis.Client, cfg *con
 		port = cfg.Server.Port
 	}
 	var store intentRouteStore
+	var jevStats intentJevStats
 	if rdb != nil {
 		store = &redisIntentRouteStore{rdb: rdb}
+		jevStats = &redisIntentJevStats{rdb: rdb}
 	}
 	var hits intentRouteHitSink
 	if entClient != nil {
@@ -273,6 +285,8 @@ func NewIntentRouterService(entClient *dbent.Client, rdb *redis.Client, cfg *con
 		store:     store,
 		hits:      hits,
 		capture:   newIntentRouteCaptureFromEnv(),
+		judge:     newHTTPIntentProbeJudge(),
+		jevStats:  jevStats,
 		classifier: &httpIntentClassifier{
 			// The per-request context carries the real deadline.
 			client:      &http.Client{Timeout: 30 * time.Second},
@@ -361,12 +375,20 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 		}
 		if rule, keyword, ok := cfg.matchKeywords(text); ok {
 			s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "keyword", Intent: rule.Name, Detail: keyword})
-			s.recordHit(in, view, rule.Name, keyword, turn, text, texts[0])
+			s.recordHit(in, view, rule.Name, keyword, turn, text, texts[0], intentHitExcerpt(text, keyword, intentRouteHitExcerpt))
 			return s.newDecision(cfg, rule, "", 0, 0)
 		}
 	}
 	if s.capture.watching(in.APIKeyID) {
 		s.capture.add(in, view, texts)
+	}
+	// Jev judges what keywords missed, per turn and without memory, exactly
+	// like a keyword: a probe goes to the rule's accounts this turn only.
+	if len(texts) > 0 {
+		if rule, p, ok := s.judgeProbe(ctx, cfg, in, view, texts[0]); ok {
+			s.recordHit(in, view, rule.Name, fmt.Sprintf("jev:%.2f", p), 0, texts[0], texts[0], truncateRunes(texts[0], intentJevHitExcerpt))
+			return s.newDecision(cfg, rule, "", 0, 0)
+		}
 	}
 	rules := cfg.classifierRules()
 	if len(rules) == 0 {
@@ -554,7 +576,7 @@ func (s *IntentRouterService) record(event IntentRouteEvent) {
 }
 
 // recordHit keeps a keyword hit for later review; see intent_route_hits.go.
-func (s *IntentRouterService) recordHit(in IntentRouteInput, view intentRequestView, rule, keyword string, turn int, text, newest string) {
+func (s *IntentRouterService) recordHit(in IntentRouteInput, view intentRequestView, rule, keyword string, turn int, text, newest, excerpt string) {
 	if s.hits == nil {
 		return
 	}
@@ -576,7 +598,7 @@ func (s *IntentRouterService) recordHit(in IntentRouteInput, view intentRequestV
 		UserTurn:     turn,
 		MessageChars: utf8.RuneCountInString(text),
 		NewestChars:  utf8.RuneCountInString(newest),
-		Excerpt:      intentHitExcerpt(text, keyword, intentRouteHitExcerpt),
+		Excerpt:      excerpt,
 	})
 }
 
@@ -651,6 +673,7 @@ func intentRouterConfigFromEnt(row *dbent.IntentRouter) *intentRouterConfig {
 		CacheTTL:           time.Duration(row.CacheTTLSeconds) * time.Second,
 		MaxInputChars:      row.MaxInputChars,
 		Rules:              row.Rules,
+		Jev:                newIntentJevConfig(row.JevAPIKey, row.Jev),
 	}
 	if cfg.ClassifierTimeout <= 0 {
 		cfg.ClassifierTimeout = 3 * time.Second

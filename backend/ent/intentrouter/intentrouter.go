@@ -37,6 +37,10 @@ const (
 	FieldMaxInputChars = "max_input_chars"
 	// FieldRules holds the string denoting the rules field in the database.
 	FieldRules = "rules"
+	// FieldJevAPIKey holds the string denoting the jev_api_key field in the database.
+	FieldJevAPIKey = "jev_api_key"
+	// FieldJev holds the string denoting the jev field in the database.
+	FieldJev = "jev"
 	// Table holds the table name of the intentrouter in the database.
 	Table = "intent_routers"
 )
@@ -56,6 +60,8 @@ var Columns = []string{
 	FieldCacheTTLSeconds,
 	FieldMaxInputChars,
 	FieldRules,
+	FieldJevAPIKey,
+	FieldJev,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -99,6 +105,10 @@ var (
 	DefaultCacheTTLSeconds int
 	// DefaultMaxInputChars holds the default value on creation for the "max_input_chars" field.
 	DefaultMaxInputChars int
+	// DefaultJevAPIKey holds the default value on creation for the "jev_api_key" field.
+	DefaultJevAPIKey string
+	// JevAPIKeyValidator is a validator for the "jev_api_key" field. It is called by the builders before save.
+	JevAPIKeyValidator func(string) error
 )
 
 // OrderOption defines the ordering options for the IntentRouter queries.
@@ -162,4 +172,9 @@ func ByCacheTTLSeconds(opts ...sql.OrderTermOption) OrderOption {
 // ByMaxInputChars orders the results by the max_input_chars field.
 func ByMaxInputChars(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMaxInputChars, opts...).ToFunc()
+}
+
+// ByJevAPIKey orders the results by the jev_api_key field.
+func ByJevAPIKey(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldJevAPIKey, opts...).ToFunc()
 }

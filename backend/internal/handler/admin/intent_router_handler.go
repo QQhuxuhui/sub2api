@@ -174,3 +174,19 @@ func (h *IntentRouterHandler) HitStats(c *gin.Context) {
 	}
 	response.Success(c, stats)
 }
+
+// JevStatus reports whether Jev is answering for the group, its daily usage
+// and the estimated balance.
+// GET /api/v1/admin/intent-routers/:group_id/jev-status
+func (h *IntentRouterHandler) JevStatus(c *gin.Context) {
+	groupID, ok := parseIDParam(c, "group_id")
+	if !ok {
+		return
+	}
+	status, err := h.router.JevStatus(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, status)
+}
