@@ -128,6 +128,18 @@ type MethodLimits struct {
 	DailyLimit  float64 `json:"daily_limit"`
 	SingleMin   float64 `json:"single_min"`
 	SingleMax   float64 `json:"single_max"`
+	// QuoteUnit is "USDT" when the method is entered in whole USDT and the
+	// credited balance follows the amount that actually arrives.
+	QuoteUnit string `json:"quote_unit,omitempty"`
+	// QuoteCNYRate is the current CNY per QuoteUnit, for a preview only; 0
+	// when the rate is unavailable (ordering will then be refused).
+	QuoteCNYRate float64 `json:"quote_cny_rate,omitempty"`
+	// QuoteNetwork is the chain the payer must use, when the instance locks one.
+	QuoteNetwork string `json:"quote_network,omitempty"`
+	// QuoteAutoSettle is true when every instance can settle a short payment
+	// on its own (gateway admin login, a scannable network and a receiving
+	// address). Without it a short payment still needs an admin.
+	QuoteAutoSettle bool `json:"quote_auto_settle,omitempty"`
 }
 
 // MethodLimitsResponse is the full response for the user-facing /limits API.

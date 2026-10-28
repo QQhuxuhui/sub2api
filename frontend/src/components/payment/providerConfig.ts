@@ -174,6 +174,8 @@ export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
     { key: 'cashierBase', label: '', sensitive: false, optional: true, clearable: true, hintKey: 'admin.settings.payment.field_epusdtCashierBaseHint' },
     { key: 'receiveAddresses', label: '', sensitive: false, optional: true, clearable: true, hintKey: 'admin.settings.payment.field_epusdtReceiveAddressesHint' },
     { key: 'chainRpc', label: '', sensitive: false, optional: true, clearable: true, hintKey: 'admin.settings.payment.field_epusdtChainRpcHint' },
+    { key: 'adminUsername', label: '', sensitive: false, optional: true, clearable: true, hintKey: 'admin.settings.payment.field_epusdtAdminUsernameHint' },
+    { key: 'adminPassword', label: '', sensitive: true, optional: true, clearable: true },
     { key: 'currency', label: '', sensitive: false, defaultValue: 'CNY', hintKey: 'admin.settings.payment.field_paymentCurrencyHint', options: PAYMENT_CURRENCY_OPTIONS },
   ],
 }

@@ -26,6 +26,8 @@
             :currency="paymentState.currency || selectedCurrency"
             :out-trade-no="paymentState.outTradeNo"
             :mobile-alipay-deep-link="paymentState.alipayMobilePrecreateDeepLink"
+            :usdt-network="visibleMethods.usdt?.quote_network"
+            :usdt-auto-settle="visibleMethods.usdt?.quote_auto_settle === true"
             @done="onPaymentDone"
             @success="onPaymentSuccess"
             @settled="onPaymentSettled"
@@ -79,16 +81,21 @@
                   <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('payment.actualPay') }}</span>
                   <span class="text-lg font-bold text-primary-600 dark:text-primary-400">{{ formatSelectedPaymentAmount(totalAmount) }}</span>
                 </div>
-                <div v-if="balanceRechargeMultiplier !== 1" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 }">
+                <div v-if="usdtQuoted && usdtCnyPreview > 0" data-test="usdt-cny-preview" class="flex justify-between">
+                  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.usdtQuote.approxCny') }}</span>
+                  <span class="text-gray-900 dark:text-white">≈ ¥{{ usdtCnyPreview.toFixed(2) }}</span>
+                </div>
+                <p v-if="usdtQuoted && selectedLimit?.quote_auto_settle" class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.usdtQuote.creditRule') }}</p>
+                <div v-if="balanceRechargeMultiplier !== 1 && !usdtQuoted" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 }">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.creditedBalance') }}</span>
                   <span class="text-gray-900 dark:text-white">${{ creditedAmount.toFixed(2) }}</span>
                 </div>
-                <p v-if="balanceRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
+                <p v-if="balanceRechargeMultiplier !== 1 && !usdtQuoted" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
                   {{ t('payment.rechargeRatePreview', { currency: selectedCurrency, usd: balanceRechargeMultiplier.toFixed(2) }) }}
                 </p>
               </div>
             </div>
-            <UsdtPaymentNotice v-if="selectedMethod === 'usdt'" />
+            <UsdtPaymentNotice v-if="selectedMethod === 'usdt'" :quoted="usdtQuoted" :amount="validAmount" :network="selectedLimit?.quote_network" :auto-settle="selectedLimit?.quote_auto_settle === true" />
             <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmit || submitting" @click="handleSubmitRecharge">
               <span v-if="submitting" class="flex items-center justify-center gap-2">
                 <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
@@ -299,6 +306,7 @@ import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
 import PaymentStatusPanel from '@/components/payment/PaymentStatusPanel.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { DEFAULT_PAYMENT_CURRENCY, formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
+import { USDT_QUOTE_UNIT, formatUsdtAmount } from '@/components/payment/usdtQuote'
 import { planValiditySuffix as validitySuffixOf } from '@/components/payment/validity'
 import type { PaymentMethodOption } from '@/components/payment/PaymentMethodSelector.vue'
 import { buildPaymentErrorToastMessage, describePaymentScenarioError } from './paymentUx'
@@ -626,7 +634,14 @@ function subscriptionPaymentAmountForCurrency(value: number, currency: string): 
   return roundPaymentAmount(value * rate, currency)
 }
 
+const usdtQuoted = computed(() => selectedLimit.value?.quote_unit === USDT_QUOTE_UNIT)
+const usdtCnyPreview = computed(() => {
+  const rate = selectedLimit.value?.quote_cny_rate ?? 0
+  return usdtQuoted.value && rate > 0 ? Math.round(validAmount.value * rate * 100) / 100 : 0
+})
+
 function formatSelectedPaymentAmount(value: number): string {
+  if (usdtQuoted.value) return formatUsdtAmount(value)
   return formatPaymentAmount(value, selectedCurrency.value, localeCode.value)
 }
 
@@ -664,6 +679,7 @@ const amountError = computed(() => {
   if (!enabledMethods.value.some((m) => amountFitsMethod(validAmount.value, m))) {
     return t('payment.amountNoMethod')
   }
+  if (usdtQuoted.value && !Number.isInteger(validAmount.value)) return t('payment.usdtQuote.wholeNumber')
   // Selected method can't handle this amount (but others can)
   const ml = selectedLimit.value
   if (ml) {
@@ -675,6 +691,7 @@ const amountError = computed(() => {
 
 const canSubmit = computed(() =>
   validAmount.value > 0
+    && (!usdtQuoted.value || Number.isInteger(validAmount.value))
     && amountFitsMethod(validAmount.value, selectedMethod.value)
     && selectedLimit.value?.available !== false
 )

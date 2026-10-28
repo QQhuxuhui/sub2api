@@ -5,6 +5,8 @@ package payment
 import (
 	"context"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 // PaymentType represents a supported payment method.
@@ -271,6 +273,39 @@ type OnChainSettlementTarget struct {
 // admin may settle manually by transaction hash.
 type OnChainSettlementProvider interface {
 	OnChainSettlementTarget(ctx context.Context, tradeNo string) (*OnChainSettlementTarget, error)
+}
+
+// Gateway order states as seen by GatewayLedgerProvider.
+const (
+	GatewayOrderWaiting   = "waiting"
+	GatewayOrderPaid      = "paid"
+	GatewayOrderExpired   = "expired"
+	GatewayOrderSelecting = "selecting"
+)
+
+// GatewayOrder is one order known to a crypto gateway, whichever merchant
+// (site) created it.
+type GatewayOrder struct {
+	TradeNo        string
+	OrderID        string
+	ParentTradeNo  string
+	TxHash         string
+	ActualAmount   decimal.Decimal
+	ReceiveAddress string
+	Token          string
+	Network        string
+	Status         string
+	CreatedAt      time.Time
+}
+
+// GatewayLedgerProvider lets automatic chain settlement see every order the
+// gateway holds for a shared receiving address, across merchants.
+type GatewayLedgerProvider interface {
+	AutoSettleConfigured() bool
+	// AutoSettleScope is the locked network/token of the instance and the
+	// merchant-owned receiving addresses to watch on it.
+	AutoSettleScope() (network, token string, addresses []string)
+	GatewayOrdersSince(ctx context.Context, network, token, address string, since time.Time) ([]GatewayOrder, error)
 }
 
 // MerchantIdentityProvider exposes the current non-sensitive merchant identity

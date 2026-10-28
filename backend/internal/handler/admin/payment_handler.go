@@ -196,6 +196,8 @@ type AdminPaymentOrderResult struct {
 	SrcURL              *string    `json:"src_url,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`
 	UpdatedAt           time.Time  `json:"updated_at"`
+	// SettledBy is "auto" or "manual" for crypto orders settled from chain data.
+	SettledBy string `json:"settled_by,omitempty"`
 }
 
 func sanitizeAdminPaymentOrdersForResponse(orders []*dbent.PaymentOrder) []*AdminPaymentOrderResult {
@@ -252,6 +254,7 @@ func sanitizeAdminPaymentOrderForResponse(order *dbent.PaymentOrder) *AdminPayme
 		SrcHost:             order.SrcHost,
 		SrcURL:              order.SrcURL,
 		CreatedAt:           order.CreatedAt,
+		SettledBy:           service.PaymentOrderSettledBy(order),
 		UpdatedAt:           order.UpdatedAt,
 	}
 }

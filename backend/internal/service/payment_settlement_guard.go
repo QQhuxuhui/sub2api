@@ -100,7 +100,9 @@ func hashlessPaidOrderNear(ctx context.Context, client *dbent.Client, blockTime 
 
 func manualPaymentForHashlessOrder(ctx context.Context, client *dbent.Client, o *dbent.PaymentOrder) (int64, error) {
 	claim, err := client.PaymentTransactionClaim.Query().Where(
-		paymenttransactionclaim.SourceEQ(claimSourceManual),
+		// Any settlement from chain data, by an admin or automatic, may have
+		// consumed the transfer this hashless confirmation stands for.
+		paymenttransactionclaim.SourceIn(claimSourceManual, claimSourceAuto),
 		paymenttransactionclaim.OrderIDNEQ(o.ID),
 		paymenttransactionclaim.Or(paymenttransactionclaim.TransferTimeIsNil(), paymenttransactionclaim.And(
 			paymenttransactionclaim.TransferTimeGTE(o.CreatedAt.Add(-manualSettleClockSkew)),

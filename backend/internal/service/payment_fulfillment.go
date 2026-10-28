@@ -110,9 +110,10 @@ func (s *PaymentService) confirmPayment(ctx context.Context, oid int64, tradeNo 
 		})
 		return fmt.Errorf("invalid paid amount from provider: %v", paid)
 	}
-	if math.Abs(paid-o.PayAmount) > paymentAmountToleranceForCurrency(PaymentOrderCurrency(o)) {
-		s.writeAuditLog(ctx, o.ID, "PAYMENT_AMOUNT_MISMATCH", pk, map[string]any{"expected": o.PayAmount, "paid": paid, "tradeNo": tradeNo})
-		return fmt.Errorf("amount mismatch: expected %s, got %s", strconv.FormatFloat(o.PayAmount, 'f', -1, 64), strconv.FormatFloat(paid, 'f', -1, 64))
+	expectedAmount := paymentGatewayAmount(o)
+	if math.Abs(paid-expectedAmount) > paymentAmountToleranceForCurrency(PaymentOrderCurrency(o)) {
+		s.writeAuditLog(ctx, o.ID, "PAYMENT_AMOUNT_MISMATCH", pk, map[string]any{"expected": expectedAmount, "paid": paid, "tradeNo": tradeNo})
+		return fmt.Errorf("amount mismatch: expected %s, got %s", strconv.FormatFloat(expectedAmount, 'f', -1, 64), strconv.FormatFloat(paid, 'f', -1, 64))
 	}
 	claimKey := paymentTxHashFromMetadata(metadata)
 	if strings.EqualFold(pk, payment.TypeEpusdt) && claimKey == "" {
@@ -275,7 +276,7 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 	if resolvingReview {
 		grace = time.Time{}
 	}
-	c, err := client.PaymentOrder.Update().Where(
+	paidUpdate := client.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),
 		paymentorder.Or(
 			paymentorder.StatusEQ(OrderStatusPending),
@@ -285,7 +286,16 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 				paymentorder.UpdatedAtGTE(grace),
 			),
 		),
-	).SetStatus(OrderStatusPaid).SetPayAmount(paid).SetPaymentTradeNo(tradeNo).SetPaidAt(now).ClearFailedAt().ClearFailedReason().Save(ctx)
+	).SetStatus(OrderStatusPaid).SetPayAmount(paid).SetPaymentTradeNo(tradeNo).SetPaidAt(now).ClearFailedAt().ClearFailedReason()
+	if orderUSDTQuote(o) != nil {
+		paidUpdate.SetProviderSnapshot(snapshotWithGatewayAmount(o))
+	}
+	if credited, actual, ok := usdtQuotedGatewayCredit(o, metadata); ok {
+		// The gateway may have shifted the quote by a few cents to tell orders
+		// apart; credit what arrived, by the same rule as chain settlement.
+		paidUpdate.SetAmount(credited).SetPayAmount(actual)
+	}
+	c, err := paidUpdate.Save(ctx)
 	if err != nil {
 		return fmt.Errorf("update to PAID: %w", err)
 	}

@@ -93,6 +93,17 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if err := validateSelectedCreateOrderAmountCurrency(payAmountStr, sel); err != nil {
 		return nil, err
 	}
+	if isUSDTQuotedSelection(sel) {
+		quote, err := prepareUSDTQuote(ctx, req, cfg)
+		if err != nil {
+			return nil, err
+		}
+		req.usdtQuote = quote
+		orderAmount = quote.credit(decimal.NewFromFloat(req.Amount))
+		if err := s.cancelPendingUSDTOrders(ctx, req.UserID, req.PaymentType); err != nil {
+			return nil, err
+		}
+	}
 	oauthResp, err := s.maybeBuildWeChatOAuthRequiredResponseForSelection(ctx, req, limitAmount, payAmount, feeRate, sel)
 	if err != nil {
 		return nil, err
@@ -171,6 +182,10 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		return nil, err
 	}
 	providerSnapshot := buildPaymentOrderProviderSnapshot(sel, req)
+	if req.usdtQuote != nil {
+		providerSnapshot = req.usdtQuote.applyToSnapshot(providerSnapshot)
+		providerSnapshot[snapshotKeyGatewayAmount] = decimal.NewFromFloat(payAmount).String()
+	}
 	selectedInstanceID := ""
 	selectedProviderKey := ""
 	if sel != nil {
@@ -478,14 +493,18 @@ func (s *PaymentService) invokeProvider(ctx context.Context, order *dbent.Paymen
 	if err != nil {
 		return nil, fmt.Errorf("update order with payment details: %w", err)
 	}
-	s.writeAuditLog(ctx, order.ID, "ORDER_CREATED", fmt.Sprintf("user:%d", req.UserID), map[string]any{
+	createdDetail := map[string]any{
 		"paymentAmount":  req.Amount,
 		"creditedAmount": order.Amount,
 		"payAmount":      order.PayAmount,
 		"paymentType":    req.PaymentType,
 		"orderType":      req.OrderType,
 		"paymentSource":  NormalizePaymentSource(req.PaymentSource),
-	})
+	}
+	if req.usdtQuote != nil {
+		createdDetail["usdtCnyRate"] = req.usdtQuote.rate.String()
+	}
+	s.writeAuditLog(ctx, order.ID, "ORDER_CREATED", fmt.Sprintf("user:%d", req.UserID), createdDetail)
 	resultType := pr.ResultType
 	if resultType == "" {
 		resultType = payment.CreatePaymentResultOrderCreated

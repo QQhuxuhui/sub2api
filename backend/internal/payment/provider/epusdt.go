@@ -113,6 +113,10 @@ func NormalizeEpusdtConfig(config map[string]string) (map[string]string, error) 
 		cfg["cashierBase"] = cashierBase
 	}
 
+	if (cfg["adminUsername"] == "") != (cfg["adminPassword"] == "") {
+		return nil, fmt.Errorf("epusdt config adminUsername and adminPassword must be set together")
+	}
+
 	if cfg["chainRpc"] != "" {
 		if _, err := chainverify.ParseEndpointOverrides(cfg["chainRpc"]); err != nil {
 			return nil, fmt.Errorf("epusdt config chainRpc: %w", err)

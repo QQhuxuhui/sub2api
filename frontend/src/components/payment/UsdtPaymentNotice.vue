@@ -10,7 +10,10 @@
       </svg>
       <p class="text-base font-bold text-amber-800 dark:text-amber-200">{{ t('payment.usdtNotice.title') }}</p>
     </div>
-    <ul class="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-amber-900 dark:text-amber-100">
+    <p v-if="quoted" data-test="usdt-quoted-notice" class="mt-2 text-sm leading-6 text-amber-900 dark:text-amber-100">
+      {{ t(autoSettle ? 'payment.usdtQuote.notice' : 'payment.usdtQuote.noticeExact', { amount: amountText, network: networkLabel }) }}
+    </p>
+    <ul v-else class="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-amber-900 dark:text-amber-100">
       <li><span class="font-semibold">{{ t('payment.usdtNotice.exactAmount') }}</span></li>
       <li>{{ t('payment.usdtNotice.exchangeFee') }}</li>
     </ul>
@@ -18,7 +21,18 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { formatUsdtAmount, usdtNetworkLabel } from './usdtQuote'
+
+const props = defineProps<{
+  quoted?: boolean
+  amount?: number
+  network?: string
+  autoSettle?: boolean
+}>()
 
 const { t } = useI18n()
+const amountText = computed(() => (props.amount && props.amount > 0 ? formatUsdtAmount(props.amount) : 'USDT'))
+const networkLabel = computed(() => usdtNetworkLabel(props.network) || 'USDT')
 </script>

@@ -167,7 +167,7 @@
 
     <!-- QR Code Mode -->
     <template v-else-if="showQRCode">
-      <UsdtWithdrawCalculator v-if="isUsdt" :order-id="orderId" />
+      <UsdtTransferCard v-if="usdtQuoted" :amount="payAmount ?? 0" :network="usdtNetwork" :auto-settle="usdtAutoSettle" />
       <div class="card p-6">
         <div class="flex flex-col items-center space-y-4">
           <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ scanTitle }}</p>
@@ -198,7 +198,7 @@
 
     <!-- Waiting for Popup/Redirect Mode -->
     <template v-else>
-      <UsdtWithdrawCalculator v-if="isUsdt" :order-id="orderId" />
+      <UsdtTransferCard v-if="usdtQuoted" :amount="payAmount ?? 0" :network="usdtNetwork" :auto-settle="usdtAutoSettle" />
       <div class="card p-6">
         <div class="flex flex-col items-center space-y-4 py-4">
           <div class="h-10 w-10 animate-spin rounded-full border-4 border-primary-500 border-t-transparent"></div>
@@ -230,7 +230,8 @@ import { getPaymentPopupFeatures, isBuiltInAlipayMethod, isBuiltInWxpayMethod } 
 import { currencySymbol, formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
 import type { PaymentOrder } from '@/types/payment'
 import Icon from '@/components/icons/Icon.vue'
-import UsdtWithdrawCalculator from '@/components/payment/UsdtWithdrawCalculator.vue'
+import UsdtTransferCard from '@/components/payment/UsdtTransferCard.vue'
+import { formatUsdtAmount, isUsdtQuotedOrder } from '@/components/payment/usdtQuote'
 import QRCode from 'qrcode'
 import alipayIcon from '@/assets/icons/alipay.svg'
 import wxpayIcon from '@/assets/icons/wxpay.svg'
@@ -253,6 +254,8 @@ const props = defineProps<{
   currency?: string
   outTradeNo?: string
   mobileAlipayDeepLink?: boolean
+  usdtNetwork?: string
+  usdtAutoSettle?: boolean
 }>()
 
 type PaymentOutcome = 'success' | 'cancelled' | 'expired'
@@ -297,6 +300,7 @@ const VERIFY_RETRY_MAX_ATTEMPTS = 6
 const isAlipay = computed(() => isBuiltInAlipayMethod(props.paymentType))
 const isWxpay = computed(() => isBuiltInWxpayMethod(props.paymentType))
 const isUsdt = computed(() => props.paymentType.trim().toLowerCase() === 'usdt')
+const usdtQuoted = computed(() => isUsdtQuotedOrder(props.paymentType, paymentCurrency.value))
 const supportsActiveRecovery = computed(() => isWxpay.value || isAlipay.value || isUsdt.value)
 const isMobileAlipayDeepLink = computed(() => props.mobileAlipayDeepLink === true && isAlipay.value && !!qrUrl.value)
 const showQRCode = computed(() => !!qrUrl.value && (!isMobileAlipayDeepLink.value || deepLinkFallbackVisible.value))
@@ -341,6 +345,7 @@ const displayPaymentAmount = computed(() => formatGatewayAmount(props.payAmount 
 const displayOrderNumber = computed(() => props.outTradeNo || `#${props.orderId}`)
 
 function formatGatewayAmount(value: number, currency?: string | null): string {
+  if (isUsdtQuotedOrder(props.paymentType, currency || paymentCurrency.value)) return formatUsdtAmount(value)
   return formatPaymentAmount(value, currency || paymentCurrency.value, localeCode.value)
 }
 

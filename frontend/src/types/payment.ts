@@ -51,6 +51,14 @@ export interface MethodLimit {
   single_max: number
   fee_rate: number
   available: boolean
+  /** "USDT" when the amount is entered in whole USDT and credited by what arrives. */
+  quote_unit?: string
+  /** CNY per quote unit, for a preview only. */
+  quote_cny_rate?: number
+  /** Chain the payer must use, e.g. "binance". */
+  quote_network?: string
+  /** True when a short payment (exchange fee deducted) is settled automatically. */
+  quote_auto_settle?: boolean
 }
 
 /** Response from /payment/limits API */
@@ -104,6 +112,8 @@ export interface PaymentOrder {
   refund_request_reason?: string
   plan_id?: number
   provider_instance_id?: string
+  /** "auto" / "manual" for crypto orders settled from chain data (admin only). */
+  settled_by?: string
 }
 
 // ==================== Plans & Channels ====================

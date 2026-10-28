@@ -34,6 +34,7 @@ func (s *PaymentConfigService) GetAvailableMethodLimits(ctx context.Context) (*M
 		ml := pcAggregateMethodLimits(pt, insts)
 		ml.DisplayName = s.pcAggregateMethodDisplayName(pt, insts)
 		ml.Currency = currency
+		s.applyUSDTQuoteLimits(ctx, &ml, insts)
 		resp.Methods[ml.PaymentType] = ml
 	}
 	resp.GlobalMin, resp.GlobalMax = pcComputeGlobalRange(resp.Methods)
@@ -331,4 +332,40 @@ func pcComputeGlobalRange(methods map[string]MethodLimits) (globalMin, globalMax
 		globalMax = 0
 	}
 	return globalMin, globalMax
+}
+
+// applyUSDTQuoteLimits marks a method whose instances are all USDT-quoted
+// Epusdt instances, raising its minimum to the USDT floor.
+func (s *PaymentConfigService) applyUSDTQuoteLimits(ctx context.Context, ml *MethodLimits, insts []*dbent.PaymentProviderInstance) {
+	if len(insts) == 0 {
+		return
+	}
+	network := ""
+	autoSettle := true
+	for i, inst := range insts {
+		if inst.ProviderKey != payment.TypeEpusdt || s.pcInstancePaymentCurrency(inst) != "USD" {
+			return
+		}
+		instNetwork := ""
+		if cfg, err := s.decryptConfig(inst.Config); err == nil {
+			instNetwork = strings.ToLower(strings.TrimSpace(cfg["network"]))
+			autoSettle = autoSettle && usdtAutoSettleReady(inst, cfg)
+		} else {
+			autoSettle = false
+		}
+		if i == 0 {
+			network = instNetwork
+		} else if network != instNetwork {
+			network = ""
+		}
+	}
+	ml.QuoteUnit = usdtQuoteUnit
+	ml.QuoteNetwork = network
+	ml.QuoteAutoSettle = autoSettle
+	if ml.SingleMin < usdtQuoteMinAmount {
+		ml.SingleMin = usdtQuoteMinAmount
+	}
+	if rate, err := usdtCNYRate(ctx); err == nil {
+		ml.QuoteCNYRate = rate.InexactFloat64()
+	}
 }

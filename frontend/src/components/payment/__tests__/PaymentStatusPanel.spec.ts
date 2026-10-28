@@ -29,16 +29,6 @@ vi.mock('@/stores', () => ({
   }),
 }))
 
-// The calculator talks to the API and the app store on its own; it has its
-// own spec, here it only needs to be mounted with the right order.
-vi.mock('@/components/payment/UsdtWithdrawCalculator.vue', () => ({
-  default: {
-    name: 'UsdtWithdrawCalculator',
-    props: ['orderId'],
-    template: '<div data-test="usdt-calculator-stub" :data-order-id="orderId" />',
-  },
-}))
-
 vi.mock('@/api/payment', () => ({
   paymentAPI: {
     cancelOrder,
@@ -234,9 +224,9 @@ describe('PaymentStatusPanel', () => {
     wrapper.unmount()
   })
 
-  it('shows the amount card only while a USDT order is waiting', async () => {
+  it('shows the withdraw-this-much card only for a USDT-quoted order', async () => {
     pollOrderStatus.mockResolvedValue({ ...orderFactory('PENDING'), payment_type: 'usdt' })
-    const mountPanel = (paymentType: string) => mount(PaymentStatusPanel, {
+    const mountPanel = (paymentType: string, currency: string, usdtAutoSettle = false) => mount(PaymentStatusPanel, {
       props: {
         orderId: 42,
         qrCode: '',
@@ -244,21 +234,36 @@ describe('PaymentStatusPanel', () => {
         expiresAt: '2099-01-01T12:30:00Z',
         paymentType,
         orderType: 'balance',
+        payAmount: 150,
+        currency,
+        usdtNetwork: 'binance',
+        usdtAutoSettle,
       },
       global: { stubs: { Icon: true } },
     })
 
-    const usdt = mountPanel('usdt')
+    const usdt = mountPanel('usdt', 'USD', true)
     await flushPromises()
-    // One card carries both the rule and the amount; no second notice next to it.
-    expect(usdt.find('[data-test="usdt-payment-notice"]').exists()).toBe(false)
-    expect(usdt.get('[data-test="usdt-calculator-stub"]').attributes('data-order-id')).toBe('42')
+    expect(usdt.get('[data-test="usdt-transfer-amount"]').text()).toContain('150 USDT')
+    expect(usdt.get('[data-test="usdt-transfer-amount"]').text()).toContain('BSC')
+    expect(usdt.get('[data-test="usdt-transfer-rule"]').text()).toContain('payment.usdtQuote.feeDeducted')
     usdt.unmount()
 
-    const stripe = mountPanel('stripe')
+    // Without automatic settlement the card must not promise that a short
+    // payment completes by itself.
+    const manual = mountPanel('usdt', 'USD', false)
     await flushPromises()
-    expect(stripe.find('[data-test="usdt-payment-notice"]').exists()).toBe(false)
-    expect(stripe.find('[data-test="usdt-calculator-stub"]').exists()).toBe(false)
+    expect(manual.get('[data-test="usdt-transfer-rule"]').text()).toContain('payment.usdtQuote.exactOnly')
+    manual.unmount()
+
+    const cnyQuoted = mountPanel('usdt', 'CNY')
+    await flushPromises()
+    expect(cnyQuoted.find('[data-test="usdt-transfer-card"]').exists()).toBe(false)
+    cnyQuoted.unmount()
+
+    const stripe = mountPanel('stripe', 'USD')
+    await flushPromises()
+    expect(stripe.find('[data-test="usdt-transfer-card"]').exists()).toBe(false)
     stripe.unmount()
   })
 

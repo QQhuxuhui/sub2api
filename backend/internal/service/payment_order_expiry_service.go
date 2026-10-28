@@ -19,6 +19,12 @@ const (
 	// paymentOrderExpiryLeaderLockTTL must exceed the combined reconcile + expiry
 	// timeouts (2 * expiryCheckTimeout) so the lock never expires mid-run.
 	paymentOrderExpiryLeaderLockTTL = 3 * time.Minute
+
+	// USDT auto-settlement scans the chain on its own, faster cadence.
+	usdtAutoSettleInterval      = 30 * time.Second
+	usdtAutoSettleTimeout       = 25 * time.Second
+	usdtAutoSettleLeaderLockKey = "payment:usdt:auto-settle:leader"
+	usdtAutoSettleLeaderLockTTL = time.Minute
 )
 
 // PaymentOrderExpiryService periodically expires timed-out payment orders.
@@ -74,6 +80,40 @@ func (s *PaymentOrderExpiryService) Start() {
 			}
 		}
 	}()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ticker := time.NewTicker(usdtAutoSettleInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.runAutoSettleOnce()
+			case <-s.stopCh:
+				return
+			}
+		}
+	}()
+}
+
+func (s *PaymentOrderExpiryService) runAutoSettleOnce() {
+	lockCtx, lockCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	release, ok := tryAcquireSingletonLeaderLock(lockCtx, s.lockCache, s.db, usdtAutoSettleLeaderLockKey, s.instanceID, usdtAutoSettleLeaderLockTTL)
+	lockCancel()
+	if !ok {
+		return
+	}
+	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), usdtAutoSettleTimeout)
+	defer cancel()
+	settled, err := s.paymentSvc.AutoSettleUSDTTransfers(ctx)
+	if err != nil {
+		slog.Warn("[PaymentOrderExpiry] usdt auto-settle pass failed", "error", err)
+	}
+	if settled > 0 {
+		slog.Info("[PaymentOrderExpiry] usdt orders auto-settled", "count", settled)
+	}
 }
 
 func (s *PaymentOrderExpiryService) Stop() {

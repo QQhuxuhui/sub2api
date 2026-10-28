@@ -22,6 +22,9 @@
       <OrderTable :orders="orders" :loading="ordersLoading" show-user>
         <template #actions="{ row }">
           <div class="flex items-center gap-1">
+            <span v-if="row.settled_by" data-test="settled-by-badge" :class="['rounded-full px-1.5 py-0.5 text-xs font-medium', row.settled_by === 'auto' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-gray-100 text-gray-600 dark:bg-dark-600 dark:text-gray-300']">
+              {{ row.settled_by === 'auto' ? t('payment.admin.settledByAuto') : t('payment.admin.settledByManual') }}
+            </span>
             <button @click="showOrderDetail(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-dark-600">
               <Icon name="eye" size="sm" />
               {{ t('common.view') }}

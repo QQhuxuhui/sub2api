@@ -116,7 +116,7 @@ var providerSensitiveConfigFields = map[string]map[string]struct{}{
 	payment.TypeWxpay:     {"privatekey": {}, "apiv3key": {}, "publickey": {}},
 	payment.TypeStripe:    {"secretkey": {}, "webhooksecret": {}},
 	payment.TypeAirwallex: {"apikey": {}, "webhooksecret": {}},
-	payment.TypeEpusdt:    {"secretkey": {}},
+	payment.TypeEpusdt:    {"secretkey": {}, "adminpassword": {}},
 }
 
 // providerPendingOrderProtectedConfigFields lists config keys that cannot be

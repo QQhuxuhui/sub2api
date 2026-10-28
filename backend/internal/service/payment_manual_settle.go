@@ -11,6 +11,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymenttransactionclaim"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
@@ -218,10 +219,69 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 		return result, nil
 	}
 
+	operator := strings.TrimSpace(req.Operator)
+	if operator == "" {
+		operator = "admin"
+	}
+	settled, err := s.commitChainSettlement(ctx, o, chainSettlement{
+		txHash:          normalizedHash,
+		network:         network,
+		transfers:       matched,
+		received:        received,
+		expected:        expected,
+		quoteNetwork:    target.Network,
+		networkSwitched: networkSwitched,
+		tradeNo:         tradeNo,
+		operator:        operator,
+		claimSource:     claimSourceManual,
+		auditAction:     auditActionManualSettled,
+	})
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("order settled manually by tx hash", "orderID", o.ID, "txHash", first.TxHash, "network", network, "operator", operator)
+	result.Settled = true
+	result.OrderStatus = OrderStatusPaid
+	if settled.fulfillErr != nil {
+		// The order is PAID and audited; the regular retry path can finish it.
+		return result, infraerrors.InternalServer("FULFILLMENT_FAILED", "order marked paid but fulfillment failed, use retry: "+settled.fulfillErr.Error())
+	}
+	if cur, getErr := s.entClient.PaymentOrder.Get(ctx, o.ID); getErr == nil {
+		result.OrderStatus = cur.Status
+	}
+	return result, nil
+}
+
+// chainSettlement is a verified on-chain payment about to settle an order.
+type chainSettlement struct {
+	txHash          string
+	network         string
+	transfers       []chainverify.Transfer
+	received        decimal.Decimal
+	expected        decimal.Decimal
+	quoteNetwork    string
+	networkSwitched bool
+	tradeNo         string
+	operator        string
+	claimSource     string
+	auditAction     string
+	extraAudit      map[string]any
+}
+
+type chainSettlementOutcome struct {
+	creditedAmount float64
+	fulfillErr     error
+}
+
+// commitChainSettlement claims the transaction, marks the order PAID and runs
+// fulfillment. A USDT-quoted order is credited for what actually arrived, at
+// its locked rate; any other order keeps its original amount.
+func (s *PaymentService) commitChainSettlement(ctx context.Context, o *dbent.PaymentOrder, cs chainSettlement) (*chainSettlementOutcome, error) {
+	first := cs.transfers[0]
 	previousStatus := o.Status
 	tx, finish, err := beginPaymentSettlement(ctx, s.entClient)
 	if err != nil {
-		return nil, fmt.Errorf("begin manual settlement: %w", err)
+		return nil, fmt.Errorf("begin chain settlement: %w", err)
 	}
 	defer finish()
 	client := tx.Client()
@@ -232,12 +292,12 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 	} else if paidBy != 0 {
 		return nil, infraerrors.Conflict("HASHLESS_PAYMENT_NEARBY", fmt.Sprintf("order %d has an unresolved hashless confirmation", paidBy))
 	}
-	if _, err := claimPaymentTransaction(ctx, client, o.ID, normalizedHash); err != nil {
+	if _, err := claimPaymentTransaction(ctx, client, o.ID, cs.txHash); err != nil {
 		return nil, err
 	}
-	if err := recordSettlementClaim(ctx, client, o, normalizedHash, claimSourceManual, &first.BlockTime, map[string]any{
-		"network": network, "token": first.Token, "destination": first.To,
-		"received_amount": received.String(), "transfers": matched,
+	if err := recordSettlementClaim(ctx, client, o, cs.txHash, cs.claimSource, &first.BlockTime, map[string]any{
+		"network": cs.network, "token": first.Token, "destination": first.To,
+		"received_amount": cs.received.String(), "transfers": cs.transfers,
 	}); err != nil {
 		return nil, err
 	}
@@ -248,56 +308,86 @@ func (s *PaymentService) AdminSettleOrderByTxHash(ctx context.Context, orderID i
 		return nil, err
 	}
 	if resolved > 0 {
-		if err := writePaymentAudit(ctx, client, o.ID, "PAYMENT_REVIEW_RESOLVED", req.Operator, map[string]any{"txHash": normalizedHash}); err != nil {
+		if err := writePaymentAudit(ctx, client, o.ID, "PAYMENT_REVIEW_RESOLVED", cs.operator, map[string]any{"txHash": cs.txHash}); err != nil {
 			return nil, err
 		}
 	}
-	updated, err := client.PaymentOrder.Update().Where(
+	update := client.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),
 		paymentorder.StatusIn(OrderStatusPending, OrderStatusExpired, OrderStatusCancelled),
-	).SetStatus(OrderStatusPaid).SetPaidAt(time.Now()).ClearFailedAt().ClearFailedReason().Save(ctx)
+	).SetStatus(OrderStatusPaid).SetPaidAt(time.Now()).ClearFailedAt().ClearFailedReason()
+	snapshot := make(map[string]any, len(o.ProviderSnapshot)+1)
+	for k, v := range o.ProviderSnapshot {
+		snapshot[k] = v
+	}
+	snapshot[snapshotKeySettledBy] = settledByFromClaimSource(cs.claimSource)
+	update.SetProviderSnapshot(snapshot)
+	outcome := &chainSettlementOutcome{creditedAmount: o.Amount}
+	quote := orderUSDTQuote(o)
+	if quote != nil {
+		snapshot[snapshotKeyGatewayAmount] = decimal.NewFromFloat(paymentGatewayAmount(o)).String()
+		outcome.creditedAmount = usdtQuotedCredit(o, cs.received)
+		update.SetAmount(outcome.creditedAmount).SetPayAmount(cs.received.Round(2).InexactFloat64())
+	}
+	updated, err := update.Save(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("update to PAID: %w", err)
 	}
 	if updated == 0 {
 		return nil, infraerrors.Conflict("INVALID_STATUS", "order status changed while settling, reload and check it")
 	}
-	operator := strings.TrimSpace(req.Operator)
-	if operator == "" {
-		operator = "admin"
-	}
-	if err := writePaymentAudit(ctx, client, o.ID, auditActionManualSettled, operator, map[string]any{
-		"txHash":          normalizedHash,
-		"network":         network,
+	detail := map[string]any{
+		"txHash":          cs.txHash,
+		"network":         cs.network,
 		"token":           first.Token,
 		"from":            first.From,
 		"to":              first.To,
-		"receivedAmount":  received.String(),
-		"expectedAmount":  expected.String(),
-		"shortfall":       shortfall.String(),
+		"receivedAmount":  cs.received.String(),
+		"expectedAmount":  cs.expected.String(),
+		"shortfall":       decimal.Max(cs.expected.Sub(cs.received), decimal.Zero).String(),
 		"blockTime":       first.BlockTime.UTC().Format(time.RFC3339),
-		"quoteNetwork":    target.Network,
-		"networkSwitched": networkSwitched,
+		"quoteNetwork":    cs.quoteNetwork,
+		"networkSwitched": cs.networkSwitched,
 		"previous_status": previousStatus,
-		"tradeNo":         tradeNo,
-	}); err != nil {
+		"tradeNo":         cs.tradeNo,
+	}
+	if quote != nil {
+		detail["usdtCnyRate"] = quote.rate.String()
+		detail["originalAmount"] = o.Amount
+		detail["creditedAmount"] = outcome.creditedAmount
+	}
+	for k, v := range cs.extraAudit {
+		detail[k] = v
+	}
+	if err := writePaymentAudit(ctx, client, o.ID, cs.auditAction, cs.operator, detail); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit manual settlement: %w", err)
+		return nil, fmt.Errorf("commit chain settlement: %w", err)
 	}
 	finish()
-	slog.Info("order settled manually by tx hash", "orderID", o.ID, "txHash", first.TxHash, "network", network, "operator", operator)
-	result.Settled = true
-	result.OrderStatus = OrderStatusPaid
-	if err := s.executeFulfillment(ctx, o.ID); err != nil {
-		// The order is PAID and audited; the regular retry path can finish it.
-		return result, infraerrors.InternalServer("FULFILLMENT_FAILED", "order marked paid but fulfillment failed, use retry: "+err.Error())
+	outcome.fulfillErr = s.executeFulfillment(ctx, o.ID)
+	return outcome, nil
+}
+
+// snapshotKeySettledBy marks orders settled from chain data instead of a
+// gateway confirmation: "auto" or "manual".
+const snapshotKeySettledBy = "settled_by"
+
+func settledByFromClaimSource(source string) string {
+	if source == claimSourceAuto {
+		return "auto"
 	}
-	if cur, getErr := s.entClient.PaymentOrder.Get(ctx, o.ID); getErr == nil {
-		result.OrderStatus = cur.Status
+	return "manual"
+}
+
+// PaymentOrderSettledBy reports how a crypto order was settled from chain data
+// ("auto", "manual"), or "" for a regular gateway confirmation.
+func PaymentOrderSettledBy(o *dbent.PaymentOrder) string {
+	if o == nil {
+		return ""
 	}
-	return result, nil
+	return psSnapshotStringValue(o.ProviderSnapshot[snapshotKeySettledBy])
 }
 
 func manualSettleAllowedStatus(status string) bool {
