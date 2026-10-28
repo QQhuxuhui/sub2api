@@ -1070,6 +1070,10 @@ type GatewayConfig struct {
 
 	// 是否允许对部分 400 错误触发 failover（默认关闭以避免改变语义）
 	FailoverOn400 bool `mapstructure:"failover_on_400"`
+	// FailoverOn400Keywords 是 FailoverOn400 开启时额外视为「换个账号可能成功」的
+	// 400 关键字（不区分大小写，匹配上游错误消息或响应体）。只换号，不标记账号状态。
+	// 环境变量用英文逗号分隔，例如 GATEWAY_FAILOVER_ON_400_KEYWORDS=第三方中转,客户端归属
+	FailoverOn400Keywords []string `mapstructure:"failover_on_400_keywords"`
 
 	// 账户切换最大次数（遇到上游错误时切换到其他账户的次数上限）
 	MaxAccountSwitches int `mapstructure:"max_account_switches"`
@@ -2371,6 +2375,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.log_upstream_error_body_max_bytes", 2048)
 	viper.SetDefault("gateway.inject_beta_for_apikey", false)
 	viper.SetDefault("gateway.failover_on_400", false)
+	viper.SetDefault("gateway.failover_on_400_keywords", []string{})
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	viper.SetDefault("gateway.force_codex_cli", false)

@@ -214,9 +214,7 @@ func (s *GatewayService) shouldFailoverOn400(respBody []byte) bool {
 	// 只对"可能是兼容性差异导致"的 400 允许切换，避免无意义重试。
 	// 默认保守：无法识别则不切换。
 	msg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-	if msg == "" {
-		return false
-	}
+	// 没有标准错误消息时仍检查下方的自定义响应体关键词。
 
 	// 缺少/错误的 beta header：换账号/链路可能成功（尤其是混合调度时）。
 	// 更精确匹配 beta 相关的兼容性问题，避免误触发切换。
@@ -232,6 +230,18 @@ func (s *GatewayService) shouldFailoverOn400(respBody []byte) bool {
 	}
 	if strings.Contains(msg, "tool_use") || strings.Contains(msg, "tool_result") || strings.Contains(msg, "tools") {
 		return true
+	}
+
+	// 运维配置的关键字：上游中转对客户端的校验（版本、归属头、第三方客户端等）
+	// 只针对某个上游，换到别的账号往往就能通过。
+	if s.cfg != nil && len(s.cfg.Gateway.FailoverOn400Keywords) > 0 {
+		bodyLower := strings.ToLower(string(respBody))
+		for _, keyword := range s.cfg.Gateway.FailoverOn400Keywords {
+			k := strings.ToLower(strings.TrimSpace(keyword))
+			if k != "" && (strings.Contains(msg, k) || strings.Contains(bodyLower, k)) {
+				return true
+			}
+		}
 	}
 
 	return false

@@ -2610,3 +2610,23 @@ func TestLoad_DefaultGatewayImageStreamConfig(t *testing.T) {
 		t.Fatalf("image stream timeout = %d, want greater than ordinary stream timeout %d", cfg.Gateway.ImageStreamDataIntervalTimeout, cfg.Gateway.StreamDataIntervalTimeout)
 	}
 }
+
+func TestLoadFailoverOn400KeywordsFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_FAILOVER_ON_400", "true")
+	t.Setenv("GATEWAY_FAILOVER_ON_400_KEYWORDS", "第三方中转,根级 system,Third-party apps")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.True(t, cfg.Gateway.FailoverOn400)
+	require.Equal(t, []string{"第三方中转", "根级 system", "Third-party apps"}, cfg.Gateway.FailoverOn400Keywords)
+}
+
+func TestLoadFailoverOn400KeywordsDefaultEmpty(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.False(t, cfg.Gateway.FailoverOn400)
+	require.Empty(t, cfg.Gateway.FailoverOn400Keywords)
+}

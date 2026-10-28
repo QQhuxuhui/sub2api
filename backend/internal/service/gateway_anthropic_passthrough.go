@@ -175,6 +175,11 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// 选定的 400 优先换号，避免被自定义错误码的重试耗尽分支提前返回。
+	if failoverErr := s.tryFailoverOn400(ctx, c, resp, account, input.RequestModel, true); failoverErr != nil {
+		return nil, failoverErr
+	}
+
 	if resp.StatusCode >= 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
 		if s.shouldFailoverUpstreamError(resp.StatusCode) {
 			respBody, _ := s.readUpstreamErrorBody(resp)

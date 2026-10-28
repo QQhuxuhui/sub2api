@@ -522,6 +522,11 @@ gateway:
   # Allow failover on selected 400 errors (default: off)
   # 允许在特定 400 错误时进行故障转移（默认：关闭）
   failover_on_400: false
+  # Extra 400 keywords (case-insensitive) that move the request to another account
+  # when failover_on_400 is on; the account itself is not marked. Env: comma-separated.
+  # failover_on_400 开启时，额外视为可换号的 400 关键字（不区分大小写），只换号不标记账号。
+  # 环境变量用英文逗号分隔：GATEWAY_FAILOVER_ON_400_KEYWORDS=第三方中转,客户端归属
+  failover_on_400_keywords: []
   # Scheduling configuration
   # 调度配置
   scheduling:

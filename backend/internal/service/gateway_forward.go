@@ -53,6 +53,58 @@ func (s *GatewayService) shouldFailoverUpstreamError(statusCode int) bool {
 	}
 }
 
+// tryFailoverOn400 lets selected 400s move the request to another account when
+// gateway.failover_on_400 is on. Only this request skips the account: its state
+// is left to the regular error handling, which ignores 400s it does not know.
+// A nil result means the caller must handle the error as usual; resp.Body is
+// then restored so it can still be read.
+func (s *GatewayService) tryFailoverOn400(ctx context.Context, c *gin.Context, resp *http.Response, account *Account, reqModel string, passthrough bool) *UpstreamFailoverError {
+	if resp.StatusCode != http.StatusBadRequest || s.cfg == nil || !s.cfg.Gateway.FailoverOn400 {
+		return nil
+	}
+	respBody, readErr := s.readUpstreamErrorBody(resp)
+	_ = resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(respBody))
+	if readErr != nil || !s.shouldFailoverOn400(respBody) {
+		return nil
+	}
+
+	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
+	upstreamDetail := ""
+	if s.cfg.Gateway.LogUpstreamErrorBody {
+		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
+		if maxBytes <= 0 {
+			maxBytes = 2048
+		}
+		upstreamDetail = truncateString(string(respBody), maxBytes)
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		ProxyID:            opsUpstreamProxyID(account),
+		ProxyName:          opsUpstreamProxyName(account),
+		Platform:           account.Platform,
+		AccountID:          account.ID,
+		AccountName:        account.Name,
+		UpstreamStatusCode: resp.StatusCode,
+		UpstreamRequestID:  resp.Header.Get("x-request-id"),
+		Passthrough:        passthrough,
+		Kind:               "failover_on_400",
+		Message:            upstreamMsg,
+		Detail:             upstreamDetail,
+	})
+
+	if s.cfg.Gateway.LogUpstreamErrorBody {
+		logger.LegacyPrintf("service.gateway",
+			"Account %d: 400 error, attempting failover: %s",
+			account.ID,
+			truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes),
+		)
+	} else {
+		logger.LegacyPrintf("service.gateway", "Account %d: 400 error, attempting failover", account.ID)
+	}
+	s.handleFailoverSideEffects(ctx, resp, account, reqModel)
+	return &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+}
+
 func retryBackoffDelay(attempt int) time.Duration {
 	// attempt 从 1 开始，表示第 attempt 次请求刚失败，需要等待后进行第 attempt+1 次请求。
 	if attempt <= 0 {
@@ -666,6 +718,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// 选定的 400 优先换号，避免被自定义错误码的重试耗尽分支提前返回。
+	if failoverErr := s.tryFailoverOn400(ctx, c, resp, account, reqModel, false); failoverErr != nil {
+		return nil, failoverErr
+	}
+
 	// 处理重试耗尽的情况
 	if resp.StatusCode >= 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
 		if s.shouldFailoverUpstreamError(resp.StatusCode) {
@@ -738,53 +795,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 	if resp.StatusCode >= 400 {
-		// 可选：对部分 400 触发 failover（默认关闭以保持语义）
-		if resp.StatusCode == 400 && s.cfg != nil && s.cfg.Gateway.FailoverOn400 {
-			respBody, readErr := s.readUpstreamErrorBody(resp)
-			if readErr != nil {
-				// ReadAll failed, fall back to normal error handling without consuming the stream
-				return s.handleErrorResponse(ctx, resp, c, account, reqModel)
-			}
-			_ = resp.Body.Close()
-			resp.Body = io.NopCloser(bytes.NewReader(respBody))
-
-			if s.shouldFailoverOn400(respBody) {
-				upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-				upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
-				upstreamDetail := ""
-				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-					maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
-					if maxBytes <= 0 {
-						maxBytes = 2048
-					}
-					upstreamDetail = truncateString(string(respBody), maxBytes)
-				}
-				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-					ProxyID:            opsUpstreamProxyID(account),
-					ProxyName:          opsUpstreamProxyName(account),
-					Platform:           account.Platform,
-					AccountID:          account.ID,
-					AccountName:        account.Name,
-					UpstreamStatusCode: resp.StatusCode,
-					UpstreamRequestID:  resp.Header.Get("x-request-id"),
-					Kind:               "failover_on_400",
-					Message:            upstreamMsg,
-					Detail:             upstreamDetail,
-				})
-
-				if s.cfg.Gateway.LogUpstreamErrorBody {
-					logger.LegacyPrintf("service.gateway",
-						"Account %d: 400 error, attempting failover: %s",
-						account.ID,
-						truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes),
-					)
-				} else {
-					logger.LegacyPrintf("service.gateway", "Account %d: 400 error, attempting failover", account.ID)
-				}
-				s.handleFailoverSideEffects(ctx, resp, account, reqModel)
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
-			}
-		}
 		return s.handleErrorResponse(ctx, resp, c, account, reqModel)
 	}
 
