@@ -190,6 +190,48 @@ func (_u *IntentRouterUpdate) AddMaxInputChars(v int) *IntentRouterUpdate {
 	return _u
 }
 
+// SetKeywordMaxChars sets the "keyword_max_chars" field.
+func (_u *IntentRouterUpdate) SetKeywordMaxChars(v int) *IntentRouterUpdate {
+	_u.mutation.ResetKeywordMaxChars()
+	_u.mutation.SetKeywordMaxChars(v)
+	return _u
+}
+
+// SetNillableKeywordMaxChars sets the "keyword_max_chars" field if the given value is not nil.
+func (_u *IntentRouterUpdate) SetNillableKeywordMaxChars(v *int) *IntentRouterUpdate {
+	if v != nil {
+		_u.SetKeywordMaxChars(*v)
+	}
+	return _u
+}
+
+// AddKeywordMaxChars adds value to the "keyword_max_chars" field.
+func (_u *IntentRouterUpdate) AddKeywordMaxChars(v int) *IntentRouterUpdate {
+	_u.mutation.AddKeywordMaxChars(v)
+	return _u
+}
+
+// SetUnavailableStatus sets the "unavailable_status" field.
+func (_u *IntentRouterUpdate) SetUnavailableStatus(v int) *IntentRouterUpdate {
+	_u.mutation.ResetUnavailableStatus()
+	_u.mutation.SetUnavailableStatus(v)
+	return _u
+}
+
+// SetNillableUnavailableStatus sets the "unavailable_status" field if the given value is not nil.
+func (_u *IntentRouterUpdate) SetNillableUnavailableStatus(v *int) *IntentRouterUpdate {
+	if v != nil {
+		_u.SetUnavailableStatus(*v)
+	}
+	return _u
+}
+
+// AddUnavailableStatus adds value to the "unavailable_status" field.
+func (_u *IntentRouterUpdate) AddUnavailableStatus(v int) *IntentRouterUpdate {
+	_u.mutation.AddUnavailableStatus(v)
+	return _u
+}
+
 // SetRules sets the "rules" field.
 func (_u *IntentRouterUpdate) SetRules(v []domain.IntentRule) *IntentRouterUpdate {
 	_u.mutation.SetRules(v)
@@ -384,6 +426,18 @@ func (_u *IntentRouterUpdate) sqlSave(ctx context.Context) (_node int, err error
 	}
 	if value, ok := _u.mutation.AddedMaxInputChars(); ok {
 		_spec.AddField(intentrouter.FieldMaxInputChars, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.KeywordMaxChars(); ok {
+		_spec.SetField(intentrouter.FieldKeywordMaxChars, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedKeywordMaxChars(); ok {
+		_spec.AddField(intentrouter.FieldKeywordMaxChars, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.UnavailableStatus(); ok {
+		_spec.SetField(intentrouter.FieldUnavailableStatus, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedUnavailableStatus(); ok {
+		_spec.AddField(intentrouter.FieldUnavailableStatus, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.Rules(); ok {
 		_spec.SetField(intentrouter.FieldRules, field.TypeJSON, value)
@@ -593,6 +647,48 @@ func (_u *IntentRouterUpdateOne) SetNillableMaxInputChars(v *int) *IntentRouterU
 // AddMaxInputChars adds value to the "max_input_chars" field.
 func (_u *IntentRouterUpdateOne) AddMaxInputChars(v int) *IntentRouterUpdateOne {
 	_u.mutation.AddMaxInputChars(v)
+	return _u
+}
+
+// SetKeywordMaxChars sets the "keyword_max_chars" field.
+func (_u *IntentRouterUpdateOne) SetKeywordMaxChars(v int) *IntentRouterUpdateOne {
+	_u.mutation.ResetKeywordMaxChars()
+	_u.mutation.SetKeywordMaxChars(v)
+	return _u
+}
+
+// SetNillableKeywordMaxChars sets the "keyword_max_chars" field if the given value is not nil.
+func (_u *IntentRouterUpdateOne) SetNillableKeywordMaxChars(v *int) *IntentRouterUpdateOne {
+	if v != nil {
+		_u.SetKeywordMaxChars(*v)
+	}
+	return _u
+}
+
+// AddKeywordMaxChars adds value to the "keyword_max_chars" field.
+func (_u *IntentRouterUpdateOne) AddKeywordMaxChars(v int) *IntentRouterUpdateOne {
+	_u.mutation.AddKeywordMaxChars(v)
+	return _u
+}
+
+// SetUnavailableStatus sets the "unavailable_status" field.
+func (_u *IntentRouterUpdateOne) SetUnavailableStatus(v int) *IntentRouterUpdateOne {
+	_u.mutation.ResetUnavailableStatus()
+	_u.mutation.SetUnavailableStatus(v)
+	return _u
+}
+
+// SetNillableUnavailableStatus sets the "unavailable_status" field if the given value is not nil.
+func (_u *IntentRouterUpdateOne) SetNillableUnavailableStatus(v *int) *IntentRouterUpdateOne {
+	if v != nil {
+		_u.SetUnavailableStatus(*v)
+	}
+	return _u
+}
+
+// AddUnavailableStatus adds value to the "unavailable_status" field.
+func (_u *IntentRouterUpdateOne) AddUnavailableStatus(v int) *IntentRouterUpdateOne {
+	_u.mutation.AddUnavailableStatus(v)
 	return _u
 }
 
@@ -820,6 +916,18 @@ func (_u *IntentRouterUpdateOne) sqlSave(ctx context.Context) (_node *IntentRout
 	}
 	if value, ok := _u.mutation.AddedMaxInputChars(); ok {
 		_spec.AddField(intentrouter.FieldMaxInputChars, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.KeywordMaxChars(); ok {
+		_spec.SetField(intentrouter.FieldKeywordMaxChars, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedKeywordMaxChars(); ok {
+		_spec.AddField(intentrouter.FieldKeywordMaxChars, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.UnavailableStatus(); ok {
+		_spec.SetField(intentrouter.FieldUnavailableStatus, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedUnavailableStatus(); ok {
+		_spec.AddField(intentrouter.FieldUnavailableStatus, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.Rules(); ok {
 		_spec.SetField(intentrouter.FieldRules, field.TypeJSON, value)

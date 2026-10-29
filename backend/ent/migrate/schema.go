@@ -1111,6 +1111,8 @@ var (
 		{Name: "classifier_timeout_ms", Type: field.TypeInt, Default: 3000},
 		{Name: "cache_ttl_seconds", Type: field.TypeInt, Default: 7200},
 		{Name: "max_input_chars", Type: field.TypeInt, Default: 2000},
+		{Name: "keyword_max_chars", Type: field.TypeInt, Default: 0},
+		{Name: "unavailable_status", Type: field.TypeInt, Default: 503},
 		{Name: "rules", Type: field.TypeJSON, Nullable: true, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "excluded_models", Type: field.TypeJSON, Nullable: true, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "jev_api_key", Type: field.TypeString, Size: 512, Default: ""},

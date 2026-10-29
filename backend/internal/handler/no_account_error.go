@@ -35,16 +35,31 @@ type noAccountErrorClassification struct {
 	ModelNotFound bool // true when this is a 404 model_not_found classification
 }
 
-// intentRouteUnavailableMessage is what a client sees when its request matched
-// an intent rule whose accounts are all busy or unavailable. It deliberately
-// reads like an ordinary rate limit: intent routing is never disclosed.
+// intentRouteUnavailableMessage is what a client sees as a 429 when its
+// request matched an intent rule whose accounts are all busy or unavailable.
+// It deliberately reads like an ordinary rate limit: intent routing is never
+// disclosed.
 const intentRouteUnavailableMessage = "All available accounts are currently rate-limited. Please retry later."
 
 // isIntentRouteUnavailable reports a selection failure that must reach the
-// client as 429 rate_limit_error (intentRouteUnavailableMessage) right away,
-// without failover or the no-account diagnosis.
+// client right away (see intentRouteUnavailableReply), without failover or the
+// no-account diagnosis.
 func isIntentRouteUnavailable(err error) bool {
 	return errors.Is(err, service.ErrIntentRouteUnavailable)
+}
+
+// intentRouteUnavailableReply is the response for an intent-route selection
+// failure, in the status the router is configured with. 429 makes a
+// downstream gateway cool the key down; 502/503 only make it fail over.
+func intentRouteUnavailableReply(err error) (status int, errType, message string) {
+	switch status = service.IntentRouteUnavailableStatus(err); status {
+	case http.StatusTooManyRequests:
+		return status, "rate_limit_error", intentRouteUnavailableMessage
+	case http.StatusBadGateway:
+		return status, "upstream_error", "Upstream request failed"
+	default:
+		return http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable. Please retry later."
+	}
 }
 
 var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited|rate_limited)=(\d+)`)

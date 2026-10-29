@@ -40,6 +40,12 @@ func (IntentRouter) Fields() []ent.Field {
 		field.Int("classifier_timeout_ms").Default(3000),
 		field.Int("cache_ttl_seconds").Default(7200),
 		field.Int("max_input_chars").Default(2000),
+		// Keywords only count in a user message of at most this many runes;
+		// 0 means no limit.
+		field.Int("keyword_max_chars").Default(0),
+		// HTTP status reported when a matched rule's accounts are all
+		// unavailable: 429, 502 or 503.
+		field.Int("unavailable_status").Default(503),
 		field.JSON("rules", []domain.IntentRule{}).Optional().
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 		// Requests for these models skip intent routing entirely.

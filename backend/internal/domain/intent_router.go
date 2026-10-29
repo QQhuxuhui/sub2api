@@ -67,6 +67,15 @@ type IntentJevConfig struct {
 	// are scheduled as a keyword miss without asking, to cap the cost.
 	SamplePercent int `json:"sample_percent"`
 
+	// HealthEnabled asks Jev a second question on the same call: is this a
+	// liveness/health check (sub2api's channel monitor, "hi", "reply OK", a
+	// trivial sum) rather than a test of the model's intelligence? Requests
+	// at or above HealthThreshold go to HealthRule, or — when it is empty —
+	// to the group's ordinary scheduling, instead of the probe rule.
+	HealthEnabled   bool    `json:"health_enabled"`
+	HealthThreshold float64 `json:"health_threshold"`
+	HealthRule      string  `json:"health_rule"`
+
 	// BalanceUSD is the account balance the admin read off the TypeSafe
 	// console at BalanceSetAt (Jev has no balance API); spending recorded
 	// since then is subtracted to estimate what is left. Set by the server.

@@ -90,9 +90,10 @@ func TestOpenAIIntentRoute_UnavailableTargetsFailTheRequest(t *testing.T) {
 			if tc.busy {
 				svc.concurrencyService = NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{49001: false}})
 			}
-			route := &IntentRouteDecision{Intent: "coding", AccountIDs: []int64{49001}}
+			route := &IntentRouteDecision{Intent: "coding", AccountIDs: []int64{49001}, UnavailableStatus: 429}
 			selection, _, err := svc.SelectAccountWithScheduler(WithIntentRouteDecision(context.Background(), route), groupID, "", "", "gpt-5.1", tc.excluded, OpenAIUpstreamTransportAny, false)
 			require.ErrorIs(t, err, ErrIntentRouteUnavailable)
+			require.Equal(t, 429, IntentRouteUnavailableStatus(err), "the router's status travels with the error")
 			require.ErrorIs(t, err, ErrNoAvailableAccounts, "callers unaware of intent routing still see a capacity failure")
 			require.Nil(t, selection, "the group's own accounts must not take over")
 			require.Zero(t, route.SelectedAccountID())

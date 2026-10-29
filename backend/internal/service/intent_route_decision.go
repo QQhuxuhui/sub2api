@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 )
 
@@ -11,13 +13,32 @@ import (
 // so callers unaware of it still treat it as a capacity failure.
 var ErrIntentRouteUnavailable = fmt.Errorf("%w: routed accounts busy or unavailable", ErrNoAvailableAccounts)
 
+// IntentRouteUnavailableError is ErrIntentRouteUnavailable carrying the HTTP
+// status the router is configured to report it with.
+type IntentRouteUnavailableError struct {
+	Status int
+}
+
+func (e *IntentRouteUnavailableError) Error() string { return ErrIntentRouteUnavailable.Error() }
+func (e *IntentRouteUnavailableError) Unwrap() error { return ErrIntentRouteUnavailable }
+
+// IntentRouteUnavailableStatus is the status to report err with: the router's
+// configured one, or 503 for a bare ErrIntentRouteUnavailable.
+func IntentRouteUnavailableStatus(err error) int {
+	var typed *IntentRouteUnavailableError
+	if errors.As(err, &typed) && typed.Status > 0 {
+		return typed.Status
+	}
+	return http.StatusServiceUnavailable
+}
+
 // IntentRouteDecision is the outcome of classifying one request. It is made
 // once, before the account failover loop, and travels in the request context
 // so every selection attempt of the request sees the same targets.
 //
 // A matched rule is binding: when none of its accounts can serve the request,
-// selection fails with ErrIntentRouteUnavailable (reported to the client as a
-// rate limit) instead of falling back to the group's own accounts. A decision
+// selection fails with ErrIntentRouteUnavailable (reported to the client with
+// UnavailableStatus) instead of falling back to the group's own accounts. A decision
 // without a matched rule (scope only) never restricts selection.
 type IntentRouteDecision struct {
 	GroupID int64
@@ -33,6 +54,9 @@ type IntentRouteDecision struct {
 	ScopeAccountIDs []int64
 	// PinnedAccountID is the account this conversation was first served by.
 	PinnedAccountID int64
+	// UnavailableStatus is the HTTP status reported when none of AccountIDs
+	// can take the request (429, 502 or 503).
+	UnavailableStatus int
 
 	mu sync.Mutex
 	// selected is the routed account of the latest attempt; announced is the
@@ -73,6 +97,15 @@ func (d *IntentRouteDecision) orderedAccountIDs() []int64 {
 		add(id)
 	}
 	return ordered
+}
+
+// unavailable is the selection error for a matched rule none of whose
+// accounts can take the request.
+func (d *IntentRouteDecision) unavailable() error {
+	if d == nil {
+		return ErrIntentRouteUnavailable
+	}
+	return &IntentRouteUnavailableError{Status: d.UnavailableStatus}
 }
 
 // markSelected records the account that was picked and pins the conversation

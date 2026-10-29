@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cachesim"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/firstbyte"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -684,7 +684,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
 			if isIntentRouteUnavailable(err) {
-				h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", intentRouteUnavailableMessage, streamStarted)
+				status, errType, message := intentRouteUnavailableReply(err)
+				h.handleStreamingAwareError(c, status, errType, message, streamStarted)
 				return
 			}
 			if len(failedAccountIDs) == 0 {
@@ -1309,7 +1310,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
 			if isIntentRouteUnavailable(err) {
-				h.anthropicStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", intentRouteUnavailableMessage, streamStarted)
+				status, errType, message := intentRouteUnavailableReply(err)
+				h.anthropicStreamingAwareError(c, status, errType, message, streamStarted)
 				return
 			}
 			if len(failedAccountIDs) == 0 {

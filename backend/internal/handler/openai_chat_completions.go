@@ -190,7 +190,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
 			if isIntentRouteUnavailable(err) {
-				h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", intentRouteUnavailableMessage, streamStarted)
+				status, errType, message := intentRouteUnavailableReply(err)
+				h.handleStreamingAwareError(c, status, errType, message, streamStarted)
 				return
 			}
 			if len(failedAccountIDs) == 0 {

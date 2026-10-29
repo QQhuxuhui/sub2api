@@ -78,7 +78,7 @@ func (s *GatewayService) selectIntentRoutedAccount(
 	}
 	slog.Info("intent_route.unavailable",
 		"group_id", derefGroupID(groupID), "intent", decision.Intent, "model", requestedModel, "excluded", len(excludedIDs))
-	return nil, ErrIntentRouteUnavailable
+	return nil, decision.unavailable()
 }
 
 func (s *GatewayService) isIntentRoutedAccountUsable(ctx context.Context, account *Account, platform string, useMixed bool, requestedModel string) bool {

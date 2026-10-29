@@ -81,11 +81,12 @@ func TestGatewayIntentRoute_UnavailableTargetsFailTheRequest(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			svc, _ := newIntentRouteGatewayFixture(t, tc.foreign)
-			decision := &IntentRouteDecision{Intent: "coding", AccountIDs: []int64{9}}
+			decision := &IntentRouteDecision{Intent: "coding", AccountIDs: []int64{9}, UnavailableStatus: 502}
 			ctx := WithIntentRouteDecision(context.Background(), decision)
 
 			result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "", "claude-3-5-sonnet-20241022", tc.excluded, "", 0)
 			require.ErrorIs(t, err, ErrIntentRouteUnavailable)
+			require.Equal(t, 502, IntentRouteUnavailableStatus(err), "the router's status travels with the error")
 			require.Nil(t, result, "the group's own accounts must not take over")
 			require.Zero(t, decision.SelectedAccountID())
 		})

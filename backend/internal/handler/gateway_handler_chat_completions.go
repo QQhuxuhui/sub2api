@@ -174,11 +174,12 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, selectionSessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
 			if isIntentRouteUnavailable(err) {
+				status, errType, message := intentRouteUnavailableReply(err)
 				if streamStarted {
 					// A slot-wait heartbeat already committed HTTP 200.
-					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", intentRouteUnavailableMessage, true)
+					h.handleStreamingAwareError(c, status, errType, message, true)
 				} else {
-					h.chatCompletionsErrorResponse(c, http.StatusTooManyRequests, "rate_limit_error", intentRouteUnavailableMessage)
+					h.chatCompletionsErrorResponse(c, status, errType, message)
 				}
 				return
 			}

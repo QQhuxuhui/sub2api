@@ -41,6 +41,10 @@ type IntentRouter struct {
 	CacheTTLSeconds int `json:"cache_ttl_seconds,omitempty"`
 	// MaxInputChars holds the value of the "max_input_chars" field.
 	MaxInputChars int `json:"max_input_chars,omitempty"`
+	// KeywordMaxChars holds the value of the "keyword_max_chars" field.
+	KeywordMaxChars int `json:"keyword_max_chars,omitempty"`
+	// UnavailableStatus holds the value of the "unavailable_status" field.
+	UnavailableStatus int `json:"unavailable_status,omitempty"`
 	// Rules holds the value of the "rules" field.
 	Rules []domain.IntentRule `json:"rules,omitempty"`
 	// ExcludedModels holds the value of the "excluded_models" field.
@@ -61,7 +65,7 @@ func (*IntentRouter) scanValues(columns []string) ([]any, error) {
 			values[i] = new([]byte)
 		case intentrouter.FieldEnabled:
 			values[i] = new(sql.NullBool)
-		case intentrouter.FieldID, intentrouter.FieldGroupID, intentrouter.FieldClassifierTimeoutMs, intentrouter.FieldCacheTTLSeconds, intentrouter.FieldMaxInputChars:
+		case intentrouter.FieldID, intentrouter.FieldGroupID, intentrouter.FieldClassifierTimeoutMs, intentrouter.FieldCacheTTLSeconds, intentrouter.FieldMaxInputChars, intentrouter.FieldKeywordMaxChars, intentrouter.FieldUnavailableStatus:
 			values[i] = new(sql.NullInt64)
 		case intentrouter.FieldClassifierBaseURL, intentrouter.FieldClassifierAPIKey, intentrouter.FieldClassifierProtocol, intentrouter.FieldClassifierModel, intentrouter.FieldJevAPIKey:
 			values[i] = new(sql.NullString)
@@ -153,6 +157,18 @@ func (_m *IntentRouter) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field max_input_chars", values[i])
 			} else if value.Valid {
 				_m.MaxInputChars = int(value.Int64)
+			}
+		case intentrouter.FieldKeywordMaxChars:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field keyword_max_chars", values[i])
+			} else if value.Valid {
+				_m.KeywordMaxChars = int(value.Int64)
+			}
+		case intentrouter.FieldUnavailableStatus:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field unavailable_status", values[i])
+			} else if value.Valid {
+				_m.UnavailableStatus = int(value.Int64)
 			}
 		case intentrouter.FieldRules:
 			if value, ok := values[i].(*[]byte); !ok {
@@ -251,6 +267,12 @@ func (_m *IntentRouter) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("max_input_chars=")
 	builder.WriteString(fmt.Sprintf("%v", _m.MaxInputChars))
+	builder.WriteString(", ")
+	builder.WriteString("keyword_max_chars=")
+	builder.WriteString(fmt.Sprintf("%v", _m.KeywordMaxChars))
+	builder.WriteString(", ")
+	builder.WriteString("unavailable_status=")
+	builder.WriteString(fmt.Sprintf("%v", _m.UnavailableStatus))
 	builder.WriteString(", ")
 	builder.WriteString("rules=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Rules))

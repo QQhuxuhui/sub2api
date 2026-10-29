@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -32,7 +33,19 @@ const (
 	intentJevMaxTurnsLimit        = 50
 	intentJevMaxScopeIDs          = 500
 	intentRouteMaxExcludedModels  = 200
+	intentRouteMaxKeywordChars    = 1000000
 )
+
+// validIntentUnavailableStatus lists the statuses a router may report "the
+// matched rule's accounts are all unavailable" with. 429 makes a downstream
+// gateway cool the whole key down; 502/503 only make it fail over.
+func validIntentUnavailableStatus(status int) bool {
+	switch status {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable:
+		return true
+	}
+	return false
+}
 
 func excludedModelsOrEmpty(models []string) []string {
 	if models == nil {
@@ -82,6 +95,8 @@ type IntentRouterView struct {
 	ClassifierTimeoutMS        int                 `json:"classifier_timeout_ms"`
 	CacheTTLSeconds            int                 `json:"cache_ttl_seconds"`
 	MaxInputChars              int                 `json:"max_input_chars"`
+	KeywordMaxChars            int                 `json:"keyword_max_chars"`
+	UnavailableStatus          int                 `json:"unavailable_status"`
 	Rules                      []domain.IntentRule `json:"rules"`
 	// ExcludedModels skip intent routing entirely; a trailing * matches a prefix.
 	ExcludedModels      []string `json:"excluded_models"`
@@ -103,6 +118,8 @@ type IntentRouterInput struct {
 	ClassifierTimeoutMS int                 `json:"classifier_timeout_ms"`
 	CacheTTLSeconds     int                 `json:"cache_ttl_seconds"`
 	MaxInputChars       int                 `json:"max_input_chars"`
+	KeywordMaxChars     int                 `json:"keyword_max_chars"`  // 0 = keywords match messages of any length
+	UnavailableStatus   int                 `json:"unavailable_status"` // 429, 502 or 503; 0 means 503
 	Rules               []domain.IntentRule `json:"rules"`
 	ExcludedModels      []string            `json:"excluded_models"`
 	// JevAPIKey, like ClassifierAPIKey, keeps the stored key when empty.
@@ -127,6 +144,10 @@ type IntentClassifyTestResult struct {
 	LatencyMS  int64   `json:"latency_ms"`
 	// ProbeProbability is Jev's answer when Jev was asked.
 	ProbeProbability *float64 `json:"probe_probability,omitempty"`
+	// HealthProbability is Jev's health-check answer, when health checks are
+	// on; HealthCheck reports it reached the health threshold.
+	HealthProbability *float64 `json:"health_probability,omitempty"`
+	HealthCheck       bool     `json:"health_check,omitempty"`
 }
 
 func intentRouterViewFromEnt(row *dbent.IntentRouter) *IntentRouterView {
@@ -144,6 +165,8 @@ func intentRouterViewFromEnt(row *dbent.IntentRouter) *IntentRouterView {
 		ClassifierTimeoutMS:        row.ClassifierTimeoutMs,
 		CacheTTLSeconds:            row.CacheTTLSeconds,
 		MaxInputChars:              row.MaxInputChars,
+		KeywordMaxChars:            row.KeywordMaxChars,
+		UnavailableStatus:          row.UnavailableStatus,
 		Rules:                      rules,
 		ExcludedModels:             excludedModelsOrEmpty(row.ExcludedModels),
 		JevAPIKeyConfigured:        strings.TrimSpace(row.JevAPIKey) != "",
@@ -308,7 +331,7 @@ func (s *IntentRouterService) SaveRouter(ctx context.Context, groupID int64, in 
 			SetClassifierBaseURL(in.ClassifierBaseURL).SetClassifierAPIKey(in.ClassifierAPIKey).
 			SetClassifierProtocol(in.ClassifierProtocol).SetClassifierModel(in.ClassifierModel).
 			SetClassifierTimeoutMs(in.ClassifierTimeoutMS).SetCacheTTLSeconds(in.CacheTTLSeconds).
-			SetMaxInputChars(in.MaxInputChars).SetRules(in.Rules).
+			SetMaxInputChars(in.MaxInputChars).SetKeywordMaxChars(in.KeywordMaxChars).SetUnavailableStatus(in.UnavailableStatus).SetRules(in.Rules).
 			SetJevAPIKey(in.JevAPIKey).SetJev(in.Jev).SetExcludedModels(in.ExcludedModels).Save(ctx)
 	} else {
 		saved, err = s.entClient.IntentRouter.UpdateOneID(existing.ID).
@@ -316,7 +339,7 @@ func (s *IntentRouterService) SaveRouter(ctx context.Context, groupID int64, in 
 			SetClassifierBaseURL(in.ClassifierBaseURL).SetClassifierAPIKey(in.ClassifierAPIKey).
 			SetClassifierProtocol(in.ClassifierProtocol).SetClassifierModel(in.ClassifierModel).
 			SetClassifierTimeoutMs(in.ClassifierTimeoutMS).SetCacheTTLSeconds(in.CacheTTLSeconds).
-			SetMaxInputChars(in.MaxInputChars).SetRules(in.Rules).
+			SetMaxInputChars(in.MaxInputChars).SetKeywordMaxChars(in.KeywordMaxChars).SetUnavailableStatus(in.UnavailableStatus).SetRules(in.Rules).
 			SetJevAPIKey(in.JevAPIKey).SetJev(in.Jev).SetExcludedModels(in.ExcludedModels).Save(ctx)
 	}
 	if err != nil {
@@ -388,6 +411,15 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 	if in.MaxInputChars < intentRouteMinInputChars || in.MaxInputChars > intentRouteMaxInputChars {
 		return bad("INTENT_INVALID_MAX_INPUT", fmt.Sprintf("max input chars must be %d-%d", intentRouteMinInputChars, intentRouteMaxInputChars))
 	}
+	if in.KeywordMaxChars < 0 || in.KeywordMaxChars > intentRouteMaxKeywordChars {
+		return bad("INTENT_INVALID_KEYWORD_MAX_CHARS", fmt.Sprintf("keyword max chars must be 0-%d (0 = no limit)", intentRouteMaxKeywordChars))
+	}
+	if in.UnavailableStatus == 0 {
+		in.UnavailableStatus = http.StatusServiceUnavailable
+	}
+	if !validIntentUnavailableStatus(in.UnavailableStatus) {
+		return bad("INTENT_INVALID_UNAVAILABLE_STATUS", "unavailable status must be 429, 502 or 503")
+	}
 	classifierReady := in.ClassifierModel != "" && in.ClassifierAPIKey != ""
 	excluded, err := normalizeIntentExcludedModels(in.ExcludedModels)
 	if err != nil {
@@ -412,6 +444,8 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 	// while Jev is off, or a switch-off (by an admin or by the server) would
 	// leave a router that can no longer be saved.
 	jevRule := strings.ToLower(strings.TrimSpace(in.Jev.Rule))
+	healthRule := strings.ToLower(strings.TrimSpace(in.Jev.HealthRule))
+	jevTarget := func(name string) bool { return name == jevRule || (healthRule != "" && name == healthRule) }
 
 	if len(in.Rules) > intentRouteMaxRules {
 		return bad("INTENT_TOO_MANY_RULES", fmt.Sprintf("at most %d rules", intentRouteMaxRules))
@@ -440,7 +474,7 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 		if err := normalizeIntentKeywords(rule); err != nil {
 			return err
 		}
-		if rule.Description == "" && len(rule.Keywords) == 0 && key != jevRule {
+		if rule.Description == "" && len(rule.Keywords) == 0 && !jevTarget(key) {
 			return infraerrors.BadRequest("INTENT_RULE_MATCHER_REQUIRED", "rule \""+rule.Name+"\" needs keywords or a description: keywords are matched directly, the description is what the classifier decides by").
 				WithMetadata(map[string]string{"name": rule.Name})
 		}
@@ -481,7 +515,7 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 			return bad("INTENT_CLASSIFIER_INCOMPLETE", "an enabled router needs a classifier model and API key, rules with keywords, or Jev")
 		}
 		for _, rule := range in.Rules {
-			if rule.Enabled && len(rule.Keywords) == 0 && strings.ToLower(rule.Name) != jevRule {
+			if rule.Enabled && len(rule.Keywords) == 0 && !jevTarget(strings.ToLower(rule.Name)) {
 				return infraerrors.BadRequest("INTENT_RULE_UNREACHABLE", "rule \""+rule.Name+"\" has no keywords and no classifier is configured, so it can never match").
 					WithMetadata(map[string]string{"name": rule.Name})
 			}
@@ -497,6 +531,7 @@ func normalizeIntentJev(jev *domain.IntentJevConfig, stored domain.IntentJevConf
 	bad := func(reason, message string) error { return infraerrors.BadRequest(reason, message) }
 	*jev = intentJevWithDefaults(*jev)
 	jev.Rule = strings.TrimSpace(jev.Rule)
+	jev.HealthRule = strings.TrimSpace(jev.HealthRule)
 	// Server-owned fields: the balance baseline changes only through
 	// setBalance, the switch-off record only through the server — and is
 	// cleared once an admin turns Jev on again.
@@ -521,6 +556,28 @@ func normalizeIntentJev(jev *domain.IntentJevConfig, stored domain.IntentJevConf
 	}
 	if jev.Threshold <= 0 || jev.Threshold > 1 {
 		return bad("INTENT_JEV_INVALID_THRESHOLD", "jev threshold must be greater than 0 and at most 1")
+	}
+	if jev.HealthThreshold <= 0 || jev.HealthThreshold > 1 {
+		return bad("INTENT_JEV_INVALID_HEALTH_THRESHOLD", "jev health-check threshold must be greater than 0 and at most 1")
+	}
+	if jev.HealthRule != "" {
+		found := false
+		for i := range rules {
+			if strings.EqualFold(strings.TrimSpace(rules[i].Name), jev.HealthRule) {
+				jev.HealthRule, found = strings.TrimSpace(rules[i].Name), true
+				break
+			}
+		}
+		switch {
+		case found:
+		case jev.Enabled && jev.HealthEnabled:
+			return infraerrors.BadRequest("INTENT_JEV_HEALTH_RULE_UNKNOWN", "the health-check rule \""+jev.HealthRule+"\" does not exist").
+				WithMetadata(map[string]string{"name": jev.HealthRule})
+		default:
+			// Health checks (or Jev) are off: a rule deleted or renamed since
+			// leaves a stale reference that must not block the save.
+			jev.HealthRule = ""
+		}
 	}
 	if jev.MaxTurns < 1 || jev.MaxTurns > intentJevMaxTurnsLimit {
 		return bad("INTENT_JEV_INVALID_MAX_TURNS", fmt.Sprintf("jev max turns must be 1-%d", intentJevMaxTurnsLimit))
@@ -704,7 +761,7 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 	if cfg.Jev.APIKey != "" && s.judge != nil {
 		started := s.now()
 		judgeCtx, cancel := context.WithTimeout(ctx, cfg.Jev.Timeout)
-		answer, err := s.judge.ProbeProbability(judgeCtx, cfg.Jev.APIKey, cfg.Jev.Model, text)
+		answer, err := s.judge.ProbeProbability(judgeCtx, cfg.Jev.APIKey, cfg.Jev.Model, text, cfg.Jev.HealthEnabled)
 		cancel()
 		latency := s.now().Sub(started).Milliseconds()
 		if err != nil {
@@ -715,7 +772,15 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 			return nil, infraerrors.BadRequest("INTENT_JEV_FAILED", "jev call failed: "+truncateRunes(err.Error(), 300)).WithMetadata(meta)
 		}
 		p := answer.P
-		jevResult = &IntentClassifyTestResult{MatchedBy: "jev", Answer: fmt.Sprintf("p=%.2f", p), Understood: true, LatencyMS: latency, ProbeProbability: &p, AccountIDs: []int64{}}
+		jevResult = &IntentClassifyTestResult{MatchedBy: "jev", Answer: fmt.Sprintf("p=%.2f", p), Understood: true, LatencyMS: latency, ProbeProbability: &p, HealthProbability: answer.Health, AccountIDs: []int64{}}
+		if answer.Health != nil && *answer.Health >= cfg.Jev.HealthThreshold {
+			// A health check: its own rule, or ordinary scheduling.
+			jevResult.HealthCheck = true
+			if rule, ok := cfg.rule(cfg.Jev.HealthRule); ok {
+				jevResult.Intent, jevResult.AccountIDs = rule.Name, rule.AccountIDs
+			}
+			return jevResult, nil
+		}
 		if rule, ok := cfg.rule(cfg.Jev.Rule); ok && p >= cfg.Jev.Threshold {
 			jevResult.Intent, jevResult.AccountIDs = rule.Name, rule.AccountIDs
 			return jevResult, nil

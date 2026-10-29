@@ -29,6 +29,7 @@ const (
 	intentJevEndpoint            = "https://api.typesafe.ai/v1/systemone"
 	intentJevDefaultModel        = "jev-latest"
 	intentJevDefaultThreshold    = 0.5
+	intentJevDefaultHealthThres  = 0.7
 	intentJevDefaultMaxTurns     = 3
 	intentJevDefaultTimeoutMS    = 1000
 	intentJevDefaultSample       = 100
@@ -54,15 +55,26 @@ const (
 		"an 'SVG of a pelican riding a bicycle' style drawing benchmark, a random number or random choice sampling test, " +
 		"an arithmetic or string task demanding output in an exact format, or a connectivity check like 'reply OK' / 'hi'), " +
 		"sent to judge which model answers or how capable it is, rather than a genuine request from someone doing real work."
+
+	// The second question, asked only with health checks on. Measured on a
+	// day of live traffic: at 0.7 it caught every sub2api channel-monitor
+	// challenge (several wordings) and 99.9% of other liveness checks, and
+	// 0.2% of intelligence probes.
+	intentJevHealthQuestion = "The `state` is a liveness or health check of an API endpoint: it only verifies that the model answers at all and correctly in a trivial way. " +
+		"Examples: 'hi', 'ping', 'reply with exactly OK', echo a fixed token or health_ code, call a probe/health tool once, or a trivial " +
+		"arithmetic challenge (one small addition or subtraction, often with worked examples like 'Q: 3 + 5 = ? A: 8') whose only purpose is to confirm the channel works. " +
+		"It does NOT measure intelligence: no puzzles, no multi-step reasoning, no knowledge or identity questions, no drawing, no random-number sequences, no long outputs."
 )
 
 // intentJevDayZone is the zone daily statistics roll over in (the operators'
 // day, not UTC).
 var intentJevDayZone = time.FixedZone("CST", 8*3600)
 
-// intentJevAnswer is one Jev verdict and what it was billed.
+// intentJevAnswer is one Jev verdict and what it was billed. Health is the
+// health-check probability, nil when that question was not asked.
 type intentJevAnswer struct {
 	P      float64
+	Health *float64
 	Tokens int64
 }
 
@@ -92,7 +104,7 @@ func intentJevAccountProblem(err error) (int, bool) {
 
 // intentProbeJudge asks Jev how likely a text is a probe of the model.
 type intentProbeJudge interface {
-	ProbeProbability(ctx context.Context, apiKey, model, text string) (intentJevAnswer, error)
+	ProbeProbability(ctx context.Context, apiKey, model, text string, askHealth bool) (intentJevAnswer, error)
 }
 
 type httpIntentProbeJudge struct {
@@ -105,13 +117,17 @@ func newHTTPIntentProbeJudge() *httpIntentProbeJudge {
 	return &httpIntentProbeJudge{client: &http.Client{Timeout: 30 * time.Second}, endpoint: intentJevEndpoint}
 }
 
-func (j *httpIntentProbeJudge) ProbeProbability(ctx context.Context, apiKey, model, text string) (intentJevAnswer, error) {
+func (j *httpIntentProbeJudge) ProbeProbability(ctx context.Context, apiKey, model, text string, askHealth bool) (intentJevAnswer, error) {
+	questions := map[string]any{
+		"is_probe": map[string]any{"type": "noul", "instructions": intentJevProbeQuestion},
+	}
+	if askHealth {
+		questions["is_health"] = map[string]any{"type": "noul", "instructions": intentJevHealthQuestion}
+	}
 	body, err := json.Marshal(map[string]any{
-		"state": truncateRunes(text, intentJevMaxTextRunes),
-		"model": model,
-		"questions": map[string]any{
-			"is_probe": map[string]any{"type": "noul", "instructions": intentJevProbeQuestion},
-		},
+		"state":     truncateRunes(text, intentJevMaxTextRunes),
+		"model":     model,
+		"questions": questions,
 	})
 	if err != nil {
 		return intentJevAnswer{}, err
@@ -139,6 +155,9 @@ func (j *httpIntentProbeJudge) ProbeProbability(ctx context.Context, apiKey, mod
 			IsProbe struct {
 				Noul *float64 `json:"noul"`
 			} `json:"is_probe"`
+			IsHealth struct {
+				Noul *float64 `json:"noul"`
+			} `json:"is_health"`
 		} `json:"answers"`
 		Usage struct {
 			InputTokens int64 `json:"input_tokens"`
@@ -151,7 +170,15 @@ func (j *httpIntentProbeJudge) ProbeProbability(ctx context.Context, apiKey, mod
 	if p == nil || *p < 0 || *p > 1 {
 		return intentJevAnswer{}, fmt.Errorf("jev answer has no probability: %s", truncateRunes(string(raw), 200))
 	}
-	return intentJevAnswer{P: *p, Tokens: parsed.Usage.InputTokens}, nil
+	answer := intentJevAnswer{P: *p, Tokens: parsed.Usage.InputTokens}
+	if askHealth {
+		h := parsed.Answers.IsHealth.Noul
+		if h == nil || *h < 0 || *h > 1 {
+			return intentJevAnswer{}, fmt.Errorf("jev answer has no health probability: %s", truncateRunes(string(raw), 200))
+		}
+		answer.Health = h
+	}
+	return answer, nil
 }
 
 // intentJevConfig is the hot-path copy of a router's Jev settings.
@@ -165,8 +192,13 @@ type intentJevConfig struct {
 	Timeout       time.Duration
 	Model         string
 	SamplePercent int
-	AllUsers      bool
-	UserIDs       map[int64]struct{}
+	// Health checks: asked only when HealthEnabled; HealthRule "" leaves
+	// them to ordinary scheduling.
+	HealthEnabled   bool
+	HealthThreshold float64
+	HealthRule      string
+	AllUsers        bool
+	UserIDs         map[int64]struct{}
 	// UserKeys narrows a listed user to some of their keys; a user without
 	// an entry is covered with all of them.
 	UserKeys map[int64]map[int64]struct{}
@@ -175,18 +207,21 @@ type intentJevConfig struct {
 func newIntentJevConfig(apiKey string, in domain.IntentJevConfig) intentJevConfig {
 	in = intentJevWithDefaults(in)
 	cfg := intentJevConfig{
-		Revision:      in.Revision,
-		Enabled:       in.Enabled,
-		APIKey:        strings.TrimSpace(apiKey),
-		Rule:          strings.TrimSpace(in.Rule),
-		Threshold:     in.Threshold,
-		MaxTurns:      in.MaxTurns,
-		Timeout:       time.Duration(in.TimeoutMS) * time.Millisecond,
-		Model:         in.Model,
-		SamplePercent: in.SamplePercent,
-		AllUsers:      in.Scope != domain.IntentJevScopeListed,
-		UserIDs:       make(map[int64]struct{}, len(in.UserIDs)),
-		UserKeys:      make(map[int64]map[int64]struct{}),
+		Revision:        in.Revision,
+		Enabled:         in.Enabled,
+		APIKey:          strings.TrimSpace(apiKey),
+		Rule:            strings.TrimSpace(in.Rule),
+		Threshold:       in.Threshold,
+		MaxTurns:        in.MaxTurns,
+		Timeout:         time.Duration(in.TimeoutMS) * time.Millisecond,
+		Model:           in.Model,
+		SamplePercent:   in.SamplePercent,
+		HealthEnabled:   in.HealthEnabled,
+		HealthThreshold: in.HealthThreshold,
+		HealthRule:      strings.TrimSpace(in.HealthRule),
+		AllUsers:        in.Scope != domain.IntentJevScopeListed,
+		UserIDs:         make(map[int64]struct{}, len(in.UserIDs)),
+		UserKeys:        make(map[int64]map[int64]struct{}),
 	}
 	for _, id := range in.UserIDs {
 		cfg.UserIDs[id] = struct{}{}
@@ -220,6 +255,9 @@ func intentJevWithDefaults(jev domain.IntentJevConfig) domain.IntentJevConfig {
 	}
 	if jev.SamplePercent == 0 {
 		jev.SamplePercent = intentJevDefaultSample
+	}
+	if jev.HealthThreshold == 0 {
+		jev.HealthThreshold = intentJevDefaultHealthThres
 	}
 	if jev.LowBalanceUSD == nil {
 		low := intentJevDefaultLowBalance
@@ -393,26 +431,44 @@ func newIntentJevRevision() string {
 
 // ---- the decision ----
 
-// judgeProbe asks Jev about a keyword miss and returns the rule to route it
-// to. Requests outside the scope, conversations longer than MaxTurns, turns
+// intentJevVerdict is what Jev decided about one request.
+type intentJevVerdict struct {
+	// Rule is set when the request is routed: to the probe rule, or to the
+	// health rule for a health check.
+	Rule  domain.IntentRule
+	Route bool
+	// Decided is true for a health check left to ordinary scheduling: the
+	// request is settled and nothing else may classify it.
+	Decided bool
+	// Label is the hit's keyword column: "jev:0.93" or "health:0.97".
+	Label string
+}
+
+// judgeProbe asks Jev about a keyword miss and decides where it goes.
+// Requests outside the scope, conversations longer than MaxTurns, turns
 // without user text and the share not sampled are not sent; neither is
 // anything while Jev is paused or switched off. Any failure means "no
 // preference".
-func (s *IntentRouterService) judgeProbe(ctx context.Context, cfg *intentRouterConfig, in IntentRouteInput, view intentRequestView, text string) (domain.IntentRule, float64, bool) {
+//
+// With health checks on, a request Jev calls a health check (sub2api's
+// channel monitor, "hi", "reply OK") goes to the health rule, or to ordinary
+// scheduling when there is none, whatever its probe probability: those
+// measure whether the channel is up, not how smart the model is.
+func (s *IntentRouterService) judgeProbe(ctx context.Context, cfg *intentRouterConfig, in IntentRouteInput, view intentRequestView, text string) intentJevVerdict {
 	rule, ok := cfg.jevRule()
 	if !ok || s.judge == nil || text == "" || !cfg.Jev.covers(in.UserID, in.APIKeyID) || len(view.turns()) > cfg.Jev.MaxTurns {
-		return domain.IntentRule{}, 0, false
+		return intentJevVerdict{}
 	}
 	if !s.jevAvailable(in.GroupID, cfg.Jev.Revision) {
-		return domain.IntentRule{}, 0, false
+		return intentJevVerdict{}
 	}
 	if s.rollPercent() >= cfg.Jev.SamplePercent {
 		s.jevCount(in.GroupID, intentJevStatSkipped, 1)
-		return domain.IntentRule{}, 0, false
+		return intentJevVerdict{}
 	}
 	started := s.now()
 	judgeCtx, cancel := context.WithTimeout(ctx, cfg.Jev.Timeout)
-	answer, err := s.judge.ProbeProbability(judgeCtx, cfg.Jev.APIKey, cfg.Jev.Model, text)
+	answer, err := s.judge.ProbeProbability(judgeCtx, cfg.Jev.APIKey, cfg.Jev.Model, text, cfg.Jev.HealthEnabled)
 	cancel()
 	latency := s.now().Sub(started).Milliseconds()
 	s.jevCount(in.GroupID, intentJevStatCalls, 1)
@@ -429,16 +485,28 @@ func (s *IntentRouterService) judgeProbe(ctx context.Context, cfg *intentRouterC
 			}
 			s.jevFailure(in.GroupID, detail)
 		}
-		return domain.IntentRule{}, 0, false
+		return intentJevVerdict{}
 	}
 	s.jevSuccess(in.GroupID)
 	s.jevSpend(in.GroupID, answer.Tokens)
+	if answer.Health != nil && *answer.Health >= cfg.Jev.HealthThreshold {
+		s.jevCount(in.GroupID, intentJevStatHealth, 1)
+		verdict := intentJevVerdict{Label: fmt.Sprintf("health:%.2f", *answer.Health)}
+		intent := ""
+		if healthRule, ok := cfg.rule(cfg.Jev.HealthRule); ok {
+			verdict.Rule, verdict.Route, intent = healthRule, true, healthRule.Name
+		} else {
+			verdict.Decided = true
+		}
+		s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "jev_health", Intent: intent, LatencyMS: latency, Detail: fmt.Sprintf("health=%.2f p=%.2f", *answer.Health, answer.P)})
+		return verdict
+	}
 	if answer.P < cfg.Jev.Threshold {
-		return domain.IntentRule{}, answer.P, false
+		return intentJevVerdict{}
 	}
 	s.jevCount(in.GroupID, intentJevStatProbes, 1)
 	s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "jev", Intent: rule.Name, LatencyMS: latency, Detail: fmt.Sprintf("p=%.2f", answer.P)})
-	return rule, answer.P, true
+	return intentJevVerdict{Rule: rule, Route: true, Label: fmt.Sprintf("jev:%.2f", answer.P)}
 }
 
 func (s *IntentRouterService) rollPercent() int {
@@ -454,6 +522,7 @@ const (
 	intentJevStatCalls   = "calls"
 	intentJevStatSkipped = "skipped"
 	intentJevStatProbes  = "probes"
+	intentJevStatHealth  = "health"
 	intentJevStatErrors  = "errors"
 	intentJevStatTokens  = "tokens"
 )
@@ -567,6 +636,7 @@ type IntentJevDayStats struct {
 	Calls   int64   `json:"calls"`
 	Skipped int64   `json:"skipped"`
 	Probes  int64   `json:"probes"`
+	Health  int64   `json:"health"`
 	Errors  int64   `json:"errors"`
 	Tokens  int64   `json:"tokens"`
 	CostUSD float64 `json:"cost_usd"`
@@ -628,7 +698,7 @@ func (s *IntentRouterService) JevStatus(ctx context.Context, groupID int64) (*In
 			}
 			status.Days = append(status.Days, IntentJevDayStats{
 				Date: day, Calls: counts[intentJevStatCalls], Skipped: counts[intentJevStatSkipped],
-				Probes: counts[intentJevStatProbes], Errors: counts[intentJevStatErrors],
+				Probes: counts[intentJevStatProbes], Health: counts[intentJevStatHealth], Errors: counts[intentJevStatErrors],
 				Tokens: counts[intentJevStatTokens], CostUSD: intentJevCostUSD(counts[intentJevStatTokens]),
 			})
 		}

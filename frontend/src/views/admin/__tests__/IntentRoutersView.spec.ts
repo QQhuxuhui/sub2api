@@ -285,7 +285,7 @@ describe('IntentRoutersView', () => {
     await wrapper.get('[data-test="intent-save"]').trigger('click')
     await flushPromises()
     const [, input] = api.save.mock.calls[0]
-    expect(input.jev).toEqual({ enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, low_balance_usd: 1, balance_usd: 0 })
+    expect(input.jev).toEqual({ enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, health_enabled: false, health_threshold: 0.7, health_rule: '', low_balance_usd: 1, balance_usd: 0 })
     expect(input.jev_api_key).toBe('')
     expect(input).not.toHaveProperty('jev_set_balance_usd') // an empty balance field changes nothing
   })
@@ -439,6 +439,80 @@ describe('IntentRoutersView', () => {
     await wrapper.get('[data-test="intent-save"]').trigger('click')
     await flushPromises()
     expect(api.save.mock.calls[0][1].excluded_models).toEqual(['codex-auto-review', 'gemini-*'])
+  })
+
+  it('loads and saves the keyword length limit', async () => {
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, keyword_max_chars: 500 }] })
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+    const field = wrapper.get('[data-test="intent-keyword-max-chars"]')
+    expect((field.element as HTMLInputElement).value).toBe('500')
+    await field.setValue('800')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].keyword_max_chars).toBe(800)
+  })
+
+  it('treats a missing or cleared keyword length limit as no limit', async () => {
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+    const field = wrapper.get('[data-test="intent-keyword-max-chars"]')
+    expect((field.element as HTMLInputElement).value).toBe('0')
+    await field.setValue('')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].keyword_max_chars).toBe(0)
+  })
+
+  it('picks the status sent when target accounts are unavailable, 503 by default', async () => {
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+    const field = wrapper.get('[data-test="intent-unavailable-status"]')
+    expect((field.element as HTMLSelectElement).value).toBe('503')
+    await field.setValue('429')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].unavailable_status).toBe(429)
+  })
+
+  it('edits the Jev health-check settings', async () => {
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+    expect(wrapper.find('[data-test="intent-jev-health-threshold"]').exists()).toBe(false)
+    await wrapper.get('[data-test="intent-jev-health-enabled"]').setValue(true)
+    expect((wrapper.get('[data-test="intent-jev-health-threshold"]').element as HTMLInputElement).value).toBe('0.7')
+    await wrapper.get('[data-test="intent-jev-health-threshold"]').setValue('0.8')
+    await wrapper.get('[data-test="intent-jev-health-rule"]').setValue('coding')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].jev).toMatchObject({ health_enabled: true, health_threshold: 0.8, health_rule: 'coding' })
+  })
+
+  it('leaves a stale health-check rule for the server to resolve, names matched as it does', async () => {
+    // The server matches rule names case-insensitively and drops references to
+    // rules that are gone while health checks are off; the page sends as is.
+    const router = { ...savedRouter, rules: [...savedRouter.rules, { name: 'health', description: '', account_ids: [21], enabled: true }],
+      jev: { enabled: false, rule: 'coding', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100,
+        health_enabled: true, health_threshold: 0.7, health_rule: 'health', low_balance_usd: 1, balance_usd: 0 } }
+    api.list.mockResolvedValue({ data: [router] })
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...router, ...input } }))
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-jev-health-enabled"]').setValue(false)
+    await wrapper.findAll('[data-test="intent-rule-name"]')[1].setValue('Health')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].jev).toMatchObject({ health_enabled: false, health_rule: 'health' })
+  })
+
+  it('shows the health-check answer of a try-it result', async () => {
+    api.test.mockResolvedValue({ data: { matched_by: 'jev', answer: 'p=0.95', intent: '', understood: true, account_ids: [], latency_ms: 80, probe_probability: 0.95, health_probability: 0.973, health_check: true } })
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-test-text"]').setValue('Reply OK')
+    await wrapper.get('[data-test="intent-test-run"]').trigger('click')
+    await flushPromises()
+    const text = wrapper.get('[data-test="intent-test-result"]').text()
+    expect(text).toContain('intentRouter.test.byJevHealthHit:{"p":"0.97"}')
+    expect(text).toContain('intentRouter.test.resultNone')
   })
 
   it('shows the Jev probability of a try-it result', async () => {

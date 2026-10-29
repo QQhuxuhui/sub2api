@@ -29581,6 +29581,10 @@ type IntentRouterMutation struct {
 	addcache_ttl_seconds     *int
 	max_input_chars          *int
 	addmax_input_chars       *int
+	keyword_max_chars        *int
+	addkeyword_max_chars     *int
+	unavailable_status       *int
+	addunavailable_status    *int
 	rules                    *[]domain.IntentRule
 	appendrules              []domain.IntentRule
 	excluded_models          *[]string
@@ -30167,6 +30171,118 @@ func (m *IntentRouterMutation) ResetMaxInputChars() {
 	m.addmax_input_chars = nil
 }
 
+// SetKeywordMaxChars sets the "keyword_max_chars" field.
+func (m *IntentRouterMutation) SetKeywordMaxChars(i int) {
+	m.keyword_max_chars = &i
+	m.addkeyword_max_chars = nil
+}
+
+// KeywordMaxChars returns the value of the "keyword_max_chars" field in the mutation.
+func (m *IntentRouterMutation) KeywordMaxChars() (r int, exists bool) {
+	v := m.keyword_max_chars
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldKeywordMaxChars returns the old "keyword_max_chars" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldKeywordMaxChars(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldKeywordMaxChars is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldKeywordMaxChars requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldKeywordMaxChars: %w", err)
+	}
+	return oldValue.KeywordMaxChars, nil
+}
+
+// AddKeywordMaxChars adds i to the "keyword_max_chars" field.
+func (m *IntentRouterMutation) AddKeywordMaxChars(i int) {
+	if m.addkeyword_max_chars != nil {
+		*m.addkeyword_max_chars += i
+	} else {
+		m.addkeyword_max_chars = &i
+	}
+}
+
+// AddedKeywordMaxChars returns the value that was added to the "keyword_max_chars" field in this mutation.
+func (m *IntentRouterMutation) AddedKeywordMaxChars() (r int, exists bool) {
+	v := m.addkeyword_max_chars
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetKeywordMaxChars resets all changes to the "keyword_max_chars" field.
+func (m *IntentRouterMutation) ResetKeywordMaxChars() {
+	m.keyword_max_chars = nil
+	m.addkeyword_max_chars = nil
+}
+
+// SetUnavailableStatus sets the "unavailable_status" field.
+func (m *IntentRouterMutation) SetUnavailableStatus(i int) {
+	m.unavailable_status = &i
+	m.addunavailable_status = nil
+}
+
+// UnavailableStatus returns the value of the "unavailable_status" field in the mutation.
+func (m *IntentRouterMutation) UnavailableStatus() (r int, exists bool) {
+	v := m.unavailable_status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUnavailableStatus returns the old "unavailable_status" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldUnavailableStatus(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUnavailableStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUnavailableStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUnavailableStatus: %w", err)
+	}
+	return oldValue.UnavailableStatus, nil
+}
+
+// AddUnavailableStatus adds i to the "unavailable_status" field.
+func (m *IntentRouterMutation) AddUnavailableStatus(i int) {
+	if m.addunavailable_status != nil {
+		*m.addunavailable_status += i
+	} else {
+		m.addunavailable_status = &i
+	}
+}
+
+// AddedUnavailableStatus returns the value that was added to the "unavailable_status" field in this mutation.
+func (m *IntentRouterMutation) AddedUnavailableStatus() (r int, exists bool) {
+	v := m.addunavailable_status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetUnavailableStatus resets all changes to the "unavailable_status" field.
+func (m *IntentRouterMutation) ResetUnavailableStatus() {
+	m.unavailable_status = nil
+	m.addunavailable_status = nil
+}
+
 // SetRules sets the "rules" field.
 func (m *IntentRouterMutation) SetRules(dr []domain.IntentRule) {
 	m.rules = &dr
@@ -30416,7 +30532,7 @@ func (m *IntentRouterMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *IntentRouterMutation) Fields() []string {
-	fields := make([]string, 0, 15)
+	fields := make([]string, 0, 17)
 	if m.created_at != nil {
 		fields = append(fields, intentrouter.FieldCreatedAt)
 	}
@@ -30449,6 +30565,12 @@ func (m *IntentRouterMutation) Fields() []string {
 	}
 	if m.max_input_chars != nil {
 		fields = append(fields, intentrouter.FieldMaxInputChars)
+	}
+	if m.keyword_max_chars != nil {
+		fields = append(fields, intentrouter.FieldKeywordMaxChars)
+	}
+	if m.unavailable_status != nil {
+		fields = append(fields, intentrouter.FieldUnavailableStatus)
 	}
 	if m.rules != nil {
 		fields = append(fields, intentrouter.FieldRules)
@@ -30492,6 +30614,10 @@ func (m *IntentRouterMutation) Field(name string) (ent.Value, bool) {
 		return m.CacheTTLSeconds()
 	case intentrouter.FieldMaxInputChars:
 		return m.MaxInputChars()
+	case intentrouter.FieldKeywordMaxChars:
+		return m.KeywordMaxChars()
+	case intentrouter.FieldUnavailableStatus:
+		return m.UnavailableStatus()
 	case intentrouter.FieldRules:
 		return m.Rules()
 	case intentrouter.FieldExcludedModels:
@@ -30531,6 +30657,10 @@ func (m *IntentRouterMutation) OldField(ctx context.Context, name string) (ent.V
 		return m.OldCacheTTLSeconds(ctx)
 	case intentrouter.FieldMaxInputChars:
 		return m.OldMaxInputChars(ctx)
+	case intentrouter.FieldKeywordMaxChars:
+		return m.OldKeywordMaxChars(ctx)
+	case intentrouter.FieldUnavailableStatus:
+		return m.OldUnavailableStatus(ctx)
 	case intentrouter.FieldRules:
 		return m.OldRules(ctx)
 	case intentrouter.FieldExcludedModels:
@@ -30625,6 +30755,20 @@ func (m *IntentRouterMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetMaxInputChars(v)
 		return nil
+	case intentrouter.FieldKeywordMaxChars:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetKeywordMaxChars(v)
+		return nil
+	case intentrouter.FieldUnavailableStatus:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUnavailableStatus(v)
+		return nil
 	case intentrouter.FieldRules:
 		v, ok := value.([]domain.IntentRule)
 		if !ok {
@@ -30673,6 +30817,12 @@ func (m *IntentRouterMutation) AddedFields() []string {
 	if m.addmax_input_chars != nil {
 		fields = append(fields, intentrouter.FieldMaxInputChars)
 	}
+	if m.addkeyword_max_chars != nil {
+		fields = append(fields, intentrouter.FieldKeywordMaxChars)
+	}
+	if m.addunavailable_status != nil {
+		fields = append(fields, intentrouter.FieldUnavailableStatus)
+	}
 	return fields
 }
 
@@ -30689,6 +30839,10 @@ func (m *IntentRouterMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedCacheTTLSeconds()
 	case intentrouter.FieldMaxInputChars:
 		return m.AddedMaxInputChars()
+	case intentrouter.FieldKeywordMaxChars:
+		return m.AddedKeywordMaxChars()
+	case intentrouter.FieldUnavailableStatus:
+		return m.AddedUnavailableStatus()
 	}
 	return nil, false
 }
@@ -30725,6 +30879,20 @@ func (m *IntentRouterMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddMaxInputChars(v)
+		return nil
+	case intentrouter.FieldKeywordMaxChars:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddKeywordMaxChars(v)
+		return nil
+	case intentrouter.FieldUnavailableStatus:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddUnavailableStatus(v)
 		return nil
 	}
 	return fmt.Errorf("unknown IntentRouter numeric field %s", name)
@@ -30806,6 +30974,12 @@ func (m *IntentRouterMutation) ResetField(name string) error {
 		return nil
 	case intentrouter.FieldMaxInputChars:
 		m.ResetMaxInputChars()
+		return nil
+	case intentrouter.FieldKeywordMaxChars:
+		m.ResetKeywordMaxChars()
+		return nil
+	case intentrouter.FieldUnavailableStatus:
+		m.ResetUnavailableStatus()
 		return nil
 	case intentrouter.FieldRules:
 		m.ResetRules()

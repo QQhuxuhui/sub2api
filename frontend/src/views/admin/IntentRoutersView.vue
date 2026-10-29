@@ -62,6 +62,20 @@
               <textarea v-model="form.excludedModelsText" data-test="intent-excluded-models" rows="2" class="input font-mono text-sm" :placeholder="t('intentRouter.excludedModelsPlaceholder')"></textarea>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.excludedModelsHint') }}</p>
             </div>
+            <div>
+              <label class="input-label">{{ t('intentRouter.keywordMaxChars') }}</label>
+              <input v-model.number="form.keyword_max_chars" data-test="intent-keyword-max-chars" type="number" min="0" max="1000000" step="1" class="input w-40" />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.keywordMaxCharsHint') }}</p>
+            </div>
+            <div>
+              <label class="input-label">{{ t('intentRouter.unavailableStatus') }}</label>
+              <select v-model.number="form.unavailable_status" data-test="intent-unavailable-status" class="input w-40">
+                <option :value="503">503</option>
+                <option :value="502">502</option>
+                <option :value="429">429</option>
+              </select>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.unavailableStatusHint') }}</p>
+            </div>
 
           </div>
 
@@ -99,6 +113,7 @@
                       <th class="py-1 pr-4">{{ t('intentRouter.jev.status.calls') }}</th>
                       <th class="py-1 pr-4">{{ t('intentRouter.jev.status.skipped') }}</th>
                       <th class="py-1 pr-4">{{ t('intentRouter.jev.status.probes') }}</th>
+                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.health') }}</th>
                       <th class="py-1 pr-4">{{ t('intentRouter.jev.status.errors') }}</th>
                       <th class="py-1 pr-4">{{ t('intentRouter.jev.status.tokens') }}</th>
                       <th class="py-1">{{ t('intentRouter.jev.status.cost') }}</th>
@@ -110,6 +125,7 @@
                       <td class="py-1 pr-4">{{ day.calls }}</td>
                       <td class="py-1 pr-4">{{ day.skipped }}</td>
                       <td class="py-1 pr-4">{{ day.probes }}</td>
+                      <td class="py-1 pr-4">{{ day.health ?? 0 }}</td>
                       <td class="py-1 pr-4">{{ day.errors }}</td>
                       <td class="py-1 pr-4">{{ day.tokens }}</td>
                       <td class="py-1">{{ formatUSD(day.cost_usd) }} / {{ formatCNY(day.cost_usd) }}</td>
@@ -157,6 +173,30 @@
               <div>
                 <label class="input-label">{{ t('intentRouter.jev.model') }}</label>
                 <input v-model.trim="form.jev.model" type="text" class="input" placeholder="jev-latest" />
+              </div>
+            </div>
+            <div class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600" data-test="intent-jev-health">
+              <label class="flex items-start gap-3">
+                <input v-model="form.jev.health_enabled" data-test="intent-jev-health-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                <span>
+                  <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('intentRouter.jev.health.enabled') }}</span>
+                  <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.health.enabledHint') }}</span>
+                </span>
+              </label>
+              <div v-if="form.jev.health_enabled" class="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label class="input-label">{{ t('intentRouter.jev.health.threshold') }}</label>
+                  <input v-model.number="form.jev.health_threshold" data-test="intent-jev-health-threshold" type="number" min="0.01" max="1" step="0.05" class="input" />
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.health.thresholdHint') }}</p>
+                </div>
+                <div>
+                  <label class="input-label">{{ t('intentRouter.jev.health.rule') }}</label>
+                  <select v-model="form.jev.health_rule" data-test="intent-jev-health-rule" class="input">
+                    <option value="">{{ t('intentRouter.jev.health.ruleNone') }}</option>
+                    <option v-for="name in ruleNames" :key="name" :value="name">{{ name }}</option>
+                  </select>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.health.ruleHint') }}</p>
+                </div>
               </div>
             </div>
             <div class="grid gap-4 md:grid-cols-3">
@@ -353,7 +393,7 @@
                 {{ t('intentRouter.test.byKeyword', { keyword: testResult.keyword }) }}
               </p>
               <p v-else-if="testResult.matched_by === 'jev'" class="text-gray-500 dark:text-gray-400">
-                {{ t('intentRouter.test.byJev', { p: (testResult.probe_probability ?? 0).toFixed(2) }) }} · {{ t('intentRouter.test.latency', { ms: testResult.latency_ms }) }}
+                {{ t('intentRouter.test.byJev', { p: (testResult.probe_probability ?? 0).toFixed(2) }) }}<template v-if="testResult.health_probability !== undefined"> · {{ t(testResult.health_check ? 'intentRouter.test.byJevHealthHit' : 'intentRouter.test.byJevHealth', { p: testResult.health_probability.toFixed(2) }) }}</template> · {{ t('intentRouter.test.latency', { ms: testResult.latency_ms }) }}
               </p>
               <p v-else-if="testResult.matched_by === 'classifier'" class="text-gray-500 dark:text-gray-400">
                 {{ t('intentRouter.test.answer', { answer: testResult.answer || '—' }) }} · {{ t('intentRouter.test.latency', { ms: testResult.latency_ms }) }}
@@ -570,6 +610,8 @@ const blankForm = (): FormState => ({
   classifier_timeout_ms: 3000,
   cache_ttl_seconds: 7200,
   max_input_chars: 2000,
+  keyword_max_chars: 0,
+  unavailable_status: 503,
   rules: [],
   jev_api_key: '',
   jev: blankJev(),
@@ -579,7 +621,7 @@ const blankForm = (): FormState => ({
   jevBalanceText: '',
 })
 function blankJev(): IntentJevConfig {
-  return { enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, low_balance_usd: 1, balance_usd: 0 }
+  return { enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, health_enabled: false, health_threshold: 0.7, health_rule: '', low_balance_usd: 1, balance_usd: 0 }
 }
 const form = reactive<FormState>(blankForm())
 const baseline = ref('')
@@ -606,6 +648,8 @@ function toInput(): IntentRouterInput {
     classifier_timeout_ms: Number(form.classifier_timeout_ms) || 0,
     cache_ttl_seconds: Number(form.cache_ttl_seconds) || 0,
     max_input_chars: Number(form.max_input_chars) || 0,
+    keyword_max_chars: Math.max(0, Math.trunc(Number(form.keyword_max_chars) || 0)),
+    unavailable_status: Number(form.unavailable_status) || 503,
     rules: form.rules.map(({ name, description, keywordsText, originalKeywords, account_ids, enabled }) => ({
       name, description, keywords: restoreOriginalControls(parseKeywords(keywordsText), originalKeywords), account_ids: [...account_ids], enabled,
     })),
@@ -619,6 +663,7 @@ function toInput(): IntentRouterInput {
       user_ids: form.jevUsers.map((u) => u.id),
       api_keys: form.jevKeys.map((k) => ({ id: k.id })),
       sample_percent: Number(form.jev.sample_percent) || 0,
+      health_threshold: Number(form.jev.health_threshold) || 0,
       low_balance_usd: Number(form.jev.low_balance_usd) || 0,
     },
     ...(String(form.jevBalanceText).trim() !== '' ? { jev_set_balance_usd: Number(form.jevBalanceText) } : {}),
@@ -753,6 +798,8 @@ function fillForm(router: IntentRouter | null) {
     form.classifier_timeout_ms = router.classifier_timeout_ms
     form.cache_ttl_seconds = router.cache_ttl_seconds
     form.max_input_chars = router.max_input_chars
+    form.keyword_max_chars = router.keyword_max_chars ?? 0
+    form.unavailable_status = router.unavailable_status || 503
     form.excludedModelsText = (router.excluded_models ?? []).join('\n')
     form.jev = { ...blankJev(), ...(router.jev ?? {}) }
     const userLabels = new Map((router.jev_scope?.users ?? []).map((u) => [u.id, u.email]))

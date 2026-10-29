@@ -143,7 +143,7 @@ func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 	if len(route.AccountIDs) > 0 {
 		slog.Info("intent_route.unavailable",
 			"group_id", derefGroupID(groupID), "intent", route.Intent, "model", requestedModel, "excluded", len(excludedIDs))
-		return nil, none, false, ErrIntentRouteUnavailable
+		return nil, none, false, route.unavailable()
 	}
 	slog.Debug("intent_route.fallback",
 		"group_id", derefGroupID(groupID), "intent", route.Intent, "model", requestedModel)

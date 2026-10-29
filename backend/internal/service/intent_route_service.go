@@ -52,6 +52,8 @@ type intentRouterConfig struct {
 	ClassifierTimeout  time.Duration
 	CacheTTL           time.Duration
 	MaxInputChars      int
+	KeywordMaxChars    int // keywords only count in a user message of at most this many runes; 0 = no limit
+	UnavailableStatus  int // reported when a matched rule's accounts are all unavailable
 	Rules              []domain.IntentRule
 	Jev                intentJevConfig
 	// ExcludedModels (lower-cased; a trailing * matches a prefix) skip
@@ -158,8 +160,13 @@ const intentKeywordFollowUpChars = 15
 
 // matchKeywords returns the first active rule, in configured order, that has a
 // keyword occurring in text (case-insensitive), and the keyword that matched.
+// A text longer than KeywordMaxChars matches nothing: long messages are
+// mostly coding-agent context, where generic words hit real work.
 func (c *intentRouterConfig) matchKeywords(text string) (domain.IntentRule, string, bool) {
 	if text == "" {
+		return domain.IntentRule{}, "", false
+	}
+	if c.KeywordMaxChars > 0 && utf8.RuneCountInString(text) > c.KeywordMaxChars {
 		return domain.IntentRule{}, "", false
 	}
 	lower := strings.ToLower(text)
@@ -424,9 +431,17 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 	// Jev judges what keywords missed, per turn and without memory, exactly
 	// like a keyword: a probe goes to the rule's accounts this turn only.
 	if len(texts) > 0 {
-		if rule, p, ok := s.judgeProbe(ctx, cfg, in, view, texts[0]); ok {
-			s.recordHit(in, view, rule.Name, fmt.Sprintf("jev:%.2f", p), 0, texts[0], texts[0], truncateRunes(texts[0], intentJevHitExcerpt))
-			return s.newDecision(cfg, rule, "", 0, 0)
+		verdict := s.judgeProbe(ctx, cfg, in, view, texts[0])
+		if verdict.Route || verdict.Decided {
+			// A health check left to ordinary scheduling is recorded with
+			// no rule, so reviews can see what Jev let through.
+			s.recordHit(in, view, verdict.Rule.Name, verdict.Label, 0, texts[0], texts[0], truncateRunes(texts[0], intentJevHitExcerpt))
+		}
+		if verdict.Route {
+			return s.newDecision(cfg, verdict.Rule, "", 0, 0)
+		}
+		if verdict.Decided {
+			return nil
 		}
 	}
 	rules := cfg.classifierRules()
@@ -572,10 +587,11 @@ func (s *IntentRouterService) newDecision(cfg *intentRouterConfig, rule domain.I
 	groupID, ttl, intent := cfg.GroupID, cfg.CacheTTL, rule.Name
 	var sequence atomic.Int64
 	return &IntentRouteDecision{
-		GroupID:         groupID,
-		Intent:          intent,
-		AccountIDs:      append([]int64(nil), rule.AccountIDs...),
-		PinnedAccountID: pinned,
+		GroupID:           groupID,
+		Intent:            intent,
+		AccountIDs:        append([]int64(nil), rule.AccountIDs...),
+		PinnedAccountID:   pinned,
+		UnavailableStatus: cfg.UnavailableStatus,
 		onSelect: func(accountID int64) {
 			s.record(IntentRouteEvent{GroupID: groupID, Kind: "routed", Intent: intent, AccountID: accountID})
 			if s.store == nil || sessionKey == "" || version <= 0 {
@@ -711,6 +727,8 @@ func intentRouterConfigFromEnt(row *dbent.IntentRouter) *intentRouterConfig {
 		ClassifierTimeout:  time.Duration(row.ClassifierTimeoutMs) * time.Millisecond,
 		CacheTTL:           time.Duration(row.CacheTTLSeconds) * time.Second,
 		MaxInputChars:      row.MaxInputChars,
+		KeywordMaxChars:    row.KeywordMaxChars,
+		UnavailableStatus:  row.UnavailableStatus,
 		Rules:              row.Rules,
 		Jev:                newIntentJevConfig(row.JevAPIKey, row.Jev),
 	}
@@ -724,6 +742,9 @@ func intentRouterConfigFromEnt(row *dbent.IntentRouter) *intentRouterConfig {
 	}
 	if cfg.MaxInputChars <= 0 {
 		cfg.MaxInputChars = 2000
+	}
+	if !validIntentUnavailableStatus(cfg.UnavailableStatus) {
+		cfg.UnavailableStatus = http.StatusServiceUnavailable
 	}
 	return cfg
 }

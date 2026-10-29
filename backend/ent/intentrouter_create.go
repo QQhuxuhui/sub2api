@@ -169,6 +169,34 @@ func (_c *IntentRouterCreate) SetNillableMaxInputChars(v *int) *IntentRouterCrea
 	return _c
 }
 
+// SetKeywordMaxChars sets the "keyword_max_chars" field.
+func (_c *IntentRouterCreate) SetKeywordMaxChars(v int) *IntentRouterCreate {
+	_c.mutation.SetKeywordMaxChars(v)
+	return _c
+}
+
+// SetNillableKeywordMaxChars sets the "keyword_max_chars" field if the given value is not nil.
+func (_c *IntentRouterCreate) SetNillableKeywordMaxChars(v *int) *IntentRouterCreate {
+	if v != nil {
+		_c.SetKeywordMaxChars(*v)
+	}
+	return _c
+}
+
+// SetUnavailableStatus sets the "unavailable_status" field.
+func (_c *IntentRouterCreate) SetUnavailableStatus(v int) *IntentRouterCreate {
+	_c.mutation.SetUnavailableStatus(v)
+	return _c
+}
+
+// SetNillableUnavailableStatus sets the "unavailable_status" field if the given value is not nil.
+func (_c *IntentRouterCreate) SetNillableUnavailableStatus(v *int) *IntentRouterCreate {
+	if v != nil {
+		_c.SetUnavailableStatus(*v)
+	}
+	return _c
+}
+
 // SetRules sets the "rules" field.
 func (_c *IntentRouterCreate) SetRules(v []domain.IntentRule) *IntentRouterCreate {
 	_c.mutation.SetRules(v)
@@ -284,6 +312,14 @@ func (_c *IntentRouterCreate) defaults() {
 		v := intentrouter.DefaultMaxInputChars
 		_c.mutation.SetMaxInputChars(v)
 	}
+	if _, ok := _c.mutation.KeywordMaxChars(); !ok {
+		v := intentrouter.DefaultKeywordMaxChars
+		_c.mutation.SetKeywordMaxChars(v)
+	}
+	if _, ok := _c.mutation.UnavailableStatus(); !ok {
+		v := intentrouter.DefaultUnavailableStatus
+		_c.mutation.SetUnavailableStatus(v)
+	}
 	if _, ok := _c.mutation.JevAPIKey(); !ok {
 		v := intentrouter.DefaultJevAPIKey
 		_c.mutation.SetJevAPIKey(v)
@@ -344,6 +380,12 @@ func (_c *IntentRouterCreate) check() error {
 	}
 	if _, ok := _c.mutation.MaxInputChars(); !ok {
 		return &ValidationError{Name: "max_input_chars", err: errors.New(`ent: missing required field "IntentRouter.max_input_chars"`)}
+	}
+	if _, ok := _c.mutation.KeywordMaxChars(); !ok {
+		return &ValidationError{Name: "keyword_max_chars", err: errors.New(`ent: missing required field "IntentRouter.keyword_max_chars"`)}
+	}
+	if _, ok := _c.mutation.UnavailableStatus(); !ok {
+		return &ValidationError{Name: "unavailable_status", err: errors.New(`ent: missing required field "IntentRouter.unavailable_status"`)}
 	}
 	if _, ok := _c.mutation.JevAPIKey(); !ok {
 		return &ValidationError{Name: "jev_api_key", err: errors.New(`ent: missing required field "IntentRouter.jev_api_key"`)}
@@ -423,6 +465,14 @@ func (_c *IntentRouterCreate) createSpec() (*IntentRouter, *sqlgraph.CreateSpec)
 	if value, ok := _c.mutation.MaxInputChars(); ok {
 		_spec.SetField(intentrouter.FieldMaxInputChars, field.TypeInt, value)
 		_node.MaxInputChars = value
+	}
+	if value, ok := _c.mutation.KeywordMaxChars(); ok {
+		_spec.SetField(intentrouter.FieldKeywordMaxChars, field.TypeInt, value)
+		_node.KeywordMaxChars = value
+	}
+	if value, ok := _c.mutation.UnavailableStatus(); ok {
+		_spec.SetField(intentrouter.FieldUnavailableStatus, field.TypeInt, value)
+		_node.UnavailableStatus = value
 	}
 	if value, ok := _c.mutation.Rules(); ok {
 		_spec.SetField(intentrouter.FieldRules, field.TypeJSON, value)
@@ -633,6 +683,42 @@ func (u *IntentRouterUpsert) UpdateMaxInputChars() *IntentRouterUpsert {
 // AddMaxInputChars adds v to the "max_input_chars" field.
 func (u *IntentRouterUpsert) AddMaxInputChars(v int) *IntentRouterUpsert {
 	u.Add(intentrouter.FieldMaxInputChars, v)
+	return u
+}
+
+// SetKeywordMaxChars sets the "keyword_max_chars" field.
+func (u *IntentRouterUpsert) SetKeywordMaxChars(v int) *IntentRouterUpsert {
+	u.Set(intentrouter.FieldKeywordMaxChars, v)
+	return u
+}
+
+// UpdateKeywordMaxChars sets the "keyword_max_chars" field to the value that was provided on create.
+func (u *IntentRouterUpsert) UpdateKeywordMaxChars() *IntentRouterUpsert {
+	u.SetExcluded(intentrouter.FieldKeywordMaxChars)
+	return u
+}
+
+// AddKeywordMaxChars adds v to the "keyword_max_chars" field.
+func (u *IntentRouterUpsert) AddKeywordMaxChars(v int) *IntentRouterUpsert {
+	u.Add(intentrouter.FieldKeywordMaxChars, v)
+	return u
+}
+
+// SetUnavailableStatus sets the "unavailable_status" field.
+func (u *IntentRouterUpsert) SetUnavailableStatus(v int) *IntentRouterUpsert {
+	u.Set(intentrouter.FieldUnavailableStatus, v)
+	return u
+}
+
+// UpdateUnavailableStatus sets the "unavailable_status" field to the value that was provided on create.
+func (u *IntentRouterUpsert) UpdateUnavailableStatus() *IntentRouterUpsert {
+	u.SetExcluded(intentrouter.FieldUnavailableStatus)
+	return u
+}
+
+// AddUnavailableStatus adds v to the "unavailable_status" field.
+func (u *IntentRouterUpsert) AddUnavailableStatus(v int) *IntentRouterUpsert {
+	u.Add(intentrouter.FieldUnavailableStatus, v)
 	return u
 }
 
@@ -912,6 +998,48 @@ func (u *IntentRouterUpsertOne) AddMaxInputChars(v int) *IntentRouterUpsertOne {
 func (u *IntentRouterUpsertOne) UpdateMaxInputChars() *IntentRouterUpsertOne {
 	return u.Update(func(s *IntentRouterUpsert) {
 		s.UpdateMaxInputChars()
+	})
+}
+
+// SetKeywordMaxChars sets the "keyword_max_chars" field.
+func (u *IntentRouterUpsertOne) SetKeywordMaxChars(v int) *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.SetKeywordMaxChars(v)
+	})
+}
+
+// AddKeywordMaxChars adds v to the "keyword_max_chars" field.
+func (u *IntentRouterUpsertOne) AddKeywordMaxChars(v int) *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.AddKeywordMaxChars(v)
+	})
+}
+
+// UpdateKeywordMaxChars sets the "keyword_max_chars" field to the value that was provided on create.
+func (u *IntentRouterUpsertOne) UpdateKeywordMaxChars() *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.UpdateKeywordMaxChars()
+	})
+}
+
+// SetUnavailableStatus sets the "unavailable_status" field.
+func (u *IntentRouterUpsertOne) SetUnavailableStatus(v int) *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.SetUnavailableStatus(v)
+	})
+}
+
+// AddUnavailableStatus adds v to the "unavailable_status" field.
+func (u *IntentRouterUpsertOne) AddUnavailableStatus(v int) *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.AddUnavailableStatus(v)
+	})
+}
+
+// UpdateUnavailableStatus sets the "unavailable_status" field to the value that was provided on create.
+func (u *IntentRouterUpsertOne) UpdateUnavailableStatus() *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.UpdateUnavailableStatus()
 	})
 }
 
@@ -1368,6 +1496,48 @@ func (u *IntentRouterUpsertBulk) AddMaxInputChars(v int) *IntentRouterUpsertBulk
 func (u *IntentRouterUpsertBulk) UpdateMaxInputChars() *IntentRouterUpsertBulk {
 	return u.Update(func(s *IntentRouterUpsert) {
 		s.UpdateMaxInputChars()
+	})
+}
+
+// SetKeywordMaxChars sets the "keyword_max_chars" field.
+func (u *IntentRouterUpsertBulk) SetKeywordMaxChars(v int) *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.SetKeywordMaxChars(v)
+	})
+}
+
+// AddKeywordMaxChars adds v to the "keyword_max_chars" field.
+func (u *IntentRouterUpsertBulk) AddKeywordMaxChars(v int) *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.AddKeywordMaxChars(v)
+	})
+}
+
+// UpdateKeywordMaxChars sets the "keyword_max_chars" field to the value that was provided on create.
+func (u *IntentRouterUpsertBulk) UpdateKeywordMaxChars() *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.UpdateKeywordMaxChars()
+	})
+}
+
+// SetUnavailableStatus sets the "unavailable_status" field.
+func (u *IntentRouterUpsertBulk) SetUnavailableStatus(v int) *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.SetUnavailableStatus(v)
+	})
+}
+
+// AddUnavailableStatus adds v to the "unavailable_status" field.
+func (u *IntentRouterUpsertBulk) AddUnavailableStatus(v int) *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.AddUnavailableStatus(v)
+	})
+}
+
+// UpdateUnavailableStatus sets the "unavailable_status" field to the value that was provided on create.
+func (u *IntentRouterUpsertBulk) UpdateUnavailableStatus() *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.UpdateUnavailableStatus()
 	})
 }
 

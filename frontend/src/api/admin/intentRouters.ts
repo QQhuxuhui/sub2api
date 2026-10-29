@@ -29,6 +29,12 @@ export interface IntentJevConfig {
   api_keys: { id: number; user_id?: number }[]
   /** 1-100: share of eligible requests actually sent to Jev. */
   sample_percent: number
+  /** Also ask Jev whether the request is a liveness/health check (sub2api channel monitor, "hi", "reply OK"). */
+  health_enabled: boolean
+  /** Health probability (0-1) at or above which a request counts as a health check. */
+  health_threshold: number
+  /** Rule health checks go to; "" leaves them to the group's ordinary scheduling. */
+  health_rule: string
   /** Estimated balance below this is flagged; never switches Jev off. */
   low_balance_usd: number
   /** Server-owned: the balance last entered and when (set via jev_set_balance_usd). */
@@ -45,6 +51,7 @@ export interface IntentJevDayStats {
   calls: number
   skipped: number
   probes: number
+  health?: number
   errors: number
   tokens: number
   cost_usd: number
@@ -84,6 +91,10 @@ export interface IntentRouter {
   classifier_timeout_ms: number
   cache_ttl_seconds: number
   max_input_chars: number
+  /** Keywords only count in a user message of at most this many characters; 0 = no limit. */
+  keyword_max_chars: number
+  /** HTTP status sent when a matched rule's accounts are all unavailable: 429, 502 or 503. */
+  unavailable_status: number
   rules: IntentRule[]
   /** Requests for these models skip intent routing entirely; a trailing * matches a prefix. */
   excluded_models: string[]
@@ -105,6 +116,8 @@ export interface IntentRouterInput {
   classifier_timeout_ms: number
   cache_ttl_seconds: number
   max_input_chars: number
+  keyword_max_chars: number
+  unavailable_status: number
   rules: IntentRule[]
   excluded_models: string[]
   /** Leave empty to keep the stored key. */
@@ -125,6 +138,9 @@ export interface IntentClassifyTestResult {
   latency_ms: number
   /** Jev's answer when Jev was asked. */
   probe_probability?: number
+  /** Jev's health-check answer, when health checks are on. */
+  health_probability?: number
+  health_check?: boolean
 }
 
 export interface IntentRouteEvent {

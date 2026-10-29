@@ -24,6 +24,8 @@ import (
 type scriptedProbeJudge struct {
 	mu     sync.Mutex
 	p      float64
+	health *float64 // answered only when asked
+	asked  []bool
 	tokens int64
 	err    error
 	calls  int
@@ -31,13 +33,22 @@ type scriptedProbeJudge struct {
 	keys   []string
 }
 
-func (j *scriptedProbeJudge) ProbeProbability(_ context.Context, apiKey, _ string, text string) (intentJevAnswer, error) {
+func (j *scriptedProbeJudge) ProbeProbability(_ context.Context, apiKey, _ string, text string, askHealth bool) (intentJevAnswer, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.calls++
 	j.texts = append(j.texts, text)
 	j.keys = append(j.keys, apiKey)
-	return intentJevAnswer{P: j.p, Tokens: j.tokens}, j.err
+	j.asked = append(j.asked, askHealth)
+	answer := intentJevAnswer{P: j.p, Tokens: j.tokens}
+	if askHealth {
+		h := 0.0
+		if j.health != nil {
+			h = *j.health
+		}
+		answer.Health = &h
+	}
+	return answer, j.err
 }
 
 type memoryIntentJevStats struct {
@@ -582,7 +593,7 @@ func TestHTTPIntentProbeJudge_ParsesNoul(t *testing.T) {
 	defer srv.Close()
 	j := &httpIntentProbeJudge{client: srv.Client(), endpoint: srv.URL}
 
-	answer, err := j.ProbeProbability(context.Background(), "k1", "jev-latest", strings.Repeat("长", intentJevMaxTextRunes+10))
+	answer, err := j.ProbeProbability(context.Background(), "k1", "jev-latest", strings.Repeat("长", intentJevMaxTextRunes+10), false)
 	require.NoError(t, err)
 	require.Equal(t, 0.67, answer.P)
 	require.Equal(t, int64(306), answer.Tokens)
@@ -591,7 +602,7 @@ func TestHTTPIntentProbeJudge_ParsesNoul(t *testing.T) {
 	q := got["questions"].(map[string]any)["is_probe"].(map[string]any)
 	require.Equal(t, "noul", q["type"])
 
-	_, err = j.ProbeProbability(context.Background(), "k1", "jev-latest", "fail")
+	_, err = j.ProbeProbability(context.Background(), "k1", "jev-latest", "fail", false)
 	status, account := intentJevAccountProblem(err)
 	require.True(t, account)
 	require.Equal(t, 451, status)
@@ -614,7 +625,7 @@ func TestHTTPIntentProbeJudge_Live(t *testing.T) {
 		{"帮我看下这个 Go 服务启动时报 dial tcp 127.0.0.1:5432: connect: connection refused 是什么原因，docker compose 里 postgres 已经起来了", false},
 	} {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		answer, err := j.ProbeProbability(ctx, key, intentJevDefaultModel, c.text)
+		answer, err := j.ProbeProbability(ctx, key, intentJevDefaultModel, c.text, false)
 		cancel()
 		require.NoError(t, err)
 		t.Logf("p=%.2f tokens=%d probe=%v %s", answer.P, answer.Tokens, c.probe, truncateRunes(c.text, 24))

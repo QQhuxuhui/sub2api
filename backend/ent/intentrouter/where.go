@@ -109,6 +109,16 @@ func MaxInputChars(v int) predicate.IntentRouter {
 	return predicate.IntentRouter(sql.FieldEQ(FieldMaxInputChars, v))
 }
 
+// KeywordMaxChars applies equality check predicate on the "keyword_max_chars" field. It's identical to KeywordMaxCharsEQ.
+func KeywordMaxChars(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldEQ(FieldKeywordMaxChars, v))
+}
+
+// UnavailableStatus applies equality check predicate on the "unavailable_status" field. It's identical to UnavailableStatusEQ.
+func UnavailableStatus(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldEQ(FieldUnavailableStatus, v))
+}
+
 // JevAPIKey applies equality check predicate on the "jev_api_key" field. It's identical to JevAPIKeyEQ.
 func JevAPIKey(v string) predicate.IntentRouter {
 	return predicate.IntentRouter(sql.FieldEQ(FieldJevAPIKey, v))
@@ -622,6 +632,86 @@ func MaxInputCharsLT(v int) predicate.IntentRouter {
 // MaxInputCharsLTE applies the LTE predicate on the "max_input_chars" field.
 func MaxInputCharsLTE(v int) predicate.IntentRouter {
 	return predicate.IntentRouter(sql.FieldLTE(FieldMaxInputChars, v))
+}
+
+// KeywordMaxCharsEQ applies the EQ predicate on the "keyword_max_chars" field.
+func KeywordMaxCharsEQ(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldEQ(FieldKeywordMaxChars, v))
+}
+
+// KeywordMaxCharsNEQ applies the NEQ predicate on the "keyword_max_chars" field.
+func KeywordMaxCharsNEQ(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldNEQ(FieldKeywordMaxChars, v))
+}
+
+// KeywordMaxCharsIn applies the In predicate on the "keyword_max_chars" field.
+func KeywordMaxCharsIn(vs ...int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldIn(FieldKeywordMaxChars, vs...))
+}
+
+// KeywordMaxCharsNotIn applies the NotIn predicate on the "keyword_max_chars" field.
+func KeywordMaxCharsNotIn(vs ...int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldNotIn(FieldKeywordMaxChars, vs...))
+}
+
+// KeywordMaxCharsGT applies the GT predicate on the "keyword_max_chars" field.
+func KeywordMaxCharsGT(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldGT(FieldKeywordMaxChars, v))
+}
+
+// KeywordMaxCharsGTE applies the GTE predicate on the "keyword_max_chars" field.
+func KeywordMaxCharsGTE(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldGTE(FieldKeywordMaxChars, v))
+}
+
+// KeywordMaxCharsLT applies the LT predicate on the "keyword_max_chars" field.
+func KeywordMaxCharsLT(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldLT(FieldKeywordMaxChars, v))
+}
+
+// KeywordMaxCharsLTE applies the LTE predicate on the "keyword_max_chars" field.
+func KeywordMaxCharsLTE(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldLTE(FieldKeywordMaxChars, v))
+}
+
+// UnavailableStatusEQ applies the EQ predicate on the "unavailable_status" field.
+func UnavailableStatusEQ(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldEQ(FieldUnavailableStatus, v))
+}
+
+// UnavailableStatusNEQ applies the NEQ predicate on the "unavailable_status" field.
+func UnavailableStatusNEQ(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldNEQ(FieldUnavailableStatus, v))
+}
+
+// UnavailableStatusIn applies the In predicate on the "unavailable_status" field.
+func UnavailableStatusIn(vs ...int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldIn(FieldUnavailableStatus, vs...))
+}
+
+// UnavailableStatusNotIn applies the NotIn predicate on the "unavailable_status" field.
+func UnavailableStatusNotIn(vs ...int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldNotIn(FieldUnavailableStatus, vs...))
+}
+
+// UnavailableStatusGT applies the GT predicate on the "unavailable_status" field.
+func UnavailableStatusGT(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldGT(FieldUnavailableStatus, v))
+}
+
+// UnavailableStatusGTE applies the GTE predicate on the "unavailable_status" field.
+func UnavailableStatusGTE(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldGTE(FieldUnavailableStatus, v))
+}
+
+// UnavailableStatusLT applies the LT predicate on the "unavailable_status" field.
+func UnavailableStatusLT(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldLT(FieldUnavailableStatus, v))
+}
+
+// UnavailableStatusLTE applies the LTE predicate on the "unavailable_status" field.
+func UnavailableStatusLTE(v int) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldLTE(FieldUnavailableStatus, v))
 }
 
 // RulesIsNil applies the IsNil predicate on the "rules" field.

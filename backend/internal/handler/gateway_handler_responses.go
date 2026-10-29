@@ -176,11 +176,12 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(requestCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
 			if isIntentRouteUnavailable(err) {
+				status, errType, message := intentRouteUnavailableReply(err)
 				if streamStarted {
 					// A slot-wait heartbeat already committed HTTP 200.
-					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", intentRouteUnavailableMessage, true)
+					h.handleStreamingAwareError(c, status, errType, message, true)
 				} else {
-					h.responsesErrorResponse(c, http.StatusTooManyRequests, "rate_limit_error", intentRouteUnavailableMessage)
+					h.responsesErrorResponse(c, status, errType, message)
 				}
 				return
 			}
