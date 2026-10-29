@@ -19,7 +19,6 @@ type Tracker struct {
 	firstByteAt  atomic.Int64 // UnixNano；0 表示尚未写出任何响应体
 	markedFirst  atomic.Bool
 	sseKeepalive atomic.Int32 // 被跳过的纯 SSE 注释写出次数（仅诊断用）
-	excluding    atomic.Int32 // >0 时写出不计首字节（网关合成的流式前导）
 }
 
 // New 以 start 作为请求到达时刻创建 Tracker。
@@ -42,7 +41,7 @@ func (t *Tracker) Start() time.Time {
 // 空写出和网关自己为了保活发出的纯 SSE 注释（": keepalive\n\n"、": ping\n\n"）
 // 不算首字节，否则保活会把真实等待掩盖掉。
 func (t *Tracker) MarkWrite(data []byte) {
-	if t == nil || t.markedFirst.Load() || len(data) == 0 || t.excluding.Load() > 0 {
+	if t == nil || t.markedFirst.Load() || len(data) == 0 {
 		return
 	}
 	if isSSECommentOnly(data) {
@@ -50,19 +49,6 @@ func (t *Tracker) MarkWrite(data []byte) {
 		return
 	}
 	t.MarkNow()
-}
-
-// Exclude 在 write 期间的写出不计首字节：网关自己合成、不含上游内容的流式
-// 前导（见 handler/openai_stream_prelude.go）不应掩盖真实等待。调用方须保证
-// 同一时刻没有其他写出。
-func (t *Tracker) Exclude(write func()) {
-	if t == nil {
-		write()
-		return
-	}
-	t.excluding.Add(1)
-	defer t.excluding.Add(-1)
-	write()
 }
 
 // MarkNow 把当前时刻记为首字节时刻（幂等，只有第一次生效）。

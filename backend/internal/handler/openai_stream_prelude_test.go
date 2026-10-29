@@ -140,8 +140,8 @@ func TestOpenAIStreamPrelude_ChatPassesStreamWithOneID(t *testing.T) {
 		// Inside, nothing has been written yet: failover stays possible.
 		require.Equal(t, -1, c.Writer.Size())
 		require.False(t, c.Writer.Written())
-		_, marked := middleware2.ClientFirstByteTracker(c).FirstByteAt()
-		require.False(t, marked, "the early event is not the client's first byte")
+		preludeAt, marked := middleware2.ClientFirstByteTracker(c).FirstByteAt()
+		require.True(t, marked, "the early event is the client's first byte, as a downstream sees it")
 
 		c.Header("Content-Type", "text/event-stream")
 		c.Status(http.StatusOK)
@@ -150,8 +150,9 @@ func TestOpenAIStreamPrelude_ChatPassesStreamWithOneID(t *testing.T) {
 		_, _ = c.Writer.WriteString(`"delta":{"content":"hi"}}]}` + "\n\n")
 		_, _ = c.Writer.WriteString("data: [DONE]\n\n")
 		c.Writer.Flush()
-		_, marked = middleware2.ClientFirstByteTracker(c).FirstByteAt()
+		firstAt, marked := middleware2.ClientFirstByteTracker(c).FirstByteAt()
 		require.True(t, marked)
+		require.Equal(t, preludeAt, firstAt, "real output must not move the first byte")
 	})
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`)))

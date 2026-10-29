@@ -45,8 +45,9 @@ import (
 //   - an error response written afterwards (status >= 400) is turned into the
 //     in-stream error of the protocol when the handler returns.
 //
-// The early bytes are kept out of client_first_byte_ms, which stays the real
-// first byte.
+// The early event is the client's first byte (client_first_byte_ms), the same
+// moment a sub2api downstream records as its first token; first_token_ms stays
+// the upstream's real first token.
 
 // openAIStreamPreludeHeartbeat is how often the neutral event is repeated
 // while no real output has been written; tests shorten it.
@@ -287,15 +288,14 @@ func (w *openAIStreamPreludeWriter) fireLocked() {
 	go w.heartbeat(openAIStreamPreludeHeartbeat)
 }
 
-// emit writes gateway-made bytes to the network without them counting as the
-// client's first byte.
+// emit writes gateway-made bytes to the network. The first one counts as the
+// client's first byte (client_first_byte_ms), matching what a sub2api
+// downstream records as its first token.
 func (w *openAIStreamPreludeWriter) emit(b []byte) {
 	if w.writeErr != nil {
 		return
 	}
-	w.tracker.Exclude(func() {
-		_, w.writeErr = w.ResponseWriter.Write(b)
-	})
+	_, w.writeErr = w.ResponseWriter.Write(b)
 	if w.writeErr == nil {
 		w.ResponseWriter.Flush()
 	}
