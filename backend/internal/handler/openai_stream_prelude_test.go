@@ -184,7 +184,7 @@ func TestOpenAIStreamPrelude_ResponsesErrorBecomesFailedEvent(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code, "committed by the early event")
 	body := w.Body.String()
-	require.True(t, strings.HasPrefix(body, "event: keepalive\ndata: {\"type\":\"keepalive\"}\n\n"), body)
+	require.True(t, strings.HasPrefix(body, "event: response.relay_ready\ndata: {\"type\":\"response.relay_ready\"}\n\n"), body)
 	require.Contains(t, body, "event: response.failed\n")
 	lines := sseDataLines(body)
 	failed := gjson.Parse(lines[len(lines)-1])
@@ -236,7 +236,8 @@ func TestOpenAIStreamPrelude_HeartbeatUntilOutputAndHiddenFromSize(t *testing.T)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{}`)))
 	body := rec.Body.String()
-	require.GreaterOrEqual(t, strings.Count(body, "event: keepalive"), 3, "the early event and its repeats")
+	require.Equal(t, 1, strings.Count(body, "event: response.relay_ready"), "the early event")
+	require.GreaterOrEqual(t, strings.Count(body, "event: keepalive"), 2, "its repeats")
 	require.True(t, strings.HasSuffix(body, "event: response.created\ndata: {\"type\":\"response.created\"}\n\n"))
 }
 
@@ -338,4 +339,12 @@ func TestOpenAIStreamPrelude_OutcomeSeesInStreamFailures(t *testing.T) {
 		service.MarkOpsStreamError(c, "upstream_error", "cut", http.StatusBadGateway)
 	})
 	require.Equal(t, service.OpenAIStreamPreludeOutcomeFailed, got)
+}
+
+// A sub2api downstream skips these when timing the first token (semantic
+// TTFT, openAIStreamEventIsMetadata upstream); the early event must not be one.
+func TestOpenAIStreamPrelude_ResponsesEventCountsDownstream(t *testing.T) {
+	for _, skipped := range []string{"response.created", "response.queued", "response.in_progress", "response.metadata", "keepalive", "response.failed", "error"} {
+		require.NotEqual(t, skipped, openAIStreamPreludeResponsesEvent)
+	}
 }

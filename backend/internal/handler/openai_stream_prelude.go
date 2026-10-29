@@ -323,12 +323,23 @@ func (w *openAIStreamPreludeWriter) heartbeat(interval time.Duration) {
 	}
 }
 
+// openAIStreamPreludeResponsesEvent is the early Responses event. A sub2api
+// downstream (semantic TTFT) counts every event type as the first token except
+// lifecycle metadata and transport heartbeats — since 0.2.6 that list is
+// response.created/queued/in_progress/metadata and keepalive — so the early
+// event must not be any of them. Clients ignore event types they do not know.
+const openAIStreamPreludeResponsesEvent = "response.relay_ready"
+
 // neutralEvent is an event a client ignores but a sub2api downstream counts
 // as the first token: an empty assistant delta, or an event type Responses
-// clients do not know.
+// clients do not know. Repeats on Responses are plain keepalives, which only
+// need to keep the connection busy.
 func (w *openAIStreamPreludeWriter) neutralEvent(first bool) []byte {
 	if !w.req.chat {
-		return []byte("event: keepalive\ndata: {\"type\":\"keepalive\"}\n\n")
+		if !first {
+			return []byte("event: keepalive\ndata: {\"type\":\"keepalive\"}\n\n")
+		}
+		return []byte("event: " + openAIStreamPreludeResponsesEvent + "\ndata: {\"type\":\"" + openAIStreamPreludeResponsesEvent + "\"}\n\n")
 	}
 	delta := map[string]any{"content": ""}
 	if first {

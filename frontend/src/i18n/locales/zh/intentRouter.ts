@@ -222,7 +222,7 @@ export default {
     },
     streamPrelude: {
       title: 'OpenAI 流式首字前导',
-      intro: '生效范围内的 OpenAI 流式请求（Chat Completions、Responses），确认本组现在能服务该模型后，在请求到达后的随机时刻（下面的区间内）发一个不含内容的事件：Chat 为空的 assistant delta，Responses 为 keepalive 事件；下游 sub2api 会把它记为首字。到点前真实内容已经开始输出、或本地已经报错，就不发前导，请求和未开启时完全一样。前导发出后到真实输出前每 10 秒补发一次，之后原样转发。换号照常进行；前导发出后全部失败时状态码已是 200，改为流内错误事件（Chat 为 error，Responses 为 response.failed）。不处理非流式、compact、生图与 WebSocket。本站首字统计不受影响。保存后立即生效。',
+      intro: '生效范围内的 OpenAI 流式请求（Chat Completions、Responses），确认本组现在能服务该模型后，在请求到达后的随机时刻（下面的区间内）发一个不含内容的事件：Chat 为空的 assistant delta，Responses 为 response.relay_ready 事件（新版 sub2api 不把 keepalive 计为首字）；下游 sub2api 会把它记为首字。到点前真实内容已经开始输出、或本地已经报错，就不发前导，请求和未开启时完全一样。前导发出后到真实输出前每 10 秒补发一次，之后原样转发。换号照常进行；前导发出后全部失败时状态码已是 200，改为流内错误事件（Chat 为 error，Responses 为 response.failed）。不处理非流式、compact、生图与 WebSocket。本站「实际首字」按前导时刻记录（与下游一致），「首字」仍是上游真实首字。保存后立即生效。',
       delay: '前导时刻（从请求到达起，毫秒）',
       delayHint: '每次在区间内随机取一个时刻；分组内所有生效的用户共用。最大 10000。',
       today: '今日前导 {n} 次，其中 {failed} 次以流内错误结束',
