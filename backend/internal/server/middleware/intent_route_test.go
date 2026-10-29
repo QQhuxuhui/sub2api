@@ -6,23 +6,24 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"entgo.io/ent/dialect"
-	entsql "entgo.io/ent/dialect/sql"
 	"fmt"
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/Wei-Shaw/sub2api/ent/enttest"
-	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"io"
-	_ "modernc.org/sqlite"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+	_ "modernc.org/sqlite"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/enttest"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -176,4 +177,70 @@ func TestIntentRoute_OversizedRequestKeepsScope(t *testing.T) {
 			engine.ServeHTTP(httptest.NewRecorder(), req)
 		})
 	}
+}
+
+type stubProbeAvailability struct{ ok bool }
+
+func (s stubProbeAvailability) HasServableAccountNow(context.Context, int64, string, string) bool {
+	return s.ok
+}
+
+// A group that answers channel-monitor challenges replies itself — the handler
+// never runs — after a short delay, without an intent router, and only for the
+// challenge, in scope, when the group could serve the model.
+func TestIntentRoute_AnswersMonitorChallenge(t *testing.T) {
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:intent_monitor_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	require.NoError(t, err)
+	_, err = db.Exec("PRAGMA foreign_keys = ON")
+	require.NoError(t, err)
+	client := enttest.NewClient(t, enttest.WithOptions(dbent.Driver(entsql.OpenDB(dialect.SQLite, db))))
+	t.Cleanup(func() { _ = client.Close() })
+	ctx := context.Background()
+	group, err := client.Group.Create().SetName("monitor-group").SetPlatform("anthropic").Save(ctx)
+	require.NoError(t, err)
+	router := service.NewIntentRouterService(client, nil, nil)
+	_, err = router.SaveMonitorProbeAnswer(ctx, group.ID, domain.MonitorProbeAnswerConfig{Enabled: true})
+	require.NoError(t, err)
+
+	challenge := `{"model":"gpt-6.1-sol","instructions":"You are a channel health-check endpoint. Answer the arithmetic challenge exactly and briefly.","input":"Calculate and respond with ONLY the number, nothing else.\n\nQ: 3 + 5 = ?\nA: 8\n\nQ: 12 - 7 = ?\nA: 5\n\nQ: 40 - 15 = ?\nA:","max_output_tokens":50,"stream":false}`
+	serve := func(body string) (*httptest.ResponseRecorder, bool, time.Duration) {
+		handled := false
+		engine := gin.New()
+		engine.POST("/v1/responses", func(c *gin.Context) {
+			c.Set(string(ContextKeyAPIKey), &service.APIKey{ID: 1, UserID: 3, GroupID: &group.ID, Group: &service.Group{ID: group.ID, Platform: "anthropic"}})
+			c.Next()
+		}, IntentRoute(router), func(c *gin.Context) {
+			handled = true
+			got, err := io.ReadAll(c.Request.Body)
+			require.NoError(t, err)
+			require.Equal(t, body, string(got), "the handler sees the body untouched")
+			c.Status(http.StatusTeapot)
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		started := time.Now()
+		engine.ServeHTTP(rec, req)
+		return rec, handled, time.Since(started)
+	}
+
+	router.SetMonitorProbeAvailability(stubProbeAvailability{ok: true})
+	rec, handled, took := serve(challenge)
+	require.False(t, handled)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "25", gjson.Get(rec.Body.String(), "output.0.content.0.text").String())
+	require.GreaterOrEqual(t, took, 300*time.Millisecond, "answered after a model-like delay")
+
+	_, handled, _ = serve(`{"model":"gpt-6.1-sol","input":"hi","stream":false}`)
+	require.True(t, handled, "anything else goes to the handler")
+
+	router.SetMonitorProbeAvailability(stubProbeAvailability{ok: false})
+	_, handled, _ = serve(challenge)
+	require.True(t, handled, "a group that cannot serve the model fails the normal way")
+
+	router.SetMonitorProbeAvailability(stubProbeAvailability{ok: true})
+	_, err = router.SaveMonitorProbeAnswer(ctx, group.ID, domain.MonitorProbeAnswerConfig{Enabled: false})
+	require.NoError(t, err)
+	_, handled, _ = serve(challenge)
+	require.True(t, handled, "switched off")
 }

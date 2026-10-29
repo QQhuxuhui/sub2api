@@ -210,6 +210,9 @@ func registerIntentRouterRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		routers.POST("/:group_id/test", h.Admin.IntentRouter.Test)
 		routers.POST("/:group_id/clear-cache", h.Admin.IntentRouter.ClearCache)
 		routers.GET("/:group_id/jev-status", h.Admin.IntentRouter.JevStatus)
+		routers.GET("/:group_id/monitor-answer", h.Admin.IntentRouter.GetMonitorAnswer)
+		routers.PUT("/:group_id/monitor-answer", h.Admin.IntentRouter.SaveMonitorAnswer)
+		routers.GET("/:group_id/monitor-answer/status", h.Admin.IntentRouter.MonitorAnswerStatus)
 	}
 }
 

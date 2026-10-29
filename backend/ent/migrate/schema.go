@@ -1131,6 +1131,27 @@ var (
 			},
 		},
 	}
+	// MonitorProbeAnswersColumns holds the columns for the "monitor_probe_answers" table.
+	MonitorProbeAnswersColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "group_id", Type: field.TypeInt64},
+		{Name: "config", Type: field.TypeJSON, Nullable: true, SchemaType: map[string]string{"postgres": "jsonb"}},
+	}
+	// MonitorProbeAnswersTable holds the schema information for the "monitor_probe_answers" table.
+	MonitorProbeAnswersTable = &schema.Table{
+		Name:       "monitor_probe_answers",
+		Columns:    MonitorProbeAnswersColumns,
+		PrimaryKey: []*schema.Column{MonitorProbeAnswersColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "monitorprobeanswer_group_id",
+				Unique:  true,
+				Columns: []*schema.Column{MonitorProbeAnswersColumns[3]},
+			},
+		},
+	}
 	// PaymentAuditLogsColumns holds the columns for the "payment_audit_logs" table.
 	PaymentAuditLogsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2192,6 +2213,7 @@ var (
 		IdempotencyRecordsTable,
 		IdentityAdoptionDecisionsTable,
 		IntentRoutersTable,
+		MonitorProbeAnswersTable,
 		PaymentAuditLogsTable,
 		PaymentOrdersTable,
 		PaymentProviderInstancesTable,
@@ -2292,6 +2314,9 @@ func init() {
 	}
 	IntentRoutersTable.Annotation = &entsql.Annotation{
 		Table: "intent_routers",
+	}
+	MonitorProbeAnswersTable.Annotation = &entsql.Annotation{
+		Table: "monitor_probe_answers",
 	}
 	PaymentAuditLogsTable.Annotation = &entsql.Annotation{
 		Table: "payment_audit_logs",

@@ -54,6 +54,8 @@ type Tx struct {
 	IdentityAdoptionDecision *IdentityAdoptionDecisionClient
 	// IntentRouter is the client for interacting with the IntentRouter builders.
 	IntentRouter *IntentRouterClient
+	// MonitorProbeAnswer is the client for interacting with the MonitorProbeAnswer builders.
+	MonitorProbeAnswer *MonitorProbeAnswerClient
 	// PaymentAuditLog is the client for interacting with the PaymentAuditLog builders.
 	PaymentAuditLog *PaymentAuditLogClient
 	// PaymentOrder is the client for interacting with the PaymentOrder builders.
@@ -247,6 +249,7 @@ func (tx *Tx) init() {
 	tx.IdempotencyRecord = NewIdempotencyRecordClient(tx.config)
 	tx.IdentityAdoptionDecision = NewIdentityAdoptionDecisionClient(tx.config)
 	tx.IntentRouter = NewIntentRouterClient(tx.config)
+	tx.MonitorProbeAnswer = NewMonitorProbeAnswerClient(tx.config)
 	tx.PaymentAuditLog = NewPaymentAuditLogClient(tx.config)
 	tx.PaymentOrder = NewPaymentOrderClient(tx.config)
 	tx.PaymentProviderInstance = NewPaymentProviderInstanceClient(tx.config)

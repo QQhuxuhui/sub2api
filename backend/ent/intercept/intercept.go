@@ -28,6 +28,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/intentrouter"
+	"github.com/Wei-Shaw/sub2api/ent/monitorprobeanswer"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -648,6 +649,33 @@ func (f TraverseIntentRouter) Traverse(ctx context.Context, q ent.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *ent.IntentRouterQuery", q)
 }
 
+// The MonitorProbeAnswerFunc type is an adapter to allow the use of ordinary function as a Querier.
+type MonitorProbeAnswerFunc func(context.Context, *ent.MonitorProbeAnswerQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f MonitorProbeAnswerFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.MonitorProbeAnswerQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.MonitorProbeAnswerQuery", q)
+}
+
+// The TraverseMonitorProbeAnswer type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseMonitorProbeAnswer func(context.Context, *ent.MonitorProbeAnswerQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseMonitorProbeAnswer) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseMonitorProbeAnswer) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.MonitorProbeAnswerQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.MonitorProbeAnswerQuery", q)
+}
+
 // The PaymentAuditLogFunc type is an adapter to allow the use of ordinary function as a Querier.
 type PaymentAuditLogFunc func(context.Context, *ent.PaymentAuditLogQuery) (ent.Value, error)
 
@@ -1258,6 +1286,8 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.IdentityAdoptionDecisionQuery, predicate.IdentityAdoptionDecision, identityadoptiondecision.OrderOption]{typ: ent.TypeIdentityAdoptionDecision, tq: q}, nil
 	case *ent.IntentRouterQuery:
 		return &query[*ent.IntentRouterQuery, predicate.IntentRouter, intentrouter.OrderOption]{typ: ent.TypeIntentRouter, tq: q}, nil
+	case *ent.MonitorProbeAnswerQuery:
+		return &query[*ent.MonitorProbeAnswerQuery, predicate.MonitorProbeAnswer, monitorprobeanswer.OrderOption]{typ: ent.TypeMonitorProbeAnswer, tq: q}, nil
 	case *ent.PaymentAuditLogQuery:
 		return &query[*ent.PaymentAuditLogQuery, predicate.PaymentAuditLog, paymentauditlog.OrderOption]{typ: ent.TypePaymentAuditLog, tq: q}, nil
 	case *ent.PaymentOrderQuery:

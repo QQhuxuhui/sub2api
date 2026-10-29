@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,7 +23,10 @@ import (
 // request is scheduled normally.
 func IntentRoute(router *service.IntentRouterService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		applyIntentRoute(c, router)
+		if applyIntentRoute(c, router) {
+			c.Abort()
+			return
+		}
 		c.Next()
 	}
 }
@@ -31,59 +35,89 @@ func IntentRoute(router *service.IntentRouterService) gin.HandlerFunc {
 // chain instead of a route group: it classifies, then runs the handler.
 func WithIntentRoute(router *service.IntentRouterService, handler gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		applyIntentRoute(c, router)
+		if applyIntentRoute(c, router) {
+			return
+		}
 		handler(c)
 	}
 }
 
-func applyIntentRoute(c *gin.Context, router *service.IntentRouterService) {
-	{
-		if router == nil || !isIntentRoutableRequest(c.Request) {
-			return
-		}
-		apiKey, ok := GetAPIKeyFromContext(c)
-		if !ok || apiKey == nil || apiKey.GroupID == nil {
-			return
-		}
-		ctx := c.Request.Context()
-		// Preserve response ownership even when classification is disabled or
-		// skipped for a large body. Scope lookup never consumes the request body.
-		if scope := router.ScopeOnly(ctx, *apiKey.GroupID); scope != nil {
-			ctx = service.WithIntentRouteDecision(ctx, scope)
-			c.Request = c.Request.WithContext(ctx)
-		}
-		if !router.Enabled(ctx, *apiKey.GroupID) {
-			return
-		}
+// applyIntentRoute reports whether it answered the request itself (a channel
+// monitor challenge), in which case the handler must not run.
+func applyIntentRoute(c *gin.Context, router *service.IntentRouterService) bool {
+	if router == nil || !isIntentRoutableRequest(c.Request) {
+		return false
+	}
+	apiKey, ok := GetAPIKeyFromContext(c)
+	if !ok || apiKey == nil || apiKey.GroupID == nil {
+		return false
+	}
+	ctx := c.Request.Context()
+	// Preserve response ownership even when classification is disabled or
+	// skipped for a large body. Scope lookup never consumes the request body.
+	if scope := router.ScopeOnly(ctx, *apiKey.GroupID); scope != nil {
+		ctx = service.WithIntentRouteDecision(ctx, scope)
+		c.Request = c.Request.WithContext(ctx)
+	}
+	enabled := router.Enabled(ctx, *apiKey.GroupID)
+	answerProbes := router.AnswersMonitorProbes(ctx, *apiKey.GroupID)
+	if !enabled && !answerProbes {
+		return false
+	}
 
-		if c.Request.ContentLength > router.MaxBodyBytes() || c.Request.Body == nil {
-			return
-		}
+	if c.Request.ContentLength > router.MaxBodyBytes() || c.Request.Body == nil {
+		return false
+	}
 
-		original := c.Request.Body
-		body, err := io.ReadAll(io.LimitReader(original, router.MaxBodyBytes()+1))
-		// Whatever was read goes back in front of whatever is left, so the
-		// handler sees the untouched stream — including its own read errors
-		// (such as the body size limit) at the point they would have occurred.
-		c.Request.Body = &replayReadCloser{Reader: io.MultiReader(bytes.NewReader(body), original), closer: original}
-		if err != nil || int64(len(body)) > router.MaxBodyBytes() {
-			return
-		}
+	original := c.Request.Body
+	body, err := io.ReadAll(io.LimitReader(original, router.MaxBodyBytes()+1))
+	// Whatever was read goes back in front of whatever is left, so the
+	// handler sees the untouched stream — including its own read errors
+	// (such as the body size limit) at the point they would have occurred.
+	c.Request.Body = &replayReadCloser{Reader: io.MultiReader(bytes.NewReader(body), original), closer: original}
+	if err != nil || int64(len(body)) > router.MaxBodyBytes() {
+		return false
+	}
 
-		clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string)
-		decision := router.Decide(ctx, service.IntentRouteInput{
-			GroupID:         *apiKey.GroupID,
-			APIKeyID:        apiKey.ID,
-			Header:          c.Request.Header,
-			Body:            body,
-			UserID:          apiKey.UserID,
-			ClientRequestID: clientRequestID,
-			Endpoint:        c.Request.URL.Path,
-		})
-		if decision != nil {
-			c.Request = c.Request.WithContext(service.WithIntentRouteDecision(ctx, decision))
+	clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string)
+	in := service.IntentRouteInput{
+		GroupID:         *apiKey.GroupID,
+		APIKeyID:        apiKey.ID,
+		Header:          c.Request.Header,
+		Body:            body,
+		UserID:          apiKey.UserID,
+		ClientRequestID: clientRequestID,
+		Endpoint:        c.Request.URL.Path,
+	}
+	// A channel-monitor challenge in scope is answered by program, before
+	// (and instead of) intent routing and account selection.
+	if answerProbes {
+		platform := ""
+		if apiKey.Group != nil {
+			platform = apiKey.Group.Platform
+		}
+		if challenge, ok := router.AnswerMonitorProbe(ctx, in, platform); ok {
+			timer := time.NewTimer(router.MonitorAnswerDelay())
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return true // the client left; nothing to send
+			case <-timer.C:
+			}
+			router.RecordMonitorAnswer(in, challenge)
+			c.Data(http.StatusOK, "application/json", challenge.Body(time.Now()))
+			return true
 		}
 	}
+	if !enabled {
+		return false
+	}
+
+	decision := router.Decide(ctx, in)
+	if decision != nil {
+		c.Request = c.Request.WithContext(service.WithIntentRouteDecision(ctx, decision))
+	}
+	return false
 }
 
 type replayReadCloser struct {

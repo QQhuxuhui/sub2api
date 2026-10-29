@@ -99,3 +99,15 @@ type IntentJevConfig struct {
 	// router deleted and created again, not by two saves racing each other.
 	Revision string `json:"revision"`
 }
+
+// MonitorProbeAnswerConfig answers sub2api channel-monitor challenges (a fixed
+// arithmetic question) by program instead of a model, for the requests in
+// scope. It is independent of the group's intent router.
+type MonitorProbeAnswerConfig struct {
+	Enabled bool `json:"enabled"`
+	// Scope is IntentJevScopeAll or IntentJevScopeListed, with UserIDs and
+	// APIKeys meaning what they mean for Jev.
+	Scope   string            `json:"scope"`
+	UserIDs []int64           `json:"user_ids"`
+	APIKeys []IntentJevAPIKey `json:"api_keys"`
+}

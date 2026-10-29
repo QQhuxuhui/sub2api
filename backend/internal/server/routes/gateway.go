@@ -41,6 +41,9 @@ func RegisterGatewayRoutes(
 	if h != nil && h.Admin != nil {
 		intentRouterService = h.Admin.IntentRouter.RouterService()
 	}
+	if h != nil && h.Gateway != nil {
+		intentRouterService.SetMonitorProbeAvailability(h.Gateway.MonitorProbeAvailability())
+	}
 	intentRoute := middleware.IntentRoute(intentRouterService)
 	compositeGeminiTarget := compositeGeminiTargetPlatformMiddleware(compositeResolver)
 

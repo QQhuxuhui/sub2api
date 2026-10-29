@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -184,6 +185,57 @@ func (h *IntentRouterHandler) JevStatus(c *gin.Context) {
 		return
 	}
 	status, err := h.router.JevStatus(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, status)
+}
+
+// GetMonitorAnswer returns the group's setting for answering channel-monitor
+// challenges by program.
+// GET /api/v1/admin/intent-routers/:group_id/monitor-answer
+func (h *IntentRouterHandler) GetMonitorAnswer(c *gin.Context) {
+	groupID, ok := parseIDParam(c, "group_id")
+	if !ok {
+		return
+	}
+	view, err := h.router.GetMonitorProbeAnswer(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, view)
+}
+
+// SaveMonitorAnswer stores the group's setting; it takes effect at once.
+// PUT /api/v1/admin/intent-routers/:group_id/monitor-answer
+func (h *IntentRouterHandler) SaveMonitorAnswer(c *gin.Context) {
+	groupID, ok := parseIDParam(c, "group_id")
+	if !ok {
+		return
+	}
+	var req domain.MonitorProbeAnswerConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	view, err := h.router.SaveMonitorProbeAnswer(c.Request.Context(), groupID, req)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, view)
+}
+
+// MonitorAnswerStatus returns the daily counts and latest answered challenges.
+// GET /api/v1/admin/intent-routers/:group_id/monitor-answer/status
+func (h *IntentRouterHandler) MonitorAnswerStatus(c *gin.Context) {
+	groupID, ok := parseIDParam(c, "group_id")
+	if !ok {
+		return
+	}
+	status, err := h.router.MonitorProbeAnswerStatus(c.Request.Context(), groupID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

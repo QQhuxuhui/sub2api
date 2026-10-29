@@ -25,6 +25,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/intentrouter"
+	"github.com/Wei-Shaw/sub2api/ent/monitorprobeanswer"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -1356,6 +1357,21 @@ func init() {
 	intentrouter.DefaultJevAPIKey = intentrouterDescJevAPIKey.Default.(string)
 	// intentrouter.JevAPIKeyValidator is a validator for the "jev_api_key" field. It is called by the builders before save.
 	intentrouter.JevAPIKeyValidator = intentrouterDescJevAPIKey.Validators[0].(func(string) error)
+	monitorprobeanswerMixin := schema.MonitorProbeAnswer{}.Mixin()
+	monitorprobeanswerMixinFields0 := monitorprobeanswerMixin[0].Fields()
+	_ = monitorprobeanswerMixinFields0
+	monitorprobeanswerFields := schema.MonitorProbeAnswer{}.Fields()
+	_ = monitorprobeanswerFields
+	// monitorprobeanswerDescCreatedAt is the schema descriptor for created_at field.
+	monitorprobeanswerDescCreatedAt := monitorprobeanswerMixinFields0[0].Descriptor()
+	// monitorprobeanswer.DefaultCreatedAt holds the default value on creation for the created_at field.
+	monitorprobeanswer.DefaultCreatedAt = monitorprobeanswerDescCreatedAt.Default.(func() time.Time)
+	// monitorprobeanswerDescUpdatedAt is the schema descriptor for updated_at field.
+	monitorprobeanswerDescUpdatedAt := monitorprobeanswerMixinFields0[1].Descriptor()
+	// monitorprobeanswer.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	monitorprobeanswer.DefaultUpdatedAt = monitorprobeanswerDescUpdatedAt.Default.(func() time.Time)
+	// monitorprobeanswer.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	monitorprobeanswer.UpdateDefaultUpdatedAt = monitorprobeanswerDescUpdatedAt.UpdateDefault.(func() time.Time)
 	paymentauditlogFields := schema.PaymentAuditLog{}.Fields()
 	_ = paymentauditlogFields
 	// paymentauditlogDescOrderID is the schema descriptor for order_id field.

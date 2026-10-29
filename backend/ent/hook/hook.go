@@ -249,6 +249,18 @@ func (f IntentRouterFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.IntentRouterMutation", m)
 }
 
+// The MonitorProbeAnswerFunc type is an adapter to allow the use of ordinary
+// function as MonitorProbeAnswer mutator.
+type MonitorProbeAnswerFunc func(context.Context, *ent.MonitorProbeAnswerMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f MonitorProbeAnswerFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.MonitorProbeAnswerMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.MonitorProbeAnswerMutation", m)
+}
+
 // The PaymentAuditLogFunc type is an adapter to allow the use of ordinary
 // function as PaymentAuditLog mutator.
 type PaymentAuditLogFunc func(context.Context, *ent.PaymentAuditLogMutation) (ent.Value, error)

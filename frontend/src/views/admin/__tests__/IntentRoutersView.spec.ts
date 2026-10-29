@@ -4,7 +4,7 @@ import IntentRoutersView from '../IntentRoutersView.vue'
 
 const api = vi.hoisted(() => ({
   list: vi.fn(), save: vi.fn(), remove: vi.fn(), test: vi.fn(), clearCache: vi.fn(), events: vi.fn(),
-  hits: vi.fn(), hitStats: vi.fn(), jevStatus: vi.fn(),
+  hits: vi.fn(), hitStats: vi.fn(), jevStatus: vi.fn(), monitorAnswer: vi.fn(), saveMonitorAnswer: vi.fn(), monitorAnswerStatus: vi.fn(),
 }))
 const admin = vi.hoisted(() => ({ getAllIncludingInactive: vi.fn(), listAccounts: vi.fn(), searchUsers: vi.fn(), searchApiKeys: vi.fn() }))
 const toast = vi.hoisted(() => ({ showSuccess: vi.fn(), showError: vi.fn() }))
@@ -74,6 +74,8 @@ describe('IntentRoutersView', () => {
     api.hitStats.mockResolvedValue({ data: [] })
     api.hits.mockResolvedValue({ data: { items: [], total: 0 } })
     api.jevStatus.mockResolvedValue({ data: { state: 'off', days: [], usd_per_mtok: 0.042, cny_per_usd: 7 } })
+    api.monitorAnswer.mockResolvedValue({ data: { group_id: 1, config: { enabled: false, scope: 'all', user_ids: [], api_keys: [] }, scope_labels: { users: [], api_keys: [] } } })
+    api.monitorAnswerStatus.mockResolvedValue({ data: { days: [], recent: [] } })
   })
 
   it('keeps statistics and details on the newest group when requests finish out of order', async () => {

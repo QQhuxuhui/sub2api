@@ -197,6 +197,42 @@ export interface IntentRouteHitQuery {
   page_size?: number
 }
 
+/** Answering sub2api channel-monitor challenges by program; the group's own setting, independent of its router. */
+export interface MonitorProbeAnswerConfig {
+  enabled: boolean
+  /** all: every request of the group; listed: only the listed users (narrowed to api_keys when any of theirs are listed). */
+  scope: 'all' | 'listed'
+  user_ids: number[]
+  /** user_id is filled by the server. */
+  api_keys: { id: number; user_id?: number }[]
+}
+
+export interface MonitorProbeAnswerView {
+  group_id: number
+  config: MonitorProbeAnswerConfig
+  /** Names of the users and keys in config; deleted ones are missing. */
+  scope_labels: { users: { id: number; email: string; username: string }[]; api_keys: { id: number; name: string; user_id: number }[] }
+}
+
+export interface MonitorProbeAnswerRecord {
+  time: string
+  group_id: number
+  user_id: number
+  api_key_id: number
+  endpoint: string
+  model: string
+  /** e.g. "37 + 64" */
+  question: string
+  answer: string
+}
+
+export interface MonitorProbeAnswerStatus {
+  /** Today first. */
+  days: { date: string; answers: number }[]
+  /** Newest first, at most 500. */
+  recent: MonitorProbeAnswerRecord[]
+}
+
 export const intentRoutersAPI = {
   list() {
     return apiClient.get<IntentRouter[]>('/admin/intent-routers')
@@ -222,6 +258,15 @@ export const intentRoutersAPI = {
   },
   jevStatus(groupId: number) {
     return apiClient.get<IntentJevStatus>(`/admin/intent-routers/${groupId}/jev-status`)
+  },
+  monitorAnswer(groupId: number) {
+    return apiClient.get<MonitorProbeAnswerView>(`/admin/intent-routers/${groupId}/monitor-answer`)
+  },
+  saveMonitorAnswer(groupId: number, config: MonitorProbeAnswerConfig) {
+    return apiClient.put<MonitorProbeAnswerView>(`/admin/intent-routers/${groupId}/monitor-answer`, config)
+  },
+  monitorAnswerStatus(groupId: number) {
+    return apiClient.get<MonitorProbeAnswerStatus>(`/admin/intent-routers/${groupId}/monitor-answer/status`)
   },
   hitStats(query: IntentRouteHitQuery) {
     return apiClient.get<IntentRouteKeywordStat[]>('/admin/intent-routers/hits/stats', { params: query })

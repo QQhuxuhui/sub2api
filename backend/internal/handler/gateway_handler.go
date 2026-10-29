@@ -60,6 +60,15 @@ type GatewayHandler struct {
 }
 
 // NewGatewayHandler creates a new GatewayHandler
+// MonitorProbeAvailability is the check that a group could serve a model right
+// now, used before a channel-monitor challenge is answered by program.
+func (h *GatewayHandler) MonitorProbeAvailability() service.MonitorProbeAvailability {
+	if h == nil {
+		return nil
+	}
+	return service.NewMonitorProbeAvailability(h.gatewayService, h.openAIGatewayService)
+}
+
 func NewGatewayHandler(
 	gatewayService *service.GatewayService,
 	openAIGatewayService *service.OpenAIGatewayService,
