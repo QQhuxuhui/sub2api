@@ -233,6 +233,48 @@ export interface MonitorProbeAnswerStatus {
   recent: MonitorProbeAnswerRecord[]
 }
 
+/** Early first event on OpenAI streams; the group's own setting, independent of its router. */
+export interface OpenAIStreamPreludeConfig {
+  enabled: boolean
+  /** The early event goes out at a random moment in [min, max] ms after arrival, unless real output or an error came first. */
+  delay_min_ms: number
+  delay_max_ms: number
+  /** all: every request of the group; listed: only the listed users (narrowed to api_keys when any of theirs are listed). */
+  scope: 'all' | 'listed'
+  user_ids: number[]
+  /** user_id is filled by the server. */
+  api_keys: { id: number; user_id?: number }[]
+}
+
+export interface OpenAIStreamPreludeView {
+  group_id: number
+  config: OpenAIStreamPreludeConfig
+  /** Names of the users and keys in config; deleted ones are missing. */
+  scope_labels: { users: { id: number; email: string; username: string }[]; api_keys: { id: number; name: string; user_id: number }[] }
+}
+
+export interface OpenAIStreamPreludeRecord {
+  time: string
+  group_id: number
+  user_id: number
+  api_key_id: number
+  endpoint: string
+  model: string
+  /** From the request's arrival to the early event. */
+  prelude_ms: number
+  /** From the request's arrival to the first real byte; missing when none came. */
+  output_ms?: number
+  heartbeats: number
+  outcome: 'ok' | 'failed' | 'client_gone'
+}
+
+export interface OpenAIStreamPreludeStatus {
+  /** Today first. */
+  days: { date: string; sent: number; failed: number }[]
+  /** Newest first, at most 500. */
+  recent: OpenAIStreamPreludeRecord[]
+}
+
 export const intentRoutersAPI = {
   list() {
     return apiClient.get<IntentRouter[]>('/admin/intent-routers')
@@ -267,6 +309,15 @@ export const intentRoutersAPI = {
   },
   monitorAnswerStatus(groupId: number) {
     return apiClient.get<MonitorProbeAnswerStatus>(`/admin/intent-routers/${groupId}/monitor-answer/status`)
+  },
+  streamPrelude(groupId: number) {
+    return apiClient.get<OpenAIStreamPreludeView>(`/admin/intent-routers/${groupId}/stream-prelude`)
+  },
+  saveStreamPrelude(groupId: number, config: OpenAIStreamPreludeConfig) {
+    return apiClient.put<OpenAIStreamPreludeView>(`/admin/intent-routers/${groupId}/stream-prelude`, config)
+  },
+  streamPreludeStatus(groupId: number) {
+    return apiClient.get<OpenAIStreamPreludeStatus>(`/admin/intent-routers/${groupId}/stream-prelude/status`)
   },
   hitStats(query: IntentRouteHitQuery) {
     return apiClient.get<IntentRouteKeywordStat[]>('/admin/intent-routers/hits/stats', { params: query })

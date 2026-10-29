@@ -596,6 +596,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
 
+	// 流式首字前导：范围内且本组现在能服务时先发中性事件（compact/生图不发）。
+	if reqStream && !legacyCompact && !nativeV2 && !imageIntent {
+		startOpenAIStreamPrelude(c, openAIStreamPreludeRequest{
+			apiKey: apiKey, userID: subject.UserID, model: reqModel, schedule: forwardModel,
+			platform: requestPlatform, capability: openAIResponsesRequiredCapabilityForRequest(imageIntent, false, requestPlatform),
+		})
+	}
+
 	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted, reqLog)
 	if !acquired {
 		return

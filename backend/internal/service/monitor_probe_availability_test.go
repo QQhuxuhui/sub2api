@@ -86,3 +86,34 @@ func TestMonitorProbeAvailability_OpenAIGateway(t *testing.T) {
 	require.True(t, check.HasServableAccountNow(ctx, *groupID, PlatformOpenAI, "gpt-5.1"))
 	require.False(t, check.HasServableAccountNow(ctx, 99999, PlatformOpenAI, "gpt-5.1"), "a group without accounts")
 }
+
+// The early stream event checks what the request's own selection requires: an
+// account that cannot serve the endpoint does not count, on the ordinary path
+// and among an intent rule's targets alike.
+func TestMonitorProbeAvailability_OpenAICapability(t *testing.T) {
+	ctx := context.Background()
+	noChat := func(a Account) Account {
+		a.Credentials = map[string]any{openAIEndpointCapabilitiesCredentialKey: []any{"embeddings"}}
+		return a
+	}
+
+	svc, groupID := newIntentRouteOpenAIFixture(t, noChat(foreignOpenAIAccount()))
+	check := NewMonitorProbeAvailability(nil, svc).(*monitorProbeAvailability)
+	require.True(t, check.HasServableOpenAIAccountNow(ctx, *groupID, PlatformOpenAI, "gpt-5.1", OpenAIEndpointCapabilityChatCompletions))
+	require.False(t, check.HasServableOpenAIAccountNow(ctx, *groupID, PlatformAnthropic, "gpt-5.1", ""), "not an OpenAI gateway request")
+
+	routed := WithIntentRouteDecision(ctx, &IntentRouteDecision{Intent: "coding", AccountIDs: []int64{49001}})
+	require.True(t, check.HasServableOpenAIAccountNow(routed, *groupID, PlatformOpenAI, "gpt-5.1", ""), "the target serves the model")
+	require.False(t, check.HasServableOpenAIAccountNow(routed, *groupID, PlatformOpenAI, "gpt-5.1", OpenAIEndpointCapabilityChatCompletions),
+		"the rule's only target has chat completions turned off")
+
+	// Ordinary path: every account of the group without chat completions.
+	svc, groupID = newIntentRouteOpenAIFixture(t, foreignOpenAIAccount())
+	repo := svc.accountRepo.(schedulerGroupAwareOpenAIAccountRepo)
+	for i := range repo.accounts {
+		repo.accounts[i] = noChat(repo.accounts[i])
+	}
+	check = NewMonitorProbeAvailability(nil, svc).(*monitorProbeAvailability)
+	require.True(t, check.HasServableOpenAIAccountNow(ctx, *groupID, PlatformOpenAI, "gpt-5.1", ""))
+	require.False(t, check.HasServableOpenAIAccountNow(ctx, *groupID, PlatformOpenAI, "gpt-5.1", OpenAIEndpointCapabilityChatCompletions))
+}

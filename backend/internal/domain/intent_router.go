@@ -111,3 +111,20 @@ type MonitorProbeAnswerConfig struct {
 	UserIDs []int64           `json:"user_ids"`
 	APIKeys []IntentJevAPIKey `json:"api_keys"`
 }
+
+// OpenAIStreamPreludeConfig sends a protocol-neutral first event on OpenAI
+// streaming requests in scope as soon as the request is known to be servable,
+// so a downstream that times the first byte sees it at once. The real upstream
+// output follows unchanged. Independent of the group's intent router.
+type OpenAIStreamPreludeConfig struct {
+	Enabled bool `json:"enabled"`
+	// The early event goes out at a random moment this many milliseconds
+	// after the request arrived, unless real output or an error came first.
+	DelayMinMs int `json:"delay_min_ms"`
+	DelayMaxMs int `json:"delay_max_ms"`
+	// Scope is IntentJevScopeAll or IntentJevScopeListed, with UserIDs and
+	// APIKeys meaning what they mean for Jev.
+	Scope   string            `json:"scope"`
+	UserIDs []int64           `json:"user_ids"`
+	APIKeys []IntentJevAPIKey `json:"api_keys"`
+}

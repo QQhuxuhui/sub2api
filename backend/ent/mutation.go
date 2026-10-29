@@ -33,6 +33,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/intentrouter"
 	"github.com/Wei-Shaw/sub2api/ent/monitorprobeanswer"
+	"github.com/Wei-Shaw/sub2api/ent/openaistreamprelude"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -88,6 +89,7 @@ const (
 	TypeIdentityAdoptionDecision      = "IdentityAdoptionDecision"
 	TypeIntentRouter                  = "IntentRouter"
 	TypeMonitorProbeAnswer            = "MonitorProbeAnswer"
+	TypeOpenAIStreamPrelude           = "OpenAIStreamPrelude"
 	TypePaymentAuditLog               = "PaymentAuditLog"
 	TypePaymentOrder                  = "PaymentOrder"
 	TypePaymentProviderInstance       = "PaymentProviderInstance"
@@ -31591,6 +31593,552 @@ func (m *MonitorProbeAnswerMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *MonitorProbeAnswerMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown MonitorProbeAnswer edge %s", name)
+}
+
+// OpenAIStreamPreludeMutation represents an operation that mutates the OpenAIStreamPrelude nodes in the graph.
+type OpenAIStreamPreludeMutation struct {
+	config
+	op            Op
+	typ           string
+	id            *int64
+	created_at    *time.Time
+	updated_at    *time.Time
+	group_id      *int64
+	addgroup_id   *int64
+	_config       *domain.OpenAIStreamPreludeConfig
+	clearedFields map[string]struct{}
+	done          bool
+	oldValue      func(context.Context) (*OpenAIStreamPrelude, error)
+	predicates    []predicate.OpenAIStreamPrelude
+}
+
+var _ ent.Mutation = (*OpenAIStreamPreludeMutation)(nil)
+
+// openaistreampreludeOption allows management of the mutation configuration using functional options.
+type openaistreampreludeOption func(*OpenAIStreamPreludeMutation)
+
+// newOpenAIStreamPreludeMutation creates new mutation for the OpenAIStreamPrelude entity.
+func newOpenAIStreamPreludeMutation(c config, op Op, opts ...openaistreampreludeOption) *OpenAIStreamPreludeMutation {
+	m := &OpenAIStreamPreludeMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeOpenAIStreamPrelude,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withOpenAIStreamPreludeID sets the ID field of the mutation.
+func withOpenAIStreamPreludeID(id int64) openaistreampreludeOption {
+	return func(m *OpenAIStreamPreludeMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *OpenAIStreamPrelude
+		)
+		m.oldValue = func(ctx context.Context) (*OpenAIStreamPrelude, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().OpenAIStreamPrelude.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withOpenAIStreamPrelude sets the old OpenAIStreamPrelude of the mutation.
+func withOpenAIStreamPrelude(node *OpenAIStreamPrelude) openaistreampreludeOption {
+	return func(m *OpenAIStreamPreludeMutation) {
+		m.oldValue = func(context.Context) (*OpenAIStreamPrelude, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m OpenAIStreamPreludeMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m OpenAIStreamPreludeMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *OpenAIStreamPreludeMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *OpenAIStreamPreludeMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().OpenAIStreamPrelude.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *OpenAIStreamPreludeMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *OpenAIStreamPreludeMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the OpenAIStreamPrelude entity.
+// If the OpenAIStreamPrelude object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIStreamPreludeMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *OpenAIStreamPreludeMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *OpenAIStreamPreludeMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *OpenAIStreamPreludeMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the OpenAIStreamPrelude entity.
+// If the OpenAIStreamPrelude object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIStreamPreludeMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *OpenAIStreamPreludeMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetGroupID sets the "group_id" field.
+func (m *OpenAIStreamPreludeMutation) SetGroupID(i int64) {
+	m.group_id = &i
+	m.addgroup_id = nil
+}
+
+// GroupID returns the value of the "group_id" field in the mutation.
+func (m *OpenAIStreamPreludeMutation) GroupID() (r int64, exists bool) {
+	v := m.group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGroupID returns the old "group_id" field's value of the OpenAIStreamPrelude entity.
+// If the OpenAIStreamPrelude object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIStreamPreludeMutation) OldGroupID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGroupID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGroupID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGroupID: %w", err)
+	}
+	return oldValue.GroupID, nil
+}
+
+// AddGroupID adds i to the "group_id" field.
+func (m *OpenAIStreamPreludeMutation) AddGroupID(i int64) {
+	if m.addgroup_id != nil {
+		*m.addgroup_id += i
+	} else {
+		m.addgroup_id = &i
+	}
+}
+
+// AddedGroupID returns the value that was added to the "group_id" field in this mutation.
+func (m *OpenAIStreamPreludeMutation) AddedGroupID() (r int64, exists bool) {
+	v := m.addgroup_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetGroupID resets all changes to the "group_id" field.
+func (m *OpenAIStreamPreludeMutation) ResetGroupID() {
+	m.group_id = nil
+	m.addgroup_id = nil
+}
+
+// SetConfig sets the "config" field.
+func (m *OpenAIStreamPreludeMutation) SetConfig(daspc domain.OpenAIStreamPreludeConfig) {
+	m._config = &daspc
+}
+
+// Config returns the value of the "config" field in the mutation.
+func (m *OpenAIStreamPreludeMutation) Config() (r domain.OpenAIStreamPreludeConfig, exists bool) {
+	v := m._config
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldConfig returns the old "config" field's value of the OpenAIStreamPrelude entity.
+// If the OpenAIStreamPrelude object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIStreamPreludeMutation) OldConfig(ctx context.Context) (v domain.OpenAIStreamPreludeConfig, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldConfig is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldConfig requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldConfig: %w", err)
+	}
+	return oldValue.Config, nil
+}
+
+// ClearConfig clears the value of the "config" field.
+func (m *OpenAIStreamPreludeMutation) ClearConfig() {
+	m._config = nil
+	m.clearedFields[openaistreamprelude.FieldConfig] = struct{}{}
+}
+
+// ConfigCleared returns if the "config" field was cleared in this mutation.
+func (m *OpenAIStreamPreludeMutation) ConfigCleared() bool {
+	_, ok := m.clearedFields[openaistreamprelude.FieldConfig]
+	return ok
+}
+
+// ResetConfig resets all changes to the "config" field.
+func (m *OpenAIStreamPreludeMutation) ResetConfig() {
+	m._config = nil
+	delete(m.clearedFields, openaistreamprelude.FieldConfig)
+}
+
+// Where appends a list predicates to the OpenAIStreamPreludeMutation builder.
+func (m *OpenAIStreamPreludeMutation) Where(ps ...predicate.OpenAIStreamPrelude) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the OpenAIStreamPreludeMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *OpenAIStreamPreludeMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.OpenAIStreamPrelude, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *OpenAIStreamPreludeMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *OpenAIStreamPreludeMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (OpenAIStreamPrelude).
+func (m *OpenAIStreamPreludeMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *OpenAIStreamPreludeMutation) Fields() []string {
+	fields := make([]string, 0, 4)
+	if m.created_at != nil {
+		fields = append(fields, openaistreamprelude.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, openaistreamprelude.FieldUpdatedAt)
+	}
+	if m.group_id != nil {
+		fields = append(fields, openaistreamprelude.FieldGroupID)
+	}
+	if m._config != nil {
+		fields = append(fields, openaistreamprelude.FieldConfig)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *OpenAIStreamPreludeMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case openaistreamprelude.FieldCreatedAt:
+		return m.CreatedAt()
+	case openaistreamprelude.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case openaistreamprelude.FieldGroupID:
+		return m.GroupID()
+	case openaistreamprelude.FieldConfig:
+		return m.Config()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *OpenAIStreamPreludeMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case openaistreamprelude.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case openaistreamprelude.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case openaistreamprelude.FieldGroupID:
+		return m.OldGroupID(ctx)
+	case openaistreamprelude.FieldConfig:
+		return m.OldConfig(ctx)
+	}
+	return nil, fmt.Errorf("unknown OpenAIStreamPrelude field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *OpenAIStreamPreludeMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case openaistreamprelude.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case openaistreamprelude.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case openaistreamprelude.FieldGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGroupID(v)
+		return nil
+	case openaistreamprelude.FieldConfig:
+		v, ok := value.(domain.OpenAIStreamPreludeConfig)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetConfig(v)
+		return nil
+	}
+	return fmt.Errorf("unknown OpenAIStreamPrelude field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *OpenAIStreamPreludeMutation) AddedFields() []string {
+	var fields []string
+	if m.addgroup_id != nil {
+		fields = append(fields, openaistreamprelude.FieldGroupID)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *OpenAIStreamPreludeMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case openaistreamprelude.FieldGroupID:
+		return m.AddedGroupID()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *OpenAIStreamPreludeMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case openaistreamprelude.FieldGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddGroupID(v)
+		return nil
+	}
+	return fmt.Errorf("unknown OpenAIStreamPrelude numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *OpenAIStreamPreludeMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(openaistreamprelude.FieldConfig) {
+		fields = append(fields, openaistreamprelude.FieldConfig)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *OpenAIStreamPreludeMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *OpenAIStreamPreludeMutation) ClearField(name string) error {
+	switch name {
+	case openaistreamprelude.FieldConfig:
+		m.ClearConfig()
+		return nil
+	}
+	return fmt.Errorf("unknown OpenAIStreamPrelude nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *OpenAIStreamPreludeMutation) ResetField(name string) error {
+	switch name {
+	case openaistreamprelude.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case openaistreamprelude.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case openaistreamprelude.FieldGroupID:
+		m.ResetGroupID()
+		return nil
+	case openaistreamprelude.FieldConfig:
+		m.ResetConfig()
+		return nil
+	}
+	return fmt.Errorf("unknown OpenAIStreamPrelude field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *OpenAIStreamPreludeMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *OpenAIStreamPreludeMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *OpenAIStreamPreludeMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *OpenAIStreamPreludeMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *OpenAIStreamPreludeMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *OpenAIStreamPreludeMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *OpenAIStreamPreludeMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown OpenAIStreamPrelude unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *OpenAIStreamPreludeMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown OpenAIStreamPrelude edge %s", name)
 }
 
 // PaymentAuditLogMutation represents an operation that mutates the PaymentAuditLog nodes in the graph.

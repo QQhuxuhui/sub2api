@@ -96,8 +96,9 @@ func TestMonitorChallengeBody(t *testing.T) {
 }
 
 type stubProbeAvailability struct {
-	ok    bool
-	calls []string
+	ok           bool
+	calls        []string
+	capabilities []OpenAIEndpointCapability // HasServableOpenAIAccountNow calls
 }
 
 func (s *stubProbeAvailability) HasServableAccountNow(_ context.Context, _ int64, platform, model string) bool {

@@ -213,6 +213,9 @@ func registerIntentRouterRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		routers.GET("/:group_id/monitor-answer", h.Admin.IntentRouter.GetMonitorAnswer)
 		routers.PUT("/:group_id/monitor-answer", h.Admin.IntentRouter.SaveMonitorAnswer)
 		routers.GET("/:group_id/monitor-answer/status", h.Admin.IntentRouter.MonitorAnswerStatus)
+		routers.GET("/:group_id/stream-prelude", h.Admin.IntentRouter.GetStreamPrelude)
+		routers.PUT("/:group_id/stream-prelude", h.Admin.IntentRouter.SaveStreamPrelude)
+		routers.GET("/:group_id/stream-prelude/status", h.Admin.IntentRouter.StreamPreludeStatus)
 	}
 }
 

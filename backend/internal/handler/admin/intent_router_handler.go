@@ -242,3 +242,55 @@ func (h *IntentRouterHandler) MonitorAnswerStatus(c *gin.Context) {
 	}
 	response.Success(c, status)
 }
+
+// GetStreamPrelude returns the group's setting for the early first event of
+// OpenAI streams.
+// GET /api/v1/admin/intent-routers/:group_id/stream-prelude
+func (h *IntentRouterHandler) GetStreamPrelude(c *gin.Context) {
+	groupID, ok := parseIDParam(c, "group_id")
+	if !ok {
+		return
+	}
+	view, err := h.router.GetOpenAIStreamPrelude(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, view)
+}
+
+// SaveStreamPrelude stores the group's setting; it takes effect at once.
+// PUT /api/v1/admin/intent-routers/:group_id/stream-prelude
+func (h *IntentRouterHandler) SaveStreamPrelude(c *gin.Context) {
+	groupID, ok := parseIDParam(c, "group_id")
+	if !ok {
+		return
+	}
+	var req domain.OpenAIStreamPreludeConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	view, err := h.router.SaveOpenAIStreamPrelude(c.Request.Context(), groupID, req)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, view)
+}
+
+// StreamPreludeStatus returns the daily counts and latest requests that got an
+// early event.
+// GET /api/v1/admin/intent-routers/:group_id/stream-prelude/status
+func (h *IntentRouterHandler) StreamPreludeStatus(c *gin.Context) {
+	groupID, ok := parseIDParam(c, "group_id")
+	if !ok {
+		return
+	}
+	status, err := h.router.OpenAIStreamPreludeStatus(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, status)
+}

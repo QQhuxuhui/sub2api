@@ -26,6 +26,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/intentrouter"
 	"github.com/Wei-Shaw/sub2api/ent/monitorprobeanswer"
+	"github.com/Wei-Shaw/sub2api/ent/openaistreamprelude"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -1372,6 +1373,21 @@ func init() {
 	monitorprobeanswer.DefaultUpdatedAt = monitorprobeanswerDescUpdatedAt.Default.(func() time.Time)
 	// monitorprobeanswer.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	monitorprobeanswer.UpdateDefaultUpdatedAt = monitorprobeanswerDescUpdatedAt.UpdateDefault.(func() time.Time)
+	openaistreampreludeMixin := schema.OpenAIStreamPrelude{}.Mixin()
+	openaistreampreludeMixinFields0 := openaistreampreludeMixin[0].Fields()
+	_ = openaistreampreludeMixinFields0
+	openaistreampreludeFields := schema.OpenAIStreamPrelude{}.Fields()
+	_ = openaistreampreludeFields
+	// openaistreampreludeDescCreatedAt is the schema descriptor for created_at field.
+	openaistreampreludeDescCreatedAt := openaistreampreludeMixinFields0[0].Descriptor()
+	// openaistreamprelude.DefaultCreatedAt holds the default value on creation for the created_at field.
+	openaistreamprelude.DefaultCreatedAt = openaistreampreludeDescCreatedAt.Default.(func() time.Time)
+	// openaistreampreludeDescUpdatedAt is the schema descriptor for updated_at field.
+	openaistreampreludeDescUpdatedAt := openaistreampreludeMixinFields0[1].Descriptor()
+	// openaistreamprelude.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	openaistreamprelude.DefaultUpdatedAt = openaistreampreludeDescUpdatedAt.Default.(func() time.Time)
+	// openaistreamprelude.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	openaistreamprelude.UpdateDefaultUpdatedAt = openaistreampreludeDescUpdatedAt.UpdateDefault.(func() time.Time)
 	paymentauditlogFields := schema.PaymentAuditLog{}.Fields()
 	_ = paymentauditlogFields
 	// paymentauditlogDescOrderID is the schema descriptor for order_id field.

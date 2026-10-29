@@ -290,6 +290,9 @@
           <!-- Answering channel-monitor challenges: the group's own setting, saved on its own -->
           <MonitorAnswerCard :group-id="selectedGroup.id" />
 
+          <!-- Early first event on OpenAI streams: the group's own setting, saved on its own -->
+          <StreamPreludeCard :group-id="selectedGroup.id" />
+
           <!-- Rules -->
           <div class="card space-y-4 p-5">
             <div class="flex flex-wrap items-start justify-between gap-3">
@@ -553,6 +556,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import MonitorAnswerCard from '@/components/admin/intentRouter/MonitorAnswerCard.vue'
+import StreamPreludeCard from '@/components/admin/intentRouter/StreamPreludeCard.vue'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import { intentRoutersAPI } from '@/api/admin/intentRouters'

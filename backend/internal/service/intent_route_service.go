@@ -293,6 +293,10 @@ type IntentRouterService struct {
 	probeLog          monitorProbeAnswerLog    // nil keeps no records
 	probeDelay        func() time.Duration     // tests replace the random delay
 
+	// Early first events on OpenAI streams (openai_stream_prelude.go).
+	preludeConfigs atomic.Pointer[map[int64]*openAIStreamPreludeConfig]
+	preludeLog     openAIStreamPreludeLog // nil keeps no records
+
 	configs      atomic.Pointer[map[int64]*intentRouterConfig]
 	configLoaded atomic.Int64 // unix nanos of the last successful load
 	configMu     sync.Mutex
@@ -318,10 +322,12 @@ func NewIntentRouterService(entClient *dbent.Client, rdb *redis.Client, cfg *con
 	var store intentRouteStore
 	var jevStats intentJevStats
 	var probeLog monitorProbeAnswerLog
+	var preludeLog openAIStreamPreludeLog
 	if rdb != nil {
 		store = &redisIntentRouteStore{rdb: rdb}
 		jevStats = &redisIntentJevStats{rdb: rdb}
 		probeLog = &redisMonitorProbeAnswerLog{rdb: rdb}
+		preludeLog = &redisOpenAIStreamPreludeLog{rdb: rdb}
 	}
 	var hits intentRouteHitSink
 	if entClient != nil {
@@ -330,13 +336,14 @@ func NewIntentRouterService(entClient *dbent.Client, rdb *redis.Client, cfg *con
 		hits = log
 	}
 	return &IntentRouterService{
-		entClient: entClient,
-		store:     store,
-		hits:      hits,
-		capture:   newIntentRouteCaptureFromEnv(),
-		judge:     newHTTPIntentProbeJudge(),
-		jevStats:  jevStats,
-		probeLog:  probeLog,
+		entClient:  entClient,
+		store:      store,
+		hits:       hits,
+		capture:    newIntentRouteCaptureFromEnv(),
+		judge:      newHTTPIntentProbeJudge(),
+		jevStats:   jevStats,
+		probeLog:   probeLog,
+		preludeLog: preludeLog,
 		classifier: &httpIntentClassifier{
 			// The per-request context carries the real deadline.
 			client:      &http.Client{Timeout: 30 * time.Second},
@@ -699,6 +706,7 @@ func (s *IntentRouterService) reloadConfigs(ctx context.Context) error {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	s.reloadMonitorProbeConfigs(ctx)
+	s.reloadOpenAIStreamPreludeConfigs(ctx)
 	rows, err := s.entClient.IntentRouter.Query().All(ctx)
 	if err != nil {
 		slog.Warn("intent_route.config_load_failed", "error", err)

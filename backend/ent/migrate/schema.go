@@ -1152,6 +1152,27 @@ var (
 			},
 		},
 	}
+	// OpenaiStreamPreludesColumns holds the columns for the "openai_stream_preludes" table.
+	OpenaiStreamPreludesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "group_id", Type: field.TypeInt64},
+		{Name: "config", Type: field.TypeJSON, Nullable: true, SchemaType: map[string]string{"postgres": "jsonb"}},
+	}
+	// OpenaiStreamPreludesTable holds the schema information for the "openai_stream_preludes" table.
+	OpenaiStreamPreludesTable = &schema.Table{
+		Name:       "openai_stream_preludes",
+		Columns:    OpenaiStreamPreludesColumns,
+		PrimaryKey: []*schema.Column{OpenaiStreamPreludesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "openaistreamprelude_group_id",
+				Unique:  true,
+				Columns: []*schema.Column{OpenaiStreamPreludesColumns[3]},
+			},
+		},
+	}
 	// PaymentAuditLogsColumns holds the columns for the "payment_audit_logs" table.
 	PaymentAuditLogsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2214,6 +2235,7 @@ var (
 		IdentityAdoptionDecisionsTable,
 		IntentRoutersTable,
 		MonitorProbeAnswersTable,
+		OpenaiStreamPreludesTable,
 		PaymentAuditLogsTable,
 		PaymentOrdersTable,
 		PaymentProviderInstancesTable,
@@ -2317,6 +2339,9 @@ func init() {
 	}
 	MonitorProbeAnswersTable.Annotation = &entsql.Annotation{
 		Table: "monitor_probe_answers",
+	}
+	OpenaiStreamPreludesTable.Annotation = &entsql.Annotation{
+		Table: "openai_stream_preludes",
 	}
 	PaymentAuditLogsTable.Annotation = &entsql.Annotation{
 		Table: "payment_audit_logs",

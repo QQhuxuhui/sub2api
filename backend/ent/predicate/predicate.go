@@ -69,6 +69,9 @@ type IntentRouter func(*sql.Selector)
 // MonitorProbeAnswer is the predicate function for monitorprobeanswer builders.
 type MonitorProbeAnswer func(*sql.Selector)
 
+// OpenAIStreamPrelude is the predicate function for openaistreamprelude builders.
+type OpenAIStreamPrelude func(*sql.Selector)
+
 // PaymentAuditLog is the predicate function for paymentauditlog builders.
 type PaymentAuditLog func(*sql.Selector)
 

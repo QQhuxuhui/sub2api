@@ -36,6 +36,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/intentrouter"
 	"github.com/Wei-Shaw/sub2api/ent/monitorprobeanswer"
+	"github.com/Wei-Shaw/sub2api/ent/openaistreamprelude"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -108,6 +109,8 @@ type Client struct {
 	IntentRouter *IntentRouterClient
 	// MonitorProbeAnswer is the client for interacting with the MonitorProbeAnswer builders.
 	MonitorProbeAnswer *MonitorProbeAnswerClient
+	// OpenAIStreamPrelude is the client for interacting with the OpenAIStreamPrelude builders.
+	OpenAIStreamPrelude *OpenAIStreamPreludeClient
 	// PaymentAuditLog is the client for interacting with the PaymentAuditLog builders.
 	PaymentAuditLog *PaymentAuditLogClient
 	// PaymentOrder is the client for interacting with the PaymentOrder builders.
@@ -182,6 +185,7 @@ func (c *Client) init() {
 	c.IdentityAdoptionDecision = NewIdentityAdoptionDecisionClient(c.config)
 	c.IntentRouter = NewIntentRouterClient(c.config)
 	c.MonitorProbeAnswer = NewMonitorProbeAnswerClient(c.config)
+	c.OpenAIStreamPrelude = NewOpenAIStreamPreludeClient(c.config)
 	c.PaymentAuditLog = NewPaymentAuditLogClient(c.config)
 	c.PaymentOrder = NewPaymentOrderClient(c.config)
 	c.PaymentProviderInstance = NewPaymentProviderInstanceClient(c.config)
@@ -316,6 +320,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		IdentityAdoptionDecision:      NewIdentityAdoptionDecisionClient(cfg),
 		IntentRouter:                  NewIntentRouterClient(cfg),
 		MonitorProbeAnswer:            NewMonitorProbeAnswerClient(cfg),
+		OpenAIStreamPrelude:           NewOpenAIStreamPreludeClient(cfg),
 		PaymentAuditLog:               NewPaymentAuditLogClient(cfg),
 		PaymentOrder:                  NewPaymentOrderClient(cfg),
 		PaymentProviderInstance:       NewPaymentProviderInstanceClient(cfg),
@@ -377,6 +382,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		IdentityAdoptionDecision:      NewIdentityAdoptionDecisionClient(cfg),
 		IntentRouter:                  NewIntentRouterClient(cfg),
 		MonitorProbeAnswer:            NewMonitorProbeAnswerClient(cfg),
+		OpenAIStreamPrelude:           NewOpenAIStreamPreludeClient(cfg),
 		PaymentAuditLog:               NewPaymentAuditLogClient(cfg),
 		PaymentOrder:                  NewPaymentOrderClient(cfg),
 		PaymentProviderInstance:       NewPaymentProviderInstanceClient(cfg),
@@ -433,12 +439,12 @@ func (c *Client) Use(hooks ...Hook) {
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
 		c.IdentityAdoptionDecision, c.IntentRouter, c.MonitorProbeAnswer,
-		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance,
-		c.PaymentTransactionClaim, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.OpenAIStreamPrelude, c.PaymentAuditLog, c.PaymentOrder,
+		c.PaymentProviderInstance, c.PaymentTransactionClaim, c.PendingAuthSession,
+		c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret,
+		c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask,
+		c.UsageLog, c.User, c.UserAllowedGroup, c.UserAttributeDefinition,
+		c.UserAttributeValue, c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -454,12 +460,12 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
 		c.IdentityAdoptionDecision, c.IntentRouter, c.MonitorProbeAnswer,
-		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance,
-		c.PaymentTransactionClaim, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.OpenAIStreamPrelude, c.PaymentAuditLog, c.PaymentOrder,
+		c.PaymentProviderInstance, c.PaymentTransactionClaim, c.PendingAuthSession,
+		c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret,
+		c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask,
+		c.UsageLog, c.User, c.UserAllowedGroup, c.UserAttributeDefinition,
+		c.UserAttributeValue, c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -510,6 +516,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.IntentRouter.mutate(ctx, m)
 	case *MonitorProbeAnswerMutation:
 		return c.MonitorProbeAnswer.mutate(ctx, m)
+	case *OpenAIStreamPreludeMutation:
+		return c.OpenAIStreamPrelude.mutate(ctx, m)
 	case *PaymentAuditLogMutation:
 		return c.PaymentAuditLog.mutate(ctx, m)
 	case *PaymentOrderMutation:
@@ -3866,6 +3874,139 @@ func (c *MonitorProbeAnswerClient) mutate(ctx context.Context, m *MonitorProbeAn
 		return (&MonitorProbeAnswerDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown MonitorProbeAnswer mutation op: %q", m.Op())
+	}
+}
+
+// OpenAIStreamPreludeClient is a client for the OpenAIStreamPrelude schema.
+type OpenAIStreamPreludeClient struct {
+	config
+}
+
+// NewOpenAIStreamPreludeClient returns a client for the OpenAIStreamPrelude from the given config.
+func NewOpenAIStreamPreludeClient(c config) *OpenAIStreamPreludeClient {
+	return &OpenAIStreamPreludeClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `openaistreamprelude.Hooks(f(g(h())))`.
+func (c *OpenAIStreamPreludeClient) Use(hooks ...Hook) {
+	c.hooks.OpenAIStreamPrelude = append(c.hooks.OpenAIStreamPrelude, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `openaistreamprelude.Intercept(f(g(h())))`.
+func (c *OpenAIStreamPreludeClient) Intercept(interceptors ...Interceptor) {
+	c.inters.OpenAIStreamPrelude = append(c.inters.OpenAIStreamPrelude, interceptors...)
+}
+
+// Create returns a builder for creating a OpenAIStreamPrelude entity.
+func (c *OpenAIStreamPreludeClient) Create() *OpenAIStreamPreludeCreate {
+	mutation := newOpenAIStreamPreludeMutation(c.config, OpCreate)
+	return &OpenAIStreamPreludeCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of OpenAIStreamPrelude entities.
+func (c *OpenAIStreamPreludeClient) CreateBulk(builders ...*OpenAIStreamPreludeCreate) *OpenAIStreamPreludeCreateBulk {
+	return &OpenAIStreamPreludeCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *OpenAIStreamPreludeClient) MapCreateBulk(slice any, setFunc func(*OpenAIStreamPreludeCreate, int)) *OpenAIStreamPreludeCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &OpenAIStreamPreludeCreateBulk{err: fmt.Errorf("calling to OpenAIStreamPreludeClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*OpenAIStreamPreludeCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &OpenAIStreamPreludeCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for OpenAIStreamPrelude.
+func (c *OpenAIStreamPreludeClient) Update() *OpenAIStreamPreludeUpdate {
+	mutation := newOpenAIStreamPreludeMutation(c.config, OpUpdate)
+	return &OpenAIStreamPreludeUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *OpenAIStreamPreludeClient) UpdateOne(_m *OpenAIStreamPrelude) *OpenAIStreamPreludeUpdateOne {
+	mutation := newOpenAIStreamPreludeMutation(c.config, OpUpdateOne, withOpenAIStreamPrelude(_m))
+	return &OpenAIStreamPreludeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *OpenAIStreamPreludeClient) UpdateOneID(id int64) *OpenAIStreamPreludeUpdateOne {
+	mutation := newOpenAIStreamPreludeMutation(c.config, OpUpdateOne, withOpenAIStreamPreludeID(id))
+	return &OpenAIStreamPreludeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for OpenAIStreamPrelude.
+func (c *OpenAIStreamPreludeClient) Delete() *OpenAIStreamPreludeDelete {
+	mutation := newOpenAIStreamPreludeMutation(c.config, OpDelete)
+	return &OpenAIStreamPreludeDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *OpenAIStreamPreludeClient) DeleteOne(_m *OpenAIStreamPrelude) *OpenAIStreamPreludeDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *OpenAIStreamPreludeClient) DeleteOneID(id int64) *OpenAIStreamPreludeDeleteOne {
+	builder := c.Delete().Where(openaistreamprelude.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &OpenAIStreamPreludeDeleteOne{builder}
+}
+
+// Query returns a query builder for OpenAIStreamPrelude.
+func (c *OpenAIStreamPreludeClient) Query() *OpenAIStreamPreludeQuery {
+	return &OpenAIStreamPreludeQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeOpenAIStreamPrelude},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a OpenAIStreamPrelude entity by its id.
+func (c *OpenAIStreamPreludeClient) Get(ctx context.Context, id int64) (*OpenAIStreamPrelude, error) {
+	return c.Query().Where(openaistreamprelude.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *OpenAIStreamPreludeClient) GetX(ctx context.Context, id int64) *OpenAIStreamPrelude {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *OpenAIStreamPreludeClient) Hooks() []Hook {
+	return c.hooks.OpenAIStreamPrelude
+}
+
+// Interceptors returns the client interceptors.
+func (c *OpenAIStreamPreludeClient) Interceptors() []Interceptor {
+	return c.inters.OpenAIStreamPrelude
+}
+
+func (c *OpenAIStreamPreludeClient) mutate(ctx context.Context, m *OpenAIStreamPreludeMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&OpenAIStreamPreludeCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&OpenAIStreamPreludeUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&OpenAIStreamPreludeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&OpenAIStreamPreludeDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown OpenAIStreamPrelude mutation op: %q", m.Op())
 	}
 }
 
@@ -7271,11 +7412,12 @@ type (
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
 		Group, IdempotencyRecord, IdentityAdoptionDecision, IntentRouter,
-		MonitorProbeAnswer, PaymentAuditLog, PaymentOrder, PaymentProviderInstance,
-		PaymentTransactionClaim, PendingAuthSession, PromoCode, PromoCodeUsage, Proxy,
-		RedeemCode, SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
-		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
-		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Hook
+		MonitorProbeAnswer, OpenAIStreamPrelude, PaymentAuditLog, PaymentOrder,
+		PaymentProviderInstance, PaymentTransactionClaim, PendingAuthSession,
+		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -7283,11 +7425,12 @@ type (
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
 		Group, IdempotencyRecord, IdentityAdoptionDecision, IntentRouter,
-		MonitorProbeAnswer, PaymentAuditLog, PaymentOrder, PaymentProviderInstance,
-		PaymentTransactionClaim, PendingAuthSession, PromoCode, PromoCodeUsage, Proxy,
-		RedeemCode, SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
-		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
-		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Interceptor
+		MonitorProbeAnswer, OpenAIStreamPrelude, PaymentAuditLog, PaymentOrder,
+		PaymentProviderInstance, PaymentTransactionClaim, PendingAuthSession,
+		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

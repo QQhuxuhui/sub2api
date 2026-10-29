@@ -128,6 +128,14 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
 
+	// 流式首字前导：范围内且本组现在能服务时先发中性事件。
+	if reqStream {
+		startOpenAIStreamPrelude(c, openAIStreamPreludeRequest{
+			apiKey: apiKey, userID: subject.UserID, model: reqModel, schedule: forwardModel,
+			platform: requestPlatform, capability: service.OpenAIEndpointCapabilityChatCompletions, chat: true,
+		})
+	}
+
 	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted, reqLog)
 	if !acquired {
 		return

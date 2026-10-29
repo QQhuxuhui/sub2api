@@ -33,6 +33,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/intentrouter"
 	"github.com/Wei-Shaw/sub2api/ent/monitorprobeanswer"
+	"github.com/Wei-Shaw/sub2api/ent/openaistreamprelude"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -135,6 +136,7 @@ func checkColumn(t, c string) error {
 			identityadoptiondecision.Table:      identityadoptiondecision.ValidColumn,
 			intentrouter.Table:                  intentrouter.ValidColumn,
 			monitorprobeanswer.Table:            monitorprobeanswer.ValidColumn,
+			openaistreamprelude.Table:           openaistreamprelude.ValidColumn,
 			paymentauditlog.Table:               paymentauditlog.ValidColumn,
 			paymentorder.Table:                  paymentorder.ValidColumn,
 			paymentproviderinstance.Table:       paymentproviderinstance.ValidColumn,

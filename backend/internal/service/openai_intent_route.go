@@ -153,3 +153,50 @@ func (s *OpenAIGatewayService) selectIntentRoutedAccount(
 // openAIAccountScheduleLayerIntentRoute labels selections made by intent routing
 // in scheduler decisions and metrics.
 const openAIAccountScheduleLayerIntentRoute = "intent_route"
+
+// hasIntentRoutedAccountNow is the no-reservation counterpart of
+// selectIntentRoutedAccount for checks made before a request is forwarded:
+// decided=false when the request carries no routing rule and ordinary
+// scheduling applies; otherwise ok reports whether one of the rule's targets
+// could take the request now, concurrency aside.
+func (s *OpenAIGatewayService) hasIntentRoutedAccountNow(ctx context.Context, groupID *int64, requestedModel, platform string, capability OpenAIEndpointCapability) (decided, ok bool) {
+	route := IntentRouteDecisionFromContext(ctx)
+	if route == nil || s == nil || len(route.AccountIDs) == 0 {
+		return false, false
+	}
+	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
+	ctx = s.withOpenAIProfitControlGate(ctx, groupID)
+	platform = NormalizeOpenAICompatiblePlatform(platform)
+	checker := &defaultOpenAIAccountScheduler{service: s, stats: s.openaiAccountStats}
+	if checker.stats == nil {
+		checker.stats = newOpenAIAccountRuntimeStats()
+	}
+	req := OpenAIAccountScheduleRequest{
+		GroupID:            groupID,
+		Platform:           platform,
+		RequestedModel:     requestedModel,
+		RequiredCapability: capability,
+		RequirePrivacySet:  s.openAIGroupRequiresPrivacySet(ctx, groupID),
+	}
+	now := time.Now()
+	for _, accountID := range route.orderedAccountIDs() {
+		account, err := s.getSchedulableAccount(ctx, accountID)
+		if err != nil || account == nil {
+			continue
+		}
+		if account.Platform != platform || !account.IsOpenAICompatible() || !account.IsSchedulable() ||
+			shouldClearStickySession(account, requestedModel) {
+			continue
+		}
+		if !checker.isAccountRequestCompatible(ctx, account, req) {
+			continue
+		}
+		upstreamModel := canonicalOpenAIAccountSchedulingModel(account, requestedModel)
+		if isGrokTeamModelRateLimited(account, upstreamModel, now) || isGrokAccountModelQuotaBlocked(account, upstreamModel, now) {
+			continue
+		}
+		return true, true
+	}
+	return true, false
+}
