@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -139,4 +140,81 @@ func TestOpenAIStreamingStatusEventsThenFailureFailOver(t *testing.T) {
 		require.ErrorAs(t, err, &failoverErr, status)
 		require.Empty(t, rec.Body.String())
 	}
+}
+
+// Seen on 2026-10-31: CPA sends keepalive while it waits for capacity and fails
+// with overloaded about 20 seconds later, nothing having been produced yet.
+const (
+	openAIUpstreamKeepaliveEvent = "event: keepalive\n" + `data: {"type":"keepalive","sequence_number":2}` + "\n\n"
+	openAIOverloadedFailedEvent  = "event: response.failed\n" +
+		`data: {"type":"response.failed","sequence_number":3,"response":{"id":"resp_k","status":"failed","error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}}` + "\n\n"
+	openAICreatedEvent = "event: response.created\n" + `data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_k","status":"in_progress"}}` + "\n\n"
+)
+
+func TestOpenAIStreamKeepaliveIsNotOutput(t *testing.T) {
+	const keepalive = `{"type":"keepalive","sequence_number":2}`
+	require.True(t, openAIStreamEventIsPreamble("keepalive"))
+	require.False(t, openAIStreamDataStartsClientOutput(keepalive, "keepalive"))
+	require.False(t, openAIStreamDataStartsSemanticTTFT(keepalive, "keepalive"))
+	require.False(t, openAIStreamDataStartsSemanticTTFT(keepalive, ""), "the type may only be in the data")
+	require.False(t, openAIStreamDataStartsVisibleOutput(keepalive, "keepalive"))
+}
+
+func TestOpenAIStreamingKeepaliveThenOverloadFailsOver(t *testing.T) {
+	svc, c, rec, resp := newPlaceholderStreamTest(t, openAICreatedEvent+openAIUpstreamKeepaliveEvent+openAIOverloadedFailedEvent)
+
+	_, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 116, Platform: PlatformOpenAI, Name: "cpa"}, time.Now(), "model", "model")
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Empty(t, rec.Body.String())
+}
+
+func TestOpenAIStreamingPassthroughKeepaliveThenOverloadFailsOver(t *testing.T) {
+	svc, c, rec, resp := newPlaceholderStreamTest(t, openAICreatedEvent+openAIUpstreamKeepaliveEvent+openAIOverloadedFailedEvent)
+
+	_, err := svc.handleStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 117, Platform: PlatformOpenAI, Name: "cpa"}, time.Now(), "model", "model")
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Empty(t, rec.Body.String())
+}
+
+func TestOpenAIStreamingKeepaliveIsForwardedWithTheRealOutput(t *testing.T) {
+	const delta = "event: response.output_text.delta\n" + `data: {"type":"response.output_text.delta","sequence_number":3,"delta":"hello"}` + "\n\n"
+	const completed = "event: response.completed\n" + `data: {"type":"response.completed","sequence_number":4,"response":{"id":"resp_k","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n"
+
+	for name, forward := range map[string]func(*OpenAIGatewayService, *http.Response, *gin.Context) error{
+		"native": func(svc *OpenAIGatewayService, resp *http.Response, c *gin.Context) error {
+			_, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 118, Platform: PlatformOpenAI, Name: "cpa"}, time.Now(), "model", "model")
+			return err
+		},
+		"passthrough": func(svc *OpenAIGatewayService, resp *http.Response, c *gin.Context) error {
+			_, err := svc.handleStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 118, Platform: PlatformOpenAI, Name: "cpa"}, time.Now(), "model", "model")
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc, c, rec, resp := newPlaceholderStreamTest(t, openAICreatedEvent+openAIUpstreamKeepaliveEvent+delta+completed)
+
+			require.NoError(t, forward(svc, resp, c))
+
+			body := rec.Body.String()
+			created, keepalive, output := strings.Index(body, "response.created"), strings.Index(body, `"type":"keepalive"`), strings.Index(body, "hello")
+			require.GreaterOrEqual(t, created, 0)
+			require.Greater(t, keepalive, created, "the frame keeps its place")
+			require.Greater(t, output, keepalive)
+		})
+	}
+}
+
+func TestOpenAIStreamingOverloadAfterRealOutputStaysDelivered(t *testing.T) {
+	const delta = "event: response.output_text.delta\n" + `data: {"type":"response.output_text.delta","sequence_number":1,"delta":"hello"}` + "\n\n"
+	svc, c, rec, resp := newPlaceholderStreamTest(t, openAICreatedEvent+delta+openAIUpstreamKeepaliveEvent+openAIOverloadedFailedEvent)
+
+	_, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 119, Platform: PlatformOpenAI, Name: "cpa"}, time.Now(), "model", "model")
+
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr), "the stream cannot be replayed once output went out")
+	require.Contains(t, rec.Body.String(), "hello")
 }
