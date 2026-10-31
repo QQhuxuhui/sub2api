@@ -423,10 +423,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			// 透传模式默认保持原样代理；容量错误以及 API-key 上游的瞬时
 			// 5xx 应先触发多账号 failover，且此时尚未写入下游响应。
 			// probeBody 已在上方任务探测时读取过一次，直接复用避免重复读取。
-			if shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, probeBody) {
-				return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
-			}
-			return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
+			return nil, s.finishOpenAIPassthroughErrorResponse(ctx, resp, c, account, body, probeBody)
 		}
 
 		if mapping, ok := openAIResponsesClientToolMapping(c); ok && isEventStreamResponse(resp.Header) {
@@ -458,10 +455,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				if signal, ok := asOpenAICompactFallbackSignal(handleErr); ok {
 					_ = resp.Body.Close()
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
-					if shouldFailoverOpenAIPassthroughResponse(account, compactResp.StatusCode, compactBody) {
-						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
-					}
-					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
+					return nil, s.finishOpenAIPassthroughErrorResponse(ctx, compactResp, c, account, body, compactBody)
 				}
 				_ = resp.Body.Close()
 				return nil, handleErr
@@ -485,10 +479,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				if signal, ok := asOpenAICompactFallbackSignal(handleErr); ok {
 					_ = resp.Body.Close()
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
-					if shouldFailoverOpenAIPassthroughResponse(account, compactResp.StatusCode, compactBody) {
-						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
-					}
-					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
+					return nil, s.finishOpenAIPassthroughErrorResponse(ctx, compactResp, c, account, body, compactBody)
 				}
 				_ = resp.Body.Close()
 				return nil, handleErr
@@ -868,6 +859,40 @@ func writeOpenAIPassthroughErrorEnvelope(c *gin.Context, downstreamStatus int, u
 	}
 	writeOpenAIPassthroughErrorHeaders(c.Writer.Header(), upstreamHeaders)
 	c.Data(downstreamStatus, "application/json; charset=utf-8", body)
+}
+
+// finishOpenAIPassthroughErrorResponse decides an upstream HTTP error of the
+// passthrough path: the platform's own failover first, then the group's rules,
+// and only then the client. Nothing has been written downstream yet.
+func (s *OpenAIGatewayService) finishOpenAIPassthroughErrorResponse(
+	ctx context.Context,
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	requestBody []byte,
+	responseBody []byte,
+) error {
+	if shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, responseBody) {
+		return s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, requestBody, responseBody)
+	}
+	body := s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)
+	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	if ruleID := matchOpenAIFailoverRule(c, resp.StatusCode, upstreamMsg, body); ruleID != "" {
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			ProxyID:            opsUpstreamProxyID(account),
+			ProxyName:          opsUpstreamProxyName(account),
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: resp.StatusCode,
+			UpstreamRequestID:  resp.Header.Get("x-request-id"),
+			Passthrough:        true,
+			Kind:               "failover",
+			Message:            upstreamMsg,
+		})
+		return newOpenAIRuleFailoverError(ruleID, resp.StatusCode, resp.Header, body, upstreamMsg)
+	}
+	return s.handleErrorResponsePassthrough(ctx, resp, c, account, requestBody, responseBody)
 }
 
 func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
@@ -2108,6 +2133,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 					if shouldFailover {
 						return resultWithUsage(),
 							s.newOpenAIStreamFailoverErrorWithModel(c, account, true, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header)
+					}
+					if !cyberHit {
+						if ruleID := matchOpenAIFailoverRule(c, 0, failedMessage, dataBytes); ruleID != "" {
+							return resultWithUsage(),
+								s.newOpenAIRuleStreamFailoverError(c, account, true, upstreamRequestID, ruleID, dataBytes, failedMessage, resp.Header)
+						}
 					}
 					if !cyberHit && !sawBareError {
 						if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, dataBytes, failedMessage); matched {

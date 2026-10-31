@@ -23,6 +23,7 @@ const (
 	openAIEncryptedArgsCheckTimeout = 75 * time.Second
 	openAIEncryptedArgsDefaultModel = "gpt-6.1-sol"
 	openAIEncryptedArgsMaxBody      = 4 << 20
+	openAIEncryptedArgsMaxDepth     = 32
 
 	// Verdicts of a check.
 	OpenAIEncryptedArgsSupported   = "supported"
@@ -42,20 +43,49 @@ type OpenAIEncryptedArgsCheckResult struct {
 	LastError string `json:"last_error,omitempty"`
 }
 
+// defaultOpenAIEncryptedArgsCheckModel picks a concrete model the account
+// serves. Mapping keys can be patterns, which no upstream would accept. A
+// pattern that does not cover the default says nothing about a request name,
+// but its target is one the upstream takes. Empty means there is nothing to
+// pick; the caller then needs a model from the admin.
 func defaultOpenAIEncryptedArgsCheckModel(account *Account) string {
 	mapping := account.GetModelMapping()
-	if len(mapping) == 0 {
+	if len(mapping) == 0 || account.IsOpenAIPassthroughEnabled() {
 		return openAIEncryptedArgsDefaultModel
 	}
-	if _, ok := mapping[openAIEncryptedArgsDefaultModel]; ok {
+	if _, matched := account.ResolveMappedModel(openAIEncryptedArgsDefaultModel); matched {
 		return openAIEncryptedArgsDefaultModel
 	}
-	models := make([]string, 0, len(mapping))
-	for model := range mapping {
-		models = append(models, model)
+	keys := make([]string, 0, len(mapping))
+	for key := range mapping {
+		keys = append(keys, key)
 	}
-	sort.Strings(models)
-	return models[0]
+	sort.Strings(keys)
+	for _, key := range keys {
+		if !strings.Contains(key, "*") {
+			return key
+		}
+	}
+	for _, key := range keys {
+		if target := mapping[key]; !strings.Contains(target, "*") {
+			return target
+		}
+	}
+	return ""
+}
+
+// resolveOpenAIEncryptedArgsCheckModel returns the name to send: the one a real
+// request for that model would reach the upstream with.
+func resolveOpenAIEncryptedArgsCheckModel(account *Account, requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		requested = defaultOpenAIEncryptedArgsCheckModel(account)
+	}
+	_, upstreamModel := resolveOpenAIForwardMappedModels(account, requested, false)
+	if upstreamModel == "" || strings.Contains(requested, "*") || strings.Contains(upstreamModel, "*") {
+		return "", infraerrors.BadRequest("OPENAI_ENCRYPTED_ARGS_CHECK_MODEL_REQUIRED", "a concrete model name is required for this account")
+	}
+	return upstreamModel, nil
 }
 
 func openAIEncryptedArgsCheckBody(model string) ([]byte, error) {
@@ -176,8 +206,9 @@ func (s *OpenAIFailoverPolicyService) CheckEncryptedArgs(ctx context.Context, ac
 	if !account.IsOpenAIApiKey() {
 		return nil, infraerrors.BadRequest("OPENAI_ENCRYPTED_ARGS_CHECK_UNSUPPORTED", "only OpenAI API-key accounts can be checked")
 	}
-	if model = strings.TrimSpace(model); model == "" {
-		model = defaultOpenAIEncryptedArgsCheckModel(account)
+	model, err = resolveOpenAIEncryptedArgsCheckModel(account, model)
+	if err != nil {
+		return nil, err
 	}
 	result := &OpenAIEncryptedArgsCheckResult{Model: model}
 	for round := 0; round < openAIEncryptedArgsCheckRounds; round++ {

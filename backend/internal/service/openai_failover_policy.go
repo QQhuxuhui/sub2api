@@ -318,10 +318,29 @@ func (a *Account) IsOpenAINoEncryptedArgs() bool {
 }
 
 // OpenAIRequestDeclaresEncryptedArgs reports a tool parameter declared
-// `"encrypted": true`. A false positive only narrows the candidates by the
-// marked accounts, so a byte scan is enough for the hot path.
+// `"encrypted": true`, however the client formatted its JSON. Only the tools
+// count: a conversation can quote the same text without declaring anything.
 func OpenAIRequestDeclaresEncryptedArgs(body []byte) bool {
-	return bytes.Contains(body, []byte(`"encrypted":true`)) || bytes.Contains(body, []byte(`"encrypted": true`))
+	return openAIDeclaresEncryptedArg(gjson.GetBytes(body, "tools"), 0)
+}
+
+// openAIDeclaresEncryptedArg walks a tool definition. The depth limit keeps a
+// hostile body from making each level rescan the rest of it; real schemas are
+// nowhere near it.
+func openAIDeclaresEncryptedArg(value gjson.Result, depth int) bool {
+	if !value.IsObject() && !value.IsArray() {
+		return false
+	}
+	if depth >= openAIEncryptedArgsMaxDepth {
+		return false
+	}
+	found := false
+	value.ForEach(func(key, child gjson.Result) bool {
+		found = (key.Type == gjson.String && key.String() == "encrypted" && child.Type == gjson.True) ||
+			openAIDeclaresEncryptedArg(child, depth+1)
+		return !found
+	})
+	return found
 }
 
 // RewriteOpenAIPlaintextEncryptedContent turns agent_message encrypted_content

@@ -3,10 +3,18 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -131,9 +139,35 @@ func TestRewriteOpenAIPlaintextEncryptedContent(t *testing.T) {
 }
 
 func TestOpenAIRequestDeclaresEncryptedArgs(t *testing.T) {
-	require.True(t, OpenAIRequestDeclaresEncryptedArgs([]byte(`{"message":{"type":"string","encrypted":true}}`)))
-	require.True(t, OpenAIRequestDeclaresEncryptedArgs([]byte(`{"encrypted": true}`)))
-	require.False(t, OpenAIRequestDeclaresEncryptedArgs([]byte(`{"encrypted":false}`)))
+	declared := func(parameter string) []byte {
+		return []byte(`{"input":"hi","tools":[{"type":"function","name":"send","parameters":{"properties":{"message":` + parameter + `}}}]}`)
+	}
+	for _, parameter := range []string{
+		`{"type":"string","encrypted":true}`,
+		`{"type":"string","encrypted": true}`,
+		`{"type":"string","encrypted" : true}`,
+		`{"type":"string","encrypted"  :   true}`,
+		"{\"type\":\"string\",\n\t\"encrypted\"\r\n:\n\ttrue\n}",
+		`{"type":"string","encr\u0079pted":true}`,
+	} {
+		require.True(t, OpenAIRequestDeclaresEncryptedArgs(declared(parameter)), parameter)
+	}
+	namespaced := []byte(`{"tools":[{"type":"namespace","tools":[{"type":"function","parameters":{"properties":{"message":{"encrypted" : true}}}}]}]}`)
+	require.True(t, OpenAIRequestDeclaresEncryptedArgs(namespaced), "namespaced tools nest deeper")
+
+	for _, body := range []string{
+		`{"tools":[{"parameters":{"properties":{"message":{"encrypted":false}}}}]}`,
+		`{"tools":[{"parameters":{"properties":{"encrypted":{"type":"boolean"}}}}]}`,
+		`{"tools":[{"description":"set \"encrypted\": true to hide it"}]}`,
+		`{"input":[{"type":"message","content":"{\"encrypted\": true}"}],"metadata":{"encrypted":true}}`,
+		`{"input":"no tools"}`,
+	} {
+		require.False(t, OpenAIRequestDeclaresEncryptedArgs([]byte(body)), body)
+	}
+
+	// Nesting is bounded so a hostile body cannot turn the walk quadratic.
+	nested := []byte(`{"tools":` + strings.Repeat("[", 200000) + `{"encrypted":true}` + strings.Repeat("]", 200000) + `}`)
+	require.False(t, OpenAIRequestDeclaresEncryptedArgs(nested))
 }
 
 func TestEligibilityExcludesMarkedAccountOnlyWhenRequired(t *testing.T) {
@@ -169,4 +203,174 @@ func TestCheckEncryptedArgsDeclaresEncryptedParameter(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, OpenAIRequestDeclaresEncryptedArgs(body))
 	require.Equal(t, "required", gjson.GetBytes(body, "tool_choice").String())
+}
+
+type failoverCheckAccountRepo struct {
+	AccountRepository
+	account *Account
+}
+
+func (r *failoverCheckAccountRepo) GetByID(context.Context, int64) (*Account, error) {
+	return r.account, nil
+}
+
+func TestCheckEncryptedArgsResolvesTheModelLikeARealRequest(t *testing.T) {
+	const fallback = openAIEncryptedArgsDefaultModel
+	passthrough := map[string]any{"openai_passthrough": true}
+	tests := []struct {
+		name      string
+		mapping   map[string]any
+		extra     map[string]any
+		requested string
+		want      string
+		wantErr   bool
+	}{
+		{name: "no mapping uses the default", want: fallback},
+		{name: "default exact mapping", mapping: map[string]any{fallback: "real-a"}, want: "real-a"},
+		{name: "default through a wildcard", mapping: map[string]any{"gpt-*": "real-a"}, want: "real-a"},
+		{name: "wildcard only is never sent verbatim", mapping: map[string]any{"*": "real-a"}, want: "real-a"},
+		{name: "alias of another model", mapping: map[string]any{"alias-b": "real-b"}, want: "real-b"},
+		{name: "wildcard that does not cover the default", mapping: map[string]any{"claude-*": "real-c"}, want: "real-c"},
+		{name: "alias preferred over a wildcard", mapping: map[string]any{"claude-*": "real-c", "alias-b": "real-b"}, want: "real-b"},
+		{name: "requested alias is mapped", mapping: map[string]any{"alias-b": "real-b"}, requested: "alias-b", want: "real-b"},
+		{name: "requested model outside the mapping stays", mapping: map[string]any{"alias-b": "real-b"}, requested: "other", want: "other"},
+		{name: "passthrough ignores a leftover mapping", mapping: map[string]any{fallback: "real-a"}, extra: passthrough, want: fallback},
+		{name: "no concrete name to send", mapping: map[string]any{"claude-*": "claude-*"}, wantErr: true},
+		{name: "wildcard typed by hand", mapping: map[string]any{"alias-b": "real-b"}, requested: "gpt-*", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			credentials := map[string]any{"api_key": "sk-test", "base_url": "https://api.example.test"}
+			if tt.mapping != nil {
+				credentials["model_mapping"] = tt.mapping
+			}
+			upstream := &httpUpstreamRecorder{}
+			for i := 0; i < openAIEncryptedArgsCheckRounds; i++ {
+				upstream.responses = append(upstream.responses, &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader(`data: {"type":"response.output_item.done","item":{"type":"function_call","arguments":"{\"message\":\"gAAAAABcipher\"}"}}` + "\n\n")),
+				})
+			}
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: credentials, Extra: tt.extra}
+			svc := &OpenAIFailoverPolicyService{accounts: &failoverCheckAccountRepo{account: account}, upstream: upstream}
+
+			result, err := svc.CheckEncryptedArgs(context.Background(), account.ID, tt.requested)
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Empty(t, upstream.bodies, "nothing to probe with: no upstream call")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, result.Model)
+			require.Equal(t, OpenAIEncryptedArgsSupported, result.Verdict)
+			require.Len(t, upstream.bodies, openAIEncryptedArgsCheckRounds)
+			for _, body := range upstream.bodies {
+				require.Equal(t, tt.want, gjson.GetBytes(body, "model").String())
+			}
+		})
+	}
+}
+
+func failoverPassthroughFixture(t *testing.T, policy *OpenAIFailoverPolicy, resp *http.Response, stream bool) (*gin.Context, *httptest.ResponseRecorder, *OpenAIGatewayService, *Account, []byte) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	ctx := context.Background()
+	if policy != nil {
+		ctx = WithOpenAIFailoverPolicy(ctx, policy)
+	}
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil)).WithContext(ctx)
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: &httpUpstreamRecorder{resp: resp},
+	}
+	account := &Account{
+		ID: 127, Name: "acc", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.example.test"},
+		Extra:       map[string]any{"openai_passthrough": true}, Status: StatusActive, Schedulable: true,
+	}
+	body := []byte(fmt.Sprintf(`{"model":"gpt-5.2","stream":%t,"input":"hello"}`, stream))
+	return c, rec, svc, account, body
+}
+
+func enabledFailoverPolicy(rules ...OpenAIFailoverRule) *OpenAIFailoverPolicy {
+	return newOpenAIFailoverPolicy(OpenAIFailoverConfig{SlotWaitMs: 3000, MaxRuleSwitches: 3, MaxSlotSwitches: 5, Rules: rules})
+}
+
+func TestPassthroughHTTPErrorFollowsFailoverRules(t *testing.T) {
+	const upstreamBody = `{"error":{"code":"thinking_signature_invalid","message":"Encrypted function output content could not be decrypted or decoded.","type":"invalid_request_error"}}`
+	newResp := func() *http.Response {
+		return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(upstreamBody))}
+	}
+
+	t.Run("a matching rule switches accounts", func(t *testing.T) {
+		c, _, svc, account, body := failoverPassthroughFixture(t, enabledFailoverPolicy(DefaultOpenAIFailoverRules()...), newResp(), false)
+		_, err := svc.Forward(c.Request.Context(), c, account, body)
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr)
+		require.Equal(t, "encrypted-content", failoverErr.FailoverRuleID)
+		require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
+		require.False(t, failoverErr.RetryableOnSameAccount)
+		require.Contains(t, string(failoverErr.ResponseBody), "could not be decrypted")
+		require.False(t, c.Writer.Written(), "nothing reaches the client before the switch")
+	})
+
+	t.Run("without a policy the error is returned as before", func(t *testing.T) {
+		c, rec, svc, account, body := failoverPassthroughFixture(t, nil, newResp(), false)
+		_, err := svc.Forward(c.Request.Context(), c, account, body)
+		var failoverErr *UpstreamFailoverError
+		require.False(t, errors.As(err, &failoverErr))
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		require.NotContains(t, rec.Body.String(), "could not be decrypted", "passthrough masks upstream errors, as it always has")
+	})
+
+	t.Run("a return rule keeps the error", func(t *testing.T) {
+		policy := enabledFailoverPolicy(failoverRule(400, OpenAIFailoverActionReturn, "could not be decrypted"), failoverRule(0, OpenAIFailoverActionFailover, "could not be decrypted"))
+		c, rec, svc, account, body := failoverPassthroughFixture(t, policy, newResp(), false)
+		_, err := svc.Forward(c.Request.Context(), c, account, body)
+		var failoverErr *UpstreamFailoverError
+		require.False(t, errors.As(err, &failoverErr))
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+}
+
+func TestPassthroughStreamFailureFollowsFailoverRules(t *testing.T) {
+	const failed = `{"type":"response.failed","sequence_number":1,"response":{"status":"failed","error":{"code":"thinking_signature_invalid","message":"Encrypted function output content could not be decrypted or decoded.","type":"invalid_request_error"}}}`
+	newResp := func(events ...string) *http.Response {
+		var sse strings.Builder
+		for _, event := range events {
+			sse.WriteString("data: " + event + "\n\n")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(sse.String()))}
+	}
+
+	t.Run("before any output the rule switches accounts", func(t *testing.T) {
+		c, rec, svc, account, body := failoverPassthroughFixture(t, enabledFailoverPolicy(DefaultOpenAIFailoverRules()...), newResp(`{"type":"response.created","sequence_number":0,"response":{"id":"resp_1"}}`, failed), true)
+		_, err := svc.Forward(c.Request.Context(), c, account, body)
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr)
+		require.Equal(t, "encrypted-content", failoverErr.FailoverRuleID)
+		require.False(t, failoverErr.RetryableOnSameAccount)
+		require.NotContains(t, rec.Body.String(), "could not be decrypted", "the failure must not reach the client")
+	})
+
+	t.Run("after visible output the stream cannot be replayed", func(t *testing.T) {
+		delta := `{"type":"response.output_text.delta","sequence_number":1,"delta":"hello"}`
+		c, rec, svc, account, body := failoverPassthroughFixture(t, enabledFailoverPolicy(DefaultOpenAIFailoverRules()...), newResp(delta, failed), true)
+		_, err := svc.Forward(c.Request.Context(), c, account, body)
+		var failoverErr *UpstreamFailoverError
+		require.False(t, errors.As(err, &failoverErr))
+		require.Contains(t, rec.Body.String(), "hello")
+		require.Contains(t, rec.Body.String(), "could not be decrypted")
+	})
+
+	t.Run("without a policy the failure is delivered as before", func(t *testing.T) {
+		c, rec, svc, account, body := failoverPassthroughFixture(t, nil, newResp(failed), true)
+		_, err := svc.Forward(c.Request.Context(), c, account, body)
+		var failoverErr *UpstreamFailoverError
+		require.False(t, errors.As(err, &failoverErr))
+		require.Contains(t, rec.Body.String(), "could not be decrypted")
+	})
 }
