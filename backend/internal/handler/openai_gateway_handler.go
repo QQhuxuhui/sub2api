@@ -36,6 +36,7 @@ import (
 
 // OpenAIGatewayHandler handles OpenAI API gateway requests
 type OpenAIGatewayHandler struct {
+	failoverPolicy             *service.OpenAIFailoverPolicyService
 	gatewayService             *service.OpenAIGatewayService
 	billingCacheService        *service.BillingCacheService
 	apiKeyService              *service.APIKeyService
@@ -572,6 +573,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
 	forwardBody := openAIModelMappedBody(body, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
 	seedOpenAIForwardImageIntentHint(c, channelMapping.Mapped, imageIntent)
+	failoverPolicy, failoverTrack := h.prepareOpenAIFailoverPolicy(c, apiKey, subject.UserID, &forwardBody, reqLog)
+	defer h.finishOpenAIFailoverTrack(failoverTrack)
 	forwardModel := openAIChannelForwardModel(channelMapping, reqModel)
 	c.Request = c.Request.WithContext(service.WithOpenAIForwardModel(
 		c.Request.Context(),
@@ -643,6 +646,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	var passthroughFailoverState openAIPassthroughFailoverState
+	ruleSwitchCount := 0
+	var slotBusyErr *openAISlotBusyError
 
 	// 生图意图的 /v1/responses 请求必须调度到确实支持 Responses API 的账号，否则
 	// 会在 forward 阶段被静默降级为无法生图的 Chat Completions 直转（#4417）。
@@ -712,6 +717,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			}
 			if lastFailoverErr != nil {
 				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
+			} else if slotBusyErr != nil {
+				h.handleStreamingAwareErrorWithCode(c, slotBusyErr.status, slotBusyErr.errType, slotBusyErr.code, slotBusyErr.message, streamStarted, false)
 			} else {
 				h.handleFailoverExhaustedSimple(c, 502, streamStarted)
 			}
@@ -773,6 +780,16 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount)
 				return
 			}
+			continue
+		}
+		if slotResult == openAISlotAcquireBusy {
+			slotBusyErr = openAISlotBusyErrorFrom(c)
+			failedAccountIDs[account.ID] = struct{}{}
+			if failoverTrack.recordSlotSwitch(account.ID) > failoverPolicy.MaxSlotSwitches() {
+				h.handleStreamingAwareErrorWithCode(c, slotBusyErr.status, slotBusyErr.errType, slotBusyErr.code, slotBusyErr.message, streamStarted, false)
+				return
+			}
+			reqLog.Warn("openai.slot_busy_switching", zap.Int64("account_id", account.ID), zap.Int("slot_switches", failoverTrack.slotSwitches))
 			continue
 		}
 		if slotResult != openAISlotAcquireOK {
@@ -891,8 +908,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						)
 						return
 					}
+					ruleSwitch := failoverErr.FailoverRuleID != ""
+					if ruleSwitch {
+						failoverTrack.recordRuleHit(failoverErr, account.ID)
+					}
 					if !openAIForwardMayFailover(c, writerSizeBeforeForward, failoverErr) {
-						h.gatewayService.ObserveOpenAIAccountHealthFailure(c.Request.Context(), account, err)
+						if !ruleSwitch {
+							h.gatewayService.ObserveOpenAIAccountHealthFailure(c.Request.Context(), account, err)
+						}
 						h.handleFailoverExhausted(c, failoverErr, true)
 						return
 					}
@@ -901,7 +924,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					if c.Writer.Written() {
 						streamStarted = true
 					}
-					if failoverErr.ShouldReportAccountScheduleFailure() {
+					if !ruleSwitch && failoverErr.ShouldReportAccountScheduleFailure() {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, nil), false, nil, err)
 					}
 					if !failoverErr.ShouldRetryNextAccount() {
@@ -911,6 +934,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					if openAIFirstOutputFailoverExhausted(failoverErr, &firstOutputTimeoutSwitchCount) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
+					}
+					if ruleSwitch {
+						ruleSwitchCount++
+						if ruleSwitchCount > failoverPolicy.MaxRuleSwitches() {
+							h.handleFailoverExhausted(c, failoverErr, streamStarted)
+							return
+						}
 					}
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
@@ -997,6 +1027,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		submitResponsesUsage(result)
+		failoverTrack.recovered = true
 		reqLog.Debug("openai.request_completed",
 			zap.Int64("account_id", account.ID),
 			zap.Int("switch_count", switchCount),
@@ -2089,7 +2120,20 @@ const (
 	// 未写任何响应；调用方应经 recordOpenAIProfitVeto 把该账号加入本请求排除集
 	// 后重新选号，全池耗尽由下一轮选号返回标准 no available accounts。
 	openAISlotAcquireProfitVetoed
+	// openAISlotAcquireBusy：分组开了换号策略、账号槽位等不到。未写任何响应，
+	// 调用方排除该账号重新选号；错误留在 gin 上下文，全池都忙时原样返回。
+	openAISlotAcquireBusy
 )
+
+const openAISlotBusyErrorKey = "openai_slot_busy_error"
+
+// openAISlotBusyError 是槽位等待失败时本该返回给客户端的错误。
+type openAISlotBusyError struct {
+	status  int
+	errType string
+	code    string
+	message string
+}
 
 // openAIWSTurnPricing 持有 WebSocket 连接内「当前 turn」的计费定价时刻。
 // 由 BeforeTurn 在每个 turn 开始时冻结，AfterTurn 的用量提交读取它；turn 在
@@ -2201,6 +2245,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	// 终检与准入后绑定使用选号结果携带的门：composite 等跨分组调度解析出的
 	// 门只存在于调度栈的局部 ctx，必须经选号结果重放到本函数的 ctx 上。
 	ctx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
+	failoverPolicy := service.OpenAIFailoverPolicyFromContext(ctx)
 	account := selection.Account
 	if selection.Acquired {
 		latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(ctx, account)
@@ -2266,6 +2311,10 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 			zap.Int64("account_id", account.ID),
 			zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 		)
+		if failoverPolicy != nil {
+			c.Set(openAISlotBusyErrorKey, openAISlotBusyError{http.StatusTooManyRequests, "rate_limit_error", gatewayQueueFullCode, "Too many pending requests, please retry later"})
+			return nil, openAISlotAcquireBusy
+		}
 		writeError(http.StatusTooManyRequests, "rate_limit_error", gatewayQueueFullCode, "Too many pending requests, please retry later")
 		return nil, openAISlotAcquireFailed
 	}
@@ -2283,12 +2332,16 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	if waitKind == "" {
 		waitKind = "unknown"
 	}
+	waitTimeout := selection.WaitPlan.Timeout
+	if failoverPolicy != nil && failoverPolicy.SlotWait() < waitTimeout {
+		waitTimeout = failoverPolicy.SlotWait()
+	}
 	waitStart := time.Now()
 	accountReleaseFunc, err := h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
 		c,
 		account.ID,
 		selection.WaitPlan.MaxConcurrency,
-		selection.WaitPlan.Timeout,
+		waitTimeout,
 		reqStream,
 		streamStarted,
 	)
@@ -2298,11 +2351,15 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 			zap.Int64("account_id", account.ID),
 			zap.String("wait_kind", waitKind),
 			zap.Int64("wait_ms", waitedMs),
-			zap.Int64("timeout_ms", selection.WaitPlan.Timeout.Milliseconds()),
+			zap.Int64("timeout_ms", waitTimeout.Milliseconds()),
 			zap.Int("max_concurrency", selection.WaitPlan.MaxConcurrency),
 			zap.Error(err),
 		)
 		status, errType, code, message := concurrencyErrorResponse(err, "account")
+		if failoverPolicy != nil && code != "" && ctx.Err() == nil {
+			c.Set(openAISlotBusyErrorKey, openAISlotBusyError{status, errType, code, message})
+			return nil, openAISlotAcquireBusy
+		}
 		writeError(status, errType, code, message)
 		return nil, openAISlotAcquireFailed
 	}
@@ -2318,7 +2375,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		zap.Int64("account_id", account.ID),
 		zap.String("wait_kind", waitKind),
 		zap.Int64("wait_ms", waitedMs),
-		zap.Int64("timeout_ms", selection.WaitPlan.Timeout.Milliseconds()),
+		zap.Int64("timeout_ms", waitTimeout.Milliseconds()),
 		zap.Int("max_concurrency", selection.WaitPlan.MaxConcurrency),
 		zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 	)
@@ -3405,6 +3462,10 @@ func (h *OpenAIGatewayHandler) handleConcurrencyError(c *gin.Context, err error,
 func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
 	if failoverErr == nil {
 		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
+		return
+	}
+	if failoverErr.FailoverRuleID != "" {
+		h.writeOpenAIRuleFailoverExhausted(c, failoverErr, streamStarted)
 		return
 	}
 	if failoverErr.IsOpenAIRequestBodyTooLarge() {

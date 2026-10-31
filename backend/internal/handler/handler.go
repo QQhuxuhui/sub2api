@@ -46,6 +46,7 @@ type AdminHandlers struct {
 	Compliance             *admin.ComplianceHandler
 	AuditLog               *admin.AuditLogHandler
 	OpenAICache            *admin.OpenAICacheHandler
+	OpenAIFailover         *admin.OpenAIFailoverHandler
 }
 
 // Handlers contains all HTTP handlers

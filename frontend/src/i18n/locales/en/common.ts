@@ -215,6 +215,7 @@ export default {
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
     openaiCache: 'Upstream Cache',
+    openaiFailover: 'Failover Rules',
   },
 
   // Auth

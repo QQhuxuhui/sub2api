@@ -1197,6 +1197,20 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
 				)
 			}
+			if ruleID := matchOpenAIFailoverRule(c, resp.StatusCode, upstreamMsg, respBody); ruleID != "" {
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					ProxyID:            opsUpstreamProxyID(account),
+					ProxyName:          opsUpstreamProxyName(account),
+					Platform:           account.Platform,
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: resp.StatusCode,
+					UpstreamRequestID:  resp.Header.Get("x-request-id"),
+					Kind:               "failover",
+					Message:            upstreamMsg,
+				})
+				return nil, newOpenAIRuleFailoverError(ruleID, resp.StatusCode, resp.Header, respBody, upstreamMsg)
+			}
 			return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 		}
 		defer func() { _ = resp.Body.Close() }()

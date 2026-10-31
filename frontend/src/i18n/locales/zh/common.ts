@@ -215,6 +215,7 @@ export default {
     promptAudit: '提示词审计',
     auditLogs: '操作日志',
     openaiCache: '上游缓存',
+    openaiFailover: '换号规则',
   },
 
   // Auth

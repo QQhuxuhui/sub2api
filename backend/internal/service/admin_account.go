@@ -446,6 +446,12 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 			normalized[openAICacheSimulationKey] = current
 		}
 	}
+	// 「不支持加密参数」标记同理：账号编辑表单不认识这个键。
+	if _, provided := input.Extra[OpenAINoEncryptedArgsExtraKey]; !provided {
+		if current, ok := account.Extra[OpenAINoEncryptedArgsExtraKey].(bool); ok {
+			normalized[OpenAINoEncryptedArgsExtraKey] = current
+		}
+	}
 	return normalized, nil
 }
 

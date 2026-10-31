@@ -672,6 +672,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/openai-failover',
+    name: 'AdminOpenAIFailover',
+    component: () => import('@/views/admin/OpenAIFailoverView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Failover Rules',
+      titleKey: 'admin.openaiFailover.title',
+      descriptionKey: 'admin.openaiFailover.description'
+    }
+  },
+  {
     path: '/admin/affiliates',
     redirect: '/admin/affiliates/invites'
   },

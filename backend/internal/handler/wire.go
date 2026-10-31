@@ -50,6 +50,7 @@ func ProvideAdminHandlers(
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
 	openAICacheHandler *admin.OpenAICacheHandler,
+	openAIFailoverHandler *admin.OpenAIFailoverHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 ) *AdminHandlers {
@@ -95,6 +96,7 @@ func ProvideAdminHandlers(
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
 		OpenAICache:            openAICacheHandler,
+		OpenAIFailover:         openAIFailoverHandler,
 	}
 }
 
@@ -137,6 +139,7 @@ func ProvideOpenAIGatewayHandler(
 	cfg *config.Config,
 	coordinator *securityaudit.Coordinator,
 	cacheSimStore service.OpenAICacheSimWindowStore,
+	failoverPolicy *service.OpenAIFailoverPolicyService,
 ) *OpenAIGatewayHandler {
 	gatewayService.SetPluginManager(pluginManager)
 	gatewayService.SetOpenAICacheSimWindowStore(cacheSimStore)
@@ -144,6 +147,7 @@ func ProvideOpenAIGatewayHandler(
 		usageRecordWorkerPool, errorPassthroughService, contentModerationService, opsService, cfg)
 	h.securityAuditCoordinator = coordinator
 	h.grokMediaEligibilityProber = grokQuotaService
+	h.failoverPolicy = failoverPolicy
 	return h
 }
 
@@ -294,6 +298,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,
 	admin.NewOpenAICacheHandler,
+	admin.NewOpenAIFailoverHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

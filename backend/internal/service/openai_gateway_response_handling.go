@@ -594,6 +594,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						streamEarlyErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header)
 						return
 					}
+					if !cyberHit {
+						if ruleID := matchOpenAIFailoverRule(c, 0, failedMessage, dataBytes); ruleID != "" {
+							sawFailedEvent = true
+							streamEarlyErr = s.newOpenAIRuleStreamFailoverError(c, account, false, upstreamRequestID, ruleID, dataBytes, failedMessage, resp.Header)
+							return
+						}
+					}
 					if !cyberHit && !sawBareError {
 						if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, dataBytes, failedMessage); matched {
 							sawFailedEvent = true

@@ -340,6 +340,15 @@ func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		openAICache.PUT("/accounts/:id/simulation", h.Admin.OpenAICache.UpdateSimulation)
 	}
 
+	// OpenAI 换号规则表、分组开关与「不支持加密参数」账号标记。
+	openAIFailover := admin.Group("/openai-failover")
+	{
+		openAIFailover.GET("", h.Admin.OpenAIFailover.Overview)
+		openAIFailover.PUT("", h.Admin.OpenAIFailover.UpdateConfig)
+		openAIFailover.PUT("/accounts/:id/encrypted-args", h.Admin.OpenAIFailover.UpdateEncryptedArgs)
+		openAIFailover.POST("/accounts/:id/encrypted-args/check", h.Admin.OpenAIFailover.CheckEncryptedArgs)
+	}
+
 	dashboard := admin.Group("/dashboard")
 	{
 		dashboard.GET("/snapshot-v2", h.Admin.Dashboard.GetSnapshotV2)

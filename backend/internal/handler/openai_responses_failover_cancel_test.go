@@ -49,7 +49,7 @@ func (u *openAIResponsesFailoverCancelUpstream) calls() []int64 {
 	return append([]int64(nil), u.accountIDs...)
 }
 
-func newOpenAIResponsesFailoverTestHandler(t *testing.T, upstream service.HTTPUpstream) *OpenAIGatewayHandler {
+func newOpenAIResponsesFailoverTestHandler(t *testing.T, upstream service.HTTPUpstream, extraAccounts ...service.Account) *OpenAIGatewayHandler {
 	t.Helper()
 	accounts := []service.Account{
 		{
@@ -75,6 +75,7 @@ func newOpenAIResponsesFailoverTestHandler(t *testing.T, upstream service.HTTPUp
 			Credentials: map[string]any{"access_token": "token-2"},
 		},
 	}
+	accounts = append(accounts, extraAccounts...)
 	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	gatewayService := service.NewOpenAIGatewayService(

@@ -395,6 +395,9 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 	if account.Platform != platform || !account.IsOpenAICompatible() {
 		return "platform_mismatch"
 	}
+	if openAIEncryptedArgsRequired(ctx) && account.IsOpenAINoEncryptedArgs() {
+		return "encrypted_args_unsupported"
+	}
 	if !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
 		if account.IsSchedulable() {
 			return "model_rate_limited"

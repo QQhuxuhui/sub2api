@@ -1820,14 +1820,17 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	if terminalType == "error" {
 		shouldFailover = openAIStreamErrorEventShouldFailover(payload, message)
 	}
-	if !shouldFailover {
-		return nil
-	}
 	var headers http.Header
 	upstreamRequestID := ""
 	if resp != nil {
 		headers = resp.Header
 		upstreamRequestID = strings.TrimSpace(resp.Header.Get("x-request-id"))
+	}
+	if !shouldFailover {
+		if ruleID := matchOpenAIFailoverRule(c, 0, message, payload); ruleID != "" {
+			return s.newOpenAIRuleStreamFailoverError(c, account, passthrough, upstreamRequestID, ruleID, payload, message, headers)
+		}
+		return nil
 	}
 	return s.newOpenAIStreamFailoverErrorWithModel(c, account, passthrough, upstreamRequestID, payload, message, firstNonEmpty(canonicalModel...), headers)
 }
