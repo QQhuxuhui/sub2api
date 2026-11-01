@@ -34,17 +34,23 @@ func (c *settlerClock) Advance(d time.Duration) {
 }
 
 type settlerRepoFake struct {
-	mu       sync.Mutex
-	pending  map[int64]int // user -> rows
-	order    []int64       // oldest first
-	settle   func(userID int64) (*UserBalanceSettlement, error)
-	excludes [][]int64
-	settled  []int64
-	stats    UserBalancePendingStats
-	allErr   error
+	beforeList func(context.Context) error
+	mu         sync.Mutex
+	pending    map[int64]int // user -> rows
+	order      []int64       // oldest first
+	settle     func(userID int64) (*UserBalanceSettlement, error)
+	excludes   [][]int64
+	settled    []int64
+	stats      UserBalancePendingStats
+	allErr     error
 }
 
-func (r *settlerRepoFake) ListUsers(_ context.Context, exclude []int64, limit int) ([]int64, error) {
+func (r *settlerRepoFake) ListUsers(ctx context.Context, exclude []int64, limit int) ([]int64, error) {
+	if r.beforeList != nil {
+		if err := r.beforeList(ctx); err != nil {
+			return nil, err
+		}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.excludes = append(r.excludes, append([]int64{}, exclude...))
@@ -573,4 +579,42 @@ func TestUserBalanceSettler_LogsBacklogAndAlertsOnOldRows(t *testing.T) {
 	rig.clock.Advance(userBalanceStatsInterval)
 	rig.settler.Tick(ctx)
 	require.Contains(t, logs.String(), "level=ERROR msg=billing.balance_settler_backlog_old settled_users=0")
+}
+
+// A listing slower than the budget must not leave rounds with nothing done.
+func TestUserBalanceSettler_SlowListingStillSettles(t *testing.T) {
+	repo := newSettlerRepoFake(1, 2)
+	rig := newSettlerRig(repo)
+	repo.beforeList = func(context.Context) error {
+		rig.clock.Advance(3 * time.Second)
+		return nil
+	}
+
+	_, err := rig.settler.RunRound(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, repo.takeSettled())
+}
+
+func TestUserBalanceSettler_HungListingIsBoundedAndLeftoversStillRun(t *testing.T) {
+	repo := newSettlerRepoFake(1, 2, 3)
+	rig := newSettlerRig(repo)
+	repo.settle = func(userID int64) (*UserBalanceSettlement, error) {
+		rig.clock.Advance(3 * time.Second)
+		return nil, nil
+	}
+	_, err := rig.settler.RunRound(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, repo.takeSettled())
+	require.Equal(t, []int64{2, 3}, rig.settler.carryover)
+
+	var deadline bool
+	repo.settle = nil
+	repo.beforeList = func(ctx context.Context) error {
+		_, deadline = ctx.Deadline()
+		return context.DeadlineExceeded
+	}
+	_, err = rig.settler.RunRound(context.Background())
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.True(t, deadline, "the listing runs under its own timeout")
+	require.Equal(t, []int64{2, 3}, repo.takeSettled(), "a failed listing does not hold up users already owed a turn")
 }
