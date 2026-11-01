@@ -15,6 +15,7 @@ const (
 	userBalanceSettleBatchSize   = 500
 	userBalanceSettleRoundBudget = 2 * time.Second
 	userBalanceSettleUserTimeout = 3 * time.Second
+	userBalanceSettleListTimeout = 2 * time.Second
 	userBalanceSettleBusyBackoff = time.Second
 	userBalanceSettleMinBackoff  = time.Second
 	userBalanceSettleMaxBackoff  = 30 * time.Second
@@ -364,13 +365,15 @@ func (s *UserBalanceSettler) Tick(ctx context.Context) bool {
 // the users behind them.
 func (s *UserBalanceSettler) RunRound(ctx context.Context) (UserBalanceRoundResult, error) {
 	var result UserBalanceRoundResult
-	start := s.now()
-	deadline := start.Add(userBalanceSettleRoundBudget)
-
-	worklist, exclude := s.planRound(start)
-	listed, listErr := s.repo.ListUsers(ctx, exclude, userBalanceSettleUserLimit)
+	worklist, exclude := s.planRound(s.now())
+	listCtx, cancel := context.WithTimeout(ctx, userBalanceSettleListTimeout)
+	listed, listErr := s.repo.ListUsers(listCtx, exclude, userBalanceSettleUserLimit)
+	cancel()
 	worklist = append(worklist, listed...)
 
+	// The budget starts after the listing: when the database is slow, a listing
+	// that eats the budget would otherwise leave every round with nothing done.
+	deadline := s.now().Add(userBalanceSettleRoundBudget)
 	s.carryover = nil
 	for i, userID := range worklist {
 		if ctx.Err() != nil || !s.now().Before(deadline) {
