@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -531,9 +532,31 @@ func (p *openAIResponsesToolSchemaParser) parseString() (int, int, error) {
 				return 0, 0, p.syntaxError("control character in string")
 			}
 			p.pos++
+			p.skipPlainStringBytes()
 		}
 	}
 	return 0, 0, p.syntaxError("unterminated string")
+}
+
+// skipPlainStringBytes 按 8 字节一组跳过不含引号、反斜杠和控制字符的内容，MB 级 base64
+// 字符串不用逐字节判断。可能含这些字节的组留给调用方逐字节处理，错误位置不变。
+func (p *openAIResponsesToolSchemaParser) skipPlainStringBytes() {
+	const (
+		lowBits  = uint64(0x0101010101010101)
+		highBits = uint64(0x8080808080808080)
+	)
+	for p.pos+8 <= len(p.body) {
+		word := binary.LittleEndian.Uint64(p.body[p.pos:])
+		quote := word ^ (lowBits * '"')
+		backslash := word ^ (lowBits * '\\')
+		special := (quote - lowBits) &^ quote
+		special |= (backslash - lowBits) &^ backslash
+		special |= (word - lowBits*0x20) &^ word
+		if special&highBits != 0 {
+			return
+		}
+		p.pos += 8
+	}
 }
 
 func isOpenAIResponsesJSONHexDigit(value byte) bool {

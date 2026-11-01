@@ -417,7 +417,7 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 			decision = nil
 		}
 	}()
-	view := intentRequestView{body: in.Body}
+	view := newIntentRequestView(in.Body)
 
 	// Keywords decide one turn at a time and leave no trace in the conversation
 	// store: a hit sends this request to the rule's accounts, the next turn is

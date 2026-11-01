@@ -161,13 +161,21 @@ func (s *OpenAIGatewayService) GenerateExplicitSessionHash(c *gin.Context, body 
 // sticky seed with the client-requested model so switching models does not
 // inherit a stale account binding (grok2api affinityKey pattern).
 func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) string {
+	return s.generateSessionHashWithMemo(c, body, openAISessionSeedMemoFromContext(c))
+}
+
+func (s *OpenAIGatewayService) generateSessionHashWithMemo(c *gin.Context, body []byte, memo *openAISessionSeedMemo) string {
 	if c == nil {
 		return ""
 	}
 
 	sessionID := explicitOpenAIRequestSessionID(c, body)
 	if sessionID == "" && len(body) > 0 {
-		sessionID = deriveOpenAIContentSessionSeed(body)
+		if memo != nil {
+			sessionID = deriveOpenAIContentSessionSeedWith(body, memo.normalize)
+		} else {
+			sessionID = deriveOpenAIContentSessionSeed(body)
+		}
 	}
 	if sessionID == "" {
 		return ""

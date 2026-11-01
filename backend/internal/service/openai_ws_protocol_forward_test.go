@@ -272,6 +272,55 @@ func TestOpenAIGatewayService_Forward_HTTPIngressRetriesInvalidEncryptedContentO
 	require.Equal(t, "client_protocol_http", reason)
 }
 
+// reqBody 在发上游前已释放，恢复路径要从最新 body 重新解码，不能用过期的 requestView。
+func TestOpenAIGatewayService_Forward_HTTPIngressRetryAfterReqBodyReleased(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "custom-client/1.0")
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	jsonResponse := func(status int, body string) *http.Response {
+		return &http.Response{
+			StatusCode: status,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}
+	}
+	upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{
+		jsonResponse(http.StatusBadRequest, `{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"The encrypted content could not be verified."}}`),
+		jsonResponse(http.StatusOK, `{"id":"resp_ok","usage":{"input_tokens":1,"output_tokens":2}}`),
+	}}
+
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID: 103, Name: "openai-apikey", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "http://upstream.example.com"},
+	}
+
+	// json_schema 让 Forward 在发送前解码出 reqBody 并改写请求。
+	body := []byte(`{"model":"gpt-5.1","stream":false,"text":{"format":{"type":"json_schema","name":"s","schema":{"type":"object","properties":{"a":{"type":"string"}}}}},"input":[{"type":"reasoning","encrypted_content":"gAAA","summary":[{"type":"summary_text","text":"keep me"}]},{"type":"input_text","text":"hello"}]}`)
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 2, upstream.callCount)
+	require.Len(t, upstream.bodies, 2)
+	require.True(t, gjson.GetBytes(upstream.bodies[0], "input.0.encrypted_content").Exists())
+	second := upstream.bodies[1]
+	require.False(t, gjson.GetBytes(second, "input.0.encrypted_content").Exists())
+	require.Equal(t, "keep me", gjson.GetBytes(second, "input.0.summary.0.text").String())
+	require.Equal(t, "hello", gjson.GetBytes(second, "input.1.text").String())
+	require.JSONEq(t,
+		gjson.GetBytes(upstream.bodies[0], "text.format").Raw,
+		gjson.GetBytes(second, "text.format").Raw,
+		"发送前对 reqBody 的改写在重试里必须保留",
+	)
+}
+
 func TestOpenAIGatewayService_Forward_HTTPIngressRetriesWrappedInvalidEncryptedContentOnce(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	wsFallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -2072,7 +2072,7 @@ func openAIJSONValueMayContainImageInput(value gjson.Result) bool {
 }
 
 func openAIRequestBodyMayContainEmptyBase64InputImage(body []byte) bool {
-	if len(body) == 0 || !openAIRequestBodyMayContainInputImageToken(body) {
+	if len(body) == 0 || !openAIRequestBodyMayHaveEmptyBase64Token(body) {
 		return false
 	}
 	input := gjson.GetBytes(body, "input")
@@ -2082,12 +2082,31 @@ func openAIRequestBodyMayContainEmptyBase64InputImage(body []byte) bool {
 	return openAIJSONValueMayContainEmptyBase64InputImage(input)
 }
 
-func openAIRequestBodyMayContainInputImageToken(body []byte) bool {
-	if bytes.Contains(body, []byte("input_image")) {
+// openAIRequestBodyMayHaveEmptyBase64Token 是不解析 JSON 的必要条件：空 base64 图片
+// 一定同时有 input_image 和紧跟字符串结尾（或空白）的 base64, 。普通图片的 base64,
+// 后面紧跟数据，这里能挡掉，避免带图请求都走一遍 input 结构扫描。
+func openAIRequestBodyMayHaveEmptyBase64Token(body []byte) bool {
+	const marker = "base64,"
+	if !JSONBodyMayContainToken(body, "input_image") || !JSONBodyMayContainToken(body, marker) {
+		return false
+	}
+	// marker 可能被转义拆开时，下面的原文定位不可靠，交给结构扫描。
+	if jsonBodyMayEscapeTokenChar(body, marker) {
 		return true
 	}
-	// JSON 字符串任意字符都可能被 unicode escape，遇到 \u 时交给 gjson 解码后的结构扫描兜底。
-	return bytes.Contains(body, []byte("\\u"))
+	rest := body
+	for {
+		index := bytes.Index(rest, []byte(marker))
+		if index < 0 {
+			return false
+		}
+		rest = rest[index+len(marker):]
+		// 结构扫描用 strings.TrimSpace 判空，所以 ASCII 空白、转义开头和非 ASCII
+		// （Unicode 空白）都要算候选。
+		if len(rest) == 0 || rest[0] == '"' || rest[0] == '\\' || rest[0] <= ' ' || rest[0] >= 0x80 {
+			return true
+		}
+	}
 }
 
 func openAIJSONValueMayContainEmptyBase64InputImage(value gjson.Result) bool {

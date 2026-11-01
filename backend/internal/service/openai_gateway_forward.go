@@ -19,6 +19,8 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	// 从 context 取走 memo：提前分流的转发路径和换号重入都不再持有它。
+	sessionSeedMemo := takeOpenAISessionSeedMemo(c)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
@@ -747,7 +749,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	lineageEntryBody := body
 	lineageSessionHash := ""
 	if stateStore := s.getOpenAIWSStateStore(); stateStore != nil && stateStore.HasAnySessionInvalidEncryptedContent() {
-		lineageSessionHash = s.GenerateSessionHash(c, body)
+		lineageSessionHash = s.generateSessionHashWithMemo(c, body, sessionSeedMemo)
 		if invalidDigests := stateStore.GetSessionInvalidEncryptedContentDigests(lineageGroupID, lineageSessionHash); len(invalidDigests) > 0 {
 			strippedBody, strippedCount := s.stripSessionInvalidEncryptedContentLogged(
 				body, invalidDigests, "invalid_encrypted_lineage_strip", account.ID, 0,
@@ -1055,6 +1057,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				headerGuard.close()
 			}
 			return nil, err
+		}
+		// 修改都已写回 body，等上游首字期间不必再保活完整 input/tools map。恢复路径用
+		// ensureReqBody 重新解码，所以 requestView 必须跟上最新的 body。
+		if reqBody != nil && !requestView.HasPatches() {
+			requestView = newOpenAIRequestView(body)
+			reqBody = nil
 		}
 
 		// Get proxy URL

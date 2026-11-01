@@ -23,6 +23,12 @@ const contentStablePrefixSessionSeedPrefix = "compat_csp_"
 // user message.
 // Supports both Chat Completions (messages) and Responses API (input).
 func deriveOpenAIContentSessionSeed(body []byte) string {
+	return deriveOpenAIContentSessionSeedWith(body, normalizeCompatSeedRaw)
+}
+
+// deriveOpenAIContentSessionSeedWith 让调用方接管片段规范化。normalize 收到的 raw 是
+// 指向请求体的只读视图，结果必须与 normalizeCompatSeedRaw 完全一致，否则会话哈希会变。
+func deriveOpenAIContentSessionSeedWith(body []byte, normalize func(raw string) string) string {
 	if len(body) == 0 {
 		return ""
 	}
@@ -101,12 +107,12 @@ scanRoot:
 
 	if tools := fields[toolsField]; tools.Exists() && tools.IsArray() && tools.Raw != "[]" {
 		_, _ = b.WriteString("|tools=")
-		_, _ = b.WriteString(normalizeCompatSeedJSON(json.RawMessage(tools.Raw)))
+		_, _ = b.WriteString(normalize(tools.Raw))
 	}
 
 	if funcs := fields[functionsField]; funcs.Exists() && funcs.IsArray() && funcs.Raw != "[]" {
 		_, _ = b.WriteString("|functions=")
-		_, _ = b.WriteString(normalizeCompatSeedJSON(json.RawMessage(funcs.Raw)))
+		_, _ = b.WriteString(normalize(funcs.Raw))
 	}
 
 	if instr := fields[instructionsField].String(); instr != "" {
@@ -126,7 +132,7 @@ scanRoot:
 				if systemPrefixOpen {
 					_, _ = b.WriteString("|system=")
 					if c := msg.Get("content"); c.Exists() {
-						_, _ = b.WriteString(normalizeCompatSeedJSON(json.RawMessage(c.Raw)))
+						_, _ = b.WriteString(normalize(c.Raw))
 					}
 				}
 			case "user":
@@ -134,7 +140,7 @@ scanRoot:
 				if !firstUserCaptured {
 					_, _ = b.WriteString("|first_user=")
 					if c := msg.Get("content"); c.Exists() {
-						_, _ = b.WriteString(normalizeCompatSeedJSON(json.RawMessage(c.Raw)))
+						_, _ = b.WriteString(normalize(c.Raw))
 					}
 					firstUserCaptured = true
 				}
@@ -154,13 +160,13 @@ scanRoot:
 				case "system", "developer":
 					_, _ = b.WriteString("|system=")
 					if c := item.Get("content"); c.Exists() {
-						_, _ = b.WriteString(normalizeCompatSeedJSON(json.RawMessage(c.Raw)))
+						_, _ = b.WriteString(normalize(c.Raw))
 					}
 				case "user":
 					if !firstUserCaptured {
 						_, _ = b.WriteString("|first_user=")
 						if c := item.Get("content"); c.Exists() {
-							_, _ = b.WriteString(normalizeCompatSeedJSON(json.RawMessage(c.Raw)))
+							_, _ = b.WriteString(normalize(c.Raw))
 						}
 						firstUserCaptured = true
 					}

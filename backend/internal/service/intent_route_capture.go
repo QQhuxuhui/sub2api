@@ -226,7 +226,7 @@ func (v intentRequestView) rawLastUserText() string {
 		if !isIntentUserRole(turns[i].Get("role").String()) {
 			continue
 		}
-		if text := intentTurnText(turns[i]); text != "" {
+		if text := v.turnText(turns, i); text != "" {
 			return text
 		}
 	}

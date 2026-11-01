@@ -628,6 +628,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// Generate session hash (header first; fallback to prompt_cache_key)
+	service.EnableOpenAISessionSeedMemo(c)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
 	if h.rejectIfCyberSessionBlocked(c, apiKey, sessionHashBody, reqModel, cyberBlockFormatResponses) {
 		return
@@ -1704,11 +1705,66 @@ func normalizeCodexDelegationBootstrap(body []byte) ([]byte, bool) {
 	// 已有任务通过 send_message_to_thread 唤醒时会携带 previous_response_id；
 	// 完整历史回放还会带有已配对的调用项。delegation 仍是客户端注入的用户输入，
 	// 不属于这些历史调用的结果，因此允许它与可明确配对的历史上下文共存。
+	if !codexDelegationBootstrapMayApply(body) {
+		return body, false
+	}
 	return normalizeCodexCallOutputBootstrap(body, isCodexDelegationCandidate, true)
 }
 
 func normalizeCodexAutomationBootstrap(body []byte) ([]byte, bool) {
+	if !codexAutomationBootstrapMayApply(body) {
+		return body, false
+	}
 	return normalizeCodexCallOutputBootstrap(body, isCodexAutomationCandidate, false)
+}
+
+// codexDelegationBootstrapMayApply / codexAutomationBootstrapMayApply 是全量解码前的
+// 必要条件。normalizeCodexCallOutputBootstrap 只有在 input 里存在候选项时才可能改写，
+// 没有候选项时一定返回 body, false，所以这里提前返回不改变结果。有重复键时 gjson 与
+// 解码取值可能不同，但原函数对重复键同样返回 body, false，结论一致。
+func codexDelegationBootstrapMayApply(body []byte) bool {
+	if !service.JSONBodyMayContainToken(body, "function_call_output") ||
+		!(service.JSONBodyMayContainToken(body, "codex_app") || service.JSONBodyMayContainToken(body, "codex_tui")) ||
+		!(service.JSONBodyMayContainToken(body, "create_thread") || service.JSONBodyMayContainToken(body, "send_message_to_thread")) {
+		return false
+	}
+	return codexBootstrapInputHasCallOutput(body, isCodexDelegationTool)
+}
+
+func codexAutomationBootstrapMayApply(body []byte) bool {
+	if !service.JSONBodyMayContainToken(body, "function_call_output") ||
+		!service.JSONBodyMayContainToken(body, "codex_app") ||
+		!service.JSONBodyMayContainToken(body, "automation_update") {
+		return false
+	}
+	return codexBootstrapInputHasCallOutput(body, func(namespace, name string) bool {
+		return namespace == "codex_app" && name == "automation_update"
+	})
+}
+
+func codexBootstrapInputHasCallOutput(body []byte, matchesTool func(namespace, name string) bool) bool {
+	input := gjson.GetBytes(body, "input")
+	if !input.IsArray() {
+		return false
+	}
+	found := false
+	input.ForEach(func(_, item gjson.Result) bool {
+		if !item.IsObject() || gjsonStringField(item, "type") != "function_call_output" {
+			return true
+		}
+		found = matchesTool(gjsonStringField(item, "namespace"), gjsonStringField(item, "name"))
+		return !found
+	})
+	return found
+}
+
+// gjsonStringField 与 stringField 口径一致：字段不是字符串时取空串。
+func gjsonStringField(item gjson.Result, key string) string {
+	value := item.Get(key)
+	if value.Type != gjson.String {
+		return ""
+	}
+	return value.Str
 }
 
 func normalizeCodexCallOutputBootstrap(body []byte, isCandidate func(map[string]any) bool, allowHistoricalContext bool) ([]byte, bool) {

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/tidwall/gjson"
@@ -24,6 +25,21 @@ import (
 // any protocol-specific parser.
 type intentRequestView struct {
 	body []byte
+	// cache 为 nil 时每次都重新解析。按值传递的 view 共享同一个 cache。
+	cache *intentViewCache
+}
+
+// intentViewCache 让同一请求里的关键字匹配、会话键、探针判定和未命中采集共用一次解析。
+// 只缓存 body 的纯函数结果，加锁是因为分类可能在独立 goroutine 上继续读取。
+type intentViewCache struct {
+	mu          sync.Mutex
+	turnsLoaded bool
+	turns       []gjson.Result
+	turnTexts   map[int]string
+}
+
+func newIntentRequestView(body []byte) intentRequestView {
+	return intentRequestView{body: body, cache: &intentViewCache{}}
 }
 
 // lastUserText returns the text of the most recent user turn that has any
@@ -48,7 +64,7 @@ func (v intentRequestView) recentUserTexts(n int) []string {
 		if !isIntentUserRole(turns[i].Get("role").String()) {
 			continue
 		}
-		if text := stripIntentInjectedText(intentTurnText(turns[i])); text != "" {
+		if text := stripIntentInjectedText(v.turnText(turns, i)); text != "" {
 			texts = append(texts, text)
 		}
 	}
@@ -97,11 +113,12 @@ func stripIntentInjectedText(text string) string {
 // firstUserText anchors content-derived session keys: it stays the same for
 // every later turn of a conversation.
 func (v intentRequestView) firstUserText() string {
-	for _, turn := range v.turns() {
+	turns := v.turns()
+	for i, turn := range turns {
 		if !isIntentUserRole(turn.Get("role").String()) {
 			continue
 		}
-		if text := stripIntentInjectedText(intentTurnText(turn)); text != "" {
+		if text := stripIntentInjectedText(v.turnText(turns, i)); text != "" {
 			return text
 		}
 	}
@@ -131,12 +148,47 @@ func (v intentRequestView) systemText() string {
 }
 
 func (v intentRequestView) turns() []gjson.Result {
+	if v.cache == nil {
+		return intentParseTurns(v.body)
+	}
+	v.cache.mu.Lock()
+	defer v.cache.mu.Unlock()
+	if !v.cache.turnsLoaded {
+		v.cache.turns = intentParseTurns(v.body)
+		v.cache.turnsLoaded = true
+	}
+	return v.cache.turns
+}
+
+func intentParseTurns(body []byte) []gjson.Result {
 	for _, path := range []string{"messages", "contents", "input"} {
-		if r := gjson.GetBytes(v.body, path); r.IsArray() {
+		// 找不到的路径要把顶层字段全走一遍，Responses 请求的 input 会被多走两次。
+		if !jsonBodyMayHaveKey(body, path) {
+			continue
+		}
+		if r := gjson.GetBytes(body, path); r.IsArray() {
 			return r.Array()
 		}
 	}
 	return nil
+}
+
+// turnText 是 intentTurnText 的按轮缓存，turns 必须来自 v.turns()。
+func (v intentRequestView) turnText(turns []gjson.Result, index int) string {
+	if v.cache == nil {
+		return intentTurnText(turns[index])
+	}
+	v.cache.mu.Lock()
+	defer v.cache.mu.Unlock()
+	if text, ok := v.cache.turnTexts[index]; ok {
+		return text
+	}
+	text := intentTurnText(turns[index])
+	if v.cache.turnTexts == nil {
+		v.cache.turnTexts = make(map[int]string)
+	}
+	v.cache.turnTexts[index] = text
+	return text
 }
 
 func isIntentUserRole(role string) bool {

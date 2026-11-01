@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -15,6 +16,8 @@ const openAINativeCompactionV2Key = "openai_native_compaction_v2"
 
 const openAIRemoteCompactionV2Feature = "remote_compaction_v2"
 
+const openAICompactionTriggerType = "compaction_trigger"
+
 // MarkOpenAINativeCompactionV2 由 handler 在识别出原生 v2 压缩请求时调用。
 func MarkOpenAINativeCompactionV2(c *gin.Context) {
 	if c != nil {
@@ -26,6 +29,11 @@ func MarkOpenAINativeCompactionV2(c *gin.Context) {
 // the final Responses input item, as required by the upstream v2 wire format.
 func NormalizeCompactionTriggerInputOrder(body []byte) ([]byte, bool, error) {
 	if len(body) == 0 {
+		return body, false, nil
+	}
+	// 绝大多数请求没有压缩触发项，这里省下一次全量解码。json.Valid 和根值检查
+	// 保证跳过解码时不会吞掉下面那行本该报出的错误。
+	if !JSONBodyMayContainToken(body, openAICompactionTriggerType) && json.Valid(body) && jsonBodyRootIsObjectOrNull(body) {
 		return body, false, nil
 	}
 	var payload map[string]any
@@ -40,7 +48,7 @@ func NormalizeCompactionTriggerInputOrder(body []byte) ([]byte, bool, error) {
 	normalized := make([]any, 0, len(input))
 	for _, raw := range input {
 		item, itemOK := raw.(map[string]any)
-		if itemOK && item["type"] == "compaction_trigger" {
+		if itemOK && item["type"] == openAICompactionTriggerType {
 			triggerCount++
 			continue
 		}
@@ -50,11 +58,11 @@ func NormalizeCompactionTriggerInputOrder(body []byte) ([]byte, bool, error) {
 		return body, false, nil
 	}
 	if triggerCount == 1 {
-		if last, ok := input[len(input)-1].(map[string]any); ok && last["type"] == "compaction_trigger" {
+		if last, ok := input[len(input)-1].(map[string]any); ok && last["type"] == openAICompactionTriggerType {
 			return body, false, nil
 		}
 	}
-	normalized = append(normalized, map[string]any{"type": "compaction_trigger"})
+	normalized = append(normalized, map[string]any{"type": openAICompactionTriggerType})
 	payload["input"] = normalized
 	encoded, err := marshalOpenAIUpstreamJSON(payload)
 	if err != nil {
@@ -163,7 +171,7 @@ func applyOpenAICodexBetaFeatures(c *gin.Context, account *Account, h http.Heade
 // request path and stream flag to distinguish the native remote compaction v2
 // wire from the legacy /responses/compact bridge.
 func HasCompactionTriggerInInput(body []byte) bool {
-	if len(body) == 0 {
+	if len(body) == 0 || !JSONBodyMayContainToken(body, openAICompactionTriggerType) {
 		return false
 	}
 	input := gjson.GetBytes(body, "input")
@@ -172,7 +180,7 @@ func HasCompactionTriggerInInput(body []byte) bool {
 	}
 	found := false
 	input.ForEach(func(_, item gjson.Result) bool {
-		if item.Get("type").String() == "compaction_trigger" {
+		if item.Get("type").String() == openAICompactionTriggerType {
 			found = true
 			return false
 		}

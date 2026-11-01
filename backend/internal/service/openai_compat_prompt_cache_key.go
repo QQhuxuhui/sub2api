@@ -174,6 +174,19 @@ func normalizeCompatSeedJSON(v json.RawMessage) string {
 	if len(v) == 0 {
 		return ""
 	}
+	if cached, ok := compatSeedCache.get(v); ok {
+		return cached
+	}
+	normalized := computeCompatSeedJSON(v)
+	compatSeedCache.put(v, normalized)
+	return normalized
+}
+
+func normalizeCompatSeedRaw(raw string) string {
+	return normalizeCompatSeedJSON(json.RawMessage(raw))
+}
+
+func computeCompatSeedJSON(v json.RawMessage) string {
 	var tmp any
 	if err := json.Unmarshal(v, &tmp); err != nil {
 		return string(v)
