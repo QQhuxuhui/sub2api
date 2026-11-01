@@ -173,7 +173,7 @@ func TestReserveUsageBillingBatchImageBalance_MissingUser(t *testing.T) {
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	mock.ExpectQuery(`SELECT balance FROM users WHERE id = \$1 AND deleted_at IS NULL FOR UPDATE`).
+	mock.ExpectQuery(`SELECT balance FROM users WHERE id = \$1 AND deleted_at IS NULL FOR NO KEY UPDATE`).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"balance"}))
 	mock.ExpectRollback()

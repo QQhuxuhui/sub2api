@@ -33,7 +33,7 @@ func NewUserBalancePendingRepository(sqlDB *sql.DB) service.UserBalancePendingRe
 // until it has written.
 func lockEffectiveBalance(ctx context.Context, q sqlQueryer, userID int64) (balance, pending decimal.Decimal, err error) {
 	err = scanSingleRow(ctx, q,
-		`SELECT balance FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+		`SELECT balance FROM users WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE`,
 		[]any{userID}, &balance)
 	if errors.Is(err, sql.ErrNoRows) {
 		return decimal.Zero, decimal.Zero, service.ErrUserNotFound
@@ -118,7 +118,7 @@ func (r *userBalancePendingRepository) SettleUser(ctx context.Context, userID in
 
 	var before decimal.Decimal
 	// Soft-deleted users settle too: their requests were served.
-	err = tx.QueryRowContext(ctx, `SELECT balance FROM users WHERE id = $1 FOR UPDATE NOWAIT`, userID).Scan(&before)
+	err = tx.QueryRowContext(ctx, `SELECT balance FROM users WHERE id = $1 FOR NO KEY UPDATE NOWAIT`, userID).Scan(&before)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrUserNotFound
 	}
