@@ -132,6 +132,7 @@ func runSetupServer() {
 }
 
 func runMainServer() {
+	startPprofServer()
 	cfg, err := config.LoadForBootstrap()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
