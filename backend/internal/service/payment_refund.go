@@ -159,11 +159,11 @@ func (s *PaymentService) RequestRefund(ctx context.Context, oid, uid int64, reas
 	if err != nil {
 		return err
 	}
-	u, err := s.userRepo.GetByID(ctx, o.UserID)
+	balance, err := s.userRepo.GetEffectiveBalance(ctx, o.UserID)
 	if err != nil {
 		return fmt.Errorf("get user: %w", err)
 	}
-	if u.Balance < o.Amount {
+	if balance < o.Amount {
 		return infraerrors.BadRequest("BALANCE_NOT_ENOUGH", "refund amount exceeds balance")
 	}
 	nr := strings.TrimSpace(reason)
@@ -268,7 +268,7 @@ func (s *PaymentService) prepDeduct(ctx context.Context, o *dbent.PaymentOrder, 
 		}
 		return nil
 	}
-	u, err := s.userRepo.GetByID(ctx, o.UserID)
+	balance, err := s.userRepo.GetEffectiveBalance(ctx, o.UserID)
 	if err != nil {
 		if !force {
 			return &RefundResult{Success: false, Warning: "cannot fetch user balance, use force", RequireForce: true}
@@ -276,15 +276,21 @@ func (s *PaymentService) prepDeduct(ctx context.Context, o *dbent.PaymentOrder, 
 		return nil
 	}
 	p.DeductionType = payment.DeductionTypeBalance
-	if u.Balance < p.RefundAmount && !force {
-		return &RefundResult{Success: false, Warning: "user balance is insufficient for deduction, use force", RequireForce: true}
+	if balance < p.RefundAmount && !force {
+		return &RefundResult{Success: false, Warning: refundInsufficientBalanceWarning, RequireForce: true}
 	}
-	p.BalanceToDeduct = math.Max(0, math.Min(p.RefundAmount, u.Balance))
+	p.BalanceToDeduct = math.Max(0, math.Min(p.RefundAmount, balance))
 	return nil
 }
 
+const refundInsufficientBalanceWarning = "user balance is insufficient for deduction, use force"
+
 type availableBalanceDeductor interface {
 	DeductAvailableBalance(ctx context.Context, id int64, amount float64) (float64, error)
+}
+
+type exactBalanceDeductor interface {
+	DeductBalanceExact(ctx context.Context, id int64, amount float64) (float64, error)
 }
 
 func (s *PaymentService) deductAvailableBalance(ctx context.Context, userID int64, amount float64) (float64, error) {
@@ -293,6 +299,20 @@ func (s *PaymentService) deductAvailableBalance(ctx context.Context, userID int6
 		return 0, errors.New("user repository does not support available balance deduction")
 	}
 	return repo.DeductAvailableBalance(ctx, userID, amount)
+}
+
+// deductRefundBalance takes the planned amount. The channel is paid back in full,
+// so without force a balance spent since the plan was made has to stop the refund
+// rather than deduct only what is left; a forced refund accepts the shortfall.
+func (s *PaymentService) deductRefundBalance(ctx context.Context, p *RefundPlan) (float64, error) {
+	if p.Force {
+		return s.deductAvailableBalance(ctx, p.Order.UserID, p.BalanceToDeduct)
+	}
+	repo, ok := s.userRepo.(exactBalanceDeductor)
+	if !ok {
+		return 0, errors.New("user repository does not support exact balance deduction")
+	}
+	return repo.DeductBalanceExact(ctx, p.Order.UserID, p.BalanceToDeduct)
 }
 
 func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*RefundResult, error) {
@@ -307,7 +327,10 @@ func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*Ref
 		// Skip balance deduction on retry if previous attempt already deducted
 		// but failed to roll back (REFUND_ROLLBACK_FAILED in audit log).
 		if !s.hasAuditLog(ctx, p.OrderID, "REFUND_ROLLBACK_FAILED") {
-			deducted, err := s.deductAvailableBalance(ctx, p.Order.UserID, p.BalanceToDeduct)
+			deducted, err := s.deductRefundBalance(ctx, p)
+			if errors.Is(err, ErrInsufficientBalance) {
+				return s.failRefundInsufficientBalance(ctx, p), nil
+			}
 			if err != nil {
 				s.restoreStatus(ctx, p)
 				return nil, fmt.Errorf("deduction: %w", err)
@@ -345,6 +368,14 @@ func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*Ref
 		return s.handleGwFail(ctx, p, err)
 	}
 	return s.finishRefund(ctx, p, resp)
+}
+
+// failRefundInsufficientBalance ends a refund before the channel is called.
+func (s *PaymentService) failRefundInsufficientBalance(ctx context.Context, p *RefundPlan) *RefundResult {
+	now := time.Now()
+	_, _ = s.entClient.PaymentOrder.UpdateOneID(p.OrderID).SetStatus(OrderStatusRefundFailed).SetFailedAt(now).SetFailedReason(refundInsufficientBalanceWarning).Save(ctx)
+	s.writeAuditLog(ctx, p.OrderID, "REFUND_BALANCE_INSUFFICIENT", "admin", map[string]any{"refundAmount": p.RefundAmount, "balanceToDeduct": p.BalanceToDeduct})
+	return &RefundResult{Success: false, Warning: refundInsufficientBalanceWarning, RequireForce: true}
 }
 
 func (s *PaymentService) gwRefund(ctx context.Context, p *RefundPlan) (*payment.RefundResponse, error) {

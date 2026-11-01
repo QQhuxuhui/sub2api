@@ -637,6 +637,178 @@ func createPendingRefundOrderForTest(t *testing.T, ctx context.Context, client *
 	return order
 }
 
+func TestRequestRefundComparesEffectiveBalance(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		balance float64
+		wantErr string
+	}{
+		{name: "effective balance short of the order", balance: 20, wantErr: "BALANCE_NOT_ENOUGH"},
+		{name: "effective balance covers the order", balance: 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newPaymentConfigServiceTestClient(t)
+			order := createBalanceRefundOrderForTest(t, ctx, client, "request-"+strconv.FormatFloat(tc.balance, 'f', 0, 64))
+			repo := &mockUserRepo{
+				// users.balance alone would pass the check.
+				getByIDUser: &User{Balance: 100},
+				getEffectiveBalanceFn: func(_ context.Context, id int64) (float64, error) {
+					require.Equal(t, order.UserID, id)
+					return tc.balance, nil
+				},
+			}
+
+			err := (&PaymentService{entClient: client, userRepo: repo}).RequestRefund(ctx, order.ID, order.UserID, "reason")
+			if tc.wantErr != "" {
+				require.Equal(t, tc.wantErr, infraerrors.Reason(err))
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestPrepDeductUsesEffectiveBalanceNotUsersBalance(t *testing.T) {
+	repo := &mockUserRepo{
+		getByIDUser:           &User{Balance: 100},
+		getEffectiveBalanceFn: func(context.Context, int64) (float64, error) { return 20, nil },
+	}
+	svc := &PaymentService{userRepo: repo}
+	order := &dbent.PaymentOrder{OrderType: payment.OrderTypeBalance, UserID: 1}
+
+	plan := &RefundPlan{RefundAmount: 100}
+	result := svc.prepDeduct(context.Background(), order, plan, false)
+	require.NotNil(t, result)
+	require.True(t, result.RequireForce)
+
+	plan = &RefundPlan{RefundAmount: 100}
+	require.Nil(t, svc.prepDeduct(context.Background(), order, plan, true))
+	require.Equal(t, 20.0, plan.BalanceToDeduct)
+}
+
+func TestExecuteRefundWithoutForceStopsBeforeTheChannelOnInsufficientBalance(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createBalanceRefundOrderForTest(t, ctx, client, "exact-short")
+	repo := &mockUserRepo{
+		deductBalanceExactFn: func(context.Context, int64, float64) (float64, error) {
+			return 0, ErrInsufficientBalance
+		},
+		deductAvailableBalanceFn: func(context.Context, int64, float64) (float64, error) {
+			t.Fatal("a refund without force must not fall back to a partial deduction")
+			return 0, nil
+		},
+	}
+	plan := &RefundPlan{
+		OrderID: order.ID, Order: order, RefundAmount: 100, GatewayAmount: 100,
+		Reason: "spent since prepare", DeductionType: payment.DeductionTypeBalance, BalanceToDeduct: 100,
+	}
+
+	result, err := (&PaymentService{entClient: client, userRepo: repo}).ExecuteRefund(ctx, plan)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.True(t, result.RequireForce)
+
+	stored, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusRefundFailed, stored.Status)
+	requireRefundAudit(t, ctx, client, order.ID, "REFUND_BALANCE_INSUFFICIENT", 1)
+	requireRefundAudit(t, ctx, client, order.ID, "REFUND_NO_TRADE_NO", 0)
+}
+
+func TestExecuteRefundWithoutForceRestoresStatusOnOtherDeductionErrors(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createBalanceRefundOrderForTest(t, ctx, client, "exact-error")
+	repo := &mockUserRepo{deductBalanceExactFn: func(context.Context, int64, float64) (float64, error) {
+		return 0, errors.New("db down")
+	}}
+	plan := &RefundPlan{
+		OrderID: order.ID, Order: order, RefundAmount: 100, GatewayAmount: 100,
+		DeductionType: payment.DeductionTypeBalance, BalanceToDeduct: 100,
+	}
+
+	_, err := (&PaymentService{entClient: client, userRepo: repo}).ExecuteRefund(ctx, plan)
+	require.Error(t, err)
+	stored, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusCompleted, stored.Status)
+}
+
+func TestExecuteRefundWithoutForceDeductsExactAmount(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createBalanceRefundOrderForTest(t, ctx, client, "exact-ok")
+	var deducted float64
+	repo := &mockUserRepo{deductBalanceExactFn: func(_ context.Context, _ int64, amount float64) (float64, error) {
+		deducted = amount
+		return amount, nil
+	}}
+	plan := &RefundPlan{
+		OrderID: order.ID, Order: order, RefundAmount: 100, GatewayAmount: 100,
+		DeductionType: payment.DeductionTypeBalance, BalanceToDeduct: 100,
+	}
+
+	result, err := (&PaymentService{entClient: client, userRepo: repo}).ExecuteRefund(ctx, plan)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, 100.0, deducted)
+	require.Equal(t, 100.0, result.BalanceDeducted)
+}
+
+func requireRefundAudit(t *testing.T, ctx context.Context, client *dbent.Client, orderID int64, action string, want int) {
+	t.Helper()
+	count, err := client.PaymentAuditLog.Query().
+		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(orderID, 10)), paymentauditlog.ActionEQ(action)).
+		Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, count, action)
+}
+
+// createBalanceRefundOrderForTest has no trade number, so gwRefund records
+// REFUND_NO_TRADE_NO instead of calling a provider.
+func createBalanceRefundOrderForTest(t *testing.T, ctx context.Context, client *dbent.Client, suffix string) *dbent.PaymentOrder {
+	t.Helper()
+	user, err := client.User.Create().
+		SetEmail("refund-" + suffix + "@example.com").
+		SetPasswordHash("hash").
+		SetUsername("refund-" + suffix).
+		Save(ctx)
+	require.NoError(t, err)
+	instance, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeAlipay).
+		SetName("alipay-" + suffix).
+		SetConfig("{}").
+		SetSupportedTypes("alipay").
+		SetEnabled(true).
+		SetAllowUserRefund(true).
+		SetRefundEnabled(true).
+		Save(ctx)
+	require.NoError(t, err)
+	order, err := client.PaymentOrder.Create().
+		SetUserID(user.ID).
+		SetUserEmail(user.Email).
+		SetUserName(user.Username).
+		SetAmount(100).
+		SetPayAmount(100).
+		SetFeeRate(0).
+		SetRechargeCode("REFUND-" + suffix).
+		SetOutTradeNo("refund_" + suffix).
+		SetPaymentType(payment.TypeAlipay).
+		SetPaymentTradeNo("").
+		SetProviderInstanceID(strconv.FormatInt(instance.ID, 10)).
+		SetOrderType(payment.OrderTypeBalance).
+		SetStatus(OrderStatusCompleted).
+		SetExpiresAt(time.Now().Add(time.Hour)).
+		SetPaidAt(time.Now()).
+		SetClientIP("127.0.0.1").
+		SetSrcHost("api.example.com").
+		Save(ctx)
+	require.NoError(t, err)
+	return order
+}
+
 func replacePaymentProviderFactoryForTest(t *testing.T, prov payment.Provider) func() {
 	t.Helper()
 	original := createPaymentProviderFromInstance
