@@ -848,6 +848,8 @@ var ProviderSet = wire.NewSet(
 	NewRedeemService,
 	NewPromoService,
 	NewUsageService,
+	NewBillingBalanceWriteModeService,
+	ProvideUserBalanceSettler,
 	NewDashboardService,
 	ProvidePricingService,
 	NewBillingService,
@@ -967,6 +969,23 @@ var ProviderSet = wire.NewSet(
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
 func ProvideUserPlatformQuotaUsageFlusher(cfg *config.Config, cache BillingCache, quotaRepo UserPlatformQuotaRepository, tw *TimingWheelService) *UserPlatformQuotaUsageFlusher {
 	svc := NewUserPlatformQuotaUsageFlusher(cfg, cache, quotaRepo, tw)
+	svc.Start()
+	return svc
+}
+
+// ProvideUserBalanceSettler connects the settler to both billing paths and starts it.
+func ProvideUserBalanceSettler(
+	pending UserBalancePendingRepository,
+	userRepo UserRepository,
+	billingCache *BillingCacheService,
+	balanceNotify *BalanceNotifyService,
+	mode *BillingBalanceWriteModeService,
+	gateway *GatewayService,
+	openAIGateway *OpenAIGatewayService,
+) *UserBalanceSettler {
+	svc := NewUserBalanceSettler(pending, userRepo, billingCache, balanceNotify, mode)
+	gateway.SetUserBalanceDeferral(svc)
+	openAIGateway.SetUserBalanceDeferral(svc)
 	svc.Start()
 	return svc
 }

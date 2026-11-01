@@ -469,6 +469,7 @@ type OpenAIGatewayService struct {
 	resolver                     *ModelPricingResolver
 	channelService               *ChannelService
 	balanceNotifyService         *BalanceNotifyService
+	balanceDeferral              UserBalanceDeferral
 	settingService               *SettingService
 	userPlatformQuotaRepo        UserPlatformQuotaRepository
 	liveAttestation              liveattestation.Provider
@@ -700,7 +701,14 @@ func (s *OpenAIGatewayService) billingDeps() *billingDeps {
 		deferredService:       s.deferredService,
 		balanceNotifyService:  s.balanceNotifyService,
 		userPlatformQuotaRepo: s.userPlatformQuotaRepo,
+		balanceDeferral:       s.balanceDeferral,
 	}
+}
+
+// SetUserBalanceDeferral lets usage billing write deductions to the pending table.
+// Set once during wiring, before the service takes traffic.
+func (s *OpenAIGatewayService) SetUserBalanceDeferral(deferral UserBalanceDeferral) {
+	s.balanceDeferral = deferral
 }
 
 // CloseOpenAIWSPool 关闭 OpenAI WebSocket 连接池的后台 worker 和空闲连接。

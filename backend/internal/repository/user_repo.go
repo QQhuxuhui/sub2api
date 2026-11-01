@@ -23,6 +23,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
+	"github.com/shopspring/decimal"
 
 	entsql "entgo.io/ent/dialect/sql"
 )
@@ -854,25 +855,17 @@ func (r *userRepository) UpdateBalance(ctx context.Context, id int64, amount flo
 	return nil
 }
 
+// ApplyRedeemBalanceAdjustment floors the effective balance at zero.
 func (r *userRepository) ApplyRedeemBalanceAdjustment(ctx context.Context, id int64, delta float64) error {
-	const updateSQL = `
-		UPDATE users
-		SET balance = GREATEST(balance + $1, 0), updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
-	`
-	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(ctx, updateSQL, delta, id)
-	if err != nil {
+	return r.inBalanceTx(ctx, func(q sqlExecutor) error {
+		balance, pending, err := lockEffectiveBalance(ctx, q, id)
+		if err != nil {
+			return err
+		}
+		effective := decimal.Max(balance.Sub(pending).Add(decimal.NewFromFloat(delta)), decimal.Zero)
+		_, err = writeLockedBalance(ctx, q, id, effective.Add(pending))
 		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return service.ErrUserNotFound
-	}
-	return nil
+	})
 }
 
 // DeductBalance 扣除用户余额
@@ -904,147 +897,170 @@ func (r *userRepository) DeductBalance(ctx context.Context, id int64, amount flo
 	return nil
 }
 
-// DeductAvailableBalance atomically deducts min(amount, max(balance, 0)).
+// inBalanceTx runs fn inside the caller's transaction, or in a short one of its
+// own: the row lock taken by lockEffectiveBalance has to outlive the statement.
+func (r *userRepository) inBalanceTx(ctx context.Context, fn func(q sqlExecutor) error) (err error) {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		return fn(tx.Client())
+	}
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	if err = fn(tx.Client()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// writeLockedBalance stores balance for a row the caller holds locked.
+func writeLockedBalance(ctx context.Context, q sqlExecutor, id int64, balance decimal.Decimal) (stored decimal.Decimal, err error) {
+	err = scanSingleRow(ctx, q,
+		`UPDATE users SET balance = $1::numeric, updated_at = NOW() WHERE id = $2 RETURNING balance`,
+		[]any{balance.String(), id}, &stored)
+	return stored, err
+}
+
+// GetEffectiveBalance returns users.balance minus the user's unsettled pending
+// rows, read in one statement so both come from the same snapshot.
+func (r *userRepository) GetEffectiveBalance(ctx context.Context, id int64) (float64, error) {
+	var effective float64
+	err := scanSingleRow(ctx, clientFromContext(ctx, r.client), `
+		SELECT u.balance - COALESCE((
+			SELECT SUM(p.amount) FROM user_balance_pending p WHERE p.user_id = u.id
+		), 0)
+		FROM users u
+		WHERE u.id = $1 AND u.deleted_at IS NULL
+	`, []any{id}, &effective)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, service.ErrUserNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	return effective, nil
+}
+
+// DeductAvailableBalance atomically deducts min(amount, max(effective balance, 0)).
 // Unlike DeductBalance, this refund-specific operation never increases an
 // existing deficit or permits a concurrent deduction to cause an overdraft.
 func (r *userRepository) DeductAvailableBalance(ctx context.Context, id int64, amount float64) (deducted float64, err error) {
 	if amount < 0 {
 		return 0, fmt.Errorf("deduction amount must be nonnegative")
 	}
-	const updateSQL = `
-		WITH target AS (
-			SELECT id, balance
-			FROM users
-			WHERE id = $2 AND deleted_at IS NULL
-			FOR UPDATE
-		), updated AS (
-			UPDATE users AS u
-			SET balance = target.balance - LEAST($1, GREATEST(target.balance, 0)), updated_at = NOW()
-			FROM target
-			WHERE u.id = target.id AND u.deleted_at IS NULL
-			RETURNING target.balance - u.balance AS deducted
-		)
-		SELECT deducted FROM updated
-	`
-	rows, err := clientFromContext(ctx, r.client).QueryContext(ctx, updateSQL, amount, id)
+	err = r.inBalanceTx(ctx, func(q sqlExecutor) error {
+		balance, pending, err := lockEffectiveBalance(ctx, q, id)
+		if err != nil {
+			return err
+		}
+		available := decimal.Max(balance.Sub(pending), decimal.Zero)
+		stored, err := writeLockedBalance(ctx, q, id, balance.Sub(decimal.Min(decimal.NewFromFloat(amount), available)))
+		if err != nil {
+			return err
+		}
+		deducted = balance.Sub(stored).InexactFloat64()
+		return nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil && err == nil {
-			err = closeErr
-		}
-	}()
-	if !rows.Next() {
-		if rowsErr := rows.Err(); rowsErr != nil {
-			return 0, rowsErr
-		}
-		return 0, service.ErrUserNotFound
-	}
-	if err := rows.Scan(&deducted); err != nil {
-		return 0, err
-	}
-	return deducted, rows.Err()
+	return deducted, nil
 }
 
-// AdjustBalance 原子地把 delta 累加到余额上，结果为负时整条语句不生效。
-// 相比"读余额 → 算新值 → 整行写回"，这里把读与写压进同一条 UPDATE，
-// 并发的计费扣款不会被旧快照覆盖。
+// DeductBalanceExact deducts the whole amount from the effective balance, or
+// nothing and ErrInsufficientBalance. A refund that pays the channel back in
+// full has no use for a partial deduction.
+func (r *userRepository) DeductBalanceExact(ctx context.Context, id int64, amount float64) (deducted float64, err error) {
+	if amount < 0 {
+		return 0, fmt.Errorf("deduction amount must be nonnegative")
+	}
+	err = r.inBalanceTx(ctx, func(q sqlExecutor) error {
+		balance, pending, err := lockEffectiveBalance(ctx, q, id)
+		if err != nil {
+			return err
+		}
+		exact := decimal.NewFromFloat(amount)
+		if balance.Sub(pending).LessThan(exact) {
+			return service.ErrInsufficientBalance
+		}
+		stored, err := writeLockedBalance(ctx, q, id, balance.Sub(exact))
+		if err != nil {
+			return err
+		}
+		deducted = balance.Sub(stored).InexactFloat64()
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return deducted, nil
+}
+
+// AdjustBalance 把 delta 累加到余额上，有效余额（balance - pending）结果为负时不写入。
+// 持行锁完成读与写，并发的计费扣款和结算都不会被旧快照覆盖。返回的是有效余额。
 func (r *userRepository) AdjustBalance(ctx context.Context, id int64, delta float64) (service.BalanceChange, error) {
-	const updateSQL = `
-		UPDATE users
-		SET balance = balance + $1, updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL AND balance + $1 >= 0
-		RETURNING balance - $1, balance
-	`
-	change, ok, err := scanBalanceChange(ctx, clientFromContext(ctx, r.client), updateSQL, delta, id)
+	var change service.BalanceChange
+	err := r.inBalanceTx(ctx, func(q sqlExecutor) error {
+		balance, pending, err := lockEffectiveBalance(ctx, q, id)
+		if err != nil {
+			return err
+		}
+		amount := decimal.NewFromFloat(delta)
+		effective := balance.Sub(pending)
+		if effective.Add(amount).IsNegative() {
+			change = service.BalanceChange{Old: effective.InexactFloat64(), New: effective.InexactFloat64() + delta}
+			return service.ErrBalanceNegative
+		}
+		stored, err := writeLockedBalance(ctx, q, id, balance.Add(amount))
+		if err != nil {
+			return err
+		}
+		newEffective := stored.Sub(pending)
+		change = service.BalanceChange{Old: newEffective.Sub(amount).InexactFloat64(), New: newEffective.InexactFloat64()}
+		return nil
+	})
+	if errors.Is(err, service.ErrBalanceNegative) {
+		return change, err
+	}
 	if err != nil {
 		return service.BalanceChange{}, err
 	}
-	if ok {
-		return change, nil
-	}
-
-	// 0 行既可能是用户不存在，也可能是余额不足以承受这次扣减，需要区分。
-	current, err := r.currentBalance(ctx, id)
-	if err != nil {
-		return service.BalanceChange{}, err
-	}
-	return service.BalanceChange{Old: current, New: current + delta}, service.ErrBalanceNegative
+	return change, nil
 }
 
-// SetBalance 原子地把余额置为 value，并返回变更前后的值。
+// SetBalance 把有效余额置为 value：balance = value + pending，待结算流水随后结算时
+// 有效余额保持不变。返回的 Old/New 都是有效余额。
 func (r *userRepository) SetBalance(ctx context.Context, id int64, value float64) (service.BalanceChange, error) {
 	if value < 0 {
-		// 连同当前余额一起返回，便于上层给出可读的错误信息。
-		current, err := r.currentBalance(ctx, id)
+		// 连同当前有效余额一起返回，便于上层给出可读的错误信息。
+		current, err := r.GetEffectiveBalance(ctx, id)
 		if err != nil {
 			return service.BalanceChange{}, err
 		}
 		return service.BalanceChange{Old: current, New: value}, service.ErrBalanceNegative
 	}
-	const updateSQL = `
-		UPDATE users AS u
-		SET balance = $1, updated_at = NOW()
-		FROM (SELECT id, balance FROM users WHERE id = $2 AND deleted_at IS NULL) AS prev
-		WHERE u.id = prev.id AND u.deleted_at IS NULL
-		RETURNING prev.balance, u.balance
-	`
-	change, ok, err := scanBalanceChange(ctx, clientFromContext(ctx, r.client), updateSQL, value, id)
+	var change service.BalanceChange
+	err := r.inBalanceTx(ctx, func(q sqlExecutor) error {
+		balance, pending, err := lockEffectiveBalance(ctx, q, id)
+		if err != nil {
+			return err
+		}
+		stored, err := writeLockedBalance(ctx, q, id, decimal.NewFromFloat(value).Add(pending))
+		if err != nil {
+			return err
+		}
+		change = service.BalanceChange{Old: balance.Sub(pending).InexactFloat64(), New: stored.Sub(pending).InexactFloat64()}
+		return nil
+	})
 	if err != nil {
 		return service.BalanceChange{}, err
 	}
-	if !ok {
-		return service.BalanceChange{}, service.ErrUserNotFound
-	}
 	return change, nil
-}
-
-// currentBalance 读取用户当前余额，用户不存在时返回 ErrUserNotFound。
-func (r *userRepository) currentBalance(ctx context.Context, id int64) (balance float64, err error) {
-	rows, err := clientFromContext(ctx, r.client).QueryContext(ctx,
-		`SELECT balance FROM users WHERE id = $1 AND deleted_at IS NULL`, id)
-	if err != nil {
-		return 0, err
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil && err == nil {
-			err = closeErr
-		}
-	}()
-	if !rows.Next() {
-		if rowsErr := rows.Err(); rowsErr != nil {
-			return 0, rowsErr
-		}
-		return 0, service.ErrUserNotFound
-	}
-	if err := rows.Scan(&balance); err != nil {
-		return 0, err
-	}
-	return balance, rows.Err()
-}
-
-// scanBalanceChange 执行一条 RETURNING 旧余额、新余额的语句。ok 为 false 表示语句未命中任何行。
-func scanBalanceChange(ctx context.Context, client *dbent.Client, query string, args ...any) (change service.BalanceChange, ok bool, err error) {
-	rows, err := client.QueryContext(ctx, query, args...)
-	if err != nil {
-		return service.BalanceChange{}, false, err
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil && err == nil {
-			err = closeErr
-		}
-	}()
-	if !rows.Next() {
-		if rowsErr := rows.Err(); rowsErr != nil {
-			return service.BalanceChange{}, false, rowsErr
-		}
-		return service.BalanceChange{}, false, nil
-	}
-	if err := rows.Scan(&change.Old, &change.New); err != nil {
-		return service.BalanceChange{}, false, err
-	}
-	return change, true, rows.Err()
 }
 
 func (r *userRepository) UpdateConcurrency(ctx context.Context, id int64, amount int) error {

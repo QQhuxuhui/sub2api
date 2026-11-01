@@ -9,6 +9,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/shopspring/decimal"
 )
 
 type usageBillingRepository struct {
@@ -179,12 +180,19 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	}
 
 	if cmd.BalanceCost > 0 {
-		newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost)
-		if err != nil {
-			return err
+		if cmd.DeferBalance {
+			if err := insertUsageBillingBalancePending(ctx, tx, cmd); err != nil {
+				return err
+			}
+			result.BalanceDeferred = true
+		} else {
+			newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost)
+			if err != nil {
+				return err
+			}
+			result.NewBalance = &newBalance
+			result.BalanceOverdrafted = !sufficient
 		}
-		result.NewBalance = &newBalance
-		result.BalanceOverdrafted = !sufficient
 	}
 
 	if cmd.APIKeyQuotaCost > 0 {
@@ -240,6 +248,17 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 	return service.ErrSubscriptionNotFound
 }
 
+// insertUsageBillingBalancePending runs only after the first successful claim and
+// commits together with it, so a deduction is stored exactly once.
+func insertUsageBillingBalancePending(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO user_balance_pending (user_id, request_id, api_key_id, amount)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (request_id, api_key_id) DO NOTHING
+	`, cmd.UserID, cmd.RequestID, cmd.APIKeyID, cmd.BalanceCost)
+	return err
+}
+
 func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, bool, error) {
 	var newBalance float64
 	err := tx.QueryRowContext(ctx, `
@@ -276,27 +295,29 @@ func reserveUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *
 	if cmd.HoldAmount <= 0 {
 		return &service.BatchImageBalanceHoldResult{}, nil
 	}
+	locked, pending, err := lockEffectiveBalance(ctx, tx, cmd.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if locked.Sub(pending).LessThan(decimal.NewFromFloat(cmd.HoldAmount)) {
+		return nil, service.ErrBatchImageInsufficientBalance
+	}
 	var balance, frozen float64
-	err := tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		UPDATE users
 		SET balance = balance - $1,
 			frozen_balance = COALESCE(frozen_balance, 0) + $1,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL AND balance >= $1
+		WHERE id = $2 AND deleted_at IS NULL
 		RETURNING balance, frozen_balance
 	`, cmd.HoldAmount, cmd.UserID).Scan(&balance, &frozen)
-	if err == nil {
-		return &service.BatchImageBalanceHoldResult{NewBalance: &balance, FrozenBalance: &frozen}, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
-	}
-	if exists, existsErr := userExistsForBilling(ctx, tx, cmd.UserID); existsErr != nil {
-		return nil, existsErr
-	} else if !exists {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrUserNotFound
 	}
-	return nil, service.ErrBatchImageInsufficientBalance
+	if err != nil {
+		return nil, err
+	}
+	return &service.BatchImageBalanceHoldResult{NewBalance: &balance, FrozenBalance: &frozen}, nil
 }
 
 func captureUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {

@@ -1656,6 +1656,10 @@ func (r *stubUserRepo) AdjustBalance(ctx context.Context, id int64, delta float6
 	return service.BalanceChange{}, errors.New("not implemented")
 }
 
+func (*stubUserRepo) GetEffectiveBalance(context.Context, int64) (float64, error) {
+	panic("unexpected GetEffectiveBalance call")
+}
+
 func (r *stubUserRepo) SetBalance(ctx context.Context, id int64, value float64) (service.BalanceChange, error) {
 	return service.BalanceChange{}, errors.New("not implemented")
 }

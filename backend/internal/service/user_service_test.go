@@ -27,6 +27,8 @@ type mockUserRepo struct {
 	updateBalanceFn          func(ctx context.Context, id int64, amount float64) error
 	deductBalanceFn          func(ctx context.Context, id int64, amount float64) error
 	deductAvailableBalanceFn func(ctx context.Context, id int64, amount float64) (float64, error)
+	deductBalanceExactFn     func(ctx context.Context, id int64, amount float64) (float64, error)
+	getEffectiveBalanceFn    func(ctx context.Context, id int64) (float64, error)
 	getByIDUser              *User
 	getByIDErr               error
 	identities               []UserAuthIdentityRecord
@@ -214,6 +216,24 @@ func (m *mockUserRepo) DeductAvailableBalance(ctx context.Context, id int64, amo
 
 func (m *mockUserRepo) AdjustBalance(ctx context.Context, id int64, delta float64) (BalanceChange, error) {
 	panic("unexpected AdjustBalance call")
+}
+
+func (m *mockUserRepo) GetEffectiveBalance(ctx context.Context, id int64) (float64, error) {
+	if m.getEffectiveBalanceFn != nil {
+		return m.getEffectiveBalanceFn(ctx, id)
+	}
+	user, err := m.GetByID(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	return user.Balance, nil
+}
+
+func (m *mockUserRepo) DeductBalanceExact(ctx context.Context, id int64, amount float64) (float64, error) {
+	if m.deductBalanceExactFn != nil {
+		return m.deductBalanceExactFn(ctx, id, amount)
+	}
+	return amount, nil
 }
 
 func (m *mockUserRepo) SetBalance(ctx context.Context, id int64, value float64) (BalanceChange, error) {
