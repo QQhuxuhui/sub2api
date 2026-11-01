@@ -1073,9 +1073,15 @@ func openAIStreamClientOutputStarted(c *gin.Context, localStarted bool) bool {
 	return OpenAICompactKeepaliveAdjustedWrittenSize(c) >= 0
 }
 
+// openAIStreamEventIsPreamble reports status events that carry no output.
+// response.queued (sent while a relay waits for capacity), response.metadata
+// (moderation metadata, which some relays send just before failing) and
+// keepalive (the heartbeat of an upstream waiting for capacity) belong here too:
+// committing the stream on them would turn the failure that follows into one
+// that can no longer fail over.
 func openAIStreamEventIsPreamble(eventType string) bool {
 	switch strings.TrimSpace(eventType) {
-	case "response.created", "response.in_progress":
+	case "response.created", "response.in_progress", "response.queued", "response.metadata", "keepalive":
 		return true
 	default:
 		return false
