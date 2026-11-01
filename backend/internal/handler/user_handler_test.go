@@ -98,6 +98,10 @@ func (s *userHandlerRepoStub) AdjustBalance(ctx context.Context, id int64, delta
 	panic("unexpected AdjustBalance call")
 }
 
+func (*userHandlerRepoStub) GetEffectiveBalance(context.Context, int64) (float64, error) {
+	panic("unexpected GetEffectiveBalance call")
+}
+
 func (s *userHandlerRepoStub) SetBalance(ctx context.Context, id int64, value float64) (service.BalanceChange, error) {
 	panic("unexpected SetBalance call")
 }

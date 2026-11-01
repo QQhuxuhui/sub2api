@@ -158,6 +158,10 @@ func (s *openAIRecordUsageUserRepoStub) AdjustBalance(ctx context.Context, id in
 	panic("unexpected AdjustBalance call")
 }
 
+func (*openAIRecordUsageUserRepoStub) GetEffectiveBalance(context.Context, int64) (float64, error) {
+	panic("unexpected GetEffectiveBalance call")
+}
+
 func (s *openAIRecordUsageUserRepoStub) SetBalance(ctx context.Context, id int64, value float64) (BalanceChange, error) {
 	panic("unexpected SetBalance call")
 }

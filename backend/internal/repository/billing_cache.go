@@ -21,6 +21,7 @@ const (
 	subCacheInvalidateChannel = "subscription:cache:invalidate"
 	billingCacheTTL           = 5 * time.Minute
 	billingCacheJitter        = 30 * time.Second
+	billingBalancePurgeBatch  = 1000
 	rateLimitCacheTTL         = 7 * 24 * time.Hour // 7 days matches the longest window
 
 	// Rate limit window durations — must match service.RateLimitWindow* constants.
@@ -171,6 +172,32 @@ func (c *billingCache) DeductUserBalance(ctx context.Context, userID int64, amou
 func (c *billingCache) InvalidateUserBalance(ctx context.Context, userID int64) error {
 	key := billingBalanceKey(userID)
 	return c.rdb.Del(ctx, key).Err()
+}
+
+// PurgeUserBalances removes every user balance key in batches. SCAN keeps it off
+// the blocking KEYS command.
+func (c *billingCache) PurgeUserBalances(ctx context.Context) (int64, error) {
+	var (
+		cursor uint64
+		purged int64
+	)
+	for {
+		keys, next, err := c.rdb.Scan(ctx, cursor, billingBalanceKeyPrefix+"*", billingBalancePurgeBatch).Result()
+		if err != nil {
+			return purged, err
+		}
+		if len(keys) > 0 {
+			removed, err := c.rdb.Unlink(ctx, keys...).Result()
+			if err != nil {
+				return purged, err
+			}
+			purged += removed
+		}
+		if next == 0 {
+			return purged, nil
+		}
+		cursor = next
+	}
 }
 
 func (c *billingCache) GetSubscriptionCache(ctx context.Context, userID, groupID int64) (*service.SubscriptionCacheData, error) {

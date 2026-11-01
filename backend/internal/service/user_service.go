@@ -155,11 +155,13 @@ type UserRepository interface {
 
 	UpdateBalance(ctx context.Context, id int64, amount float64) error
 	DeductBalance(ctx context.Context, id int64, amount float64) error
-	// AdjustBalance 原子地把 delta 累加到余额上，并返回变更前后的值。结果为负时
-	// 拒绝写入并返回 ErrBalanceNegative。管理员的加/扣款必须走这里而不是
+	// GetEffectiveBalance 返回有效余额：users.balance 减去未结算的待结算流水。
+	GetEffectiveBalance(ctx context.Context, id int64) (float64, error)
+	// AdjustBalance 原子地把 delta 累加到余额上，并返回变更前后的有效余额。有效余额
+	// 结果为负时拒绝写入并返回 ErrBalanceNegative。管理员的加/扣款必须走这里而不是
 	// "读余额→算新值→整行写回"，否则并发的计费扣款会被旧快照抹掉。
 	AdjustBalance(ctx context.Context, id int64, delta float64) (BalanceChange, error)
-	// SetBalance 原子地把余额置为 value（value 必须 >= 0），返回变更前后的值。
+	// SetBalance 原子地把有效余额置为 value（value 必须 >= 0），返回变更前后的有效余额。
 	SetBalance(ctx context.Context, id int64, value float64) (BalanceChange, error)
 	UpdateConcurrency(ctx context.Context, id int64, amount int) error
 	BatchSetConcurrency(ctx context.Context, userIDs []int64, value int) (int, error)

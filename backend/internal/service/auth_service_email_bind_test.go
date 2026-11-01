@@ -1105,6 +1105,10 @@ func (s *emailBindUserRepoStub) AdjustBalance(ctx context.Context, id int64, del
 	panic("unexpected AdjustBalance call")
 }
 
+func (*emailBindUserRepoStub) GetEffectiveBalance(context.Context, int64) (float64, error) {
+	panic("unexpected GetEffectiveBalance call")
+}
+
 func (s *emailBindUserRepoStub) SetBalance(ctx context.Context, id int64, value float64) (service.BalanceChange, error) {
 	panic("unexpected SetBalance call")
 }

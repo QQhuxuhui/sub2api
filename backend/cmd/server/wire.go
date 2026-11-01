@@ -130,6 +130,7 @@ func provideCleanup(
 	pluginManager *service.PluginManager,
 	intentRouter *service.IntentRouterService,
 	iqProbeRunner *service.IQProbeRunner,
+	userBalanceSettler *service.UserBalanceSettler,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -390,6 +391,11 @@ func provideCleanup(
 		}
 
 		infraSteps := []cleanupStep{
+			// Runs after the usage workers stopped writing pending rows, before Redis and the database close.
+			{"UserBalanceSettler", func() error {
+				userBalanceSettler.Stop()
+				return nil
+			}},
 			{"Redis", func() error {
 				if rdb == nil {
 					return nil

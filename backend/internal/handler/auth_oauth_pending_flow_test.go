@@ -3352,6 +3352,10 @@ func (r *oauthPendingFlowUserRepo) AdjustBalance(ctx context.Context, id int64, 
 	panic("unexpected AdjustBalance call")
 }
 
+func (*oauthPendingFlowUserRepo) GetEffectiveBalance(context.Context, int64) (float64, error) {
+	panic("unexpected GetEffectiveBalance call")
+}
+
 func (r *oauthPendingFlowUserRepo) SetBalance(ctx context.Context, id int64, value float64) (service.BalanceChange, error) {
 	panic("unexpected SetBalance call")
 }

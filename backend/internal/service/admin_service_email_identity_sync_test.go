@@ -121,6 +121,10 @@ func (s *emailSyncRepoStub) AdjustBalance(ctx context.Context, id int64, delta f
 	panic("unexpected AdjustBalance call")
 }
 
+func (*emailSyncRepoStub) GetEffectiveBalance(context.Context, int64) (float64, error) {
+	panic("unexpected GetEffectiveBalance call")
+}
+
 func (s *emailSyncRepoStub) SetBalance(ctx context.Context, id int64, value float64) (BalanceChange, error) {
 	panic("unexpected SetBalance call")
 }

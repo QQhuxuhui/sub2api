@@ -21,6 +21,10 @@ func (s *balanceUserRepoStub) AdjustBalance(ctx context.Context, id int64, delta
 	return s.apply(func(current float64) float64 { return current + delta })
 }
 
+func (*balanceUserRepoStub) GetEffectiveBalance(context.Context, int64) (float64, error) {
+	panic("unexpected GetEffectiveBalance call")
+}
+
 func (s *balanceUserRepoStub) SetBalance(ctx context.Context, id int64, value float64) (BalanceChange, error) {
 	return s.apply(func(float64) float64 { return value })
 }

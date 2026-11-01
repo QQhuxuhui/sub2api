@@ -349,12 +349,13 @@ func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) 
 }
 
 // getUserBalanceFromDB 从数据库获取用户余额
+// 缓存存的是有效余额（balance - 待结算），预检查才能看到尚未结算的消费。
 func (s *BillingCacheService) getUserBalanceFromDB(ctx context.Context, userID int64) (float64, error) {
-	user, err := s.userRepo.GetByID(ctx, userID)
+	balance, err := s.userRepo.GetEffectiveBalance(ctx, userID)
 	if err != nil {
 		return 0, fmt.Errorf("get user balance: %w", err)
 	}
-	return user.Balance, nil
+	return balance, nil
 }
 
 // setBalanceCache 设置余额缓存
@@ -393,6 +394,27 @@ func (s *BillingCacheService) QueueDeductBalance(userID int64, amount float64) {
 	if err := s.DeductBalanceCache(ctx, userID, amount); err != nil {
 		logger.LegacyPrintf("service.billing_cache", "Warning: deduct balance cache fallback failed for user %d: %v", userID, err)
 	}
+}
+
+// billingBalanceCachePurger is the optional cache capability behind
+// PurgeUserBalances; it stays out of BillingCache so test doubles need not grow.
+type billingBalanceCachePurger interface {
+	PurgeUserBalances(ctx context.Context) (int64, error)
+}
+
+// PurgeUserBalances drops every cached user balance. The next check of each user
+// reloads the effective balance from the database.
+func (s *BillingCacheService) PurgeUserBalances(ctx context.Context) error {
+	purger, ok := s.cache.(billingBalanceCachePurger)
+	if !ok {
+		return nil
+	}
+	purged, err := purger.PurgeUserBalances(ctx)
+	if err != nil {
+		return err
+	}
+	logger.LegacyPrintf("service.billing_cache", "Purged %d user balance cache keys", purged)
+	return nil
 }
 
 // InvalidateUserBalance 失效用户余额缓存

@@ -83,6 +83,7 @@ type postUsageBillingParams struct {
 	AccountRateMultiplier float64
 	APIKeyService         APIKeyQuotaUpdater
 	Platform              string // 来自 APIKey 关联 Group 的平台标识
+	DeferBalance          bool   // 余额扣款写待结算流水，由 applyUsageBilling 按写入模式决定
 }
 
 // PlatformFromAPIKey 从 APIKey 关联的 Group 推导 platform 名称。
@@ -316,6 +317,7 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.SubscriptionCost = p.Cost.ActualCost
 	} else if p.Cost.ActualCost > 0 {
 		cmd.BalanceCost = p.Cost.ActualCost
+		cmd.DeferBalance = p.DeferBalance
 	}
 
 	if p.shouldDeductAPIKeyQuota() {
@@ -337,14 +339,17 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 		return false, nil
 	}
 
+	billingCtx, cancel := detachedBillingContext(ctx)
+	defer cancel()
+
+	p.DeferBalance = !p.IsSubscriptionBill && p.User != nil && deps.balanceDeferral != nil &&
+		deps.balanceDeferral.ShouldDeferBalance(billingCtx, p.User.ID)
+
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
 	if cmd == nil || cmd.RequestID == "" || repo == nil {
 		postUsageBilling(ctx, p, deps)
 		return true, nil
 	}
-
-	billingCtx, cancel := detachedBillingContext(ctx)
-	defer cancel()
 
 	result, err := repo.Apply(billingCtx, cmd)
 	if err != nil {
@@ -354,6 +359,10 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 	if result == nil || !result.Applied {
 		deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
 		return false, nil
+	}
+
+	if result.BalanceDeferred && deps.balanceDeferral != nil {
+		deps.balanceDeferral.MarkBalanceDirty(p.User.ID)
 	}
 
 	if result.APIKeyQuotaExhausted {
@@ -461,6 +470,11 @@ func notifyBalanceLow(p *postUsageBillingParams, deps *billingDeps, result *Usag
 		)
 		return
 	}
+	// The balance has not moved yet: the settler checks the threshold with the
+	// balance before and after each batch.
+	if result != nil && result.BalanceDeferred {
+		return
+	}
 
 	oldBalance := resolveOldBalance(p, result)
 	slog.Debug("notifyBalanceLow: calling CheckBalanceAfterDeduction",
@@ -550,6 +564,7 @@ type billingDeps struct {
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 	cfg                   *config.Config
+	balanceDeferral       UserBalanceDeferral // nil keeps every deduction synchronous
 }
 
 func (s *GatewayService) billingDeps() *billingDeps {
@@ -562,7 +577,14 @@ func (s *GatewayService) billingDeps() *billingDeps {
 		balanceNotifyService:  s.balanceNotifyService,
 		userPlatformQuotaRepo: s.userPlatformQuotaRepo,
 		cfg:                   s.cfg,
+		balanceDeferral:       s.balanceDeferral,
 	}
+}
+
+// SetUserBalanceDeferral lets usage billing write deductions to the pending table.
+// Set once during wiring, before the service takes traffic.
+func (s *GatewayService) SetUserBalanceDeferral(deferral UserBalanceDeferral) {
+	s.balanceDeferral = deferral
 }
 
 func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usageLog *UsageLog, logKey string) {

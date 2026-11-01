@@ -42,6 +42,12 @@ type UsageBillingCommand struct {
 	APIKeyQuotaCost     float64
 	APIKeyRateLimitCost float64
 	AccountQuotaCost    float64
+
+	// DeferBalance writes BalanceCost to user_balance_pending instead of updating
+	// users.balance. It only says how the deduction is stored, so it stays out of
+	// buildUsageBillingFingerprint: a mode switch between a request and its replay
+	// must not turn the replay into a fingerprint conflict.
+	DeferBalance bool
 }
 
 func (c *UsageBillingCommand) Normalize() {
@@ -165,7 +171,8 @@ type AccountQuotaState struct {
 type UsageBillingApplyResult struct {
 	Applied              bool
 	APIKeyQuotaExhausted bool
-	NewBalance           *float64           // post-deduction balance (nil = no balance deduction)
+	NewBalance           *float64           // post-deduction balance (nil = no balance deduction, or deferred)
+	BalanceDeferred      bool               // true when the deduction went to user_balance_pending
 	BalanceOverdrafted   bool               // true when the sufficient-balance guard missed and debt was still recorded
 	QuotaState           *AccountQuotaState // post-increment quota state (nil = no quota increment)
 }
