@@ -1137,3 +1137,20 @@ func TestUsageBillingApply_HotUserDoesNotWaitForUserRowOnSmallPool(t *testing.T)
 	f.settleAll(t)
 	f.requireLedger(t, decimal.NewFromInt(1000).Sub(sum).String(), "0")
 }
+
+// A usage_logs insert holds FOR KEY SHARE on the users row through its foreign
+// key, and a busy user always has one open. Settlement must get past it, or the
+// users this table exists for would never settle.
+func TestUserBalanceSettleIsNotBlockedByForeignKeyLocks(t *testing.T) {
+	f := newUserBalanceFixture(t, 10)
+	f.deferCharge(t, 1.25)
+
+	tx, err := integrationDB.BeginTx(context.Background(), nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(context.Background(), `SELECT 1 FROM users WHERE id = $1 FOR KEY SHARE`, f.user.ID)
+	require.NoError(t, err)
+
+	f.settleAll(t)
+	f.requireLedger(t, "8.75", "0")
+}

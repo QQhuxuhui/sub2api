@@ -27,7 +27,7 @@ func newRedeemAdjustmentRepoMock(t *testing.T) (*userRepository, sqlmock.Sqlmock
 // expectLockEffectiveBalance pins the order: the row lock, then pending in its own
 // statement.
 func expectLockEffectiveBalance(mock sqlmock.Sqlmock, userID int64, balance, pending string) {
-	mock.ExpectQuery(`SELECT balance FROM users WHERE id = \$1 AND deleted_at IS NULL FOR UPDATE`).
+	mock.ExpectQuery(`SELECT balance FROM users WHERE id = \$1 AND deleted_at IS NULL FOR NO KEY UPDATE`).
 		WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(balance))
 	mock.ExpectQuery(`SELECT COALESCE\(SUM\(amount\), 0\) FROM user_balance_pending WHERE user_id = \$1`).
@@ -75,7 +75,7 @@ func TestApplyRedeemConcurrencyAdjustment_UsesAtomicFloor(t *testing.T) {
 func TestApplyRedeemAdjustment_MissingUser(t *testing.T) {
 	repo, mock := newRedeemAdjustmentRepoMock(t)
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT balance FROM users WHERE id = \$1 AND deleted_at IS NULL FOR UPDATE`).
+	mock.ExpectQuery(`SELECT balance FROM users WHERE id = \$1 AND deleted_at IS NULL FOR NO KEY UPDATE`).
 		WithArgs(int64(404)).
 		WillReturnRows(sqlmock.NewRows([]string{"balance"}))
 	mock.ExpectRollback()
