@@ -97,6 +97,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // openAIAutoReset
 		nil, // promptAudit
 		nil, // pluginManager
+		&service.UserBalanceSettler{},
 	)
 
 	require.NotPanics(t, func() {
