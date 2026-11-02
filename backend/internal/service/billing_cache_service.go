@@ -992,7 +992,7 @@ func newBillingCircuitBreaker(cfg config.CircuitBreakerConfig) *billingCircuitBr
 	}
 	threshold := cfg.FailureThreshold
 	if threshold <= 0 {
-		threshold = 5
+		threshold = 50
 	}
 	return &billingCircuitBreaker{
 		state:            billingCircuitClosed,

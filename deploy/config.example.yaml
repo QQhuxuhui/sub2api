@@ -1102,9 +1102,9 @@ billing:
     # Enable circuit breaker for billing service
     # 启用计费服务熔断器
     enabled: true
-    # Number of failures before opening circuit
-    # 触发熔断的失败次数阈值
-    failure_threshold: 5
+    # Consecutive failures before opening circuit; any success resets the count
+    # 触发熔断的连续失败次数，任意一次成功都会清零
+    failure_threshold: 50
     # Time to wait before attempting reset (seconds)
     # 熔断后重试等待时间（秒）
     reset_timeout_seconds: 30

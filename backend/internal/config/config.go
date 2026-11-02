@@ -2076,7 +2076,7 @@ func setDefaults() {
 
 	// Billing
 	viper.SetDefault("billing.circuit_breaker.enabled", true)
-	viper.SetDefault("billing.circuit_breaker.failure_threshold", 5)
+	viper.SetDefault("billing.circuit_breaker.failure_threshold", 50)
 	viper.SetDefault("billing.circuit_breaker.reset_timeout_seconds", 30)
 	viper.SetDefault("billing.circuit_breaker.half_open_requests", 3)
 	viper.SetDefault("billing.minimum_balance_reserve", 0.000001)

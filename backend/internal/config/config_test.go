@@ -2630,3 +2630,23 @@ func TestLoad_DefaultGatewayImageStreamConfig(t *testing.T) {
 		t.Fatalf("image stream timeout = %d, want greater than ordinary stream timeout %d", cfg.Gateway.ImageStreamDataIntervalTimeout, cfg.Gateway.StreamDataIntervalTimeout)
 	}
 }
+
+func TestLoadBillingCircuitBreakerThreshold(t *testing.T) {
+	t.Run("default is fifty consecutive failures", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.True(t, cfg.Billing.CircuitBreaker.Enabled)
+		require.Equal(t, 50, cfg.Billing.CircuitBreaker.FailureThreshold)
+		require.Equal(t, 30, cfg.Billing.CircuitBreaker.ResetTimeoutSeconds)
+		require.Equal(t, 3, cfg.Billing.CircuitBreaker.HalfOpenRequests)
+	})
+
+	t.Run("environment override is kept", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		t.Setenv("BILLING_CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5")
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.Equal(t, 5, cfg.Billing.CircuitBreaker.FailureThreshold)
+	})
+}
