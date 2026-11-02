@@ -93,6 +93,11 @@ func MatchMonitorChallenge(path string, body []byte) (MonitorChallenge, bool) {
 	default:
 		return MonitorChallenge{}, false
 	}
+	// 绝大多数请求是流式或带工具，先按字段排除，省下全量校验和 ParseBytes 的复制。
+	// 下面的校验和判断都保留，这里命中时原逻辑同样返回 false。
+	if gjson.GetBytes(body, "stream").Bool() || gjson.GetBytes(body, "tools").Exists() {
+		return MonitorChallenge{}, false
+	}
 	if !gjson.ValidBytes(body) {
 		return MonitorChallenge{}, false
 	}

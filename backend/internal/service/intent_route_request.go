@@ -222,16 +222,18 @@ func intentContentText(r gjson.Result) string {
 		var b strings.Builder
 		for _, block := range r.Array() {
 			var text string
-			switch {
-			case block.Type == gjson.String:
+			if block.Type == gjson.String {
 				text = block.String()
-			case block.Get("functionCall").Exists() || block.Get("functionResponse").Exists():
-				continue
-			default:
-				switch block.Get("type").String() {
-				case "", "text", "input_text", "output_text":
-					text = block.Get("text").String()
+			} else {
+				// 先看 type：图片块带着 MB 级数据，后面几次字段查找都要扫过它，
+				// 而非文本块无论如何都取不到文本，可以直接跳过。
+				if !isIntentTextBlockType(block.Get("type").String()) {
+					continue
 				}
+				if block.Get("functionCall").Exists() || block.Get("functionResponse").Exists() {
+					continue
+				}
+				text = block.Get("text").String()
 			}
 			if text = strings.TrimSpace(text); text != "" {
 				if b.Len() > 0 {
@@ -243,6 +245,14 @@ func intentContentText(r gjson.Result) string {
 		return b.String()
 	}
 	return ""
+}
+
+func isIntentTextBlockType(blockType string) bool {
+	switch blockType {
+	case "", "text", "input_text", "output_text":
+		return true
+	}
+	return false
 }
 
 func truncateRunes(s string, max int) string {

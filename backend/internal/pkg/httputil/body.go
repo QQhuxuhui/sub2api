@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"compress/zlib"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -211,7 +212,14 @@ func NormalizeLenientJSONRequestBody(body []byte, maxNormalizedBytes int64) ([]b
 	var out []byte
 	inString := false
 	escaped := false
-	for i, b := range body {
+	for i := 0; i < len(body); i++ {
+		// 还没开始改写时，字符串里的普通内容不需要逐字节判断。
+		if inString && !escaped && out == nil {
+			if i = skipPlainJSONStringBytes(body, i); i >= len(body) {
+				break
+			}
+		}
+		b := body[i]
 		if inString && isJSONControlByte(b) {
 			if out == nil {
 				capHint := len(body) + 6
@@ -249,6 +257,31 @@ func NormalizeLenientJSONRequestBody(body []byte, maxNormalizedBytes int64) ([]b
 		return out, nil
 	}
 	return body, nil
+}
+
+// skipPlainJSONStringBytes 从 start 起按 8 字节一组跳过字符串内的普通内容，返回第一个
+// 可能含引号、反斜杠或控制字节的组的起点。MB 级 base64 不用逐字节走状态机。
+func skipPlainJSONStringBytes(body []byte, start int) int {
+	const (
+		lowBits  = uint64(0x0101010101010101)
+		highBits = uint64(0x8080808080808080)
+	)
+	i := start
+	for i+8 <= len(body) {
+		word := binary.LittleEndian.Uint64(body[i:])
+		quote := word ^ (lowBits * '"')
+		backslash := word ^ (lowBits * '\\')
+		del := word ^ (lowBits * 0x7f)
+		special := (quote - lowBits) &^ quote
+		special |= (backslash - lowBits) &^ backslash
+		special |= (del - lowBits) &^ del
+		special |= (word - lowBits*0x20) &^ word
+		if special&highBits != 0 {
+			break
+		}
+		i += 8
+	}
+	return i
 }
 
 func trimUTF8BOM(body []byte) []byte {

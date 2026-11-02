@@ -1057,8 +1057,12 @@ func isBareOpenAIResponsesPath(c *gin.Context) bool {
 }
 
 func isOpenAIRemoteCompactionV2Request(body []byte) bool {
+	// 触发项检查有字节过滤，放前面；两个判断都没有副作用。
+	if !service.HasCompactionTriggerInInput(body) {
+		return false
+	}
 	stream, valid := parseOpenAICompatibleStream(body)
-	return valid && stream && service.HasCompactionTriggerInInput(body)
+	return valid && stream
 }
 
 // normalizeOpenAIResponsesCompactRequest keeps Codex remote compaction v2 on
