@@ -1679,7 +1679,13 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		if bodyLooksLikeSSE {
 			return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
 		}
-		return nil, fmt.Errorf("parse response: invalid json response")
+		// A valid JSON object under an SSE label used to go through the SSE
+		// converter, which accepted bodies without usage (compact replies).
+		// Keep accepting them with zero usage rather than failing the request.
+		if !bareJSONUnderSSEHeader {
+			return nil, fmt.Errorf("parse response: invalid json response")
+		}
+		usageValue = OpenAIUsage{}
 	}
 	usage := &usageValue
 	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false)

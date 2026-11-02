@@ -55,3 +55,24 @@ func TestSSEHeaderWithFramedBodyStillConverts(t *testing.T) {
 	require.False(t, openAISSEHeaderCarriesBareJSON(newRewriteTestUpstreamResponse("text/event-stream", "").Header, []byte(`not json`)))
 	require.False(t, openAISSEHeaderCarriesBareJSON(newRewriteTestUpstreamResponse("text/event-stream", "").Header, []byte(`[1,2]`)))
 }
+
+// 没有 usage 的裸 JSON（如 compact 响应）仍要成功返回并能桥接成 SSE，用量记 0。
+func TestHandleNonStreamingResponse_SSEHeaderBareJSONWithoutUsage(t *testing.T) {
+	for _, body := range []string{
+		`{"id":"resp_1","model":"gpt-5.4-2026-03-05","output":[{"type":"compaction","encrypted_content":"x"}]}`,
+		`{"id":"resp_1","model":"gpt-5.4-2026-03-05","output":[{"type":"compaction","encrypted_content":"x"}],"usage":null}`,
+	} {
+		c, rec := newRewriteTestContext(t, rewriteTestClientModel)
+		resp := newRewriteTestUpstreamResponse("text/event-stream", body)
+		result, err := newRewriteTestService().handleNonStreamingResponse(context.Background(), resp, c, openAIRewriteTestAccount(AccountTypeAPIKey), rewriteTestChannelModel, rewriteTestUpstreamModel)
+		require.NoError(t, err, body)
+		require.Zero(t, result.usage.InputTokens)
+		require.Equal(t, rewriteTestClientModel, gjson.Get(rec.Body.String(), "model").String())
+
+		bc, brec := newCompactBridgeTestContext(t, true)
+		bc.Request = bc.Request.WithContext(c.Request.Context())
+		_, err = newRewriteTestService().handleNonStreamingResponse(context.Background(), newRewriteTestUpstreamResponse("text/event-stream", body), bc, openAIRewriteTestAccount(AccountTypeAPIKey), rewriteTestChannelModel, rewriteTestUpstreamModel)
+		require.NoError(t, err, body)
+		require.Contains(t, brec.Body.String(), "event: response.completed", "compact client stream still gets the SSE bridge")
+	}
+}
