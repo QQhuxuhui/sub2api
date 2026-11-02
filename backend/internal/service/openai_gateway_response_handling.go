@@ -1647,7 +1647,8 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	// Detect SSE responses for ALL account types via Content-Type header.
 	// Some OpenAI-compatible upstreams (including other sub2api instances)
 	// may return SSE even when stream=false was requested.
-	if isEventStreamResponse(resp.Header) {
+	bareJSONUnderSSEHeader := openAISSEHeaderCarriesBareJSON(resp.Header, body)
+	if isEventStreamResponse(resp.Header) && !bareJSONUnderSSEHeader {
 		return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
 	}
 	// bodyLooksLikeSSE is a line-level heuristic: real SSE framing requires
@@ -1710,6 +1711,11 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 			contentType = upstreamType
 		}
 	}
+	if bareJSONUnderSSEHeader {
+		// The upstream label was wrong; the client gets the JSON it asked for.
+		c.Writer.Header().Del("Content-Type")
+		contentType = "application/json"
+	}
 
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		c.Data(resp.StatusCode, contentType, body)
@@ -1728,6 +1734,18 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 func isEventStreamResponse(header http.Header) bool {
 	contentType := strings.ToLower(header.Get("Content-Type"))
 	return strings.Contains(contentType, "text/event-stream")
+}
+
+// openAISSEHeaderCarriesBareJSON reports an upstream that labels a stream=false
+// reply as text/event-stream but sends a plain JSON object without any SSE
+// framing. Converting it as SSE finds no terminal event, which drops usage to
+// zero and skips the model rewrite, so callers must treat it as JSON.
+func openAISSEHeaderCarriesBareJSON(header http.Header, body []byte) bool {
+	if !isEventStreamResponse(header) || bodyHasSSEFraming(body) {
+		return false
+	}
+	trimmed := bytes.TrimSpace(body)
+	return len(trimmed) > 0 && trimmed[0] == '{' && gjson.ValidBytes(trimmed)
 }
 
 // bodyHasSSEFraming reports whether body contains genuine SSE framing by

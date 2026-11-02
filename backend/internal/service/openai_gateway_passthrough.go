@@ -2378,7 +2378,8 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	// Some upstreams (e.g. other sub2api instances) may return SSE even when
 	// stream=false was requested. Without this conversion the client would
 	// receive raw SSE text or a terminal event with empty output.
-	if isEventStreamResponse(resp.Header) {
+	bareJSONUnderSSEHeader := openAISSEHeaderCarriesBareJSON(resp.Header, body)
+	if isEventStreamResponse(resp.Header) && !bareJSONUnderSSEHeader {
 		return s.handlePassthroughSSEToJSON(resp, c, account, body, originalModel, mappedModel)
 	}
 
@@ -2399,7 +2400,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
 	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" {
+	if contentType == "" || bareJSONUnderSSEHeader {
+		// A bare JSON body under an SSE label goes out as the JSON it is.
+		c.Writer.Header().Del("Content-Type")
 		contentType = "application/json"
 	}
 	body = newOpenAIResponseModelRewrite(c, account, originalModel, mappedModel).applyJSON(body)
