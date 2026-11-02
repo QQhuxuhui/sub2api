@@ -33,6 +33,12 @@ func (s *GatewayService) selectIntentRoutedAccount(
 	if geminiCachedContentBoundFromContext(ctx) {
 		return nil, nil
 	}
+	// The decision was made for the API key's group. When Claude Code
+	// restriction has moved the request to its fallback group, that group's
+	// ordinary scheduling must serve it, not the original group's rule.
+	if decision.GroupID != 0 && groupID != nil && *groupID != decision.GroupID {
+		return nil, nil
+	}
 	if len(decision.AccountIDs) == 0 {
 		// Scope only: this turn has no preference, and these protocols bind no
 		// server-side state to an account that would have to be honored.
