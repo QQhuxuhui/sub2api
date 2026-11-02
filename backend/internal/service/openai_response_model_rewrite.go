@@ -59,7 +59,8 @@ func containsModelHeaderKeyHint[T string | []byte](data T) bool {
 // 客户端模型时原样返回，正常响应不多一个字节。
 // 上游原值由 upstreamResponseModelObserver 在改写之前记录，管理端日志可见。
 //
-// 其他平台保持旧语义：仅当字段值恰好等于上游模型名时才替换。
+// 其他平台命中映射时把协议 model 字段还原成映射前的名字，上游返回别名也一样；
+// 只改协议字段，不碰正文和工具参数。
 type openAIResponseModelRewrite struct {
 	from  string
 	to    string
@@ -208,7 +209,7 @@ func (r openAIResponseModelRewrite) mayApply(data string) bool {
 	if r.force {
 		return strings.Contains(data, `"model"`) || containsModelHeaderKeyHint(data)
 	}
-	return strings.Contains(data, r.from)
+	return strings.Contains(data, `"model"`)
 }
 
 func (r openAIResponseModelRewrite) mayApplyBytes(data []byte) bool {
@@ -224,7 +225,7 @@ func (r openAIResponseModelRewrite) mayApplyBytes(data []byte) bool {
 	if r.force {
 		return bytes.Contains(data, []byte(`"model"`)) || containsModelHeaderKeyHint(data)
 	}
-	return bytes.Contains(data, []byte(r.from))
+	return bytes.Contains(data, []byte(`"model"`))
 }
 
 // appliesToWSEvent 决定某个 WS 事件是否需要改写。强制模式不按事件类型过滤，
@@ -246,7 +247,16 @@ func (r openAIResponseModelRewrite) applyJSON(data []byte) []byte {
 	switch {
 	case !r.rewritesModel():
 	case !r.force:
-		updated = replaceOpenAIWSMessageModel(updated, r.from, r.to)
+		if gjson.ValidBytes(updated) {
+			for _, path := range []string{"model", "response.model"} {
+				if gjson.GetBytes(updated, path).Type != gjson.String {
+					continue
+				}
+				if next, err := sjson.SetBytes(updated, path, r.to); err == nil {
+					updated = next
+				}
+			}
+		}
 	default:
 		values := gjson.GetManyBytes(updated, openAIForcedResponseModelPaths...)
 		for i, value := range values {

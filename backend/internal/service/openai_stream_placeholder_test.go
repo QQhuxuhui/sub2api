@@ -153,7 +153,7 @@ const (
 
 func TestOpenAIStreamKeepaliveIsNotOutput(t *testing.T) {
 	const keepalive = `{"type":"keepalive","sequence_number":2}`
-	require.True(t, openAIStreamEventIsPreamble("keepalive"))
+	require.True(t, openAIStreamEventIsMetadata("keepalive"))
 	require.False(t, openAIStreamDataStartsClientOutput(keepalive, "keepalive"))
 	require.False(t, openAIStreamDataStartsSemanticTTFT(keepalive, "keepalive"))
 	require.False(t, openAIStreamDataStartsSemanticTTFT(keepalive, ""), "the type may only be in the data")

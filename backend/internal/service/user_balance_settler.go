@@ -232,6 +232,9 @@ func (s *UserBalanceSettler) Start() {
 // Stop ends the loop and drains for at most 5 seconds. What is left waits for the
 // next start: committed rows are not lost.
 func (s *UserBalanceSettler) Stop() {
+	if s == nil {
+		return
+	}
 	s.lifecycleMu.Lock()
 	cancel, done, stopped := s.cancel, s.done, s.stopped
 	s.stopped = true

@@ -162,7 +162,7 @@ func TestPaymentSettlementRegressionCreationLocksGatewayAmount(t *testing.T) {
 	req := CreateOrderRequest{UserID: seed.UserID, PaymentType: payment.TypeUSDT, OrderType: payment.OrderTypeBalance, Amount: 150, usdtQuote: q}
 	cfg := &PaymentConfig{MaxPendingOrders: 10, OrderTimeoutMin: 10}
 	sel := &payment.InstanceSelection{InstanceID: f.instance, ProviderKey: payment.TypeEpusdt, Config: map[string]string{"currency": "USD"}}
-	o, err := f.svc.createOrderInTx(ctx, req, &User{ID: seed.UserID, Email: seed.UserEmail, Username: seed.UserName}, nil, cfg, 1065, 150, 0, 150, sel)
+	o, err := f.svc.createOrderInTx(ctx, req, &User{ID: seed.UserID, Email: seed.UserEmail, Username: seed.UserName}, nil, cfg, 1065, 150, 0, 150, 0, sel)
 	require.NoError(t, err)
 	require.Equal(t, "150", f.reload(o.ID).ProviderSnapshot["usdt_gateway_amount"])
 	require.Equal(t, 150.0, paymentGatewayAmount(f.reload(o.ID)))

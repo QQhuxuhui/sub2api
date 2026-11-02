@@ -28,6 +28,11 @@ func (s *GatewayService) selectIntentRoutedAccount(
 		return nil, nil
 	}
 	decision.clearSelected()
+	// An explicit Gemini cache lives on one account; a keyword rule must not move
+	// the request away from it, so ordinary (bound) scheduling takes over.
+	if geminiCachedContentBoundFromContext(ctx) {
+		return nil, nil
+	}
 	if len(decision.AccountIDs) == 0 {
 		// Scope only: this turn has no preference, and these protocols bind no
 		// server-side state to an account that would have to be honored.

@@ -31,11 +31,11 @@ func openAIStreamEventIsPlaceholder(data, eventType string) bool {
 	switch eventType {
 	case "response.output_text.delta", "response.refusal.delta",
 		"response.reasoning_summary_text.delta", "response.reasoning_text.delta":
-		return gjson.Get(data, openAIStreamPlaceholderMarker).Bool() || openAIStreamTextIsBlank(gjson.Get(data, "delta").String())
+		return gjson.Get(data, openAIStreamPlaceholderMarker).Bool() || openAIStreamStringFieldIsBlank(data, "delta")
 	case "response.output_text.done", "response.reasoning_summary_text.done", "response.reasoning_text.done":
-		return gjson.Get(data, openAIStreamPlaceholderMarker).Bool() || openAIStreamTextIsBlank(gjson.Get(data, "text").String())
+		return gjson.Get(data, openAIStreamPlaceholderMarker).Bool() || openAIStreamStringFieldIsBlank(data, "text")
 	case "response.refusal.done":
-		return gjson.Get(data, openAIStreamPlaceholderMarker).Bool() || openAIStreamTextIsBlank(gjson.Get(data, "refusal").String())
+		return gjson.Get(data, openAIStreamPlaceholderMarker).Bool() || openAIStreamStringFieldIsBlank(data, "refusal")
 	case "response.content_part.added", "response.content_part.done":
 		return gjson.Get(data, openAIStreamPlaceholderMarker).Bool() || openAIStreamPartIsBlank(gjson.Get(data, "part"))
 	case "response.output_item.added", "response.output_item.done":
@@ -76,4 +76,12 @@ func openAIStreamTextIsBlank(text string) bool {
 		}
 		return unicode.IsSpace(r)
 	}) == ""
+}
+
+// openAIStreamStringFieldIsBlank is true only for a string field holding nothing
+// visible. A null, missing or non-string field is not provably blank, so it keeps
+// counting as output.
+func openAIStreamStringFieldIsBlank(data, field string) bool {
+	value := gjson.Get(data, field)
+	return value.Type == gjson.String && openAIStreamTextIsBlank(value.String())
 }

@@ -112,7 +112,7 @@ func TestCacheStripRegressionChatUpstreamBridges(t *testing.T) {
 						result, err = svc.forwardAnthropicViaRawChatCompletions(context.Background(), c, account, body, "")
 					} else {
 						body := []byte(fmt.Sprintf(`{"model":"gpt-5.4","input":"hi","stream":%t}`, stream))
-						result, err = svc.forwardResponsesViaRawChatCompletions(context.Background(), c, account, body)
+						result, err = svc.forwardResponsesViaRawChatCompletions(context.Background(), c, account, body, time.Now())
 					}
 					require.NoError(t, err)
 					require.Equal(t, 20, result.Usage.CacheCreationInputTokens, "retain upstream usage for accounting")

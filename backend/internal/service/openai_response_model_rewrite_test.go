@@ -119,14 +119,14 @@ func TestOpenAIResponseModelRewrite_NoClientModelDoesNotRewriteModel(t *testing.
 	require.False(t, newOpenAIResponseModelRewrite(c, off, "", "").active(), "既不改 model 也不抹缓存写入时完全不介入")
 }
 
-func TestOpenAIResponseModelRewrite_NonOpenAIKeepsExactMatchSemantics(t *testing.T) {
+func TestOpenAIResponseModelRewrite_NonOpenAIRestoresMappedAlias(t *testing.T) {
 	c, _ := newRewriteTestContext(t, rewriteTestClientModel)
 	account := &Account{ID: 1, Platform: PlatformGrok, Type: AccountTypeAPIKey}
 	rw := newOpenAIResponseModelRewrite(c, account, "grok-alias", "grok-4.5")
 	require.False(t, rw.force)
 
-	swapped := []byte(`{"model":"grok-4.5-0709"}`)
-	require.Equal(t, string(swapped), string(rw.applyJSON(swapped)), "非 OpenAI 平台不做强制覆盖")
+	swapped := rw.applyJSON([]byte(`{"model":"grok-4.5-0709"}`))
+	require.Equal(t, "grok-alias", gjson.GetBytes(swapped, "model").String(), "命中映射时上游别名也要还原")
 	exact := rw.applyJSON([]byte(`{"model":"grok-4.5"}`))
 	require.Equal(t, "grok-alias", gjson.GetBytes(exact, "model").String())
 	require.Equal(t, "grok-alias", openAIClientVisibleModel(c, account, "grok-alias"), "非 OpenAI 平台不读客户端上下文")
@@ -308,12 +308,12 @@ func TestRawChatCompletions_ForcesClientModelOnlyForOpenAI(t *testing.T) {
 	require.NoError(t, err)
 	requireClientSeesAliasAndLogKeepsUpstream(t, c, rec.Body.String())
 
-	// 国产供应商的 raw Chat Completions 维持原样透传。
+	// 国产供应商不做强制覆盖，只按映射还原成转发层模型名。
 	c, rec = newRewriteTestContext(t, rewriteTestClientModel)
 	cnAccount := &Account{ID: 2, Platform: PlatformDeepseek, Type: AccountTypeAPIKey}
 	_, err = newRewriteTestService().bufferRawChatCompletions(c, newRewriteTestUpstreamResponse("application/json", ccBody), cnAccount, rewriteTestChannelModel, rewriteTestUpstreamModel, rewriteTestUpstreamModel, nil, nil, time.Now())
 	require.NoError(t, err)
-	require.Equal(t, rewriteTestSwappedModel, gjson.Get(rec.Body.String(), "model").String())
+	require.Equal(t, rewriteTestChannelModel, gjson.Get(rec.Body.String(), "model").String())
 }
 
 func TestOpenAIWSMessageRewrite_ForcesClientModel(t *testing.T) {
@@ -527,4 +527,84 @@ func TestHandleCodexDirectImagesNonStreamingResponse_RewritesRootModel(t *testin
 	require.Equal(t, 1, count)
 	require.Equal(t, rewriteTestImageClientModel, gjson.Get(rec.Body.String(), "model").String())
 	requireImageClientSeesAliasAndLogKeepsUpstream(t, c, rec.Body.String())
+}
+
+func TestMappedResponseModelPreservesOtherData(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	body := `{"model":"alias","text":"mapped alias","tool":{"model":"mapped","arguments":"{\"model\":\"alias\"}"}}`
+	want := `{"model":"public","text":"mapped alias","tool":{"model":"mapped","arguments":"{\"model\":\"alias\"}"}}`
+	require.Equal(t, want, string(svc.replaceModelInResponseBody([]byte(body), "mapped", "public")))
+	require.Equal(t, "data: "+want, svc.replaceModelInSSELine("data: "+body, "mapped", "public"))
+	for _, body := range []string{
+		`{"model":"alias",`, `{"model":"alias"} trailing`, `{"model":null}`, `{"model":42}`, `{"model":{}}`, `{"model":[]}`, `{"model":true}`,
+		`{"text":"alias","tool":{"model":"alias"}}`,
+	} {
+		require.Equal(t, body, string(svc.replaceModelInResponseBody([]byte(body), "mapped", "public")))
+		require.Equal(t, "data: "+body, svc.replaceModelInSSELine("data: "+body, "mapped", "public"))
+	}
+	for _, models := range [][2]string{{"same", "same"}, {"", "public"}, {"mapped", ""}} {
+		body := `{"model":"alias","response":{"model":"alias"}}`
+		require.Equal(t, body, string(svc.replaceModelInResponseBody([]byte(body), models[0], models[1])))
+		require.Equal(t, "data: "+body, svc.replaceModelInSSELine("data: "+body, models[0], models[1]))
+	}
+	require.Equal(t, `data: {"response":{"model":42}}`, svc.replaceModelInSSELine(`data: {"response":{"model":42}}`, "mapped", "public"))
+	require.Equal(t, `{"model":"public"}`, string(svc.replaceModelInResponseBody([]byte(`{"model":""}`), "mapped", "public")))
+}
+
+// Exercise both streaming processors so substring fast paths cannot bypass the rewrite.
+func TestMappedResponseModelForwarding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, passthrough := range []bool{false, true} {
+		for _, returned := range []string{"zhipu/glm-5.3", "glm-5.3-alias"} {
+			for _, mapped := range []string{"ZHIPU/GLM-5.3", "public"} {
+				for _, kind := range []string{"json", "chat", "responses"} {
+					name := kind + "/" + returned + "/" + mapped
+					if passthrough {
+						name += "/passthrough"
+					}
+					t.Run(name, func(t *testing.T) {
+						model := returned
+						if mapped != "public" {
+							model = "public"
+						}
+						payload := `{"model":"` + returned + `","choices":[{"delta":{"content":"keep alias","tool_calls":[{"function":{"arguments":"{\"model\":\"alias\"}"}}]}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`
+						want := strings.Replace(payload, `"model":"`+returned+`"`, `"model":"`+model+`"`, 1)
+						contentType := "application/json"
+						body := payload
+						if kind == "responses" {
+							payload = `{"type":"response.completed","response":{"id":"resp_1","created_at":1700000000,"model":"` + returned + `","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`
+							want = strings.Replace(payload, `"model":"`+returned+`"`, `"model":"`+model+`"`, 1)
+						}
+						if kind != "json" {
+							contentType = "text/event-stream"
+							body = "data: " + payload + "\n\ndata: [DONE]\n\n"
+						}
+						rec := httptest.NewRecorder()
+						c, _ := gin.CreateTestContext(rec)
+						c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+						resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body))}
+						svc := &OpenAIGatewayService{}
+						account := &Account{ID: 1}
+						var err error
+						if kind == "json" {
+							if passthrough {
+								_, err = svc.handleNonStreamingResponsePassthrough(context.Background(), resp, c, account, "public", mapped)
+							} else {
+								_, err = svc.handleNonStreamingResponse(context.Background(), resp, c, account, "public", mapped)
+							}
+						} else {
+							if passthrough {
+								_, err = svc.handleStreamingResponsePassthrough(context.Background(), resp, c, account, time.Now(), "public", mapped)
+							} else {
+								_, err = svc.handleStreamingResponse(context.Background(), resp, c, account, time.Now(), "public", mapped)
+							}
+						}
+						require.NoError(t, err)
+						require.Contains(t, rec.Body.String(), want)
+						require.Equal(t, returned, observedUpstreamResponseModel(c))
+					})
+				}
+			}
+		}
+	}
 }
