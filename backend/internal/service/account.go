@@ -205,7 +205,7 @@ func (a *Account) IsSchedulable() bool {
 	}
 	// 保持可用：忽略上游触发的过载 / 限流 / 临时不可调度冷却，额度上限仍按配置生效。
 	if a.KeepAvailable() {
-		return !(a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded())
+		return !(a.SupportsAccountQuota() && a.IsQuotaExceeded())
 	}
 	if a.OverloadUntil != nil && now.Before(*a.OverloadUntil) {
 		return false

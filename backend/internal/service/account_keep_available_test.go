@@ -258,3 +258,23 @@ func TestKeepAvailable_BulkOtherEditsDoNotRestore(t *testing.T) {
 		require.Empty(t, repo.getByIDCalled)
 	}
 }
+
+// 额度上限对所有支持账号额度的类型都生效，保持可用也不例外；不支持额度的类型不受额度影响。
+func TestKeepAvailable_HonorsQuotaForEveryQuotaType(t *testing.T) {
+	future := time.Now().Add(10 * time.Minute)
+	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeBedrock, AccountTypeServiceAccount, AccountTypeOAuth} {
+		for _, keep := range []bool{false, true} {
+			account := keepAvailableTestAccount(keep)
+			account.Type = accountType
+			account.Extra["quota_limit"] = 10.0
+			account.Extra["quota_used"] = 10.0
+			want := !AccountTypeSupportsQuota(accountType)
+			require.Equal(t, want, account.IsSchedulable(), "type=%s keep=%v", accountType, keep)
+
+			// 额度未用完时，保持可用仍忽略上游冷却。
+			account.Extra["quota_used"] = 1.0
+			account.RateLimitResetAt = &future
+			require.Equal(t, keep, account.IsSchedulable(), "cooldown type=%s keep=%v", accountType, keep)
+		}
+	}
+}
