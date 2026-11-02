@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"unsafe"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -18,7 +19,11 @@ type inflightReservationEstimator interface {
 // 大请求体在热路径上不能按字段各扫一遍，这里只遍历一次顶层字段。
 func requestMaxOutputTokens(body []byte) int {
 	var maxTokens, maxCompletionTokens, maxOutputTokens, camelConfig, snakeConfig gjson.Result
-	gjson.ParseBytes(body).ForEach(func(key, value gjson.Result) bool {
+	if len(body) == 0 {
+		return 0
+	}
+	// 只读视图，不复制请求体；返回值只取数字，不会在调用后引用 body。
+	gjson.Parse(unsafe.String(unsafe.SliceData(body), len(body))).ForEach(func(key, value gjson.Result) bool {
 		switch key.Str {
 		case "max_tokens":
 			maxTokens = value
