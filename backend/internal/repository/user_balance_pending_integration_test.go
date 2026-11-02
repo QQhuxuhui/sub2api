@@ -291,12 +291,29 @@ func TestUsageBillingApply_ClaimAndPendingAreAtomic(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("a later effect failing removes the pending row", func(t *testing.T) {
+		// A missing key is now skipped, so a failing write after the pending
+		// insert is injected on the key's quota update instead.
+		_, err := integrationDB.ExecContext(ctx, fmt.Sprintf(`
+			CREATE OR REPLACE FUNCTION test_fail_key_quota() RETURNS trigger AS $$
+			BEGIN
+				RAISE EXCEPTION 'injected quota failure';
+			END $$ LANGUAGE plpgsql;
+			CREATE TRIGGER test_fail_key_quota BEFORE UPDATE ON api_keys
+				FOR EACH ROW WHEN (NEW.id = %d) EXECUTE FUNCTION test_fail_key_quota();
+		`, f.apiKey.ID))
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, err := integrationDB.ExecContext(ctx, `
+				DROP TRIGGER test_fail_key_quota ON api_keys;
+				DROP FUNCTION test_fail_key_quota();
+			`)
+			require.NoError(t, err)
+		})
+
 		cmd := f.command(1)
 		cmd.APIKeyQuotaCost = 1
-		cmd.APIKeyID = f.apiKey.ID + 1_000_000 // quota update finds no key
-
-		_, err := f.billing.Apply(ctx, cmd)
-		require.ErrorIs(t, err, service.ErrAPIKeyNotFound)
+		_, err = f.billing.Apply(ctx, cmd)
+		require.ErrorContains(t, err, "injected quota failure")
 		require.Zero(t, countRows(t, `SELECT COUNT(*) FROM usage_billing_dedup WHERE request_id = $1`, cmd.RequestID))
 		require.Zero(t, countRows(t, `SELECT COUNT(*) FROM user_balance_pending WHERE request_id = $1`, cmd.RequestID))
 	})
