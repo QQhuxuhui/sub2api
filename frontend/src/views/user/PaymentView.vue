@@ -588,8 +588,12 @@ const subscriptionUsdToCnyRate = computed(() => {
   const rate = checkout.value.subscription_usd_to_cny_rate
   return Number.isFinite(rate) && rate > 0 ? rate : 0
 })
+const allRechargeBonusTiers = computed(() => normalizeRechargeBonusTiers(checkout.value.recharge_bonus_tiers))
 // USDT 不参与充值优惠，与后端 CreateOrder 口径一致。
-const rechargeBonusTiers = computed(() => (selectedMethod.value === 'usdt' ? [] : normalizeRechargeBonusTiers(checkout.value.recharge_bonus_tiers)))
+function rechargeBonusTiersForMethod(method: string) {
+  return method === 'usdt' ? [] : allRechargeBonusTiers.value
+}
+const rechargeBonusTiers = computed(() => rechargeBonusTiersForMethod(selectedMethod.value))
 const rechargeBonusMode = computed(() => normalizeRechargeBonusMode(checkout.value.recharge_bonus_mode))
 
 // Adaptive grid: center single card, 2-col for 2 plans, 3-col for 3+
@@ -687,6 +691,16 @@ const bonusQuote = computed(() => quoteRechargeBonus(rechargeBonusTiers.value, v
   currencyDigits: currencyFractionDigits(selectedCurrency.value),
 }))
 const payBaseAmount = computed(() => bonusQuote.value.payBase)
+// 各支付方式的优惠不同（USDT 无优惠），判断某个方式能否承接金额时要用它自己的实付基数。
+function payBaseForMethod(method: string): number {
+  if (method === selectedMethod.value) return payBaseAmount.value
+  const currency = normalizePaymentCurrency(visibleMethods.value[method]?.currency)
+  return quoteRechargeBonus(rechargeBonusTiersForMethod(method), validAmount.value, {
+    multiplier: balanceRechargeMultiplier.value,
+    mode: rechargeBonusMode.value,
+    currencyDigits: currencyFractionDigits(currency),
+  }).payBase
+}
 const discountAmount = computed(() => roundPaymentAmount(validAmount.value - payBaseAmount.value, selectedCurrency.value))
 const creditedAmount = computed(() => bonusQuote.value.credited)
 const showBonusRow = computed(() => bonusQuote.value.mode !== 'discount' && bonusQuote.value.bonus > 0)
@@ -699,7 +713,7 @@ const methodOptions = computed<PaymentMethodOption[]>(() =>
       type,
       display_name: ml?.display_name,
       fee_rate: ml?.fee_rate ?? 0,
-      available: ml?.available !== false && amountFitsMethod(payBaseAmount.value, type),
+      available: ml?.available !== false && amountFitsMethod(payBaseForMethod(type), type),
     }
   })
 )
@@ -720,7 +734,7 @@ const showActualPay = computed(() => feeRate.value > 0 || discountAmount.value >
 const amountError = computed(() => {
   if (validAmount.value <= 0) return ''
   // No method can handle this amount
-  if (!enabledMethods.value.some((m) => amountFitsMethod(payBaseAmount.value, m))) {
+  if (!enabledMethods.value.some((m) => amountFitsMethod(payBaseForMethod(m), m))) {
     return t('payment.amountNoMethod')
   }
   if (usdtQuoted.value && !Number.isInteger(validAmount.value)) return t('payment.usdtQuote.wholeNumber')
@@ -786,7 +800,7 @@ const canSubmitSubscription = computed(() =>
 // Auto-switch to first available method when current selection can't handle the amount
 watch(() => [payBaseAmount.value, selectedMethod.value] as const, ([amt, method]) => {
   if (amt <= 0 || amountFitsMethod(amt, method)) return
-  const available = enabledMethods.value.find((m) => amountFitsMethod(amt, m))
+  const available = enabledMethods.value.find((m) => amountFitsMethod(payBaseForMethod(m), m))
   if (available) selectedMethod.value = available
 })
 

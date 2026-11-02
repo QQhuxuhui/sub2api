@@ -887,3 +887,39 @@ describe('PaymentView subscription feature flag', () => {
     wrapper.unmount()
   })
 })
+
+describe('PaymentView recharge bonus with USDT', () => {
+  it('checks each method with its own discount and does not flip between methods', async () => {
+    translate.mockClear()
+    routeState.path = '/purchase'
+    routeState.query = {}
+    const base = checkoutInfoFixture().data.methods.wxpay
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({
+      methods: {
+        alipay: { ...base, single_min: 60, single_max: 1000 },
+        usdt: { ...base, single_min: 10, single_max: 55, currency: 'USD' },
+      },
+      recharge_bonus_tiers: [{ min_amount: 50, bonus_percent: 50 }],
+      recharge_bonus_mode: 'discount',
+    }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 100)
+    await flushPromises()
+
+    // 支付宝折后 50 低于下限 60，USDT 无折扣 100 高于上限 55：两种方式都不可用，不能来回切换。
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('Maximum recursive updates')
+    expect(translate).toHaveBeenCalledWith('payment.amountNoMethod')
+    warn.mockRestore()
+  })
+})
