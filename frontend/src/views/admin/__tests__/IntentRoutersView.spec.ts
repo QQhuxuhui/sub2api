@@ -289,7 +289,7 @@ describe('IntentRoutersView', () => {
     await wrapper.get('[data-test="intent-save"]').trigger('click')
     await flushPromises()
     const [, input] = api.save.mock.calls[0]
-    expect(input.jev).toEqual({ enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, health_enabled: false, health_threshold: 0.7, health_rule: '', low_balance_usd: 1, balance_usd: 0 })
+    expect(input.jev).toEqual({ enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, health_enabled: false, health_threshold: 0.7, health_rule: '', timely_enabled: false, timely_threshold: 0.9, timely_rule: '', low_balance_usd: 1, balance_usd: 0 })
     expect(input.jev_api_key).toBe('')
     expect(input).not.toHaveProperty('jev_set_balance_usd') // an empty balance field changes nothing
   })
@@ -492,6 +492,19 @@ describe('IntentRoutersView', () => {
     expect(api.save.mock.calls[0][1].jev).toMatchObject({ health_enabled: true, health_threshold: 0.8, health_rule: 'coding' })
   })
 
+  it('edits the Jev time-sensitivity settings', async () => {
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+    expect(wrapper.find('[data-test="intent-jev-timely-threshold"]').exists()).toBe(false)
+    await wrapper.get('[data-test="intent-jev-timely-enabled"]').setValue(true)
+    expect((wrapper.get('[data-test="intent-jev-timely-threshold"]').element as HTMLInputElement).value).toBe('0.9')
+    await wrapper.get('[data-test="intent-jev-timely-threshold"]').setValue('0.85')
+    await wrapper.get('[data-test="intent-jev-timely-rule"]').setValue('coding')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].jev).toMatchObject({ timely_enabled: true, timely_threshold: 0.85, timely_rule: 'coding', health_enabled: false, threshold: 0.5 })
+  })
+
   it('leaves a stale health-check rule for the server to resolve, names matched as it does', async () => {
     // The server matches rule names case-insensitively and drops references to
     // rules that are gone while health checks are off; the page sends as is.
@@ -517,6 +530,26 @@ describe('IntentRoutersView', () => {
     const text = wrapper.get('[data-test="intent-test-result"]').text()
     expect(text).toContain('intentRouter.test.byJevHealthHit:{"p":"0.97"}')
     expect(text).toContain('intentRouter.test.resultNone')
+  })
+
+  it('shows the time-sensitivity answer of a try-it result', async () => {
+    api.test.mockResolvedValue({ data: { matched_by: 'jev', answer: 'p=0.10', intent: 'coding', understood: true, account_ids: [21], latency_ms: 70, probe_probability: 0.1, timely_probability: 0.934, timely: true } })
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-test-text"]').setValue('日本的首相是谁，不要使用联网搜索')
+    await wrapper.get('[data-test="intent-test-run"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="intent-test-timely"]').text()).toBe('intentRouter.test.byJevTimelyHit:{"p":"0.93"}')
+  })
+
+  it('keeps the Jev answers when the classifier decided', async () => {
+    api.test.mockResolvedValue({ data: { matched_by: 'classifier', answer: 'coding', intent: 'coding', understood: true, account_ids: [21], latency_ms: 300, probe_probability: 0.1, timely_probability: 0.2, jev_latency_ms: 60 } })
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-test-text"]').setValue('帮我重构这个函数')
+    await wrapper.get('[data-test="intent-test-run"]').trigger('click')
+    await flushPromises()
+    const before = wrapper.get('[data-test="intent-test-jev-before"]').text()
+    expect(before).toContain('intentRouter.test.byJevTimely:{"p":"0.20"}')
+    expect(before).toContain('intentRouter.test.latency:{"ms":60}')
   })
 
   it('shows the Jev probability of a try-it result', async () => {

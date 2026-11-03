@@ -114,6 +114,7 @@
                       <th class="py-1 pr-4">{{ t('intentRouter.jev.status.skipped') }}</th>
                       <th class="py-1 pr-4">{{ t('intentRouter.jev.status.probes') }}</th>
                       <th class="py-1 pr-4">{{ t('intentRouter.jev.status.health') }}</th>
+                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.timely') }}</th>
                       <th class="py-1 pr-4">{{ t('intentRouter.jev.status.errors') }}</th>
                       <th class="py-1 pr-4">{{ t('intentRouter.jev.status.tokens') }}</th>
                       <th class="py-1">{{ t('intentRouter.jev.status.cost') }}</th>
@@ -126,6 +127,7 @@
                       <td class="py-1 pr-4">{{ day.skipped }}</td>
                       <td class="py-1 pr-4">{{ day.probes }}</td>
                       <td class="py-1 pr-4">{{ day.health ?? 0 }}</td>
+                      <td class="py-1 pr-4" :title="t('intentRouter.jev.status.timelyTitle')">{{ day.timely_routed ?? 0 }} / {{ day.timely_hits ?? 0 }} / {{ day.timely_answered ?? 0 }}</td>
                       <td class="py-1 pr-4">{{ day.errors }}</td>
                       <td class="py-1 pr-4">{{ day.tokens }}</td>
                       <td class="py-1">{{ formatUSD(day.cost_usd) }} / {{ formatCNY(day.cost_usd) }}</td>
@@ -196,6 +198,30 @@
                     <option v-for="name in ruleNames" :key="name" :value="name">{{ name }}</option>
                   </select>
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.health.ruleHint') }}</p>
+                </div>
+              </div>
+            </div>
+            <div class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600" data-test="intent-jev-timely">
+              <label class="flex items-start gap-3">
+                <input v-model="form.jev.timely_enabled" data-test="intent-jev-timely-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                <span>
+                  <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('intentRouter.jev.timely.enabled') }}</span>
+                  <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.timely.enabledHint') }}</span>
+                </span>
+              </label>
+              <div v-if="form.jev.timely_enabled" class="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label class="input-label">{{ t('intentRouter.jev.timely.threshold') }}</label>
+                  <input v-model.number="form.jev.timely_threshold" data-test="intent-jev-timely-threshold" type="number" min="0.01" max="1" step="0.05" class="input" />
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.timely.thresholdHint') }}</p>
+                </div>
+                <div>
+                  <label class="input-label">{{ t('intentRouter.jev.timely.rule') }}</label>
+                  <select v-model="form.jev.timely_rule" data-test="intent-jev-timely-rule" class="input">
+                    <option value="">{{ t('intentRouter.jev.timely.ruleNone') }}</option>
+                    <option v-for="name in ruleNames" :key="name" :value="name">{{ name }}</option>
+                  </select>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.timely.ruleHint') }}</p>
                 </div>
               </div>
             </div>
@@ -399,10 +425,13 @@
                 {{ t('intentRouter.test.byKeyword', { keyword: testResult.keyword }) }}
               </p>
               <p v-else-if="testResult.matched_by === 'jev'" class="text-gray-500 dark:text-gray-400">
-                {{ t('intentRouter.test.byJev', { p: (testResult.probe_probability ?? 0).toFixed(2) }) }}<template v-if="testResult.health_probability !== undefined"> · {{ t(testResult.health_check ? 'intentRouter.test.byJevHealthHit' : 'intentRouter.test.byJevHealth', { p: testResult.health_probability.toFixed(2) }) }}</template> · {{ t('intentRouter.test.latency', { ms: testResult.latency_ms }) }}
+                {{ t('intentRouter.test.byJev', { p: (testResult.probe_probability ?? 0).toFixed(2) }) }}<template v-if="testResult.health_probability !== undefined"> · {{ t(testResult.health_check ? 'intentRouter.test.byJevHealthHit' : 'intentRouter.test.byJevHealth', { p: testResult.health_probability.toFixed(2) }) }}</template><template v-if="testResult.timely_probability !== undefined"> · <span data-test="intent-test-timely">{{ t(testResult.timely ? 'intentRouter.test.byJevTimelyHit' : 'intentRouter.test.byJevTimely', { p: testResult.timely_probability.toFixed(2) }) }}</span></template> · {{ t('intentRouter.test.latency', { ms: testResult.latency_ms }) }}
               </p>
               <p v-else-if="testResult.matched_by === 'classifier'" class="text-gray-500 dark:text-gray-400">
                 {{ t('intentRouter.test.answer', { answer: testResult.answer || '—' }) }} · {{ t('intentRouter.test.latency', { ms: testResult.latency_ms }) }}
+              </p>
+              <p v-if="testResult.matched_by === 'classifier' && testResult.probe_probability !== undefined" data-test="intent-test-jev-before" class="text-gray-500 dark:text-gray-400">
+                {{ t('intentRouter.test.byJev', { p: testResult.probe_probability.toFixed(2) }) }}<template v-if="testResult.health_probability !== undefined"> · {{ t('intentRouter.test.byJevHealth', { p: testResult.health_probability.toFixed(2) }) }}</template><template v-if="testResult.timely_probability !== undefined"> · {{ t('intentRouter.test.byJevTimely', { p: testResult.timely_probability.toFixed(2) }) }}</template><template v-if="testResult.jev_latency_ms !== undefined"> · {{ t('intentRouter.test.latency', { ms: testResult.jev_latency_ms }) }}</template>
               </p>
             </div>
             <p v-if="testError" data-test="intent-test-error" class="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ testError }}</p>
@@ -629,7 +658,7 @@ const blankForm = (): FormState => ({
   jevBalanceText: '',
 })
 function blankJev(): IntentJevConfig {
-  return { enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, health_enabled: false, health_threshold: 0.7, health_rule: '', low_balance_usd: 1, balance_usd: 0 }
+  return { enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, health_enabled: false, health_threshold: 0.7, health_rule: '', timely_enabled: false, timely_threshold: 0.9, timely_rule: '', low_balance_usd: 1, balance_usd: 0 }
 }
 const form = reactive<FormState>(blankForm())
 const baseline = ref('')
@@ -672,6 +701,7 @@ function toInput(): IntentRouterInput {
       api_keys: form.jevKeys.map((k) => ({ id: k.id })),
       sample_percent: Number(form.jev.sample_percent) || 0,
       health_threshold: Number(form.jev.health_threshold) || 0,
+      timely_threshold: Number(form.jev.timely_threshold) || 0,
       low_balance_usd: Number(form.jev.low_balance_usd) || 0,
     },
     ...(String(form.jevBalanceText).trim() !== '' ? { jev_set_balance_usd: Number(form.jevBalanceText) } : {}),

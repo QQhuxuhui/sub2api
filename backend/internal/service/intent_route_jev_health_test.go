@@ -123,7 +123,7 @@ func TestHTTPIntentProbeJudge_AsksTheHealthQuestion(t *testing.T) {
 	defer srv.Close()
 	j := &httpIntentProbeJudge{client: srv.Client(), endpoint: srv.URL}
 
-	res, err := j.ProbeProbability(context.Background(), "k", "jev-latest", "hi", true)
+	res, err := j.ProbeProbability(context.Background(), "k", "jev-latest", "hi", intentJevQuestions{Health: true})
 	require.NoError(t, err)
 	require.Equal(t, 0.9, res.P)
 	require.Equal(t, 0.97, *res.Health)
@@ -131,13 +131,13 @@ func TestHTTPIntentProbeJudge_AsksTheHealthQuestion(t *testing.T) {
 	require.Contains(t, q, "is_health")
 	require.Equal(t, intentJevHealthQuestion, q["is_health"].(map[string]any)["instructions"])
 
-	res, err = j.ProbeProbability(context.Background(), "k", "jev-latest", "hi", false)
+	res, err = j.ProbeProbability(context.Background(), "k", "jev-latest", "hi", intentJevQuestions{})
 	require.NoError(t, err)
 	require.Nil(t, res.Health)
 	require.NotContains(t, got["questions"].(map[string]any), "is_health")
 
 	answer = `{"answers":{"is_probe":{"noul":0.9}},"usage":{"input_tokens":400}}`
-	_, err = j.ProbeProbability(context.Background(), "k", "jev-latest", "hi", true)
+	_, err = j.ProbeProbability(context.Background(), "k", "jev-latest", "hi", intentJevQuestions{Health: true})
 	require.ErrorContains(t, err, "no health probability")
 }
 

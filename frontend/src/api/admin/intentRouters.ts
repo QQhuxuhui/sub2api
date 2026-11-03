@@ -35,6 +35,12 @@ export interface IntentJevConfig {
   health_threshold: number
   /** Rule health checks go to; "" leaves them to the group's ordinary scheduling. */
   health_rule: string
+  /** Also ask Jev, on the same call, whether answering needs current real-world information. */
+  timely_enabled: boolean
+  /** Time-sensitivity probability (0-1) at or above which a request is routed to timely_rule. */
+  timely_threshold: number
+  /** Rule time-sensitive requests go to; required while timely_enabled is on. */
+  timely_rule: string
   /** Estimated balance below this is flagged; never switches Jev off. */
   low_balance_usd: number
   /** Server-owned: the balance last entered and when (set via jev_set_balance_usd). */
@@ -55,6 +61,12 @@ export interface IntentJevDayStats {
   errors: number
   tokens: number
   cost_usd: number
+  /** Calls that carried a usable time-sensitivity answer. */
+  timely_answered?: number
+  /** At or above the time-sensitivity threshold (also when a health check or probe took the request). */
+  timely_hits?: number
+  /** Actually routed to the time-sensitivity rule. */
+  timely_routed?: number
 }
 
 export interface IntentJevStatus {
@@ -141,6 +153,11 @@ export interface IntentClassifyTestResult {
   /** Jev's health-check answer, when health checks are on. */
   health_probability?: number
   health_check?: boolean
+  /** Jev's time-sensitivity answer, when that question is on; timely: routed for it. */
+  timely_probability?: number
+  timely?: boolean
+  /** Jev's latency when the classifier decided after it. */
+  jev_latency_ms?: number
 }
 
 export interface IntentRouteEvent {

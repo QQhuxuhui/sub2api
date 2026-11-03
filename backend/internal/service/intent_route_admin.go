@@ -148,6 +148,13 @@ type IntentClassifyTestResult struct {
 	// on; HealthCheck reports it reached the health threshold.
 	HealthProbability *float64 `json:"health_probability,omitempty"`
 	HealthCheck       bool     `json:"health_check,omitempty"`
+	// TimelyProbability is Jev's time-sensitivity answer, when that question
+	// is on; Timely reports the text was routed for it.
+	TimelyProbability *float64 `json:"timely_probability,omitempty"`
+	Timely            bool     `json:"timely,omitempty"`
+	// JevLatencyMS is the Jev call's latency when the classifier decided
+	// after it (LatencyMS is then the classifier's).
+	JevLatencyMS int64 `json:"jev_latency_ms,omitempty"`
 }
 
 func intentRouterViewFromEnt(row *dbent.IntentRouter) *IntentRouterView {
@@ -445,7 +452,10 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 	// leave a router that can no longer be saved.
 	jevRule := strings.ToLower(strings.TrimSpace(in.Jev.Rule))
 	healthRule := strings.ToLower(strings.TrimSpace(in.Jev.HealthRule))
-	jevTarget := func(name string) bool { return name == jevRule || (healthRule != "" && name == healthRule) }
+	timelyRule := strings.ToLower(strings.TrimSpace(in.Jev.TimelyRule))
+	jevTarget := func(name string) bool {
+		return name == jevRule || (healthRule != "" && name == healthRule) || (timelyRule != "" && name == timelyRule)
+	}
 
 	if len(in.Rules) > intentRouteMaxRules {
 		return bad("INTENT_TOO_MANY_RULES", fmt.Sprintf("at most %d rules", intentRouteMaxRules))
@@ -532,6 +542,7 @@ func normalizeIntentJev(jev *domain.IntentJevConfig, stored domain.IntentJevConf
 	*jev = intentJevWithDefaults(*jev)
 	jev.Rule = strings.TrimSpace(jev.Rule)
 	jev.HealthRule = strings.TrimSpace(jev.HealthRule)
+	jev.TimelyRule = strings.TrimSpace(jev.TimelyRule)
 	// Server-owned fields: the balance baseline changes only through
 	// setBalance, the switch-off record only through the server — and is
 	// cleared once an admin turns Jev on again.
@@ -578,6 +589,31 @@ func normalizeIntentJev(jev *domain.IntentJevConfig, stored domain.IntentJevConf
 			// leaves a stale reference that must not block the save.
 			jev.HealthRule = ""
 		}
+	}
+	if jev.TimelyThreshold <= 0 || jev.TimelyThreshold > 1 {
+		return bad("INTENT_JEV_INVALID_TIMELY_THRESHOLD", "jev time-sensitivity threshold must be greater than 0 and at most 1")
+	}
+	// Like the health rule, saving checks only that the rule exists; a rule
+	// disabled or left without accounts is skipped at runtime by cfg.rule.
+	if jev.TimelyRule != "" {
+		found := false
+		for i := range rules {
+			if strings.EqualFold(strings.TrimSpace(rules[i].Name), jev.TimelyRule) {
+				jev.TimelyRule, found = strings.TrimSpace(rules[i].Name), true
+				break
+			}
+		}
+		switch {
+		case found:
+		case jev.Enabled && jev.TimelyEnabled:
+			return infraerrors.BadRequest("INTENT_JEV_TIMELY_RULE_UNKNOWN", "the time-sensitivity rule \""+jev.TimelyRule+"\" does not exist").
+				WithMetadata(map[string]string{"name": jev.TimelyRule})
+		default:
+			jev.TimelyRule = ""
+		}
+	}
+	if jev.Enabled && jev.TimelyEnabled && jev.TimelyRule == "" {
+		return bad("INTENT_JEV_TIMELY_RULE_REQUIRED", "choose the rule time-sensitive requests go to")
 	}
 	if jev.MaxTurns < 1 || jev.MaxTurns > intentJevMaxTurnsLimit {
 		return bad("INTENT_JEV_INVALID_MAX_TURNS", fmt.Sprintf("jev max turns must be 1-%d", intentJevMaxTurnsLimit))
@@ -761,7 +797,7 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 	if cfg.Jev.APIKey != "" && s.judge != nil {
 		started := s.now()
 		judgeCtx, cancel := context.WithTimeout(ctx, cfg.Jev.Timeout)
-		answer, err := s.judge.ProbeProbability(judgeCtx, cfg.Jev.APIKey, cfg.Jev.Model, text, cfg.Jev.HealthEnabled)
+		answer, err := s.judge.ProbeProbability(judgeCtx, cfg.Jev.APIKey, cfg.Jev.Model, text, intentJevQuestions{Health: cfg.Jev.HealthEnabled, Timely: cfg.Jev.TimelyEnabled})
 		cancel()
 		latency := s.now().Sub(started).Milliseconds()
 		if err != nil {
@@ -772,7 +808,7 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 			return nil, infraerrors.BadRequest("INTENT_JEV_FAILED", "jev call failed: "+truncateRunes(err.Error(), 300)).WithMetadata(meta)
 		}
 		p := answer.P
-		jevResult = &IntentClassifyTestResult{MatchedBy: "jev", Answer: fmt.Sprintf("p=%.2f", p), Understood: true, LatencyMS: latency, ProbeProbability: &p, HealthProbability: answer.Health, AccountIDs: []int64{}}
+		jevResult = &IntentClassifyTestResult{MatchedBy: "jev", Answer: fmt.Sprintf("p=%.2f", p), Understood: true, LatencyMS: latency, ProbeProbability: &p, HealthProbability: answer.Health, TimelyProbability: answer.Timely, AccountIDs: []int64{}}
 		if answer.Health != nil && *answer.Health >= cfg.Jev.HealthThreshold {
 			// A health check: its own rule, or ordinary scheduling.
 			jevResult.HealthCheck = true
@@ -785,6 +821,14 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 			jevResult.Intent, jevResult.AccountIDs = rule.Name, rule.AccountIDs
 			return jevResult, nil
 		}
+		// Time sensitivity decides only what health checks and probes leave.
+		if cfg.Jev.TimelyEnabled && answer.Timely != nil && *answer.Timely >= cfg.Jev.TimelyThreshold {
+			if rule, ok := cfg.rule(cfg.Jev.TimelyRule); ok {
+				jevResult.Timely = true
+				jevResult.Intent, jevResult.AccountIDs = rule.Name, rule.AccountIDs
+				return jevResult, nil
+			}
+		}
 	}
 	rules := cfg.classifierRules()
 	if len(rules) == 0 {
@@ -793,7 +837,7 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 		}
 		if !cfg.classifierReady() {
 			for _, rule := range cfg.activeRules() {
-				if len(rule.Keywords) == 0 && rule.Name != cfg.Jev.Rule {
+				if len(rule.Keywords) == 0 && rule.Name != cfg.Jev.Rule && rule.Name != cfg.Jev.TimelyRule {
 					return nil, infraerrors.BadRequest("INTENT_CLASSIFIER_INCOMPLETE", "set the classifier model and API key first")
 				}
 			}
@@ -811,6 +855,11 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 			WithMetadata(map[string]string{"latency_ms": fmt.Sprint(latency)})
 	}
 	result := &IntentClassifyTestResult{MatchedBy: "classifier", Answer: truncateRunes(answer, 300), LatencyMS: latency, AccountIDs: []int64{}}
+	if jevResult != nil {
+		// Keep what Jev said before the classifier decided.
+		result.ProbeProbability, result.HealthProbability, result.TimelyProbability = jevResult.ProbeProbability, jevResult.HealthProbability, jevResult.TimelyProbability
+		result.JevLatencyMS = jevResult.LatencyMS
+	}
 	result.Intent, result.Understood = matchIntentLabel(answer, rules)
 	if rule, ok := cfg.rule(result.Intent); ok {
 		result.AccountIDs = rule.AccountIDs

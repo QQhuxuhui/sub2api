@@ -76,6 +76,14 @@ type IntentJevConfig struct {
 	HealthThreshold float64 `json:"health_threshold"`
 	HealthRule      string  `json:"health_rule"`
 
+	// TimelyEnabled asks Jev, on the same call, whether answering needs current
+	// real-world information that may have changed since the model was trained.
+	// Requests at or above TimelyThreshold go to TimelyRule. Health checks and
+	// probes are decided first; this only applies to what they leave.
+	TimelyEnabled   bool    `json:"timely_enabled"`
+	TimelyThreshold float64 `json:"timely_threshold"`
+	TimelyRule      string  `json:"timely_rule"`
+
 	// BalanceUSD is the account balance the admin read off the TypeSafe
 	// console at BalanceSetAt (Jev has no balance API); spending recorded
 	// since then is subtracted to estimate what is left. Set by the server.

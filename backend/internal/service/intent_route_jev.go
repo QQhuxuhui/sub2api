@@ -30,6 +30,7 @@ const (
 	intentJevDefaultModel        = "jev-latest"
 	intentJevDefaultThreshold    = 0.5
 	intentJevDefaultHealthThres  = 0.7
+	intentJevDefaultTimelyThres  = 0.9
 	intentJevDefaultMaxTurns     = 3
 	intentJevDefaultTimeoutMS    = 1000
 	intentJevDefaultSample       = 100
@@ -66,16 +67,34 @@ const (
 		"It does NOT measure intelligence: no puzzles, no multi-step reasoning, no knowledge or identity questions, no drawing, no random-number sequences, no long outputs."
 )
 
+// intentJevTimelyQuestion is deliberately generic: it names no topic, so Jev
+// judges by itself whether the answer depends on facts that change over time.
+// Measured before shipping: time-sensitive questions 0.74-0.97 (also when the
+// user forbids searching), others 0.02-0.13; about 1% of live coding traffic
+// at 0.9; asking it moved no probe or health verdict on 300 live messages.
+const intentJevTimelyQuestion = "The `state` is the latest message a user sent to an AI assistant. Answering it correctly requires current " +
+	"real-world information that may have changed after the assistant's training data was collected, so the answer " +
+	"must be looked up rather than recalled from memory."
+
 // intentJevDayZone is the zone daily statistics roll over in (the operators'
 // day, not UTC).
 var intentJevDayZone = time.FixedZone("CST", 8*3600)
 
 // intentJevAnswer is one Jev verdict and what it was billed. Health is the
-// health-check probability, nil when that question was not asked.
+// health-check probability, nil when that question was not asked. Timely is
+// the time-sensitivity probability, nil when not asked or not usable.
 type intentJevAnswer struct {
 	P      float64
 	Health *float64
+	Timely *float64
 	Tokens int64
+}
+
+// intentJevQuestions selects the optional questions asked next to the probe
+// question on one call.
+type intentJevQuestions struct {
+	Health bool
+	Timely bool
 }
 
 // intentJevStatusError is a non-200 answer from Jev.
@@ -104,7 +123,7 @@ func intentJevAccountProblem(err error) (int, bool) {
 
 // intentProbeJudge asks Jev how likely a text is a probe of the model.
 type intentProbeJudge interface {
-	ProbeProbability(ctx context.Context, apiKey, model, text string, askHealth bool) (intentJevAnswer, error)
+	ProbeProbability(ctx context.Context, apiKey, model, text string, ask intentJevQuestions) (intentJevAnswer, error)
 }
 
 type httpIntentProbeJudge struct {
@@ -117,12 +136,16 @@ func newHTTPIntentProbeJudge() *httpIntentProbeJudge {
 	return &httpIntentProbeJudge{client: &http.Client{Timeout: 30 * time.Second}, endpoint: intentJevEndpoint}
 }
 
-func (j *httpIntentProbeJudge) ProbeProbability(ctx context.Context, apiKey, model, text string, askHealth bool) (intentJevAnswer, error) {
+func (j *httpIntentProbeJudge) ProbeProbability(ctx context.Context, apiKey, model, text string, ask intentJevQuestions) (intentJevAnswer, error) {
+	askHealth := ask.Health
 	questions := map[string]any{
 		"is_probe": map[string]any{"type": "noul", "instructions": intentJevProbeQuestion},
 	}
 	if askHealth {
 		questions["is_health"] = map[string]any{"type": "noul", "instructions": intentJevHealthQuestion}
+	}
+	if ask.Timely {
+		questions["is_timely"] = map[string]any{"type": "noul", "instructions": intentJevTimelyQuestion}
 	}
 	body, err := json.Marshal(map[string]any{
 		"state":     truncateRunes(text, intentJevMaxTextRunes),
@@ -178,7 +201,37 @@ func (j *httpIntentProbeJudge) ProbeProbability(ctx context.Context, apiKey, mod
 		}
 		answer.Health = h
 	}
+	if ask.Timely {
+		answer.Timely = parseIntentJevTimely(raw)
+	}
 	return answer, nil
+}
+
+// parseIntentJevTimely reads answers.is_timely.noul on its own, apart from the
+// probe and health answers: a missing, mistyped or out-of-range value drops
+// only the time-sensitivity verdict and never fails the call.
+func parseIntentJevTimely(raw []byte) *float64 {
+	var envelope struct {
+		Answers map[string]json.RawMessage `json:"answers"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil {
+		return nil
+	}
+	var answer struct {
+		Noul json.RawMessage `json:"noul"`
+	}
+	if json.Unmarshal(envelope.Answers["is_timely"], &answer) != nil {
+		return nil
+	}
+	// json.Unmarshal reads null into a float64 as 0 without an error.
+	if trimmed := bytes.TrimSpace(answer.Noul); len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil
+	}
+	var p float64
+	if json.Unmarshal(answer.Noul, &p) != nil || p < 0 || p > 1 {
+		return nil
+	}
+	return &p
 }
 
 // intentJevConfig is the hot-path copy of a router's Jev settings.
@@ -197,6 +250,10 @@ type intentJevConfig struct {
 	HealthEnabled   bool
 	HealthThreshold float64
 	HealthRule      string
+	// Time sensitivity: asked only when TimelyEnabled, routed to TimelyRule.
+	TimelyEnabled   bool
+	TimelyThreshold float64
+	TimelyRule      string
 	AllUsers        bool
 	UserIDs         map[int64]struct{}
 	// UserKeys narrows a listed user to some of their keys; a user without
@@ -219,6 +276,9 @@ func newIntentJevConfig(apiKey string, in domain.IntentJevConfig) intentJevConfi
 		HealthEnabled:   in.HealthEnabled,
 		HealthThreshold: in.HealthThreshold,
 		HealthRule:      strings.TrimSpace(in.HealthRule),
+		TimelyEnabled:   in.TimelyEnabled,
+		TimelyThreshold: in.TimelyThreshold,
+		TimelyRule:      strings.TrimSpace(in.TimelyRule),
 		AllUsers:        in.Scope != domain.IntentJevScopeListed,
 		UserIDs:         make(map[int64]struct{}, len(in.UserIDs)),
 		UserKeys:        make(map[int64]map[int64]struct{}),
@@ -258,6 +318,9 @@ func intentJevWithDefaults(jev domain.IntentJevConfig) domain.IntentJevConfig {
 	}
 	if jev.HealthThreshold == 0 {
 		jev.HealthThreshold = intentJevDefaultHealthThres
+	}
+	if jev.TimelyThreshold == 0 {
+		jev.TimelyThreshold = intentJevDefaultTimelyThres
 	}
 	if jev.LowBalanceUSD == nil {
 		low := intentJevDefaultLowBalance
@@ -468,7 +531,7 @@ func (s *IntentRouterService) judgeProbe(ctx context.Context, cfg *intentRouterC
 	}
 	started := s.now()
 	judgeCtx, cancel := context.WithTimeout(ctx, cfg.Jev.Timeout)
-	answer, err := s.judge.ProbeProbability(judgeCtx, cfg.Jev.APIKey, cfg.Jev.Model, text, cfg.Jev.HealthEnabled)
+	answer, err := s.judge.ProbeProbability(judgeCtx, cfg.Jev.APIKey, cfg.Jev.Model, text, intentJevQuestions{Health: cfg.Jev.HealthEnabled, Timely: cfg.Jev.TimelyEnabled})
 	cancel()
 	latency := s.now().Sub(started).Milliseconds()
 	s.jevCount(in.GroupID, intentJevStatCalls, 1)
@@ -489,6 +552,13 @@ func (s *IntentRouterService) judgeProbe(ctx context.Context, cfg *intentRouterC
 	}
 	s.jevSuccess(in.GroupID)
 	s.jevSpend(in.GroupID, answer.Tokens)
+	timelyHit := cfg.Jev.TimelyEnabled && answer.Timely != nil && *answer.Timely >= cfg.Jev.TimelyThreshold
+	if cfg.Jev.TimelyEnabled && answer.Timely != nil {
+		s.jevCount(in.GroupID, intentJevStatTimelyAnswered, 1)
+		if timelyHit {
+			s.jevCount(in.GroupID, intentJevStatTimelyHits, 1)
+		}
+	}
 	if answer.Health != nil && *answer.Health >= cfg.Jev.HealthThreshold {
 		s.jevCount(in.GroupID, intentJevStatHealth, 1)
 		verdict := intentJevVerdict{Label: fmt.Sprintf("health:%.2f", *answer.Health)}
@@ -502,6 +572,14 @@ func (s *IntentRouterService) judgeProbe(ctx context.Context, cfg *intentRouterC
 		return verdict
 	}
 	if answer.P < cfg.Jev.Threshold {
+		// Time sensitivity only decides what health checks and probes leave.
+		if timelyHit {
+			if timelyRule, ok := cfg.rule(cfg.Jev.TimelyRule); ok {
+				s.jevCount(in.GroupID, intentJevStatTimelyRouted, 1)
+				s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "jev_timely", Intent: timelyRule.Name, LatencyMS: latency, Detail: fmt.Sprintf("timely=%.2f p=%.2f", *answer.Timely, answer.P)})
+				return intentJevVerdict{Rule: timelyRule, Route: true, Label: fmt.Sprintf("timely:%.2f", *answer.Timely)}
+			}
+		}
 		return intentJevVerdict{}
 	}
 	s.jevCount(in.GroupID, intentJevStatProbes, 1)
@@ -524,7 +602,13 @@ const (
 	intentJevStatProbes  = "probes"
 	intentJevStatHealth  = "health"
 	intentJevStatErrors  = "errors"
-	intentJevStatTokens  = "tokens"
+	// Time sensitivity: answered = the call carried a usable timely answer;
+	// hits = at or above the threshold, also when a health check or probe took
+	// the request; routed = sent to the timely rule.
+	intentJevStatTimelyAnswered = "timely_answered"
+	intentJevStatTimelyHits     = "timely_hits"
+	intentJevStatTimelyRouted   = "timely_routed"
+	intentJevStatTokens         = "tokens"
 )
 
 // intentJevStats keeps daily counters and the tokens spent since the admin
@@ -640,6 +724,10 @@ type IntentJevDayStats struct {
 	Errors  int64   `json:"errors"`
 	Tokens  int64   `json:"tokens"`
 	CostUSD float64 `json:"cost_usd"`
+
+	TimelyAnswered int64 `json:"timely_answered"`
+	TimelyHits     int64 `json:"timely_hits"`
+	TimelyRouted   int64 `json:"timely_routed"`
 }
 
 type IntentJevBalance struct {
@@ -700,6 +788,7 @@ func (s *IntentRouterService) JevStatus(ctx context.Context, groupID int64) (*In
 				Date: day, Calls: counts[intentJevStatCalls], Skipped: counts[intentJevStatSkipped],
 				Probes: counts[intentJevStatProbes], Health: counts[intentJevStatHealth], Errors: counts[intentJevStatErrors],
 				Tokens: counts[intentJevStatTokens], CostUSD: intentJevCostUSD(counts[intentJevStatTokens]),
+				TimelyAnswered: counts[intentJevStatTimelyAnswered], TimelyHits: counts[intentJevStatTimelyHits], TimelyRouted: counts[intentJevStatTimelyRouted],
 			})
 		}
 	}
