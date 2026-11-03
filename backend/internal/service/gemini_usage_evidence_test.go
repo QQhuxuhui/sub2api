@@ -335,3 +335,22 @@ func TestGeminiUsageEvidence_SmallPayloadRedactedAtRender(t *testing.T) {
 	require.Contains(t, tail[0].Sample, "<text len=3>")
 	require.NotContains(t, tail[0].Sample, "abc")
 }
+
+// 回归（code-review-2 #1）：结构字段不能引用整块大载荷。
+func TestGeminiUsageEvidence_StructureFieldsDoNotRetainPayload(t *testing.T) {
+	big := `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"` + strings.Repeat("A", 200000) +
+		`"}}]},"finishReason":"STOP"}],"modelVersion":"gemini-3.8-flash","responseId":"rid"}`
+	ev := &geminiUsageEvidence{}
+	ev.observePayload([]byte(big))
+	for _, v := range []string{ev.modelVersion, ev.finishReason, ev.responseID} {
+		require.NotEmpty(t, v)
+		// 独立拷贝：容量等于自身长度，不可能覆盖 200KB 载荷。
+		require.Less(t, len(v), 64)
+	}
+	require.Equal(t, "gemini-3.8-flash", ev.modelVersion)
+	require.Equal(t, "STOP", ev.finishReason)
+
+	long := `{"modelVersion":"` + strings.Repeat("m", 1000) + `"}`
+	ev.observePayload([]byte(long))
+	require.Len(t, ev.modelVersion, geminiEvidenceFieldMaxLen)
+}

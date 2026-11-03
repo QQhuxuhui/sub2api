@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -182,24 +183,24 @@ func (e *geminiUsageEvidence) observeParseFailure(raw []byte) {
 }
 
 // observePayload 观察一个 JSON 载荷（OAuth 已解包、尚未做图片/伪装改写）。
-// 非流式出口以整个响应体调用一次。
+// 非流式出口以整个响应体调用一次。全程在 []byte 上操作，不整体转 string；
+// 保存的结构字段都限长并拷贝，避免引用整块载荷的底层内存。
 func (e *geminiUsageEvidence) observePayload(raw []byte) {
 	if e == nil {
 		return
 	}
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
 		return
 	}
-	if !gjson.Valid(trimmed) {
+	if !gjson.ValidBytes(trimmed) {
 		e.parseFailures++
 		e.pushTail(makeGeminiEvidenceSampleBytes(raw, false))
 		return
 	}
-	parsed := gjson.Parse(trimmed)
-	if parsed.IsObject() {
+	if trimmed[0] == '{' {
 		e.jsonPayloads++
-		e.extractStructure(parsed)
+		e.extractStructure(trimmed)
 	} else {
 		// 例如 JSON 数组：不能当对象取 usage，计为解析失败但保留样本。
 		e.parseFailures++
@@ -207,8 +208,20 @@ func (e *geminiUsageEvidence) observePayload(raw []byte) {
 	e.pushTail(makeGeminiEvidenceSampleBytes(raw, true))
 }
 
-func (e *geminiUsageEvidence) extractStructure(obj gjson.Result) {
-	if usage := obj.Get("usageMetadata"); usage.Exists() {
+// geminiEvidenceFieldMaxLen 是保存的单个结构字符串字段上限。
+const geminiEvidenceFieldMaxLen = 256
+
+// evidenceField 取字段并返回限长的独立拷贝（GetBytes 结果不引用入参，但仍限长防异常长值）。
+func evidenceField(obj []byte, path string) string {
+	v := gjson.GetBytes(obj, path).String()
+	if v == "" {
+		return ""
+	}
+	return strings.Clone(truncateUTF8Bytes(v, geminiEvidenceFieldMaxLen))
+}
+
+func (e *geminiUsageEvidence) extractStructure(obj []byte) {
+	if usage := gjson.GetBytes(obj, "usageMetadata"); usage.Exists() {
 		e.usageSeen = true
 		e.lastUsage = geminiUsageEvidenceCounts{
 			prompt:     usage.Get("promptTokenCount").Int(),
@@ -218,25 +231,25 @@ func (e *geminiUsageEvidence) extractStructure(obj gjson.Result) {
 			total:      usage.Get("totalTokenCount").Int(),
 		}
 	}
-	if v := obj.Get("candidates.0.finishReason").String(); v != "" {
+	if v := evidenceField(obj, "candidates.0.finishReason"); v != "" {
 		e.finishReason = v
 	}
-	if v := obj.Get("promptFeedback.blockReason").String(); v != "" {
+	if v := evidenceField(obj, "promptFeedback.blockReason"); v != "" {
 		e.blockReason = v
 	}
-	if errObj := obj.Get("error"); errObj.Exists() {
+	if gjson.GetBytes(obj, "error").Exists() {
 		e.errorPresent = true
-		if v := errObj.Get("code").String(); v != "" {
+		if v := evidenceField(obj, "error.code"); v != "" {
 			e.errorCode = v
 		}
-		if v := errObj.Get("status").String(); v != "" {
+		if v := evidenceField(obj, "error.status"); v != "" {
 			e.errorStatus = v
 		}
 	}
-	if v := obj.Get("modelVersion").String(); v != "" {
+	if v := evidenceField(obj, "modelVersion"); v != "" {
 		e.modelVersion = v
 	}
-	if v := obj.Get("responseId").String(); v != "" {
+	if v := evidenceField(obj, "responseId"); v != "" {
 		e.responseID = v
 	}
 }
