@@ -1143,6 +1143,8 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
 	beginGeminiImageOutputObservation(c)
+	// 换号重试会再次进入 ForwardNative：先清掉上一轮尝试的用量取证收集器。
+	clearGeminiUsageEvidence(c)
 	startTime := time.Now()
 
 	if strings.TrimSpace(originalModel) == "" {
@@ -1601,6 +1603,19 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	imageInputSize := s.extractImageInputSize(body)
 	imageUsageParams := newGeminiImageUsageParams(originalModel, action, imageInputSize, body)
 
+	// 用量取证：只观察上游原始响应，缺失或全零时记一条 warn，不改计费与响应。
+	var usageEvidence *geminiUsageEvidence
+	if isGeminiUsageEvidenceAction(action) {
+		exit := geminiUsageEvidenceExitNonStream
+		switch {
+		case stream:
+			exit = geminiUsageEvidenceExitStream
+		case useUpstreamStream:
+			exit = geminiUsageEvidenceExitStreamAggregate
+		}
+		usageEvidence = beginGeminiUsageEvidence(c, exit, resp.Header.Get("Content-Type"))
+	}
+
 	if stream {
 		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth, imageUsageParams)
 		if err != nil {
@@ -1610,7 +1625,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		firstTokenMs = streamRes.firstTokenMs
 	} else {
 		if useUpstreamStream {
-			collected, usageObj, err := collectGeminiSSE(resp.Body, isOAuth)
+			collected, usageObj, err := collectGeminiSSEWithEvidence(resp.Body, isOAuth, usageEvidence)
 			if err != nil {
 				return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to read upstream stream")
 			}
@@ -1652,6 +1667,20 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	if usage == nil {
 		usage = &ClaudeUsage{}
 	}
+
+	usageEvidence.emit(c, geminiUsageEvidenceMeta{
+		account:           account,
+		model:             originalModel,
+		upstreamModel:     mappedModel,
+		action:            action,
+		upstreamAction:    upstreamAction,
+		clientStream:      stream,
+		upstreamStream:    useUpstreamStream,
+		upstreamRequestID: requestID,
+		resp:              resp,
+		duration:          time.Since(startTime),
+		billedUsage:       usage,
+	})
 
 	// 图片生成计费
 	// imageInputSize 已在本函数上方（imageUsageParams 构造处）算过，这里不再重复声明。
@@ -2654,6 +2683,12 @@ func geminiCandidateWithImages(candidate map[string]any, images []any) map[strin
 }
 
 func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsage, error) {
+	return collectGeminiSSEWithEvidence(body, isOAuth, nil)
+}
+
+// collectGeminiSSEWithEvidence 与 collectGeminiSSE 相同，另把读到的行与载荷交给用量取证
+// 收集器（可为 nil）。只有原生 ForwardNative 聚合出口传入非 nil，兼容路径行为不变。
+func collectGeminiSSEWithEvidence(body io.Reader, isOAuth bool, usageEvidence *geminiUsageEvidence) (map[string]any, *ClaudeUsage, error) {
 	reader := bufio.NewReader(body)
 
 	var last map[string]any
@@ -2672,6 +2707,7 @@ func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsag
 	for {
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {
+			usageEvidence.observeLine(line)
 			trimmed := strings.TrimRight(line, "\r\n")
 			if strings.HasPrefix(trimmed, "data:") {
 				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
@@ -2692,6 +2728,11 @@ func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsag
 					} else {
 						rawBytes = []byte(payload)
 						_ = json.Unmarshal(rawBytes, &parsed)
+					}
+					if rawBytes == nil {
+						usageEvidence.observeParseFailure([]byte(payload))
+					} else {
+						usageEvidence.observePayload(rawBytes)
 					}
 					if parsed != nil {
 						imageAccumulator.observe(parsed)
@@ -2914,12 +2955,16 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	_ = resp.Body.Close()
 	resp.Body = http.NoBody
 
+	usageEvidence := geminiUsageEvidenceFromContext(c)
+	usageEvidence.addBytes(len(respBody))
 	if isOAuth {
 		unwrappedBody, uwErr := unwrapGeminiResponse(respBody)
 		if uwErr == nil {
 			respBody = unwrappedBody
 		}
 	}
+	// 解包后、图片 usage 修正前观察上游原始响应。
+	usageEvidence.observePayload(respBody)
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -2998,6 +3043,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
 	}
+	usageEvidence := geminiUsageEvidenceFromContext(c)
 	var firstTokenMs *int
 	flashState := &geminiFlashImageStreamState{}
 	// 流式的伪装延迟只补一次：第一个被伪装的分块（通常就是首块，modelVersion 露出 flash）
@@ -3045,6 +3091,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 	for {
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {
+			usageEvidence.observeLine(line)
 			trimmed := strings.TrimRight(line, "\r\n")
 			if strings.HasPrefix(trimmed, "data:") {
 				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
@@ -3064,6 +3111,12 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 						}
 					} else {
 						rawBytes = []byte(payload)
+					}
+					// 用量取证：解包后、mask/flash 改写前的上游原始载荷。
+					if rawBytes == nil {
+						usageEvidence.observeParseFailure([]byte(payload))
+					} else {
+						usageEvidence.observePayload(rawBytes)
 					}
 
 					// 先留存 mask/flash 改写前的原始 chunk 供上游模型审计观察，
