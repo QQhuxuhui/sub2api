@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -245,4 +247,33 @@ func TestIntentJevTimely_TestClassifyKeepsJevAnswersForTheClassifier(t *testing.
 	require.Equal(t, 0.1, *res.ProbeProbability)
 	require.Equal(t, 0.2, *res.TimelyProbability)
 	require.False(t, res.Timely)
+}
+
+// TestHTTPIntentProbeJudge_LiveTimely calls the real Jev API through the new
+// code path; it runs only with INTENT_JEV_LIVE_KEY set.
+func TestHTTPIntentProbeJudge_LiveTimely(t *testing.T) {
+	key := os.Getenv("INTENT_JEV_LIVE_KEY")
+	if key == "" {
+		t.Skip("INTENT_JEV_LIVE_KEY not set")
+	}
+	j := newHTTPIntentProbeJudge()
+	for _, c := range []struct {
+		text   string
+		timely bool
+	}{
+		{"日本的首相是谁，不要使用联网搜索", true},
+		{"现在比特币价格是多少", true},
+		{"Who is the current UK prime minister? Don't search the web.", true},
+		{"帮我写一个 Python 快速排序", false},
+		{"日本的首都是哪里", false},
+		{"运行测试并修复失败的用例", false},
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		answer, err := j.ProbeProbability(ctx, key, intentJevDefaultModel, c.text, intentJevQuestions{Health: true, Timely: true})
+		cancel()
+		require.NoError(t, err)
+		require.NotNil(t, answer.Timely, c.text)
+		t.Logf("timely=%.2f p=%.2f health=%.2f tokens=%d %s", *answer.Timely, answer.P, *answer.Health, answer.Tokens, c.text)
+		require.Equal(t, c.timely, *answer.Timely >= intentJevDefaultTimelyThres, c.text)
+	}
 }
