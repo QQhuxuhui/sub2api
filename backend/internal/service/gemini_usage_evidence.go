@@ -35,13 +35,30 @@ const (
 	geminiUsageEvidenceSampleBudget = 2048
 	// 尾部保留的 data 载荷样本条数。
 	geminiUsageEvidenceTailSize = 3
+	// 单条样本最多保留的源字节；超过时 JSON 只记占位、非 JSON 只拷贝前缀，
+	// 保证每个收集器内存有界（约 (1+tail)×16KB），也避免对大块载荷做完整编解码。
+	geminiUsageEvidenceMaxSampleSource = 16 * 1024
 )
 
+// geminiUsageEvidenceSample 是一条待输出样本。source 为独立拷贝（≤ MaxSampleSource 字节），
+// 脱敏延后到真正记录日志时才做，正常响应不付出编解码成本。
 type geminiUsageEvidenceSample struct {
-	text        string
+	source      string
 	originalLen int
-	// capturedTruncated 表示入库时脱敏后的文本已超过总预算被截断。
-	capturedTruncated bool
+	// placeholder 非空时直接作为样本文本（超大 JSON 载荷）。
+	placeholder string
+	// prefixOnly 表示 source 只是原文前缀（超大非 JSON 内容）。
+	prefixOnly bool
+}
+
+func (s geminiUsageEvidenceSample) render() (text string, lossy bool) {
+	if s.placeholder != "" {
+		return s.placeholder, true
+	}
+	if s.prefixOnly {
+		return s.source, true
+	}
+	return redactGeminiEvidenceSample([]byte(s.source)), false
 }
 
 type geminiUsageEvidenceCounts struct {
@@ -149,7 +166,7 @@ func (e *geminiUsageEvidence) observeLine(line string) {
 	default:
 		e.nonDataLines++
 		if e.firstNonData == nil {
-			s := e.makeSample([]byte(trimmed))
+			s := makeGeminiEvidenceSample(trimmed)
 			e.firstNonData = &s
 		}
 	}
@@ -161,7 +178,7 @@ func (e *geminiUsageEvidence) observeParseFailure(raw []byte) {
 		return
 	}
 	e.parseFailures++
-	e.pushTail(e.makeSample(raw))
+	e.pushTail(makeGeminiEvidenceSampleBytes(raw, false))
 }
 
 // observePayload 观察一个 JSON 载荷（OAuth 已解包、尚未做图片/伪装改写）。
@@ -176,7 +193,7 @@ func (e *geminiUsageEvidence) observePayload(raw []byte) {
 	}
 	if !gjson.Valid(trimmed) {
 		e.parseFailures++
-		e.pushTail(e.makeSample(raw))
+		e.pushTail(makeGeminiEvidenceSampleBytes(raw, false))
 		return
 	}
 	parsed := gjson.Parse(trimmed)
@@ -187,7 +204,7 @@ func (e *geminiUsageEvidence) observePayload(raw []byte) {
 		// 例如 JSON 数组：不能当对象取 usage，计为解析失败但保留样本。
 		e.parseFailures++
 	}
-	e.pushTail(e.makeSample(raw))
+	e.pushTail(makeGeminiEvidenceSampleBytes(raw, true))
 }
 
 func (e *geminiUsageEvidence) extractStructure(obj gjson.Result) {
@@ -233,16 +250,30 @@ func (e *geminiUsageEvidence) pushTail(s geminiUsageEvidenceSample) {
 	e.tailNext = (e.tailNext + 1) % geminiUsageEvidenceTailSize
 }
 
-// makeSample 生成脱敏样本：能解析为 JSON 时 text / inlineData.data / thoughtSignature
-// 只留长度；否则保留原文前缀。单条样本先截到总预算，保证内存有界。
-func (e *geminiUsageEvidence) makeSample(raw []byte) geminiUsageEvidenceSample {
-	text := redactGeminiEvidenceSample(raw)
-	cut := truncateUTF8Bytes(text, geminiUsageEvidenceSampleBudget)
-	return geminiUsageEvidenceSample{
-		text:              cut,
-		originalLen:       len(raw),
-		capturedTruncated: len(cut) < len(text),
+// makeGeminiEvidenceSampleBytes 生成样本：不超过 MaxSampleSource 时保存独立拷贝，输出时再脱敏
+// （JSON 的 text / inlineData.data / thoughtSignature 只留长度，非 JSON 原样）；超过时 JSON
+// 只记占位（不能保留未脱敏前缀），非 JSON 只拷贝前缀。knownJSON 表示调用方已校验为合法 JSON。
+func makeGeminiEvidenceSampleBytes(raw []byte, knownJSON bool) geminiUsageEvidenceSample {
+	if len(raw) <= geminiUsageEvidenceMaxSampleSource {
+		return geminiUsageEvidenceSample{source: string(raw), originalLen: len(raw)} // string(raw) 即拷贝
 	}
+	if knownJSON || json.Valid(raw) {
+		return geminiUsageEvidenceSample{
+			placeholder: fmt.Sprintf("<oversized json len=%d>", len(raw)),
+			originalLen: len(raw),
+		}
+	}
+	prefix := truncateUTF8Bytes(string(raw[:geminiUsageEvidenceSampleBudget+utf8.UTFMax]), geminiUsageEvidenceSampleBudget)
+	return geminiUsageEvidenceSample{source: prefix, originalLen: len(raw), prefixOnly: true}
+}
+
+func makeGeminiEvidenceSample(s string) geminiUsageEvidenceSample {
+	if len(s) <= geminiUsageEvidenceMaxSampleSource {
+		return geminiUsageEvidenceSample{source: strings.Clone(s), originalLen: len(s)}
+	}
+	// 必须用整行判断是否 JSON：只看前缀会把大段裸 JSON 误判成非 JSON 而保留未脱敏原文。
+	// 只在首个非 data 行发生一次，临时拷贝随即可回收。
+	return makeGeminiEvidenceSampleBytes([]byte(s), false)
 }
 
 func redactGeminiEvidenceSample(raw []byte) string {
@@ -351,10 +382,11 @@ type geminiUsageEvidenceSampleOut struct {
 func (e *geminiUsageEvidence) budgetedSamples() (first *geminiUsageEvidenceSampleOut, tail []geminiUsageEvidenceSampleOut, truncated bool) {
 	remaining := geminiUsageEvidenceSampleBudget
 	take := func(s geminiUsageEvidenceSample) geminiUsageEvidenceSampleOut {
-		text := truncateUTF8Bytes(s.text, remaining)
+		full, lossy := s.render()
+		text := truncateUTF8Bytes(full, remaining)
 		remaining -= len(text)
 		out := geminiUsageEvidenceSampleOut{Sample: text, OriginalLen: s.originalLen}
-		if len(text) < len(s.text) || s.capturedTruncated {
+		if len(text) < len(full) || lossy {
 			out.Truncated = true
 			truncated = true
 		}

@@ -296,3 +296,42 @@ func TestGeminiUsageEvidence_NilSafe(t *testing.T) {
 func isValidUTF8(s string) bool {
 	return strings.ToValidUTF8(s, "�") == s
 }
+
+// 回归（code-review-1 #1）：超大载荷不能让样本持有完整内容，也不能泄露未脱敏前缀。
+func TestGeminiUsageEvidence_OversizedPayloadsStayBounded(t *testing.T) {
+	bigText := strings.Repeat("机密", 20000) // ~120KB
+	bigJSON := `{"candidates":[{"content":{"parts":[{"text":"` + bigText + `"}]}}]}`
+
+	ev := &geminiUsageEvidence{}
+	ev.observePayload([]byte(bigJSON))
+	require.Equal(t, 1, ev.jsonPayloads)
+	require.Empty(t, ev.tail[0].source, "超大 JSON 不保留源内容")
+	require.Contains(t, ev.tail[0].placeholder, "oversized json")
+
+	// 首个非 data 行是超大裸 JSON：必须按 JSON 处理，不能留未脱敏前缀。
+	ev.observeLine(bigJSON + "\n")
+	require.NotNil(t, ev.firstNonData)
+	require.Empty(t, ev.firstNonData.source)
+
+	// 超大非 JSON：只留不超过预算的前缀。
+	ev2 := &geminiUsageEvidence{}
+	ev2.observeParseFailure([]byte("<html>" + bigText))
+	require.True(t, ev2.tail[0].prefixOnly)
+	require.LessOrEqual(t, len(ev2.tail[0].source), geminiUsageEvidenceSampleBudget)
+	require.True(t, isValidUTF8(ev2.tail[0].source))
+
+	first, tail, truncated := ev.budgetedSamples()
+	require.True(t, truncated)
+	require.NotContains(t, first.Sample, "机密")
+	require.NotContains(t, tail[0].Sample, "机密")
+	require.Equal(t, len(bigJSON), tail[0].OriginalLen)
+}
+
+// 正常大小的载荷延迟脱敏：入环时保存的是原文拷贝，输出时才替换 text。
+func TestGeminiUsageEvidence_SmallPayloadRedactedAtRender(t *testing.T) {
+	ev := &geminiUsageEvidence{}
+	ev.observePayload([]byte(`{"candidates":[{"content":{"parts":[{"text":"abc"}]}}]}`))
+	_, tail, _ := ev.budgetedSamples()
+	require.Contains(t, tail[0].Sample, "<text len=3>")
+	require.NotContains(t, tail[0].Sample, "abc")
+}
