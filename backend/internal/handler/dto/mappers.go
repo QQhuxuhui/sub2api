@@ -775,6 +775,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		EmptyResponseBillingWaived: l.EmptyResponseBillingWaived,
 		EmptyResponseBillingRuleID: l.EmptyResponseBillingRuleID,
 		EmptyResponseWaivedCost:    l.EmptyResponseWaivedCost,
+		UsageEstimated:             l.UsageEstimated,
 		IPAddress:                  l.IPAddress,
 		Account:                    AccountSummaryFromService(l.Account),
 	}

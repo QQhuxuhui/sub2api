@@ -428,6 +428,8 @@ type geminiUsageEvidenceMeta struct {
 	resp              *http.Response
 	duration          time.Duration
 	billedUsage       *ClaudeUsage
+	// usageEstimated 表示 billedUsage 是本地估算值（上游缺 usageMetadata 但交付了文本）。
+	usageEstimated bool
 }
 
 func (e *geminiUsageEvidence) emit(c *gin.Context, meta geminiUsageEvidenceMeta) {
@@ -509,6 +511,13 @@ func (e *geminiUsageEvidence) emit(c *gin.Context, meta geminiUsageEvidenceMeta)
 		fields = append(fields, zap.Bool("billed_usage_zero",
 			u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadInputTokens == 0 &&
 				u.CacheCreationInputTokens == 0 && u.ImageOutputTokens == 0))
+		if meta.usageEstimated {
+			fields = append(fields,
+				zap.Bool("usage_estimated", true),
+				zap.Int("estimated_prompt_tokens", u.InputTokens),
+				zap.Int("estimated_output_tokens", u.OutputTokens),
+			)
+		}
 	}
 
 	logger.FromContext(ctx).Warn("gemini.usage_evidence", fields...)

@@ -215,6 +215,11 @@ func EmptyResponseWaivedCost(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldEmptyResponseWaivedCost, v))
 }
 
+// UsageEstimated applies equality check predicate on the "usage_estimated" field. It's identical to UsageEstimatedEQ.
+func UsageEstimated(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUsageEstimated, v))
+}
+
 // AccountRateMultiplier applies equality check predicate on the "account_rate_multiplier" field. It's identical to AccountRateMultiplierEQ.
 func AccountRateMultiplier(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldAccountRateMultiplier, v))
@@ -1698,6 +1703,16 @@ func EmptyResponseWaivedCostLT(v float64) predicate.UsageLog {
 // EmptyResponseWaivedCostLTE applies the LTE predicate on the "empty_response_waived_cost" field.
 func EmptyResponseWaivedCostLTE(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldEmptyResponseWaivedCost, v))
+}
+
+// UsageEstimatedEQ applies the EQ predicate on the "usage_estimated" field.
+func UsageEstimatedEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUsageEstimated, v))
+}
+
+// UsageEstimatedNEQ applies the NEQ predicate on the "usage_estimated" field.
+func UsageEstimatedNEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldUsageEstimated, v))
 }
 
 // AccountRateMultiplierEQ applies the EQ predicate on the "account_rate_multiplier" field.

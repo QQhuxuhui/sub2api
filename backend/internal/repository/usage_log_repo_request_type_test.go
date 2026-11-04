@@ -279,6 +279,30 @@ func TestPrepareUsageLogInsert_PersistsEmptyResponseBillingAudit(t *testing.T) {
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 }
 
+func TestPrepareUsageLogInsert_PersistsUsageEstimatedAsTrailingLiteral(t *testing.T) {
+	base := service.UsageLog{
+		UserID:    1,
+		APIKeyID:  2,
+		AccountID: 3,
+		RequestID: "req-usage-estimated",
+		Model:     "gemini-3.8-flash",
+		CreatedAt: time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC),
+	}
+	plain := prepareUsageLogInsert(&base)
+	require.Equal(t, "FALSE, NULL::bigint, 0::numeric, FALSE", usageLogTrailingValuesSQL(plain))
+
+	estimated := base
+	estimated.UsageEstimated = true
+	prepared := prepareUsageLogInsert(&estimated)
+	require.Equal(t, "FALSE, NULL::bigint, 0::numeric, TRUE", usageLogTrailingValuesSQL(prepared))
+	require.Len(t, prepared.args, len(usageLogInsertArgTypes), "字面量列不占位置参数")
+
+	// 批量与 best-effort 两条拼接路径都要带上 usage_estimated 列与对应字面量。
+	bestEffort, _ := buildUsageLogBestEffortInsertQuery([]usageLogInsertPrepared{prepared})
+	require.Contains(t, bestEffort, "empty_response_waived_cost,\n\t\t\tusage_estimated\n")
+	require.Contains(t, bestEffort, "0::numeric, TRUE)")
+}
+
 func TestPrepareUsageLogInsert_PersistsNativeCompactionV2WithoutChangingRequestType(t *testing.T) {
 	log := &service.UsageLog{
 		UserID:             1,
@@ -980,6 +1004,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			true,
 			sql.NullInt64{Valid: true, Int64: 77},
 			0.25,
+			true, // usage_estimated
 			now,
 		}})
 		require.NoError(t, err)
@@ -996,6 +1021,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 		require.True(t, log.EmptyResponseBillingWaived)
 		require.Equal(t, int64(77), log.EmptyResponseBillingRuleID)
 		require.Equal(t, 0.25, log.EmptyResponseWaivedCost)
+		require.True(t, log.UsageEstimated)
 	})
 
 	t.Run("request_type_ws_v2_overrides_legacy", func(t *testing.T) {
@@ -1066,6 +1092,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			false,             // empty_response_billing_waived
 			sql.NullInt64{},   // empty_response_billing_rule_id
 			0.0,               // empty_response_waived_cost
+			false,             // usage_estimated
 			now,
 		}})
 		require.NoError(t, err)
@@ -1132,6 +1159,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			false,             // empty_response_billing_waived
 			sql.NullInt64{},   // empty_response_billing_rule_id
 			0.0,               // empty_response_waived_cost
+			false,             // usage_estimated
 			now,
 		}})
 		require.NoError(t, err)
@@ -1199,6 +1227,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			false,             // empty_response_billing_waived
 			sql.NullInt64{},   // empty_response_billing_rule_id
 			0.0,               // empty_response_waived_cost
+			false,             // usage_estimated
 			now,
 		}})
 		require.NoError(t, err)

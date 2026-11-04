@@ -49,10 +49,10 @@ func requireStaticInsertMatchesArgTypes(t *testing.T, query string) {
 			columns++
 		}
 	}
-	// 本仓 empty_response_billing_waived / _rule_id / _waived_cost 三列由 emptyResponseBillingValuesSQL
-	// 以字面量追加在最后一个占位符之后，不占绑定参数位，故列数 = 占位符数 + 3。
-	const emptyResponseLiteralColumns = 3
-	require.Equal(t, want+emptyResponseLiteralColumns, columns, "INSERT column list must match usageLogInsertArgTypes plus the 3 literal empty-response columns")
+	// 本仓 empty_response_billing_waived / _rule_id / _waived_cost 三列与 usage_estimated 由
+	// usageLogTrailingValuesSQL 以字面量追加在最后一个占位符之后，不占绑定参数位，故列数 = 占位符数 + 4。
+	const trailingLiteralColumns = 4
+	require.Equal(t, want+trailingLiteralColumns, columns, "INSERT column list must match usageLogInsertArgTypes plus the 4 literal trailing columns")
 
 	seen := make(map[int]struct{}, want)
 	for _, ph := range usageLogPlaceholderRe.FindAllStringSubmatch(m[2], -1) {

@@ -1145,6 +1145,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	beginGeminiImageOutputObservation(c)
 	// 换号重试会再次进入 ForwardNative：先清掉上一轮尝试的用量取证收集器。
 	clearGeminiUsageEvidence(c)
+	clearGeminiNativeOutputMeter(c)
 	startTime := time.Now()
 
 	if strings.TrimSpace(originalModel) == "" {
@@ -1615,6 +1616,11 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		}
 		usageEvidence = beginGeminiUsageEvidence(c, exit, resp.Header.Get("Content-Type"))
 	}
+	// 输出计量：判定「200 但只有错误」以便写出前换号，并在上游缺 usageMetadata 时估算。
+	var outputMeter *geminiNativeOutputMeter
+	if isGeminiUsageEvidenceAction(action) {
+		outputMeter = beginGeminiNativeOutputMeter(c)
+	}
 
 	if stream {
 		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth, imageUsageParams)
@@ -1625,9 +1631,15 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		firstTokenMs = streamRes.firstTokenMs
 	} else {
 		if useUpstreamStream {
-			collected, usageObj, err := collectGeminiSSEWithEvidence(resp.Body, isOAuth, usageEvidence)
+			collected, usageObj, err := collectGeminiSSEWithEvidence(resp.Body, isOAuth, usageEvidence, outputMeter)
 			if err != nil {
 				return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to read upstream stream")
+			}
+			if outputMeter.errorOnly() {
+				// 上游 200 但整条流只有错误、没有任何输出：写出前交给 handler 换号。
+				_ = resp.Body.Close()
+				resp.Body = http.NoBody
+				return nil, outputMeter.failoverError()
 			}
 			// The upstream stream is fully aggregated before the masked response
 			// delay. Release the tracked connection before sleeping; the client and
@@ -1668,6 +1680,15 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		usage = &ClaudeUsage{}
 	}
 
+	// 上游交付了文本却完全没给 usageMetadata：按发往上游的请求体与累计输出字符本地估算，
+	// 照常计费并标记估算（usage_logs.usage_estimated）。
+	usageEstimated := false
+	if outputMeter.shouldEstimate(usage) {
+		usage.InputTokens = estimateGeminiCountTokens(body)
+		usage.OutputTokens = outputMeter.estimatedOutputTokens()
+		usageEstimated = true
+	}
+
 	usageEvidence.emit(c, geminiUsageEvidenceMeta{
 		account:           account,
 		model:             originalModel,
@@ -1680,6 +1701,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		resp:              resp,
 		duration:          time.Since(startTime),
 		billedUsage:       usage,
+		usageEstimated:    usageEstimated,
 	})
 
 	// 图片生成计费
@@ -1702,6 +1724,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		ImageOutputsObserved:          observedGeminiImageOutputsForBilling(c, imageCount),
 		ImageSize:                     imageSize,
 		ImageInputSize:                imageInputSize,
+		UsageEstimated:                usageEstimated,
 	}, nil
 }
 
@@ -2683,12 +2706,12 @@ func geminiCandidateWithImages(candidate map[string]any, images []any) map[strin
 }
 
 func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsage, error) {
-	return collectGeminiSSEWithEvidence(body, isOAuth, nil)
+	return collectGeminiSSEWithEvidence(body, isOAuth, nil, nil)
 }
 
 // collectGeminiSSEWithEvidence 与 collectGeminiSSE 相同，另把读到的行与载荷交给用量取证
-// 收集器（可为 nil）。只有原生 ForwardNative 聚合出口传入非 nil，兼容路径行为不变。
-func collectGeminiSSEWithEvidence(body io.Reader, isOAuth bool, usageEvidence *geminiUsageEvidence) (map[string]any, *ClaudeUsage, error) {
+// 收集器与输出计量器（均可为 nil）。只有原生 ForwardNative 聚合出口传入非 nil，兼容路径行为不变。
+func collectGeminiSSEWithEvidence(body io.Reader, isOAuth bool, usageEvidence *geminiUsageEvidence, outputMeter *geminiNativeOutputMeter) (map[string]any, *ClaudeUsage, error) {
 	reader := bufio.NewReader(body)
 
 	var last map[string]any
@@ -2733,6 +2756,7 @@ func collectGeminiSSEWithEvidence(body io.Reader, isOAuth bool, usageEvidence *g
 						usageEvidence.observeParseFailure([]byte(payload))
 					} else {
 						usageEvidence.observePayload(rawBytes)
+						outputMeter.observe(rawBytes)
 					}
 					if parsed != nil {
 						imageAccumulator.observe(parsed)
@@ -2965,6 +2989,12 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	}
 	// 解包后、图片 usage 修正前观察上游原始响应。
 	usageEvidence.observePayload(respBody)
+	outputMeter := geminiNativeOutputMeterFromContext(c)
+	outputMeter.observe(respBody)
+	if outputMeter.errorOnly() {
+		// 上游 200 但只有错误对象、没有任何输出：尚未写出，交给 handler 换号。
+		return nil, outputMeter.failoverError()
+	}
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -3017,6 +3047,11 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 		logger.LegacyPrintf("service.gemini_messages_compat", "[GeminiAPI] ====================================================")
 	}
 
+	// 「200 但只有错误」需要在首次写出前换号：先留一份响应头快照，换号时恢复，
+	// 避免把本次上游的响应头带到下一个账号的响应里。
+	headerSnapshot := c.Writer.Header().Clone()
+	outputMeter := geminiNativeOutputMeterFromContext(c)
+
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
@@ -3061,20 +3096,64 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 			firstTokenMs = &ms
 		}
 	}
-	writeLine := func(line string) {
-		_, _ = io.WriteString(c.Writer, line)
+	// 错误暂扣：出现错误对象且尚无任何有效输出、客户端也还什么都没收到时，
+	// 之后所有写出与 Flush 都先扣在这里（gin 的 Flush 即使没有正文也会提交 200 头）。
+	// 出现有效输出或缓冲超限就按原顺序放行；到流结束仍只有错误则换号。
+	holdingError := false
+	var heldLines []string
+	heldBytes := 0
+	releaseHeld := func() {
+		holdingError = false
+		for _, held := range heldLines {
+			_, _ = io.WriteString(c.Writer, held)
+		}
+		heldLines = nil
+		heldBytes = 0
 		flusher.Flush()
+	}
+	writeOut := func(line string) {
+		if holdingError {
+			heldLines = append(heldLines, line)
+			heldBytes += len(line)
+			if heldBytes > geminiNativeErrorHoldMaxBytes {
+				releaseHeld()
+			}
+			return
+		}
+		_, _ = io.WriteString(c.Writer, line)
+	}
+	flushOut := func() {
+		if holdingError {
+			return
+		}
+		flusher.Flush()
+	}
+	errorOnlyFailover := func() (*geminiNativeStreamResult, error) {
+		h := c.Writer.Header()
+		for k := range h {
+			delete(h, k)
+		}
+		for k, v := range headerSnapshot {
+			h[k] = v
+		}
+		heldLines = nil
+		pendingProMaskLines = nil
+		return nil, outputMeter.failoverError()
+	}
+	writeLine := func(line string) {
+		writeOut(line)
+		flushOut()
 	}
 	flushPendingProMaskLines := func() {
 		if pendingProMaskHasSemanticData {
 			markFirstToken()
 		}
 		for _, pending := range pendingProMaskLines {
-			_, _ = io.WriteString(c.Writer, pending)
+			writeOut(pending)
 		}
 		pendingProMaskLines = pendingProMaskLines[:0]
 		pendingProMaskHasSemanticData = false
-		flusher.Flush()
+		flushOut()
 	}
 	emitPendingOrLine := func(line string, semanticData bool) {
 		if !proMaskResolved {
@@ -3117,6 +3196,13 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 						usageEvidence.observeParseFailure([]byte(payload))
 					} else {
 						usageEvidence.observePayload(rawBytes)
+						outputMeter.observe(rawBytes)
+						if holdingError && !outputMeter.errorOnly() {
+							// 先报错、后有正常内容：按成功处理，放行已扣下的行。
+							releaseHeld()
+						} else if !holdingError && outputMeter.errorOnly() && !c.Writer.Written() {
+							holdingError = true
+						}
 					}
 
 					// 先留存 mask/flash 改写前的原始 chunk 供上游模型审计观察，
@@ -3217,6 +3303,10 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 			}
 		}
 
+		if err != nil && holdingError {
+			// 整条流只有错误、没有任何输出（EOF 或读取出错）：客户端尚未收到任何字节，换号。
+			return errorOnlyFailover()
+		}
 		if errors.Is(err, io.EOF) {
 			if len(pendingProMaskLines) > 0 {
 				// A truncated stream without a terminal usage/model decision must not

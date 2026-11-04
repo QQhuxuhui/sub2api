@@ -66,7 +66,9 @@ func TestGeminiUsageEvidence_NonStreamMissingUsageLogsWarn(t *testing.T) {
 
 	result, err := svc.ForwardNative(context.Background(), c, geminiEvidenceTestAccount(), "gemini-3.8-flash", "generateContent", false, []byte(geminiEvidenceTestRequestBody))
 	require.NoError(t, err)
-	require.Equal(t, ClaudeUsage{}, result.Usage, "计费用量保持原行为（0）")
+	// 有文本、无 usageMetadata：按本地估算计费（输入 "hi"=1，输出 13 个 ASCII 字符=4）。
+	require.Equal(t, ClaudeUsage{InputTokens: 1, OutputTokens: 4}, result.Usage)
+	require.True(t, result.UsageEstimated)
 	require.Equal(t, body, rec.Body.String(), "写给客户端的字节不变")
 
 	entries := evidenceLogs(logs)
@@ -81,7 +83,8 @@ func TestGeminiUsageEvidence_NonStreamMissingUsageLogsWarn(t *testing.T) {
 	require.Equal(t, "STOP", f["finish_reason"])
 	require.Equal(t, "r1", f["response_id"])
 	require.Equal(t, int64(len(body)), f["bytes_read"])
-	require.Equal(t, true, f["billed_usage_zero"])
+	require.Equal(t, false, f["billed_usage_zero"])
+	require.Equal(t, true, f["usage_estimated"])
 	tail, ok := f["tail_samples"].([]geminiUsageEvidenceSampleOut)
 	require.True(t, ok)
 	require.Len(t, tail, 1)
@@ -146,7 +149,9 @@ func TestGeminiUsageEvidence_StreamMissingUsageCountsLines(t *testing.T) {
 
 	result, err := svc.ForwardNative(context.Background(), c, geminiEvidenceTestAccount(), "gemini-3.8-flash", "streamGenerateContent", true, []byte(geminiEvidenceTestRequestBody))
 	require.NoError(t, err)
-	require.Equal(t, ClaudeUsage{}, result.Usage)
+	// 文本 "a"+"b" 无 usageMetadata：估算输出 1、输入 1。
+	require.Equal(t, ClaudeUsage{InputTokens: 1, OutputTokens: 1}, result.Usage)
+	require.True(t, result.UsageEstimated)
 	require.Contains(t, rec.Body.String(), `{"error":{"code":500,"status":"INTERNAL"}}`, "非 data 行仍原样透传")
 
 	entries := evidenceLogs(logs)
@@ -214,7 +219,7 @@ func TestGeminiUsageEvidence_AggregateCollectorObservesWithoutChangingResult(t *
 	require.NoError(t, err)
 
 	ev := &geminiUsageEvidence{exit: geminiUsageEvidenceExitStreamAggregate}
-	gotEv, usageEv, err := collectGeminiSSEWithEvidence(strings.NewReader(stream), false, ev)
+	gotEv, usageEv, err := collectGeminiSSEWithEvidence(strings.NewReader(stream), false, ev, nil)
 	require.NoError(t, err)
 	require.Equal(t, gotPlain, gotEv, "聚合结果不受取证影响")
 	require.Equal(t, usagePlain, usageEv)
@@ -226,7 +231,7 @@ func TestGeminiUsageEvidence_AggregateCollectorObservesWithoutChangingResult(t *
 
 func TestGeminiUsageEvidence_OAuthUnwrapFailureCounted(t *testing.T) {
 	ev := &geminiUsageEvidence{}
-	_, _, err := collectGeminiSSEWithEvidence(strings.NewReader("data: not-json\n\n"), true, ev)
+	_, _, err := collectGeminiSSEWithEvidence(strings.NewReader("data: not-json\n\n"), true, ev, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, ev.parseFailures)
 	first, tail, _ := ev.budgetedSamples()

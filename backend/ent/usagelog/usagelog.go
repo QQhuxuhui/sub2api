@@ -78,6 +78,8 @@ const (
 	FieldEmptyResponseBillingRuleID = "empty_response_billing_rule_id"
 	// FieldEmptyResponseWaivedCost holds the string denoting the empty_response_waived_cost field in the database.
 	FieldEmptyResponseWaivedCost = "empty_response_waived_cost"
+	// FieldUsageEstimated holds the string denoting the usage_estimated field in the database.
+	FieldUsageEstimated = "usage_estimated"
 	// FieldAccountRateMultiplier holds the string denoting the account_rate_multiplier field in the database.
 	FieldAccountRateMultiplier = "account_rate_multiplier"
 	// FieldBillingType holds the string denoting the billing_type field in the database.
@@ -198,6 +200,7 @@ var Columns = []string{
 	FieldEmptyResponseBillingWaived,
 	FieldEmptyResponseBillingRuleID,
 	FieldEmptyResponseWaivedCost,
+	FieldUsageEstimated,
 	FieldAccountRateMultiplier,
 	FieldBillingType,
 	FieldStream,
@@ -277,6 +280,8 @@ var (
 	DefaultEmptyResponseBillingWaived bool
 	// DefaultEmptyResponseWaivedCost holds the default value on creation for the "empty_response_waived_cost" field.
 	DefaultEmptyResponseWaivedCost float64
+	// DefaultUsageEstimated holds the default value on creation for the "usage_estimated" field.
+	DefaultUsageEstimated bool
 	// DefaultBillingType holds the default value on creation for the "billing_type" field.
 	DefaultBillingType int8
 	// DefaultStream holds the default value on creation for the "stream" field.
@@ -471,6 +476,11 @@ func ByEmptyResponseBillingRuleID(opts ...sql.OrderTermOption) OrderOption {
 // ByEmptyResponseWaivedCost orders the results by the empty_response_waived_cost field.
 func ByEmptyResponseWaivedCost(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldEmptyResponseWaivedCost, opts...).ToFunc()
+}
+
+// ByUsageEstimated orders the results by the usage_estimated field.
+func ByUsageEstimated(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUsageEstimated, opts...).ToFunc()
 }
 
 // ByAccountRateMultiplier orders the results by the account_rate_multiplier field.

@@ -217,6 +217,18 @@ func TestUsageLogFromServiceAdmin_IncludesEmptyResponseBillingAudit(t *testing.T
 	require.NotContains(t, string(userJSON), "empty_response_billing")
 }
 
+func TestUsageLogFromServiceAdmin_IncludesUsageEstimatedAdminOnly(t *testing.T) {
+	log := &service.UsageLog{UsageEstimated: true}
+
+	adminJSON, err := json.Marshal(UsageLogFromServiceAdmin(log))
+	require.NoError(t, err)
+	require.Contains(t, string(adminJSON), `"usage_estimated":true`)
+
+	userJSON, err := json.Marshal(UsageLogFromService(log))
+	require.NoError(t, err)
+	require.NotContains(t, string(userJSON), "usage_estimated")
+}
+
 func TestUsageLogFromService_UsersSeeRequestedReasoningEffortOnly(t *testing.T) {
 	t.Parallel()
 

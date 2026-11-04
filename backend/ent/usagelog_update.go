@@ -658,6 +658,20 @@ func (_u *UsageLogUpdate) AddEmptyResponseWaivedCost(v float64) *UsageLogUpdate 
 	return _u
 }
 
+// SetUsageEstimated sets the "usage_estimated" field.
+func (_u *UsageLogUpdate) SetUsageEstimated(v bool) *UsageLogUpdate {
+	_u.mutation.SetUsageEstimated(v)
+	return _u
+}
+
+// SetNillableUsageEstimated sets the "usage_estimated" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableUsageEstimated(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetUsageEstimated(*v)
+	}
+	return _u
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (_u *UsageLogUpdate) SetAccountRateMultiplier(v float64) *UsageLogUpdate {
 	_u.mutation.ResetAccountRateMultiplier()
@@ -1352,6 +1366,9 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedEmptyResponseWaivedCost(); ok {
 		_spec.AddField(usagelog.FieldEmptyResponseWaivedCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.UsageEstimated(); ok {
+		_spec.SetField(usagelog.FieldUsageEstimated, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.AccountRateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64, value)
@@ -2252,6 +2269,20 @@ func (_u *UsageLogUpdateOne) AddEmptyResponseWaivedCost(v float64) *UsageLogUpda
 	return _u
 }
 
+// SetUsageEstimated sets the "usage_estimated" field.
+func (_u *UsageLogUpdateOne) SetUsageEstimated(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetUsageEstimated(v)
+	return _u
+}
+
+// SetNillableUsageEstimated sets the "usage_estimated" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableUsageEstimated(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetUsageEstimated(*v)
+	}
+	return _u
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (_u *UsageLogUpdateOne) SetAccountRateMultiplier(v float64) *UsageLogUpdateOne {
 	_u.mutation.ResetAccountRateMultiplier()
@@ -2976,6 +3007,9 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.AddedEmptyResponseWaivedCost(); ok {
 		_spec.AddField(usagelog.FieldEmptyResponseWaivedCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.UsageEstimated(); ok {
+		_spec.SetField(usagelog.FieldUsageEstimated, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.AccountRateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64, value)

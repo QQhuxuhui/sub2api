@@ -704,6 +704,8 @@ type AdminUsageLog struct {
 	EmptyResponseBillingWaived bool    `json:"empty_response_billing_waived"`
 	EmptyResponseBillingRuleID int64   `json:"empty_response_billing_rule_id,omitempty"`
 	EmptyResponseWaivedCost    float64 `json:"empty_response_waived_cost"`
+	// UsageEstimated 表示 token 用量是本地估算值（上游交付了内容却没有返回用量），仅管理端可见。
+	UsageEstimated bool `json:"usage_estimated"`
 
 	// IPAddress 用户请求 IP
 	IPAddress *string `json:"ip_address,omitempty"`

@@ -45473,6 +45473,7 @@ type UsageLogMutation struct {
 	addempty_response_billing_rule_id *int64
 	empty_response_waived_cost        *float64
 	addempty_response_waived_cost     *float64
+	usage_estimated                   *bool
 	account_rate_multiplier           *float64
 	addaccount_rate_multiplier        *float64
 	billing_type                      *int8
@@ -47229,6 +47230,42 @@ func (m *UsageLogMutation) ResetEmptyResponseWaivedCost() {
 	m.addempty_response_waived_cost = nil
 }
 
+// SetUsageEstimated sets the "usage_estimated" field.
+func (m *UsageLogMutation) SetUsageEstimated(b bool) {
+	m.usage_estimated = &b
+}
+
+// UsageEstimated returns the value of the "usage_estimated" field in the mutation.
+func (m *UsageLogMutation) UsageEstimated() (r bool, exists bool) {
+	v := m.usage_estimated
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUsageEstimated returns the old "usage_estimated" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldUsageEstimated(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUsageEstimated is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUsageEstimated requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUsageEstimated: %w", err)
+	}
+	return oldValue.UsageEstimated, nil
+}
+
+// ResetUsageEstimated resets all changes to the "usage_estimated" field.
+func (m *UsageLogMutation) ResetUsageEstimated() {
+	m.usage_estimated = nil
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (m *UsageLogMutation) SetAccountRateMultiplier(f float64) {
 	m.account_rate_multiplier = &f
@@ -48346,7 +48383,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 50)
+	fields := make([]string, 0, 51)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -48442,6 +48479,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.empty_response_waived_cost != nil {
 		fields = append(fields, usagelog.FieldEmptyResponseWaivedCost)
+	}
+	if m.usage_estimated != nil {
+		fields = append(fields, usagelog.FieldUsageEstimated)
 	}
 	if m.account_rate_multiplier != nil {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
@@ -48569,6 +48609,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.EmptyResponseBillingRuleID()
 	case usagelog.FieldEmptyResponseWaivedCost:
 		return m.EmptyResponseWaivedCost()
+	case usagelog.FieldUsageEstimated:
+		return m.UsageEstimated()
 	case usagelog.FieldAccountRateMultiplier:
 		return m.AccountRateMultiplier()
 	case usagelog.FieldBillingType:
@@ -48678,6 +48720,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldEmptyResponseBillingRuleID(ctx)
 	case usagelog.FieldEmptyResponseWaivedCost:
 		return m.OldEmptyResponseWaivedCost(ctx)
+	case usagelog.FieldUsageEstimated:
+		return m.OldUsageEstimated(ctx)
 	case usagelog.FieldAccountRateMultiplier:
 		return m.OldAccountRateMultiplier(ctx)
 	case usagelog.FieldBillingType:
@@ -48946,6 +48990,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetEmptyResponseWaivedCost(v)
+		return nil
+	case usagelog.FieldUsageEstimated:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUsageEstimated(v)
 		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		v, ok := value.(float64)
@@ -49637,6 +49688,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldEmptyResponseWaivedCost:
 		m.ResetEmptyResponseWaivedCost()
+		return nil
+	case usagelog.FieldUsageEstimated:
+		m.ResetUsageEstimated()
 		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		m.ResetAccountRateMultiplier()

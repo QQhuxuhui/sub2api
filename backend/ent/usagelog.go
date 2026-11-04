@@ -87,6 +87,8 @@ type UsageLog struct {
 	EmptyResponseBillingRuleID *int64 `json:"empty_response_billing_rule_id,omitempty"`
 	// EmptyResponseWaivedCost holds the value of the "empty_response_waived_cost" field.
 	EmptyResponseWaivedCost float64 `json:"empty_response_waived_cost,omitempty"`
+	// Whether token usage was estimated locally because the upstream returned content without usage
+	UsageEstimated bool `json:"usage_estimated,omitempty"`
 	// AccountRateMultiplier holds the value of the "account_rate_multiplier" field.
 	AccountRateMultiplier *float64 `json:"account_rate_multiplier,omitempty"`
 	// BillingType holds the value of the "billing_type" field.
@@ -208,7 +210,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case usagelog.FieldImageSizeBreakdown:
 			values[i] = new([]byte)
-		case usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldEmptyResponseBillingWaived, usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
+		case usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldEmptyResponseBillingWaived, usagelog.FieldUsageEstimated, usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldEmptyResponseWaivedCost, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
@@ -441,6 +443,12 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field empty_response_waived_cost", values[i])
 			} else if value.Valid {
 				_m.EmptyResponseWaivedCost = value.Float64
+			}
+		case usagelog.FieldUsageEstimated:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field usage_estimated", values[i])
+			} else if value.Valid {
+				_m.UsageEstimated = value.Bool
 			}
 		case usagelog.FieldAccountRateMultiplier:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -741,6 +749,9 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("empty_response_waived_cost=")
 	builder.WriteString(fmt.Sprintf("%v", _m.EmptyResponseWaivedCost))
+	builder.WriteString(", ")
+	builder.WriteString("usage_estimated=")
+	builder.WriteString(fmt.Sprintf("%v", _m.UsageEstimated))
 	builder.WriteString(", ")
 	if v := _m.AccountRateMultiplier; v != nil {
 		builder.WriteString("account_rate_multiplier=")

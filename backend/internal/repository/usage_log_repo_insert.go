@@ -127,6 +127,7 @@ type usageLogInsertPrepared struct {
 	emptyResponseBillingWaived bool
 	emptyResponseBillingRuleID int64
 	emptyResponseWaivedCost    float64
+	usageEstimated             bool
 	args                       []any
 }
 
@@ -293,7 +294,8 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			created_at,
 			empty_response_billing_waived,
 			empty_response_billing_rule_id,
-			empty_response_waived_cost
+			empty_response_waived_cost,
+			usage_estimated
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11,
@@ -301,7 +303,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
 			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62,
-		` + emptyResponseBillingValuesSQL(prepared) + `
+		` + usageLogTrailingValuesSQL(prepared) + `
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -757,7 +759,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			created_at,
 			empty_response_billing_waived,
 			empty_response_billing_rule_id,
-			empty_response_waived_cost
+			empty_response_waived_cost,
+			usage_estimated
 		) AS (VALUES `)
 
 	// Each batch row prepends the synthetic input_index before the 62
@@ -785,7 +788,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			argPos++
 		}
 		_, _ = query.WriteString(",")
-		_, _ = query.WriteString(emptyResponseBillingValuesSQL(prepared))
+		_, _ = query.WriteString(usageLogTrailingValuesSQL(prepared))
 		_, _ = query.WriteString(")")
 		args = append(args, prepared.args...)
 	}
@@ -857,7 +860,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				created_at,
 				empty_response_billing_waived,
 				empty_response_billing_rule_id,
-				empty_response_waived_cost
+				empty_response_waived_cost,
+				usage_estimated
 			)
 			SELECT
 				user_id,
@@ -924,7 +928,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				created_at,
 				empty_response_billing_waived,
 				empty_response_billing_rule_id,
-				empty_response_waived_cost
+				empty_response_waived_cost,
+				usage_estimated
 			FROM input
 			ON CONFLICT (request_id, api_key_id) DO NOTHING
 			RETURNING request_id, api_key_id, id, created_at
@@ -1031,7 +1036,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			created_at,
 			empty_response_billing_waived,
 			empty_response_billing_rule_id,
-			empty_response_waived_cost
+			empty_response_waived_cost,
+			usage_estimated
 		) AS (VALUES `)
 
 	args := make([]any, 0, len(preparedList)*62)
@@ -1054,7 +1060,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			argPos++
 		}
 		_, _ = query.WriteString(",")
-		_, _ = query.WriteString(emptyResponseBillingValuesSQL(prepared))
+		_, _ = query.WriteString(usageLogTrailingValuesSQL(prepared))
 		_, _ = query.WriteString(")")
 		args = append(args, prepared.args...)
 	}
@@ -1126,7 +1132,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			created_at,
 			empty_response_billing_waived,
 			empty_response_billing_rule_id,
-			empty_response_waived_cost
+			empty_response_waived_cost,
+			usage_estimated
 		)
 		SELECT
 			user_id,
@@ -1193,7 +1200,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			created_at,
 			empty_response_billing_waived,
 			empty_response_billing_rule_id,
-			empty_response_waived_cost
+			empty_response_waived_cost,
+			usage_estimated
 		FROM input
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`)
@@ -1268,7 +1276,8 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			created_at,
 			empty_response_billing_waived,
 			empty_response_billing_rule_id,
-			empty_response_waived_cost
+			empty_response_waived_cost,
+			usage_estimated
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11,
@@ -1276,7 +1285,7 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
 			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62,
-		`+emptyResponseBillingValuesSQL(prepared)+`
+		`+usageLogTrailingValuesSQL(prepared)+`
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1405,7 +1414,18 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 		emptyResponseBillingWaived: log.EmptyResponseBillingWaived,
 		emptyResponseBillingRuleID: log.EmptyResponseBillingRuleID,
 		emptyResponseWaivedCost:    log.EmptyResponseWaivedCost,
+		usageEstimated:             log.UsageEstimated,
 	}
+}
+
+// usageLogTrailingValuesSQL 生成列清单末尾那几列的 SQL 字面量：empty_response_* 三列
+// 加 usage_estimated。它们不占位置参数，因此新增时不必移动 $N 占位符与 usageLogInsertArgTypes。
+func usageLogTrailingValuesSQL(prepared usageLogInsertPrepared) string {
+	estimated := "FALSE"
+	if prepared.usageEstimated {
+		estimated = "TRUE"
+	}
+	return emptyResponseBillingValuesSQL(prepared) + ", " + estimated
 }
 
 func emptyResponseBillingValuesSQL(prepared usageLogInsertPrepared) string {

@@ -662,6 +662,9 @@ type ForwardResult struct {
 	ImageSizeBreakdown   map[string]int
 	SearchCount          int
 	AudioUsage           *AudioUsage
+	// UsageEstimated 表示 Usage 是本地估算值：上游交付了内容却没有返回用量
+	// （目前只有 Gemini 原生路径会设置），落库为 usage_logs.usage_estimated。
+	UsageEstimated bool
 }
 
 // IsEmptyImageResponse 报告本次转发是否为「按图计费但上游一张图都没回」。

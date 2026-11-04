@@ -213,6 +213,9 @@ type UsageLog struct {
 	EmptyResponseBillingRuleID int64
 	EmptyResponseWaivedCost    float64
 
+	// UsageEstimated 表示 token 用量是本地估算值（上游交付了内容却没有返回用量）。
+	UsageEstimated bool
+
 	CreatedAt time.Time
 
 	User         *User

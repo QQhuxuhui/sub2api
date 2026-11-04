@@ -435,6 +435,20 @@ func (_c *UsageLogCreate) SetNillableEmptyResponseWaivedCost(v *float64) *UsageL
 	return _c
 }
 
+// SetUsageEstimated sets the "usage_estimated" field.
+func (_c *UsageLogCreate) SetUsageEstimated(v bool) *UsageLogCreate {
+	_c.mutation.SetUsageEstimated(v)
+	return _c
+}
+
+// SetNillableUsageEstimated sets the "usage_estimated" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableUsageEstimated(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetUsageEstimated(*v)
+	}
+	return _c
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (_c *UsageLogCreate) SetAccountRateMultiplier(v float64) *UsageLogCreate {
 	_c.mutation.SetAccountRateMultiplier(v)
@@ -803,6 +817,10 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultEmptyResponseWaivedCost
 		_c.mutation.SetEmptyResponseWaivedCost(v)
 	}
+	if _, ok := _c.mutation.UsageEstimated(); !ok {
+		v := usagelog.DefaultUsageEstimated
+		_c.mutation.SetUsageEstimated(v)
+	}
 	if _, ok := _c.mutation.BillingType(); !ok {
 		v := usagelog.DefaultBillingType
 		_c.mutation.SetBillingType(v)
@@ -933,6 +951,9 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.EmptyResponseWaivedCost(); !ok {
 		return &ValidationError{Name: "empty_response_waived_cost", err: errors.New(`ent: missing required field "UsageLog.empty_response_waived_cost"`)}
+	}
+	if _, ok := _c.mutation.UsageEstimated(); !ok {
+		return &ValidationError{Name: "usage_estimated", err: errors.New(`ent: missing required field "UsageLog.usage_estimated"`)}
 	}
 	if _, ok := _c.mutation.BillingType(); !ok {
 		return &ValidationError{Name: "billing_type", err: errors.New(`ent: missing required field "UsageLog.billing_type"`)}
@@ -1130,6 +1151,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.EmptyResponseWaivedCost(); ok {
 		_spec.SetField(usagelog.FieldEmptyResponseWaivedCost, field.TypeFloat64, value)
 		_node.EmptyResponseWaivedCost = value
+	}
+	if value, ok := _c.mutation.UsageEstimated(); ok {
+		_spec.SetField(usagelog.FieldUsageEstimated, field.TypeBool, value)
+		_node.UsageEstimated = value
 	}
 	if value, ok := _c.mutation.AccountRateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64, value)
@@ -1883,6 +1908,18 @@ func (u *UsageLogUpsert) UpdateEmptyResponseWaivedCost() *UsageLogUpsert {
 // AddEmptyResponseWaivedCost adds v to the "empty_response_waived_cost" field.
 func (u *UsageLogUpsert) AddEmptyResponseWaivedCost(v float64) *UsageLogUpsert {
 	u.Add(usagelog.FieldEmptyResponseWaivedCost, v)
+	return u
+}
+
+// SetUsageEstimated sets the "usage_estimated" field.
+func (u *UsageLogUpsert) SetUsageEstimated(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldUsageEstimated, v)
+	return u
+}
+
+// UpdateUsageEstimated sets the "usage_estimated" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateUsageEstimated() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldUsageEstimated)
 	return u
 }
 
@@ -2883,6 +2920,20 @@ func (u *UsageLogUpsertOne) AddEmptyResponseWaivedCost(v float64) *UsageLogUpser
 func (u *UsageLogUpsertOne) UpdateEmptyResponseWaivedCost() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateEmptyResponseWaivedCost()
+	})
+}
+
+// SetUsageEstimated sets the "usage_estimated" field.
+func (u *UsageLogUpsertOne) SetUsageEstimated(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUsageEstimated(v)
+	})
+}
+
+// UpdateUsageEstimated sets the "usage_estimated" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateUsageEstimated() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUsageEstimated()
 	})
 }
 
@@ -4102,6 +4153,20 @@ func (u *UsageLogUpsertBulk) AddEmptyResponseWaivedCost(v float64) *UsageLogUpse
 func (u *UsageLogUpsertBulk) UpdateEmptyResponseWaivedCost() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateEmptyResponseWaivedCost()
+	})
+}
+
+// SetUsageEstimated sets the "usage_estimated" field.
+func (u *UsageLogUpsertBulk) SetUsageEstimated(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUsageEstimated(v)
+	})
+}
+
+// UpdateUsageEstimated sets the "usage_estimated" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateUsageEstimated() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUsageEstimated()
 	})
 }
 

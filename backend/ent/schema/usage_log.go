@@ -124,6 +124,9 @@ func (UsageLog) Fields() []ent.Field {
 		field.Float("empty_response_waived_cost").
 			Default(0).
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
+		field.Bool("usage_estimated").
+			Default(false).
+			Comment("Whether token usage was estimated locally because the upstream returned content without usage"),
 
 		// account_rate_multiplier: 账号计费倍率快照（NULL 表示按 1.0 处理）
 		field.Float("account_rate_multiplier").
