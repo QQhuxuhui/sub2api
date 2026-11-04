@@ -89,22 +89,23 @@ func extractIQShowcaseSVG(text string) (string, error) {
 	}
 }
 
-// findIQShowcaseSVGStart finds the first "<svg" that starts a tag (followed by
-// whitespace, ">" or "/"), case-insensitively.
+// findIQShowcaseSVGStart finds the first "<svg" that starts a tag (followed
+// by whitespace, ">" or "/"). It searches the original text: case folding can
+// change byte lengths (U+212A KELVIN SIGN lowercases to one byte), which would
+// shift the offset. The root must be a lowercase svg element anyway.
 func findIQShowcaseSVGStart(text string) int {
-	lower := strings.ToLower(text)
 	from := 0
 	for {
-		i := strings.Index(lower[from:], "<svg")
+		i := strings.Index(text[from:], "<svg")
 		if i < 0 {
 			return -1
 		}
 		i += from
 		next := i + len("<svg")
-		if next >= len(lower) {
+		if next >= len(text) {
 			return -1
 		}
-		switch lower[next] {
+		switch text[next] {
 		case ' ', '\t', '\n', '\r', '>', '/':
 			return i
 		}

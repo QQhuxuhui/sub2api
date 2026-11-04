@@ -21,7 +21,10 @@ func TestExtractIQShowcaseSVG_Accepts(t *testing.T) {
 			`<svg xmlns="http://www.w3.org/2000/svg"><!-- </svg> --><svg x="1"><rect/></svg><![CDATA[</svg>]]></svg>`,
 		},
 		"skips <svgfoo": {"<svgfoo> " + iqTestSVG, iqTestSVG},
-		"first of two":  {iqTestSVG + `<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>`, iqTestSVG},
+		// U+212A lowercases to a one-byte "k"; offsets must stay on the original.
+		"multibyte text before": {"\u212A: " + iqTestSVG, iqTestSVG},
+		"chinese prose before":  {"好的，这是鹈鹕：\n" + iqTestSVG + "\n完成", iqTestSVG},
+		"first of two":          {iqTestSVG + `<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>`, iqTestSVG},
 		"prefixed root": {
 			`<s:svg xmlns:s="http://www.w3.org/2000/svg"><s:rect/></s:svg>`, "",
 		},
