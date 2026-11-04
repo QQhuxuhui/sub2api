@@ -139,9 +139,14 @@ type IQShowcaseRepository interface {
 	ListItems(ctx context.Context) ([]*IQShowcaseItem, error)
 	GetItem(ctx context.Context, id int64) (*IQShowcaseItem, error)
 	CreateItem(ctx context.Context, item *IQShowcaseItem) (*IQShowcaseItem, error)
-	// UpdateItem bumps config_rev when bumpRev is true and prunes success
-	// cards that no longer belong to the current rev or exceed max_cards.
-	UpdateItem(ctx context.Context, item *IQShowcaseItem, bumpRev bool) (*IQShowcaseItem, error)
+	// UpdateItem writes the item and, in the same statement, bumps config_rev
+	// when a field that changes the output differs from the row as it is now
+	// (not as some earlier read saw it), then prunes success cards that no
+	// longer belong to the current rev or exceed max_cards.
+	UpdateItem(ctx context.Context, item *IQShowcaseItem) (*IQShowcaseItem, error)
+	// SetEnabled only switches the item on or off. It never validates the
+	// rest of the item, so an item whose key or group is gone can be stopped.
+	SetEnabled(ctx context.Context, id int64, enabled bool) (*IQShowcaseItem, error)
 	DeleteItem(ctx context.Context, id int64) error
 
 	GetGroup(ctx context.Context, id int64) (*IQShowcaseGroupInfo, error)

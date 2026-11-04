@@ -80,7 +80,7 @@ import Toggle from '@/components/common/Toggle.vue'
 import IQShowcaseItemDialog from './IQShowcaseItemDialog.vue'
 import IQShowcaseResultsDialog from './IQShowcaseResultsDialog.vue'
 import { iqShowcaseAdminAPI } from '@/api/admin/iqShowcase'
-import type { IQShowcaseItem, IQShowcaseItemInput } from '@/api/admin/iqShowcase'
+import type { IQShowcaseItem } from '@/api/admin/iqShowcase'
 import { useAppStore } from '@/stores/app'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { formatRelativeTime } from '@/utils/format'
@@ -118,26 +118,9 @@ async function load() {
   }
 }
 
-function input(it: IQShowcaseItem): IQShowcaseItemInput {
-  return {
-    title: it.title,
-    group_id: it.group_id,
-    api_key_id: it.api_key_id,
-    protocol: it.protocol,
-    model: it.model,
-    prompt: it.prompt,
-    reasoning_effort: it.reasoning_effort,
-    max_output_tokens: it.max_output_tokens,
-    interval_minutes: it.interval_minutes,
-    max_cards: it.max_cards,
-    enabled: it.enabled,
-    sort_order: it.sort_order,
-  }
-}
-
 async function toggle(it: IQShowcaseItem, enabled: boolean) {
   try {
-    Object.assign(it, (await iqShowcaseAdminAPI.updateItem(it.id, { ...input(it), enabled })).data)
+    Object.assign(it, (await iqShowcaseAdminAPI.setEnabled(it.id, enabled)).data)
   } catch (err) {
     appStore.showError(errorText(err))
   }

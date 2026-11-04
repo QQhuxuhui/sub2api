@@ -86,6 +86,28 @@ func (h *IQShowcaseHandler) UpdateItem(c *gin.Context) {
 	response.Success(c, item)
 }
 
+// SetEnabled PUT /api/v1/admin/iq-showcase/items/:id/enabled {"enabled": bool}
+// Switches an item without validating the rest, so a broken one can be stopped.
+func (h *IQShowcaseHandler) SetEnabled(c *gin.Context) {
+	id, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		response.BadRequest(c, "Invalid request: enabled is required")
+		return
+	}
+	item, err := h.svc.SetEnabled(c.Request.Context(), id, *req.Enabled)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
 // DeleteItem DELETE /api/v1/admin/iq-showcase/items/:id
 func (h *IQShowcaseHandler) DeleteItem(c *gin.Context) {
 	id, ok := parseIDParam(c, "id")

@@ -82,6 +82,10 @@ export const iqShowcaseAdminAPI = {
   updateItem(id: number, input: IQShowcaseItemInput) {
     return apiClient.put<IQShowcaseItem>(`/admin/iq-showcase/items/${id}`, input)
   },
+  /** Switches an item without validating the rest, so a broken one can be stopped. */
+  setEnabled(id: number, enabled: boolean) {
+    return apiClient.put<IQShowcaseItem>(`/admin/iq-showcase/items/${id}/enabled`, { enabled })
+  },
   removeItem(id: number) {
     return apiClient.delete(`/admin/iq-showcase/items/${id}`)
   },

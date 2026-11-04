@@ -28,7 +28,6 @@ type iqShowcaseFakeRepo struct {
 	claimNil  bool
 	owned     bool
 	completed []*IQShowcaseResult
-	bumped    []bool
 	done      chan struct{}
 }
 
@@ -58,9 +57,16 @@ func (r *iqShowcaseFakeRepo) CreateItem(_ context.Context, it *IQShowcaseItem) (
 	r.items[it.ID] = it
 	return it, nil
 }
-func (r *iqShowcaseFakeRepo) UpdateItem(_ context.Context, it *IQShowcaseItem, bump bool) (*IQShowcaseItem, error) {
-	r.bumped = append(r.bumped, bump)
+func (r *iqShowcaseFakeRepo) UpdateItem(_ context.Context, it *IQShowcaseItem) (*IQShowcaseItem, error) {
 	r.items[it.ID] = it
+	return it, nil
+}
+func (r *iqShowcaseFakeRepo) SetEnabled(_ context.Context, id int64, enabled bool) (*IQShowcaseItem, error) {
+	it, ok := r.items[id]
+	if !ok {
+		return nil, ErrIQShowcaseItemNotFound
+	}
+	it.Enabled = enabled
 	return it, nil
 }
 func (r *iqShowcaseFakeRepo) DeleteItem(context.Context, int64) error { return nil }
@@ -318,28 +324,25 @@ func TestIQShowcaseNormalizeItem(t *testing.T) {
 	require.Equal(t, "IQ_SHOWCASE_KEY_INVALID", infraerrors.Reason(s.normalizeItem(context.Background(), it)))
 }
 
-func TestIQShowcaseUpdate_BumpsRevOnlyForOutputChanges(t *testing.T) {
+// An item whose key or group is gone fails the full save validation, but it
+// must still be possible to switch it off.
+func TestIQShowcaseSetEnabled_WorksWhenReferencesAreGone(t *testing.T) {
 	repo := newIQShowcaseFakeRepo()
 	s := newIQShowcaseTestService(repo, nil, true)
 	repo.items[1] = iqShowcaseTestItem()
-	edit := func(mutate func(*IQShowcaseItem)) bool {
-		it := iqShowcaseTestItem()
-		repo.items[1] = iqShowcaseTestItem()
-		mutate(it)
-		_, err := s.UpdateItem(context.Background(), it)
-		require.NoError(t, err)
-		return repo.bumped[len(repo.bumped)-1]
-	}
-	require.False(t, edit(func(i *IQShowcaseItem) { i.Title = "new title" }))
-	require.False(t, edit(func(i *IQShowcaseItem) { i.MaxCards = 3; i.IntervalMinutes = 5; i.Enabled = false; i.SortOrder = 9 }))
-	require.True(t, edit(func(i *IQShowcaseItem) { i.Model = "gpt-y" }))
-	require.True(t, edit(func(i *IQShowcaseItem) { i.Prompt = "draw a fox" }))
-	require.True(t, edit(func(i *IQShowcaseItem) { i.Protocol = IQShowcaseProtocolOpenAIResponses }))
-	require.True(t, edit(func(i *IQShowcaseItem) { i.ReasoningEffort = "low" }))
-	require.True(t, edit(func(i *IQShowcaseItem) { i.MaxOutputTokens = 100 }))
-	g := int64(5)
-	repo.keys[11] = &IQShowcaseRunKey{Key: "k2", GroupID: &g, Status: StatusAPIKeyActive}
-	require.True(t, edit(func(i *IQShowcaseItem) { k := int64(11); i.APIKeyID = &k }))
+	delete(repo.keys, 9)
+	delete(repo.groups, 5)
+
+	full := iqShowcaseTestItem()
+	full.Enabled = false
+	_, err := s.UpdateItem(context.Background(), full)
+	require.Error(t, err, "a full save still validates")
+
+	got, err := s.SetEnabled(context.Background(), 1, false)
+	require.NoError(t, err)
+	require.False(t, got.Enabled)
+	_, err = s.SetEnabled(context.Background(), 99, false)
+	require.ErrorIs(t, err, ErrIQShowcaseItemNotFound)
 }
 
 func TestIQShowcaseUserView(t *testing.T) {

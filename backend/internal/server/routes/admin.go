@@ -179,6 +179,7 @@ func registerIQShowcaseRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		g.GET("/items", h.Admin.IQShowcase.ListItems)
 		g.POST("/items", h.Admin.IQShowcase.CreateItem)
 		g.PUT("/items/:id", h.Admin.IQShowcase.UpdateItem)
+		g.PUT("/items/:id/enabled", h.Admin.IQShowcase.SetEnabled)
 		g.DELETE("/items/:id", h.Admin.IQShowcase.DeleteItem)
 		g.POST("/items/:id/run", h.Admin.IQShowcase.RunItem)
 		g.GET("/items/:id/results", h.Admin.IQShowcase.ListResults)

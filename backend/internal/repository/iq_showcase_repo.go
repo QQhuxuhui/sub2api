@@ -141,21 +141,26 @@ func (r *iqShowcaseRepository) CreateItem(ctx context.Context, it *service.IQSho
 	return r.GetItem(ctx, id)
 }
 
-func (r *iqShowcaseRepository) UpdateItem(ctx context.Context, it *service.IQShowcaseItem, bumpRev bool) (*service.IQShowcaseItem, error) {
+func (r *iqShowcaseRepository) UpdateItem(ctx context.Context, it *service.IQShowcaseItem) (*service.IQShowcaseItem, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// SET expressions see the row as it is when the UPDATE takes its lock,
+	// so the rev decision cannot rest on a stale read of another edit.
 	res, err := tx.ExecContext(ctx, `
-		UPDATE iq_showcase_items SET title = $2, group_id = $3, api_key_id = $4, protocol = $5, model = $6,
+		UPDATE iq_showcase_items SET
+			config_rev = config_rev + CASE WHEN
+				(group_id, api_key_id, protocol, model, prompt, reasoning_effort, max_output_tokens)
+				IS DISTINCT FROM ($3::bigint, $4::bigint, $5::varchar, $6::varchar, $7::text, $8::varchar, $9::integer)
+				THEN 1 ELSE 0 END,
+			title = $2, group_id = $3, api_key_id = $4, protocol = $5, model = $6,
 			prompt = $7, reasoning_effort = $8, max_output_tokens = $9, interval_minutes = $10, max_cards = $11,
-			enabled = $12, sort_order = $13,
-			config_rev = config_rev + CASE WHEN $14 THEN 1 ELSE 0 END,
-			updated_at = NOW()
+			enabled = $12, sort_order = $13, updated_at = NOW()
 		WHERE id = $1`,
 		it.ID, it.Title, it.GroupID, it.APIKeyID, it.Protocol, it.Model, it.Prompt, it.ReasoningEffort,
-		it.MaxOutputTokens, it.IntervalMinutes, it.MaxCards, it.Enabled, it.SortOrder, bumpRev)
+		it.MaxOutputTokens, it.IntervalMinutes, it.MaxCards, it.Enabled, it.SortOrder)
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +174,17 @@ func (r *iqShowcaseRepository) UpdateItem(ctx context.Context, it *service.IQSho
 		return nil, err
 	}
 	return r.GetItem(ctx, it.ID)
+}
+
+func (r *iqShowcaseRepository) SetEnabled(ctx context.Context, id int64, enabled bool) (*service.IQShowcaseItem, error) {
+	res, err := r.db.ExecContext(ctx, `UPDATE iq_showcase_items SET enabled = $2, updated_at = NOW() WHERE id = $1`, id, enabled)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, service.ErrIQShowcaseItemNotFound
+	}
+	return r.GetItem(ctx, id)
 }
 
 func (r *iqShowcaseRepository) DeleteItem(ctx context.Context, id int64) error {

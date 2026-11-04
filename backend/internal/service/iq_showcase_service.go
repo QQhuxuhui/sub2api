@@ -99,14 +99,19 @@ func (s *IQShowcaseService) CreateItem(ctx context.Context, item *IQShowcaseItem
 }
 
 func (s *IQShowcaseService) UpdateItem(ctx context.Context, item *IQShowcaseItem) (*IQShowcaseItem, error) {
-	old, err := s.repo.GetItem(ctx, item.ID)
-	if err != nil {
+	if _, err := s.repo.GetItem(ctx, item.ID); err != nil {
 		return nil, err
 	}
 	if err := s.normalizeItem(ctx, item); err != nil {
 		return nil, err
 	}
-	return s.repo.UpdateItem(ctx, item, iqShowcaseConfigChanged(old, item))
+	return s.repo.UpdateItem(ctx, item)
+}
+
+// SetEnabled switches an item on or off without validating the rest of it,
+// so an item whose key or group has gone away can still be stopped.
+func (s *IQShowcaseService) SetEnabled(ctx context.Context, id int64, enabled bool) (*IQShowcaseItem, error) {
+	return s.repo.SetEnabled(ctx, id, enabled)
 }
 
 func (s *IQShowcaseService) DeleteItem(ctx context.Context, id int64) error {
@@ -128,20 +133,6 @@ func (s *IQShowcaseService) ListKeyOptions(ctx context.Context, groupID int64) (
 		return nil, infraerrors.BadRequest("IQ_SHOWCASE_GROUP_REQUIRED", "group_id is required")
 	}
 	return s.repo.ListKeyOptions(ctx, groupID)
-}
-
-// iqShowcaseConfigChanged reports whether an edit changes what a round
-// measures or where its cards belong; such edits start a new config_rev.
-func iqShowcaseConfigChanged(old, item *IQShowcaseItem) bool {
-	if old.GroupID != item.GroupID || old.Protocol != item.Protocol || old.Model != item.Model ||
-		old.Prompt != item.Prompt || old.ReasoningEffort != item.ReasoningEffort ||
-		old.MaxOutputTokens != item.MaxOutputTokens {
-		return true
-	}
-	if (old.APIKeyID == nil) != (item.APIKeyID == nil) {
-		return true
-	}
-	return old.APIKeyID != nil && *old.APIKeyID != *item.APIKeyID
 }
 
 func iqShowcaseBadRequest(reason, format string, a ...any) error {

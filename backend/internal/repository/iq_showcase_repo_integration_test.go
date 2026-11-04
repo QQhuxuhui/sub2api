@@ -135,11 +135,39 @@ func TestIQShowcaseRepositoryLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 
+	// Edits that do not change the output keep the rev.
+	item.Title, item.MaxCards, item.IntervalMinutes, item.SortOrder = "pelican 2", 2, 30, 4
+	updated, err := repo.UpdateItem(ctx, item)
+	require.NoError(t, err)
+	require.Equal(t, 1, updated.ConfigRev)
+	meta, err = repo.ListCardMeta(ctx, item.ID, 1, 10)
+	require.NoError(t, err)
+	require.Len(t, meta, 2, "cards survive a cosmetic edit")
+
 	// An edit that changes the output starts a new rev and drops old cards.
 	item.Model = "gpt-y"
-	updated, err := repo.UpdateItem(ctx, item, true)
+	updated, err = repo.UpdateItem(ctx, item)
 	require.NoError(t, err)
 	require.Equal(t, 2, updated.ConfigRev)
+	updated, err = repo.UpdateItem(ctx, item)
+	require.NoError(t, err)
+	require.Equal(t, 2, updated.ConfigRev, "saving the same output fields again keeps the rev")
+
+	// A stale full write (an admin who loaded the item before another admin
+	// changed the prompt) is compared with the row as it is now, so it starts
+	// a new rev instead of relabelling cards drawn from the other prompt.
+	stale := *item
+	edited := *item
+	edited.Prompt = "draw a fox"
+	updated, err = repo.UpdateItem(ctx, &edited)
+	require.NoError(t, err)
+	require.Equal(t, 3, updated.ConfigRev)
+	stale.Title = "only the title"
+	updated, err = repo.UpdateItem(ctx, &stale)
+	require.NoError(t, err)
+	require.Equal(t, 4, updated.ConfigRev)
+	require.Equal(t, "draw", updated.Prompt)
+	item = updated
 	meta, err = repo.ListCardMeta(ctx, item.ID, 1, 10)
 	require.NoError(t, err)
 	require.Empty(t, meta)
@@ -174,15 +202,28 @@ func TestIQShowcaseRepositoryLifecycle(t *testing.T) {
 	_, err = integrationDB.ExecContext(ctx, "UPDATE iq_showcase_results SET created_at = NOW() - INTERVAL '40 days' WHERE item_id = $1 AND NOT success", item.ID)
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO iq_showcase_results (item_id, config_rev, group_id, model, success, svg)
-		SELECT $1, 2, $2, 'gpt-y', TRUE, '<svg/>' FROM generate_series(1, 5)`, item.ID, group.ID)
+		SELECT $1, $3, $2, 'gpt-y', TRUE, '<svg/>' FROM generate_series(1, 5)`, item.ID, group.ID, item.ConfigRev)
 	require.NoError(t, err)
 	require.NoError(t, repo.Maintenance(ctx, 30*24*time.Hour))
 	failed, err = repo.ListResults(ctx, item.ID, &fails, 10)
 	require.NoError(t, err)
 	require.Empty(t, failed)
-	meta, err = repo.ListCardMeta(ctx, item.ID, 2, 10)
+	meta, err = repo.ListCardMeta(ctx, item.ID, item.ConfigRev, 10)
 	require.NoError(t, err)
 	require.Len(t, meta, 2)
+
+	// Switching off needs no valid key or group.
+	_, err = integrationDB.ExecContext(ctx, "UPDATE api_keys SET deleted_at = NOW() WHERE id = $1", key.ID)
+	require.NoError(t, err)
+	off, err := repo.SetEnabled(ctx, item.ID, false)
+	require.NoError(t, err)
+	require.False(t, off.Enabled)
+	require.Equal(t, item.ConfigRev, off.ConfigRev, "switching does not start a new rev")
+	visible, err = repo.ListVisibleItems(ctx)
+	require.NoError(t, err)
+	require.False(t, containsShowcaseItem(visible, item.ID), "a switched-off item leaves the user page")
+	_, err = repo.SetEnabled(ctx, 999999999, true)
+	require.ErrorIs(t, err, service.ErrIQShowcaseItemNotFound)
 
 	require.NoError(t, repo.DeleteItem(ctx, item.ID))
 	_, err = repo.GetItem(ctx, item.ID)
