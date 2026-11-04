@@ -93,6 +93,9 @@ func extractIQShowcaseSVG(text string) (string, error) {
 				if err := checkIQShowcaseSVGWellFormed(svg); err != nil {
 					return "", err
 				}
+				if err := checkIQShowcaseSVGPrefixes(svg); err != nil {
+					return "", err
+				}
 				return svg, nil
 			}
 		case xml.Directive:
@@ -144,6 +147,64 @@ func checkIQShowcaseSVGWellFormed(svg string) error {
 		if start, ok := tok.(xml.StartElement); ok {
 			if err := checkIQShowcaseSVGAttrs(start); err != nil {
 				return err
+			}
+		}
+	}
+}
+
+// checkIQShowcaseSVGPrefixes rejects namespace prefixes that are not declared
+// on the element or an ancestor, such as xlink:href without xmlns:xlink.
+// encoding/xml leaves those unresolved even in Strict mode, while browsers
+// refuse the image ("unbound prefix"). It reads raw tokens so that prefixes
+// are seen as written; the caller has already checked well-formedness.
+func checkIQShowcaseSVGPrefixes(svg string) error {
+	dec := xml.NewDecoder(strings.NewReader(svg))
+	dec.Strict = true
+	dec.Entity = nil
+	var scopes []map[string]struct{}
+	bound := func(prefix string) bool {
+		if prefix == "xml" {
+			return true // always bound by the XML spec
+		}
+		for i := len(scopes) - 1; i >= 0; i-- {
+			if _, ok := scopes[i][prefix]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	for {
+		tok, err := dec.RawToken()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("svg is not well-formed xml: %v", err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			declared := map[string]struct{}{}
+			for _, attr := range t.Attr {
+				if attr.Name.Space == "xmlns" {
+					declared[attr.Name.Local] = struct{}{}
+				}
+			}
+			scopes = append(scopes, declared)
+			if t.Name.Space != "" && !bound(t.Name.Space) {
+				return fmt.Errorf("svg uses undeclared namespace prefix %q on <%s:%s>", t.Name.Space, t.Name.Space, t.Name.Local)
+			}
+			for _, attr := range t.Attr {
+				p := attr.Name.Space
+				if p == "" || p == "xmlns" {
+					continue
+				}
+				if !bound(p) {
+					return fmt.Errorf("svg uses undeclared namespace prefix %q in attribute %s:%s", p, p, attr.Name.Local)
+				}
+			}
+		case xml.EndElement:
+			if len(scopes) > 0 {
+				scopes = scopes[:len(scopes)-1]
 			}
 		}
 	}

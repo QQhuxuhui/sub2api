@@ -53,24 +53,47 @@ func TestExtractIQShowcaseSVG_AddsMissingNamespace(t *testing.T) {
 	require.True(t, strings.HasPrefix(got, `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink=`), got)
 }
 
+func TestExtractIQShowcaseSVG_NamespacePrefixesInScope(t *testing.T) {
+	ok := []string{
+		`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><use xlink:href="#r"/></svg>`,
+		`<svg xmlns="http://www.w3.org/2000/svg"><g xmlns:xlink="http://www.w3.org/1999/xlink"><g><use xlink:href="#r"/></g></g></svg>`,
+		`<svg xmlns="http://www.w3.org/2000/svg"><text xml:space="preserve">a</text></svg>`,
+		`<s:svg xmlns:s="http://www.w3.org/2000/svg"><s:rect/></s:svg>`,
+	}
+	for _, in := range ok {
+		_, err := extractIQShowcaseSVG("x " + in)
+		if strings.HasPrefix(in, "<s:svg") {
+			require.Error(t, err, "a prefixed root is not found by the <svg search")
+			continue
+		}
+		require.NoError(t, err, in)
+	}
+	// The added default namespace must not hide an undeclared prefix.
+	_, err := extractIQShowcaseSVG(`<svg viewBox="0 0 1 1"><use xlink:href="#r"/></svg>`)
+	require.Error(t, err)
+}
+
 func TestExtractIQShowcaseSVG_Rejects(t *testing.T) {
 	deep := strings.Repeat("<g>", iqShowcaseMaxSVGDepth) + strings.Repeat("</g>", iqShowcaseMaxSVGDepth)
 	many := strings.Repeat("<rect/>", iqShowcaseMaxSVGElements)
 	big := `<svg xmlns="http://www.w3.org/2000/svg"><text>` + strings.Repeat("a", iqShowcaseMaxSVGBytes) + `</text></svg>`
 	cases := map[string]string{
-		"no svg":              "I cannot draw that.",
-		"unclosed":            `<svg xmlns="http://www.w3.org/2000/svg"><rect/>`,
-		"malformed":           `<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>`,
-		"doctype inside":      `<svg xmlns="http://www.w3.org/2000/svg"><!DOCTYPE x [<!ENTITY a "b">]><text>&a;</text></svg>`,
-		"unknown entity":      `<svg xmlns="http://www.w3.org/2000/svg"><text>&nbsp;</text></svg>`,
-		"proc inst":           `<svg xmlns="http://www.w3.org/2000/svg"><?xml-stylesheet href="x"?></svg>`,
-		"wrong namespace":     `<svg xmlns="http://example.com/ns"><rect/></svg>`,
-		"empty namespace":     `<svg xmlns=""><rect/></svg>`,
-		"duplicate attribute": `<svg xmlns="http://www.w3.org/2000/svg" width="1" width="2"/>`,
-		"too deep":            `<svg xmlns="http://www.w3.org/2000/svg">` + deep + `</svg>`,
-		"too many":            `<svg xmlns="http://www.w3.org/2000/svg">` + many + `</svg>`,
-		"too big":             big,
-		"cut at end":          `<svg`,
+		"no svg":                            "I cannot draw that.",
+		"unclosed":                          `<svg xmlns="http://www.w3.org/2000/svg"><rect/>`,
+		"malformed":                         `<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>`,
+		"doctype inside":                    `<svg xmlns="http://www.w3.org/2000/svg"><!DOCTYPE x [<!ENTITY a "b">]><text>&a;</text></svg>`,
+		"unknown entity":                    `<svg xmlns="http://www.w3.org/2000/svg"><text>&nbsp;</text></svg>`,
+		"proc inst":                         `<svg xmlns="http://www.w3.org/2000/svg"><?xml-stylesheet href="x"?></svg>`,
+		"wrong namespace":                   `<svg xmlns="http://example.com/ns"><rect/></svg>`,
+		"undeclared xlink":                  `<svg xmlns="http://www.w3.org/2000/svg"><use xlink:href="#r"/></svg>`,
+		"undeclared element prefix":         `<svg xmlns="http://www.w3.org/2000/svg"><foo:bar/></svg>`,
+		"prefix declared on a sibling only": `<svg xmlns="http://www.w3.org/2000/svg"><g xmlns:a="urn:a"/><use a:x="1"/></svg>`,
+		"empty namespace":                   `<svg xmlns=""><rect/></svg>`,
+		"duplicate attribute":               `<svg xmlns="http://www.w3.org/2000/svg" width="1" width="2"/>`,
+		"too deep":                          `<svg xmlns="http://www.w3.org/2000/svg">` + deep + `</svg>`,
+		"too many":                          `<svg xmlns="http://www.w3.org/2000/svg">` + many + `</svg>`,
+		"too big":                           big,
+		"cut at end":                        `<svg`,
 	}
 	for name, in := range cases {
 		t.Run(name, func(t *testing.T) {
