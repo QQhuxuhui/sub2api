@@ -78,13 +78,15 @@ func TestExtractIQShowcaseSVG_Rejects(t *testing.T) {
 	many := strings.Repeat("<rect/>", iqShowcaseMaxSVGElements)
 	big := `<svg xmlns="http://www.w3.org/2000/svg"><text>` + strings.Repeat("a", iqShowcaseMaxSVGBytes) + `</text></svg>`
 	cases := map[string]string{
-		"no svg":                            "I cannot draw that.",
-		"unclosed":                          `<svg xmlns="http://www.w3.org/2000/svg"><rect/>`,
-		"malformed":                         `<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>`,
-		"doctype inside":                    `<svg xmlns="http://www.w3.org/2000/svg"><!DOCTYPE x [<!ENTITY a "b">]><text>&a;</text></svg>`,
-		"unknown entity":                    `<svg xmlns="http://www.w3.org/2000/svg"><text>&nbsp;</text></svg>`,
-		"proc inst":                         `<svg xmlns="http://www.w3.org/2000/svg"><?xml-stylesheet href="x"?></svg>`,
-		"wrong namespace":                   `<svg xmlns="http://example.com/ns"><rect/></svg>`,
+		"no svg":                           "I cannot draw that.",
+		"unclosed":                         `<svg xmlns="http://www.w3.org/2000/svg"><rect/>`,
+		"malformed":                        `<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>`,
+		"doctype inside":                   `<svg xmlns="http://www.w3.org/2000/svg"><!DOCTYPE x [<!ENTITY a "b">]><text>&a;</text></svg>`,
+		"unknown entity":                   `<svg xmlns="http://www.w3.org/2000/svg"><text>&nbsp;</text></svg>`,
+		"proc inst":                        `<svg xmlns="http://www.w3.org/2000/svg"><?xml-stylesheet href="x"?></svg>`,
+		"wrong namespace":                  `<svg xmlns="http://example.com/ns"><rect/></svg>`,
+		"empty prefix declaration on root": `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink=""><use xlink:href="#r"/></svg>`,
+		"empty prefix declaration overriding an ancestor": `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><g xmlns:xlink=""><use xlink:href="#r"/></g></svg>`,
 		"undeclared xlink":                  `<svg xmlns="http://www.w3.org/2000/svg"><use xlink:href="#r"/></svg>`,
 		"undeclared element prefix":         `<svg xmlns="http://www.w3.org/2000/svg"><foo:bar/></svg>`,
 		"prefix declared on a sibling only": `<svg xmlns="http://www.w3.org/2000/svg"><g xmlns:a="urn:a"/><use a:x="1"/></svg>`,

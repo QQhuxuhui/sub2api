@@ -186,6 +186,12 @@ func checkIQShowcaseSVGPrefixes(svg string) error {
 			declared := map[string]struct{}{}
 			for _, attr := range t.Attr {
 				if attr.Name.Space == "xmlns" {
+					// xmlns:p="" is not allowed in XML 1.0 namespaces and
+					// browsers refuse it; skipping it would instead fall back
+					// to an ancestor's binding, so it fails outright.
+					if strings.TrimSpace(attr.Value) == "" {
+						return fmt.Errorf("svg declares namespace prefix %q with an empty URI", attr.Name.Local)
+					}
 					declared[attr.Name.Local] = struct{}{}
 				}
 			}
