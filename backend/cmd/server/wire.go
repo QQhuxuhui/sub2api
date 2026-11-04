@@ -133,6 +133,7 @@ func provideCleanup(
 	pluginManager *service.PluginManager,
 	intentRouter *service.IntentRouterService,
 	iqProbeRunner *service.IQProbeRunner,
+	iqShowcaseRunner *service.IQShowcaseRunner,
 	userBalanceSettler *service.UserBalanceSettler,
 ) func() {
 	return func() {
@@ -149,6 +150,10 @@ func provideCleanup(
 			{"IntentRouter", func() error { return intentRouter.Stop(ctx) }},
 			{"IQProbeRunner", func() error {
 				iqProbeRunner.Stop()
+				return nil
+			}},
+			{"IQShowcaseRunner", func() error {
+				iqShowcaseRunner.Stop()
 				return nil
 			}},
 			{"PluginManager", func() error {

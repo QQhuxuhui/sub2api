@@ -662,6 +662,13 @@ func ProvideIQProbeRunner(svc *IQProbeService) *IQProbeRunner {
 	return r
 }
 
+// ProvideIQShowcaseRunner creates and starts the IQ showcase runner.
+func ProvideIQShowcaseRunner(svc *IQShowcaseService) *IQShowcaseRunner {
+	r := NewIQShowcaseRunner(svc)
+	r.Start()
+	return r
+}
+
 // ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
 func ProvideScheduledTestRunnerService(
 	planRepo ScheduledTestPlanRepository,
@@ -990,7 +997,9 @@ var ProviderSet = wire.NewSet(
 	NewContentModerationService,
 	NewIntentRouterService,
 	NewIQProbeService,
+	NewIQShowcaseService,
 	ProvideIQProbeRunner,
+	ProvideIQShowcaseRunner,
 	NewAffiliateService,
 	ProvidePaymentConfigService,
 	ProvidePaymentService,

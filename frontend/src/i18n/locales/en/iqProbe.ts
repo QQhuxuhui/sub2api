@@ -9,7 +9,8 @@ export default {
     tabs: {
       monitors: 'Monitors',
       sets: 'Question sets',
-      runs: 'Runs'
+      runs: 'Runs',
+      showcase: 'Group IQ showcase'
     },
     monitors: {
       summary: '{n} monitors, {enabled} enabled',

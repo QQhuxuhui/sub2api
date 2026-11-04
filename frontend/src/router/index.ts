@@ -515,6 +515,17 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/iq-showcase',
+    name: 'IQShowcase',
+    component: () => import('@/views/user/IQShowcaseView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'IQ Showcase',
+      titleKey: 'iqShowcase.title'
+    }
+  },
+  {
     path: '/monitor',
     name: 'ChannelStatus',
     component: () => import('@/views/user/ChannelStatusView.vue'),

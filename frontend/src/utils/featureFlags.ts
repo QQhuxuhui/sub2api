@@ -104,6 +104,11 @@ export const FeatureFlags = {
     mode: 'opt-in',
     label: 'Available Channels',
   }),
+  iqShowcase: defineFlag({
+    key: 'iq_showcase_enabled',
+    mode: 'opt-in',
+    label: 'IQ Showcase',
+  }),
   subscription: defineFlag({
     key: 'subscription_enabled',
     mode: 'opt-out',

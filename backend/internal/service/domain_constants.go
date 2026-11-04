@@ -535,6 +535,11 @@ const (
 	// sidebar entry is hidden. Defaults to false (opt-in feature).
 	SettingKeyAvailableChannelsEnabled = "available_channels_enabled"
 
+	// SettingKeyIQShowcaseEnabled switches the user-facing IQ showcase page and
+	// its read API. Probes keep running per item; this only controls display.
+	// Defaults to false (opt-in feature).
+	SettingKeyIQShowcaseEnabled = "iq_showcase_enabled"
+
 	// SettingKeySubscriptionEnabled is a DB-backed soft switch for the user-facing
 	// subscription surface: sidebar entries, purchase-page subscription tab, header
 	// progress badge, usage billing-type filter and the /subscriptions route. When

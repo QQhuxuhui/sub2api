@@ -103,6 +103,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // pluginManager
 		nil, // intentRouter
 		nil, // iqProbeRunner
+		nil, // iqShowcaseRunner
 		nil, // userBalanceSettler
 	)
 

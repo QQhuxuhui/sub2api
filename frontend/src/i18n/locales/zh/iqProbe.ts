@@ -9,7 +9,8 @@ export default {
     tabs: {
       monitors: '监控列表',
       sets: '题组与题目',
-      runs: '运行记录'
+      runs: '运行记录',
+      showcase: '分组智力展示'
     },
     monitors: {
       summary: '共 {n} 条监控，{enabled} 条启用',

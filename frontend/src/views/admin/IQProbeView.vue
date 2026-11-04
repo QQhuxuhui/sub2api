@@ -114,6 +114,7 @@
         </div>
       </section>
 
+      <IQShowcaseTab v-else-if="activeTab === 'showcase'" :groups="groups" />
       <IQProbeSetsTab v-else-if="activeTab === 'sets'" :sets="sets" @changed="loadSets" />
       <IQProbeRunsTab v-else :monitors="monitors" />
     </div>
@@ -134,6 +135,7 @@ import IQProbeMonitorDialog from '@/components/admin/iqProbe/IQProbeMonitorDialo
 import IQProbeDetailDialog from '@/components/admin/iqProbe/IQProbeDetailDialog.vue'
 import IQProbeSetsTab from '@/components/admin/iqProbe/IQProbeSetsTab.vue'
 import IQProbeRunsTab from '@/components/admin/iqProbe/IQProbeRunsTab.vue'
+import IQShowcaseTab from '@/components/admin/iqProbe/IQShowcaseTab.vue'
 import { adminAPI } from '@/api/admin'
 import { iqProbeAPI } from '@/api/admin/iqProbe'
 import type { IQProbeAlertState, IQProbeMonitor, IQProbeMonitorInput, IQProbeQuestionSet } from '@/api/admin/iqProbe'
@@ -141,8 +143,8 @@ import { useAppStore } from '@/stores/app'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { formatRelativeTime } from '@/utils/format'
 
-type Tab = 'monitors' | 'sets' | 'runs'
-const tabs: Tab[] = ['monitors', 'sets', 'runs']
+type Tab = 'monitors' | 'sets' | 'runs' | 'showcase'
+const tabs: Tab[] = ['monitors', 'sets', 'runs', 'showcase']
 
 const { t } = useI18n()
 const appStore = useAppStore()

@@ -135,6 +135,13 @@ func RegisterUserRoutes(
 			subscriptions.GET("/summary", h.Subscription.GetSummary)
 		}
 
+		// 智力展示（用户只读；开关关闭时 404）
+		iqShowcase := authenticated.Group("/iq-showcase")
+		{
+			iqShowcase.GET("", h.IQShowcase.View)
+			iqShowcase.GET("/cards", h.IQShowcase.Cards)
+		}
+
 		// 渠道监控（用户只读）
 		monitors := authenticated.Group("/channel-monitors")
 		{

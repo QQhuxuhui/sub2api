@@ -6,6 +6,7 @@ import channelMonitorV2 from './channelMonitorV2'
 import batchImage from './batchImage'
 import intentRouter from './intentRouter'
 import iqProbe from './iqProbe'
+import iqShowcase from './iqShowcase'
 import admin from './admin'
 import misc from './misc'
 
@@ -18,6 +19,7 @@ export default {
   ...batchImage,
   ...intentRouter,
   ...iqProbe,
+  ...iqShowcase,
   admin,
   ...misc,
 }

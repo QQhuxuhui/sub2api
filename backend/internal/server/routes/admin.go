@@ -125,6 +125,7 @@ func RegisterAdminRoutes(
 		registerContentModerationRoutes(admin, h)
 		registerIntentRouterRoutes(admin, h)
 		registerIQProbeRoutes(admin, h)
+		registerIQShowcaseRoutes(admin, h)
 
 		// 独立提示词输入审计
 		registerPromptAuditRoutes(admin, h)
@@ -168,6 +169,20 @@ func registerAdminComplianceRoutes(admin *gin.RouterGroup, h *handler.Handlers) 
 	{
 		compliance.GET("", h.Admin.Compliance.GetStatus)
 		compliance.POST("/accept", h.Admin.Compliance.Accept)
+	}
+}
+
+// registerIQShowcaseRoutes：用户端智力展示页的探测项配置。
+func registerIQShowcaseRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	g := admin.Group("/iq-showcase")
+	{
+		g.GET("/items", h.Admin.IQShowcase.ListItems)
+		g.POST("/items", h.Admin.IQShowcase.CreateItem)
+		g.PUT("/items/:id", h.Admin.IQShowcase.UpdateItem)
+		g.DELETE("/items/:id", h.Admin.IQShowcase.DeleteItem)
+		g.POST("/items/:id/run", h.Admin.IQShowcase.RunItem)
+		g.GET("/items/:id/results", h.Admin.IQShowcase.ListResults)
+		g.GET("/key-options", h.Admin.IQShowcase.ListKeyOptions)
 	}
 }
 
