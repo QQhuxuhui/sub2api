@@ -72,6 +72,23 @@ func TestReadIQShowcaseStream(t *testing.T) {
 			`{"candidates":[{"content":{"parts":[{"text":"a"}]},"finishReason":"STOP"}]}`, `{"error":{"code":500}}`), "", true},
 
 		{"non-json event", IQShowcaseProtocolOpenAIChat, sse(`oops`), "", true},
+
+		// Event type only on the SSE "event:" line (see effectiveOpenAISSEEventType).
+		{"responses typed by event lines", IQShowcaseProtocolOpenAIResponses,
+			"event: response.output_text.delta\ndata: {\"delta\":\"<svg/>\"}\n\n" +
+				"event: response.completed\ndata: {\"response\":{\"status\":\"completed\"}}\n\n", "<svg/>", false},
+		{"responses event-line error after completed", IQShowcaseProtocolOpenAIResponses,
+			"event: response.output_text.delta\ndata: {\"delta\":\"x\"}\n\n" +
+				"event: response.completed\ndata: {}\n\n" +
+				"event: error\ndata: {\"message\":\"boom\"}\n\n", "", true},
+		{"event name does not leak into the next frame", IQShowcaseProtocolOpenAIResponses,
+			"event: response.completed\ndata: {}\n\n" +
+				"data: {\"delta\":\"late\"}\n\n", "", false},
+		{"anthropic typed by event lines", IQShowcaseProtocolAnthropicMessages,
+			"event: content_block_delta\ndata: {\"delta\":{\"type\":\"text_delta\",\"text\":\"x\"}}\n\n" +
+				"event: message_stop\ndata: {}\n\n", "x", false},
+		{"event error without data on chat", IQShowcaseProtocolOpenAIChat,
+			sse(`{"choices":[{"delta":{"content":"a"}}]}`) + "event: error\n\n" + sse(`[DONE]`), "", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

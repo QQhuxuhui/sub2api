@@ -138,9 +138,16 @@ func (st *iqShowcaseStreamState) appendText(s string) {
 	st.text.WriteString(s)
 }
 
-// handle processes one SSE data payload.
-func (st *iqShowcaseStreamState) handle(data string) {
+// handle processes one SSE frame: its data payload and the event name from
+// its "event:" line, if any. Some upstreams name the event only there, so
+// the name stands in for a missing JSON "type".
+func (st *iqShowcaseStreamState) handle(event, data string) {
 	data = strings.TrimSpace(data)
+	event = strings.TrimSpace(event)
+	if event == "error" {
+		st.fail("upstream reported %s", truncateIQShowcaseError(data))
+		return
+	}
 	if data == "" {
 		return
 	}
@@ -157,18 +164,27 @@ func (st *iqShowcaseStreamState) handle(data string) {
 	ev := gjson.Parse(data)
 	switch st.protocol {
 	case IQShowcaseProtocolOpenAIResponses:
-		st.handleResponses(ev, data)
+		st.handleResponses(ev, iqShowcaseEventType(ev, event), data)
 	case IQShowcaseProtocolOpenAIChat:
 		st.handleChat(ev, data)
 	case IQShowcaseProtocolAnthropicMessages:
-		st.handleAnthropic(ev, data)
+		st.handleAnthropic(ev, iqShowcaseEventType(ev, event), data)
 	case IQShowcaseProtocolGemini:
 		st.handleGemini(ev, data)
 	}
 }
 
-func (st *iqShowcaseStreamState) handleResponses(ev gjson.Result, raw string) {
-	switch ev.Get("type").String() {
+// iqShowcaseEventType is the JSON "type" of an event, or the SSE event name
+// when the payload carries none.
+func iqShowcaseEventType(ev gjson.Result, event string) string {
+	if t := ev.Get("type").String(); t != "" {
+		return t
+	}
+	return event
+}
+
+func (st *iqShowcaseStreamState) handleResponses(ev gjson.Result, typ, raw string) {
+	switch typ {
 	case "response.output_text.delta":
 		st.appendText(ev.Get("delta").String())
 	case "response.completed":
@@ -212,8 +228,8 @@ func (st *iqShowcaseStreamState) handleChat(ev gjson.Result, raw string) {
 	}
 }
 
-func (st *iqShowcaseStreamState) handleAnthropic(ev gjson.Result, raw string) {
-	switch ev.Get("type").String() {
+func (st *iqShowcaseStreamState) handleAnthropic(ev gjson.Result, typ, raw string) {
+	switch typ {
 	case "content_block_delta":
 		if ev.Get("delta.type").String() == "text_delta" {
 			st.appendText(ev.Get("delta.text").String())
@@ -266,11 +282,13 @@ func readIQShowcaseStream(protocol string, body io.Reader) (string, error) {
 	limited := &io.LimitedReader{R: body, N: iqShowcaseMaxStreamBytes + 1}
 	reader := bufio.NewReaderSize(limited, 64<<10)
 	var data strings.Builder
+	event := ""
 	flush := func() {
-		if data.Len() > 0 {
-			st.handle(data.String())
-			data.Reset()
+		if data.Len() > 0 || event != "" {
+			st.handle(event, data.String())
 		}
+		data.Reset()
+		event = ""
 	}
 	for {
 		line, err := reader.ReadString('\n')
@@ -279,6 +297,8 @@ func readIQShowcaseStream(protocol string, body io.Reader) (string, error) {
 			switch {
 			case trimmed == "":
 				flush()
+			case strings.HasPrefix(trimmed, "event:"):
+				event = strings.TrimPrefix(trimmed, "event:")
 			case strings.HasPrefix(trimmed, "data:"):
 				if data.Len() > 0 {
 					data.WriteByte('\n')
