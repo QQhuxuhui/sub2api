@@ -58,17 +58,19 @@ func TestExtractIQShowcaseSVG_Rejects(t *testing.T) {
 	many := strings.Repeat("<rect/>", iqShowcaseMaxSVGElements)
 	big := `<svg xmlns="http://www.w3.org/2000/svg"><text>` + strings.Repeat("a", iqShowcaseMaxSVGBytes) + `</text></svg>`
 	cases := map[string]string{
-		"no svg":          "I cannot draw that.",
-		"unclosed":        `<svg xmlns="http://www.w3.org/2000/svg"><rect/>`,
-		"malformed":       `<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>`,
-		"doctype inside":  `<svg xmlns="http://www.w3.org/2000/svg"><!DOCTYPE x [<!ENTITY a "b">]><text>&a;</text></svg>`,
-		"unknown entity":  `<svg xmlns="http://www.w3.org/2000/svg"><text>&nbsp;</text></svg>`,
-		"proc inst":       `<svg xmlns="http://www.w3.org/2000/svg"><?xml-stylesheet href="x"?></svg>`,
-		"wrong namespace": `<svg xmlns="http://example.com/ns"><rect/></svg>`,
-		"too deep":        `<svg xmlns="http://www.w3.org/2000/svg">` + deep + `</svg>`,
-		"too many":        `<svg xmlns="http://www.w3.org/2000/svg">` + many + `</svg>`,
-		"too big":         big,
-		"cut at end":      `<svg`,
+		"no svg":              "I cannot draw that.",
+		"unclosed":            `<svg xmlns="http://www.w3.org/2000/svg"><rect/>`,
+		"malformed":           `<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>`,
+		"doctype inside":      `<svg xmlns="http://www.w3.org/2000/svg"><!DOCTYPE x [<!ENTITY a "b">]><text>&a;</text></svg>`,
+		"unknown entity":      `<svg xmlns="http://www.w3.org/2000/svg"><text>&nbsp;</text></svg>`,
+		"proc inst":           `<svg xmlns="http://www.w3.org/2000/svg"><?xml-stylesheet href="x"?></svg>`,
+		"wrong namespace":     `<svg xmlns="http://example.com/ns"><rect/></svg>`,
+		"empty namespace":     `<svg xmlns=""><rect/></svg>`,
+		"duplicate attribute": `<svg xmlns="http://www.w3.org/2000/svg" width="1" width="2"/>`,
+		"too deep":            `<svg xmlns="http://www.w3.org/2000/svg">` + deep + `</svg>`,
+		"too many":            `<svg xmlns="http://www.w3.org/2000/svg">` + many + `</svg>`,
+		"too big":             big,
+		"cut at end":          `<svg`,
 	}
 	for name, in := range cases {
 		t.Run(name, func(t *testing.T) {

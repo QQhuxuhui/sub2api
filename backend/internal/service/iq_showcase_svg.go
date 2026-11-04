@@ -48,12 +48,22 @@ func extractIQShowcaseSVG(text string) (string, error) {
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
+			if err := checkIQShowcaseSVGAttrs(t); err != nil {
+				return "", err
+			}
 			if depth == 0 {
 				if t.Name.Local != "svg" {
 					return "", errors.New("root element is not svg")
 				}
 				switch t.Name.Space {
 				case "":
+					// xmlns="" declares "no namespace"; adding ours would
+					// duplicate the attribute.
+					for _, attr := range t.Attr {
+						if attr.Name.Space == "" && attr.Name.Local == "xmlns" {
+							return "", errors.New("root svg declares an empty namespace")
+						}
+					}
 					needsNamespace = true
 				case iqShowcaseSVGNamespace:
 				default:
@@ -78,6 +88,10 @@ func extractIQShowcaseSVG(text string) (string, error) {
 				svg := rest[:end]
 				if needsNamespace {
 					svg = addIQShowcaseSVGNamespace(svg)
+				}
+				// Whatever we changed must still be one well-formed element.
+				if err := checkIQShowcaseSVGWellFormed(svg); err != nil {
+					return "", err
 				}
 				return svg, nil
 			}
@@ -111,6 +125,44 @@ func findIQShowcaseSVGStart(text string) int {
 		}
 		from = next
 	}
+}
+
+// checkIQShowcaseSVGWellFormed parses the final SVG once more, strictly, so a
+// rewrite can never store something a browser would fail to load.
+func checkIQShowcaseSVGWellFormed(svg string) error {
+	dec := xml.NewDecoder(strings.NewReader(svg))
+	dec.Strict = true
+	dec.Entity = nil
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("svg is not well-formed xml: %v", err)
+		}
+		if start, ok := tok.(xml.StartElement); ok {
+			if err := checkIQShowcaseSVGAttrs(start); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// checkIQShowcaseSVGAttrs rejects repeated attributes. encoding/xml accepts
+// them, but they are a well-formedness error and browsers refuse the image.
+func checkIQShowcaseSVGAttrs(el xml.StartElement) error {
+	if len(el.Attr) < 2 {
+		return nil
+	}
+	seen := make(map[xml.Name]struct{}, len(el.Attr))
+	for _, attr := range el.Attr {
+		if _, dup := seen[attr.Name]; dup {
+			return fmt.Errorf("svg element <%s> repeats attribute %q", el.Name.Local, attr.Name.Local)
+		}
+		seen[attr.Name] = struct{}{}
+	}
+	return nil
 }
 
 // addIQShowcaseSVGNamespace adds the SVG namespace to a root element that
