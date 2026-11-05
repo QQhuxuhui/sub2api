@@ -148,7 +148,8 @@ func TestAccountStatsCustomRulesUseOwnReasoningEffortMultipliers(t *testing.T) {
 					ReasoningEffortMultipliers: map[string]float64{"high": 1.5},
 				}},
 			}}}
-			for effort, multiplier := range map[string]float64{"high": 1.5, "max": 1} {
+			// 本仓 U7：规则没配 max 时，claude-fable-5-1 的 max 档沿用内置默认 3 倍。
+			for effort, multiplier := range map[string]float64{"high": 1.5, "max": claudeFable51MaxReasoningEffortMultiplier} {
 				cost := tryCustomRules(channel, 1, 100, PlatformAnthropic, "claude-fable-5-1", UsageTokens{InputTokens: 100}, 2, effort)
 				require.NotNil(t, cost)
 				base := 0.2
@@ -242,4 +243,31 @@ func TestReasoningEffortBillingPreservesForwardedNoneAndMinimal(t *testing.T) {
 	filtered, err := filterOpenAIResponsesNoneReasoningEffortForAccount(account, []byte(`{"model":"custom-model","reasoning":{"effort":"none"}}`))
 	require.NoError(t, err)
 	require.Nil(t, extractOpenAIReasoningEffortFromBody(filtered, "custom-model"))
+}
+
+// 本仓 U7：显式配置的 max 倍率（含 1）优先于 claude-fable-5-1 的内置默认 3 倍；
+// 内置默认只认 fable-5-1 的 max 档，其他模型/档位不受影响。
+func TestReasoningEffortBillingMultiplierForModel_ConfiguredWinsOverFable51Default(t *testing.T) {
+	require.Equal(t, 3.0, reasoningEffortBillingMultiplierForModel("claude-fable-5-1", "max", nil))
+	require.Equal(t, 3.0, reasoningEffortBillingMultiplierForModel("claude-fable-5-1-20261001", "max", map[string]float64{"high": 2}))
+	require.Equal(t, 1.0, reasoningEffortBillingMultiplierForModel("claude-fable-5-1", "max", map[string]float64{"max": 1}))
+	require.Equal(t, 1.5, reasoningEffortBillingMultiplierForModel("claude-fable-5-1", "max", map[string]float64{"max": 1.5}))
+	require.Equal(t, 3.0, reasoningEffortBillingMultiplierForModel("claude-fable-5-1", "max", map[string]float64{"max": 0}), "非法配置视为未配置")
+	require.Equal(t, 1.0, reasoningEffortBillingMultiplierForModel("claude-fable-5-1", "xhigh", nil))
+	require.Equal(t, 1.0, reasoningEffortBillingMultiplierForModel("claude-fable-5", "max", nil))
+	require.Equal(t, 1.0, reasoningEffortBillingMultiplierForModel("claude-fable-5-10", "max", nil))
+	require.Equal(t, 2.0, reasoningEffortBillingMultiplierForModel("gpt-5.6-sol", "max", map[string]float64{"max": 2}))
+}
+
+// 本仓 U7：OpenAI 记账在无分组/解析器的兜底路径同样套内置默认（合并前 dev 即如此）。
+func TestCalculateOpenAIRecordUsageTokenCost_FallbackKeepsFable51MaxDefault(t *testing.T) {
+	bs := NewBillingService(&config.Config{}, nil)
+	svc := &OpenAIGatewayService{billingService: bs}
+	tokens := UsageTokens{InputTokens: 1000, OutputTokens: 10}
+	standard, err := svc.calculateOpenAIRecordUsageTokenCost(context.Background(), &APIKey{}, "claude-fable-5-1", 1, time.Time{}, tokens, "", "xhigh", false, nil, false)
+	require.NoError(t, err)
+	max, err := svc.calculateOpenAIRecordUsageTokenCost(context.Background(), &APIKey{}, "claude-fable-5-1", 1, time.Time{}, tokens, "", "max", false, nil, false)
+	require.NoError(t, err)
+	require.Greater(t, standard.TotalCost, 0.0)
+	require.InDelta(t, standard.TotalCost*3, max.TotalCost, 1e-12)
 }

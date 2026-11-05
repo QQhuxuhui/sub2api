@@ -217,7 +217,8 @@ func TestCalculateTokenCostForRequest_NoResolverFallsBackToCatalog(t *testing.T)
 	require.Equal(t, want, got)
 }
 
-func TestCalculateTokenCostForRequest_Fable51HasNoImplicitReasoningMultiplier(t *testing.T) {
+// 本仓 U7：未配置倍率时 claude-fable-5-1 max 档按内置默认 3 倍。
+func TestCalculateTokenCostForRequest_Fable51KeepsDefaultMaxReasoningMultiplier(t *testing.T) {
 	bs := NewBillingService(&config.Config{}, nil)
 	tokens := UsageTokens{InputTokens: 1000, OutputTokens: 10}
 	standard, err := bs.CalculateTokenCostForRequest(TokenCostRequest{
@@ -228,7 +229,8 @@ func TestCalculateTokenCostForRequest_Fable51HasNoImplicitReasoningMultiplier(t 
 		Model: "claude-fable-5-1", Tokens: tokens, RateMultiplier: 1, ReasoningEffort: "max",
 	})
 	require.NoError(t, err)
-	require.Equal(t, standard, max)
+	require.InDelta(t, standard.TotalCost*claudeFable51MaxReasoningEffortMultiplier, max.TotalCost, 1e-12)
+	require.InDelta(t, standard.ActualCost*claudeFable51MaxReasoningEffortMultiplier, max.ActualCost, 1e-12)
 }
 
 func TestCalculateTokenCostForRequest_ChannelConfiguresReasoningEffortMultiplier(t *testing.T) {

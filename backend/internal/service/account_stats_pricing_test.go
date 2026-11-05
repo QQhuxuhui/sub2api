@@ -556,7 +556,8 @@ func TestTryModelFilePricing_Success(t *testing.T) {
 	require.InDelta(t, 0.2, *result, 1e-12)
 }
 
-func TestTryModelFilePricing_Fable51HasNoImplicitReasoningMultiplier(t *testing.T) {
+// 本仓 U7：claude-fable-5-1 的 max 档在未配置倍率时保留内置默认 3 倍（上游 v0.2.19 已删）。
+func TestTryModelFilePricing_Fable51KeepsDefaultMaxReasoningMultiplier(t *testing.T) {
 	bs := newTestBillingServiceWithPrices(map[string]*ModelPricing{
 		"claude-fable-5-1": {InputPricePerToken: 0.001},
 	})
@@ -565,7 +566,7 @@ func TestTryModelFilePricing_Fable51HasNoImplicitReasoningMultiplier(t *testing.
 	max := tryModelFilePricing(bs, "claude-fable-5-1", tokens, "", time.Time{}, true, "max")
 	require.NotNil(t, standard)
 	require.NotNil(t, max)
-	require.Equal(t, *standard, *max)
+	require.InDelta(t, *standard*claudeFable51MaxReasoningEffortMultiplier, *max, 1e-12)
 }
 
 func TestTryModelFilePricing_AppliesLongContextPricing(t *testing.T) {

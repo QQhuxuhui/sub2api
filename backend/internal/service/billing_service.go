@@ -239,6 +239,35 @@ func isClaudeFable51Model(model string) bool {
 	return false
 }
 
+// claudeFable51MaxReasoningEffortMultiplier 是本仓保留的内置默认（用户决策 U7）：上游 v0.2.19
+// 删掉了这条模型默认、改为只认渠道/分组配置的 reasoning_effort_multipliers；本仓在未配置 max
+// 倍率时仍按合并前的 3 倍计，避免升级即降价。配置了（含显式 1）以配置为准。
+const claudeFable51MaxReasoningEffortMultiplier = 3.0
+
+// reasoningEffortBillingMultiplierForModel 在 reasoningEffortBillingMultiplier 之上叠加本仓的
+// 模型内置默认：仅当配置里没有该档位的有效倍率时，claude-fable-5-1 的 max 档按 3 倍。
+func reasoningEffortBillingMultiplierForModel(model, effort string, multipliers map[string]float64) float64 {
+	if configuredReasoningEffortMultiplier(effort, multipliers) {
+		return reasoningEffortBillingMultiplier(effort, multipliers)
+	}
+	if NormalizeMaxReasoningEffort(effort) == "max" && isClaudeFable51Model(model) {
+		return claudeFable51MaxReasoningEffortMultiplier
+	}
+	return 1
+}
+
+func configuredReasoningEffortMultiplier(effort string, multipliers map[string]float64) bool {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort != "none" {
+		effort = NormalizeMaxReasoningEffort(effort)
+	}
+	if effort == "" {
+		return false
+	}
+	multiplier, ok := multipliers[effort]
+	return ok && multiplier > 0 && !math.IsNaN(multiplier) && !math.IsInf(multiplier, 0)
+}
+
 func reasoningEffortBillingMultiplier(effort string, multipliers map[string]float64) float64 {
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	if effort != "none" {
@@ -1569,7 +1598,7 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 			return nil, err
 		}
 		breakdown := s.computeTokenBreakdown(pricing, input.Tokens, input.RateMultiplier, input.ServiceTier, applyLongContextBilling && !input.DisableModelLongContextPricing)
-		applyCostBreakdownMultiplier(breakdown, reasoningEffortBillingMultiplier(input.ReasoningEffort, pricing.ReasoningEffortMultipliers))
+		applyCostBreakdownMultiplier(breakdown, reasoningEffortBillingMultiplierForModel(input.Model, input.ReasoningEffort, pricing.ReasoningEffortMultipliers))
 		return breakdown, nil
 	}
 
@@ -1593,8 +1622,13 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 	switch resolved.Mode {
 	case BillingModePerRequest, BillingModeImage, BillingModeVideo:
 		breakdown, err = s.calculatePerRequestCost(resolved, input)
-		if err == nil && resolved.channelPricing != nil {
-			applyCostBreakdownMultiplier(breakdown, reasoningEffortBillingMultiplier(input.ReasoningEffort, resolved.channelPricing.ReasoningEffortMultipliers))
+		if err == nil {
+			// 本仓 U7：无渠道价时也要套 fable-5-1 max 的内置默认（合并前按次/图片模式同样 ×3）。
+			var multipliers map[string]float64
+			if resolved.channelPricing != nil {
+				multipliers = resolved.channelPricing.ReasoningEffortMultipliers
+			}
+			applyCostBreakdownMultiplier(breakdown, reasoningEffortBillingMultiplierForModel(input.Model, input.ReasoningEffort, multipliers))
 		}
 	default: // BillingModeToken
 		breakdown, err = s.calculateTokenCost(resolved, input)
@@ -1658,7 +1692,7 @@ func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input Cos
 
 	breakdown := s.computeTokenBreakdown(pricing, input.Tokens, input.RateMultiplier, input.ServiceTier, applyLongCtx)
 	applyCostBreakdownMultiplier(breakdown, resolvedChannelTimeMultiplier(resolved, input.PricingAt))
-	applyCostBreakdownMultiplier(breakdown, reasoningEffortBillingMultiplier(input.ReasoningEffort, pricing.ReasoningEffortMultipliers))
+	applyCostBreakdownMultiplier(breakdown, reasoningEffortBillingMultiplierForModel(input.Model, input.ReasoningEffort, pricing.ReasoningEffortMultipliers))
 	return breakdown, nil
 }
 

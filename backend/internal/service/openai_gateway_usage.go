@@ -839,6 +839,10 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 	if err == nil && cost != nil && cost.BillingMode == "" {
 		cost.BillingMode = string(BillingModeToken)
 	}
+	if err == nil {
+		// 无分组/解析器的兜底路径没有配置倍率，只套本仓 U7 的 fable-5-1 max 内置默认。
+		applyCostBreakdownMultiplier(cost, reasoningEffortBillingMultiplierForModel(billingModel, reasoningEffort, nil))
+	}
 	return cost, err
 }
 
