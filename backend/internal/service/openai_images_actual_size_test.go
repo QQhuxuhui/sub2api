@@ -58,7 +58,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthUsesDecodedOutputDimensions(t *t
 // 客户端拿到普通 JSON 响应，计费与非流式请求完全一致（按解码像素），
 // 而不是旧行为的"走流式管线→不可模拟→透传空 usage→0 token 白送"。
 func TestOpenAIGatewayServiceForwardImages_GPTImage2IgnoresStreamAndBillsDecodedOutput(t *testing.T) {
-	run := runOpenAIOAuthImageActualSizeTest(t, true)
+	run := runOpenAIOAuthImageActualSizeTestModel(t, "gpt-image-2", true)
 
 	// 响应是普通 JSON（非 SSE），结构与非流式一致。
 	require.Equal(t, "1672x941", gjson.Get(run.recorder.Body.String(), "size").String())
@@ -80,8 +80,16 @@ type openAIOAuthImageActualSizeTestRun struct {
 
 func runOpenAIOAuthImageActualSizeTest(t *testing.T, stream bool) openAIOAuthImageActualSizeTestRun {
 	t.Helper()
+	return runOpenAIOAuthImageActualSizeTestModel(t, "gpt-image-1", stream)
+}
+
+// runOpenAIOAuthImageActualSizeTestModel 走 Responses 生图管线（上游 v0.2.19 起 gpt-image-1.5/2/2.5
+// 的 OAuth 请求默认直连 codex/images，这里用 withOpenAIImagesForceResponses 固定在 Responses 回退路径，
+// 以继续覆盖本仓的解码像素计费与 gpt-image-2 忽略 stream 语义）。
+func runOpenAIOAuthImageActualSizeTestModel(t *testing.T, model string, stream bool) openAIOAuthImageActualSizeTestRun {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
-	body := []byte(fmt.Sprintf(`{"model":"gpt-image-1","prompt":"draw a test chart","size":"3840x2160","quality":"low","output_format":"png","stream":%t}`, stream))
+	body := []byte(fmt.Sprintf(`{"model":%q,"prompt":"draw a test chart","size":"3840x2160","quality":"low","output_format":"png","stream":%t}`, model, stream))
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -118,7 +126,7 @@ func runOpenAIOAuthImageActualSizeTest(t *testing.T, stream bool) openAIOAuthIma
 			"chatgpt_account_id": "acct-123",
 		},
 	}
-	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+	result, err := svc.ForwardImages(withOpenAIImagesForceResponses(context.Background()), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	return openAIOAuthImageActualSizeTestRun{result: result, recorder: rec, upstream: upstream}

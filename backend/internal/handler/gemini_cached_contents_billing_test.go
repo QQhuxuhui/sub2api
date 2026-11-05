@@ -269,6 +269,11 @@ func (r *cachedBillingUserRepo) GetByID(_ context.Context, id int64) (*service.U
 
 func (r *cachedBillingUserRepo) DeductBalance(context.Context, int64, float64) error { return nil }
 
+// GetEffectiveBalance 是本仓待结算流水引入的余额回源口径（账面 - 待结算），测试桩无待结算。
+func (r *cachedBillingUserRepo) GetEffectiveBalance(context.Context, int64) (float64, error) {
+	return r.balance, nil
+}
+
 type cachedBillingUsageRepo struct {
 	service.UsageLogRepository
 	mu   sync.Mutex

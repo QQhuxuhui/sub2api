@@ -29,7 +29,9 @@ func TestEveryRootGatewayRouteBypassesFrontend(t *testing.T) {
 
 	// 只取根级注册（接收者是 r 的那些）；gateway/gemini/codexDirect 等是 /v1 子组，
 	// 已被 "/v1/" 前缀整体放行。
-	rootRoute := regexp.MustCompile(`(?m)^\s*r\.(?:GET|POST|PUT|PATCH|DELETE)\("([^"]+)"`)
+	// 上游 v0.2.19 把根级路由收敛到 rootRoute(http.MethodX, "/path", ...) 公共链，
+	// 两种写法都要解析；循环里 prefix+"/..." 拼出的 Seedance 路由正则看不到，在函数末尾逐条断言。
+	rootRoute := regexp.MustCompile(`(?m)^\s*(?:r\.(?:GET|POST|PUT|PATCH|DELETE)\(|rootRoute\(http\.Method\w+, )"([^"]+)"`)
 	matches := rootRoute.FindAllStringSubmatch(string(source), -1)
 	require.NotEmpty(t, matches, "没从 gateway.go 里解析出任何根级路由 —— 正则或文件结构变了，此时「零遗漏」是假绿灯")
 
@@ -51,6 +53,12 @@ func TestEveryRootGatewayRouteBypassesFrontend(t *testing.T) {
 	// 不在本正则的匹配范围内）。留出余量，只用于拦「正则失配导致空转」。
 	require.GreaterOrEqual(t, len(seen), 30,
 		"解析出的根级路由只有 %d 条，明显偏少 —— 正则大概率失配了，此时「零遗漏」是假绿灯", len(seen))
+
+	for _, prefix := range []string{"/api/v3", "/v3", "/v1", ""} {
+		for _, p := range []string{prefix + "/contents/generations/tasks", prefix + "/contents/generations/tasks/task-1"} {
+			require.True(t, shouldBypassEmbeddedFrontend(p), "Seedance 根级路由 %s 会被前端 SPA 吞掉", p)
+		}
+	}
 
 	sort.Strings(offenders)
 	require.Empty(t, offenders,

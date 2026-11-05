@@ -1500,6 +1500,8 @@ func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamServerErrorReturnsFailo
 	require.Equal(t, http.StatusBadGateway, events[0].UpstreamStatusCode)
 }
 
+// 上游 v0.2.19 起该模型的 OAuth 请求默认直连 codex/images；本用例覆盖本仓在 Responses 回退管线上的行为，
+// 故用 withOpenAIImagesForceResponses 固定路径。
 func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamRateLimitBlocksOrganization(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","response_format":"b64_json"}`)
@@ -1532,7 +1534,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamRateLimitBlocksOrganiza
 		},
 	}
 
-	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+	result, err := svc.ForwardImages(withOpenAIImagesForceResponses(context.Background()), c, account, body, parsed, "")
 
 	require.Nil(t, result)
 	var upstreamErr *OpenAIImagesUpstreamError
@@ -1936,6 +1938,8 @@ func TestOpenAIGatewayServiceForwardImages_RevalidatesOptionsAfterModelMapping(t
 	}
 }
 
+// 上游 v0.2.19 起该模型的 OAuth 请求默认直连 codex/images；本用例覆盖本仓在 Responses 回退管线上的行为，
+// 故用 withOpenAIImagesForceResponses 固定路径。
 func TestOpenAIGatewayServiceForwardImages_OAuthReverseMappingPreservesStreamAndInputFidelity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-image-2","prompt":"edit","images":[{"image_url":"https://example.com/source.png"}],"stream":true,"input_fidelity":"high"}`)
@@ -1965,7 +1969,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthReverseMappingPreservesStreamAnd
 			"model_mapping": map[string]any{"gpt-image-2": "gpt-image-1.5"},
 		},
 	}
-	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+	result, err := svc.ForwardImages(withOpenAIImagesForceResponses(context.Background()), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.True(t, result.Stream)

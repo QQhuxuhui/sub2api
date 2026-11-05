@@ -120,7 +120,8 @@ func TestCalculateOpenAIRecordUsageCost_ImageCountBillingIgnoresMixedRequests(t 
 		Hydrated:             true,
 		AllowImageGeneration: true,
 		ImageCountBilling:    true,
-		ImagePrice1K:         f64p(0.4),
+		// 不配 ImagePrice1K：本仓 262d1bfc7「分组按次价优先级最高」会让配了按次价的分组
+		// 始终走图片计费（与本开关无关），这里只验开关本身不影响混合请求。
 	}
 	apiKey := &APIKey{ID: 4, GroupID: &groupID, Group: group}
 	svc := &OpenAIGatewayService{billingService: resolver.billingService, resolver: resolver}

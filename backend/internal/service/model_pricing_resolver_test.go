@@ -852,7 +852,9 @@ func TestApplyTokenOverrides_FlatUnsetImagePricesInheritCatalog(t *testing.T) {
 	require.Equal(t, PricingSourceChannel, resolved.Source)
 	require.False(t, resolved.BasePricing.ImageOutputPriceExplicit, "留空不应标记显式")
 	require.InDelta(t, 30e-6, resolved.BasePricing.ImageOutputPricePerToken, 1e-12)
-	require.InDelta(t, 8e-6, resolved.BasePricing.ImageInputPricePerToken, 1e-12)
+	// 本仓 D13：图片输入价留空保留本仓语义（归零、不显式 → 回退文本输入价），不沿用目录价。
+	require.InDelta(t, 0, resolved.BasePricing.ImageInputPricePerToken, 1e-12)
+	require.False(t, resolved.BasePricing.ImageInputPriceExplicit)
 }
 
 func TestApplyTokenOverrides_ExplicitZeroImageOutputPriceStaysZero(t *testing.T) {
@@ -870,7 +872,9 @@ func TestApplyTokenOverrides_ExplicitZeroImageOutputPriceStaysZero(t *testing.T)
 
 	require.True(t, resolved.BasePricing.ImageOutputPriceExplicit)
 	require.Equal(t, 0.0, resolved.BasePricing.ImageOutputPricePerToken)
-	require.InDelta(t, 8e-6, resolved.BasePricing.ImageInputPricePerToken, 1e-12, "图片输入留空仍沿用目录价")
+	// 本仓 D13：图片输入价留空保留本仓语义（归零、不显式 → 回退文本输入价），不沿用目录价。
+	require.InDelta(t, 0, resolved.BasePricing.ImageInputPricePerToken, 1e-12, "图片输入留空回退文本输入价")
+	require.False(t, resolved.BasePricing.ImageInputPriceExplicit)
 }
 
 func TestApplyTokenOverrides_FlatWithImageOutputPriceSetsExplicit(t *testing.T) {
@@ -913,7 +917,9 @@ func TestApplyTokenOverrides_IntervalUnsetImagePricesInheritCatalog(t *testing.T
 	pricing := r.GetIntervalPricing(resolved, 50000)
 	require.False(t, pricing.ImageOutputPriceExplicit)
 	require.InDelta(t, 30e-6, pricing.ImageOutputPricePerToken, 1e-12)
-	require.InDelta(t, 8e-6, pricing.ImageInputPricePerToken, 1e-12)
+	// 本仓 D13：图片输入价留空保留本仓语义（归零、不显式 → 回退文本输入价），不沿用目录价。
+	require.InDelta(t, 0, pricing.ImageInputPricePerToken, 1e-12)
+	require.False(t, pricing.ImageInputPriceExplicit)
 }
 
 func TestApplyTokenOverrides_IntervalExplicitImageOutputPrice(t *testing.T) {
@@ -954,7 +960,9 @@ func TestCalculateCostUnified_EmptyChannelEntryBillsCatalogImagePrices(t *testin
 	})
 	require.NoError(t, err)
 	require.InDelta(t, 500*30e-6, cost.ImageOutputCost, 1e-12)
-	require.InDelta(t, 600*8e-6, cost.ImageInputCost, 1e-12)
+	// 本仓 D13：图片输入价留空保留本仓语义（归零、不显式 → 回退文本输入价），不沿用目录价。
+	// 空价卡的 InputPrice 也留空 → 文本输入价沿用目录 3e-6，图片输入按它计。
+	require.InDelta(t, 600*3e-6, cost.ImageInputCost, 1e-12)
 	require.InDelta(t, 400*3e-6, cost.InputCost, 1e-12)
 	require.InDelta(t, 0, cost.OutputCost, 1e-12, "输出全部是图片 token")
 }

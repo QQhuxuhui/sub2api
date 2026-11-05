@@ -581,7 +581,9 @@ func ValidateOpenAIImagesRequestForModel(req *OpenAIImagesRequest, model string)
 // NormalizeOpenAIImagesRequestForModel validates and returns an attempt-local
 // copy normalized for the model that will actually receive the request.
 func NormalizeOpenAIImagesRequestForModel(req *OpenAIImagesRequest, model string) (*OpenAIImagesRequest, error) {
-	if err := validateOpenAIImagesModel(model); err != nil {
+	// 上游 v0.2.19 起 /v1/images 也可路由到 Gemini 兼容生图模型（validateCompatibleImagesModel）；
+	// 本仓的 gpt-image 参数归一只按模型名生效，对 Gemini 模型是原样拷贝。
+	if err := validateCompatibleImagesModel(model); err != nil {
 		return nil, err
 	}
 	normalized, err := normalizeOpenAIImagesOptions(req, model)

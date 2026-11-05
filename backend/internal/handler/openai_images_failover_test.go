@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -71,10 +72,27 @@ type openAIImagesMappedOptionsHTTPUpstream struct {
 	accountIDs []int64
 }
 
-func (u *openAIImagesMappedOptionsHTTPUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+func (u *openAIImagesMappedOptionsHTTPUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.mu.Lock()
 	u.accountIDs = append(u.accountIDs, accountID)
 	u.mu.Unlock()
+	// 上游 v0.2.19：gpt-image-1.5/2/2.5 的 OAuth 请求直连 codex/images，回原生 Images 协议。
+	if req != nil && req.URL != nil && strings.HasPrefix(req.URL.Path, "/backend-api/codex/images/") {
+		if strings.Contains(req.Header.Get("Accept"), "text/event-stream") {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(bytes.NewBufferString(
+					"data: {\"type\":\"image_generation.completed\",\"b64_json\":\"aGVsbG8=\",\"output_format\":\"png\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\n\n",
+				)),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewBufferString(`{"created":1,"data":[{"b64_json":"aGVsbG8="}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		}, nil
+	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},

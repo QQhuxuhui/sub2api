@@ -17,10 +17,13 @@ func directImagesTestAccount() *Account {
 		Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"}}
 }
 
+// 本仓：gpt-image 参数归一（normalizeOpenAIImagesOptions）只放行 auto/low/medium/high，
+// xhigh/max 仅对 2.5 → 2.5/2 生效，故路由用例用 high；gpt-image-2 的 stream 被本仓忽略
+// （上游逆向线一次性出图），流式直连用例改用同样走直连的 gpt-image-1.5。
 func TestCodexDirectImagesRouting(t *testing.T) {
 	for _, model := range []string{"gpt-image-1.5", "gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare-2026-09-08", "gpt-image-2.5-sunburst-2026-09-08"} {
 		t.Run(model, func(t *testing.T) {
-			body := []byte(fmt.Sprintf(`{"model":%q,"prompt":"  原样保留 prompt  ","quality":"max","size":"auto","response_format":"url","extra":{"preserve":true}}`, model))
+			body := []byte(fmt.Sprintf(`{"model":%q,"prompt":"  原样保留 prompt  ","quality":"high","size":"auto","response_format":"url","extra":{"preserve":true}}`, model))
 			c, rec := newOpenAIImagesTestContext(t, body)
 			upstream := &httpUpstreamRecorder{resp: openAIImagesJSONResponse()}
 			svc := newOpenAIImagesTestService(upstream)
@@ -112,7 +115,7 @@ func TestCodexDirectImagesHTTPErrorFallbacksOnlyWhenEndpointUnavailable(t *testi
 }
 
 func TestCodexDirectImagesStreamRejectsPlainJSON(t *testing.T) {
-	body := []byte(`{"model":"gpt-image-2","prompt":"draw","stream":true}`)
+	body := []byte(`{"model":"gpt-image-1.5","prompt":"draw","stream":true}`)
 	c, _ := newOpenAIImagesTestContext(t, body)
 	svc := newOpenAIImagesTestService(&httpUpstreamRecorder{resp: openAIImagesJSONResponse()})
 	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
@@ -158,9 +161,9 @@ func TestCodexDirectImagesStreaming(t *testing.T) {
 		{"partial_success", "complete,error", 1, true, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			body := []byte(`{"model":"gpt-image-2","prompt":"edit","images":[{"image_url":"data:image/png;base64,AA=="}],"stream":true,"response_format":"url"}`)
+			body := []byte(`{"model":"gpt-image-1.5","prompt":"edit","images":[{"image_url":"data:image/png;base64,AA=="}],"stream":true,"response_format":"url"}`)
 			if test.name == "partial_requested_multiple" {
-				body = []byte(`{"model":"gpt-image-2","prompt":"edit","n":2,"images":[{"image_url":"data:image/png;base64,AA=="}],"stream":true,"response_format":"url"}`)
+				body = []byte(`{"model":"gpt-image-1.5","prompt":"edit","n":2,"images":[{"image_url":"data:image/png;base64,AA=="}],"stream":true,"response_format":"url"}`)
 			}
 			c, rec := newOpenAIImagesTestContext(t, body)
 			c.Request.URL.Path = "/v1/images/edits"

@@ -2019,7 +2019,9 @@ func TestGetModelPricingWithChannel_NilImagePricesInheritCatalog(t *testing.T) {
 	require.InDelta(t, 6e-6, pricing.InputPricePerToken, 1e-12)
 	require.InDelta(t, 30e-6, pricing.ImageOutputPricePerToken, 1e-12)
 	require.False(t, pricing.ImageOutputPriceExplicit)
-	require.InDelta(t, 8e-6, pricing.ImageInputPricePerToken, 1e-12)
+	// 本仓 D13：图片输入价留空保留本仓语义（归零、不显式 → 回退文本输入价），不沿用目录价。
+	require.InDelta(t, 0, pricing.ImageInputPricePerToken, 1e-12)
+	require.False(t, pricing.ImageInputPriceExplicit)
 }
 
 func TestGetModelPricingWithChannel_ExplicitImagePricesOverrideCatalog(t *testing.T) {

@@ -48,6 +48,15 @@ func (w *refundHoldWallet) repo(userID int64) *mockUserRepo {
 			w.balance -= deducted
 			return deducted, nil
 		},
+		// 本仓：非强制退款走 DeductBalanceExact（余额不足整笔不扣、不调渠道）。
+		deductBalanceExactFn: func(_ context.Context, _ int64, amount float64) (float64, error) {
+			w.deductCalls++
+			if w.balance+1e-9 < amount {
+				return 0, ErrInsufficientBalance
+			}
+			w.balance -= amount
+			return amount, nil
+		},
 		updateBalanceFn: func(_ context.Context, _ int64, amount float64) error {
 			w.restoreCalls++
 			w.balance += amount

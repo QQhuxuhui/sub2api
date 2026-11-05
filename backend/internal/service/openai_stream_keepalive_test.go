@@ -249,6 +249,13 @@ func TestOpenAIWSHTTPBridgeKeepaliveThenOverloadFailsOverOnFirstTurn(t *testing.
 			require.Nil(t, result)
 			var failoverErr *UpstreamFailoverError
 			require.ErrorAs(t, err, &failoverErr)
+			if event.eventType == "keepalive" {
+				// 上游 e74c690ac：传输心跳直接发给客户端保活，但不算语义输出、不提交本次尝试，
+				// 换号能力不受影响；暂存的 response.created 等生命周期事件仍不外泄。
+				require.Len(t, writes, 1)
+				require.Contains(t, string(writes[0]), `"type":"keepalive"`)
+				return
+			}
 			require.Empty(t, writes)
 		})
 	}
@@ -271,8 +278,14 @@ func TestOpenAIWSHTTPBridgeKeepaliveGoesOutInOrderWithTheRealOutput(t *testing.T
 
 			require.NoError(t, err)
 			require.Len(t, writes, 4)
-			require.Contains(t, string(writes[0]), `"type":"response.created"`)
-			require.Contains(t, string(writes[1]), `"type":"`+event.eventType+`"`)
+			if event.eventType == "keepalive" {
+				// 心跳不进暂存区，先于暂存的 response.created 发出（上游 e74c690ac）。
+				require.Contains(t, string(writes[0]), `"type":"keepalive"`)
+				require.Contains(t, string(writes[1]), `"type":"response.created"`)
+			} else {
+				require.Contains(t, string(writes[0]), `"type":"response.created"`)
+				require.Contains(t, string(writes[1]), `"type":"`+event.eventType+`"`)
+			}
 			require.Contains(t, string(writes[2]), "hello")
 			require.Contains(t, string(writes[3]), `"type":"response.completed"`)
 			require.NotNil(t, result.FirstTokenMs)

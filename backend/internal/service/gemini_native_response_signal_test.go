@@ -278,22 +278,15 @@ func TestGeminiForwardNative_NonStreamErrorEnvelopeOn200MarksUpstreamFailure(t *
 
 	result, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
 		"gemini-3.7-flash", "generateContent", false, geminiSignalTestRequest())
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, body, rec.Body.String())
-
-	streamErrs := GetOpsStreamErrors(c)
-	require.Len(t, streamErrs, 1)
-	require.Equal(t, "upstream_error", streamErrs[0].ErrType)
-	require.Equal(t, "INTERNAL", streamErrs[0].Code)
-	require.Equal(t, http.StatusInternalServerError, streamErrs[0].IntendedStatus)
-	require.True(t, streamErrs[0].CountTowardsSLA)
-
-	require.True(t, streamErrs[0].NonStream)
-
-	events := upstreamErrorEventsFromContext(t, c)
-	require.Len(t, events, 1)
-	require.Equal(t, "http_error", events[0].Kind)
+	// 本仓（ca2cea48e）：200 里只有错误对象、没有任何输出时不透传，写出前交给 handler 换号；
+	// 上游 v0.2.19 的「透传 + 打 ops 标」在这条路径上让位于换号。
+	require.Nil(t, result)
+	var fe *UpstreamFailoverError
+	require.ErrorAs(t, err, &fe)
+	require.Equal(t, http.StatusBadGateway, fe.StatusCode)
+	require.JSONEq(t, body, string(fe.ResponseBody))
+	require.False(t, c.Writer.Written(), "换号前不得向客户端写任何字节")
+	require.Empty(t, rec.Body.String())
 }
 
 func TestGeminiForwardNative_StreamErrorEnvelopeAfterContentFilterWins(t *testing.T) {

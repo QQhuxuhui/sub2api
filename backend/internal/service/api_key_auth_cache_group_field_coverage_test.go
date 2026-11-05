@@ -31,6 +31,7 @@ func TestEveryGroupFieldIsEitherProjectedOrExplicitlyExcluded(t *testing.T) {
 	// key = Group 的字段名，value = 不进快照的理由。
 	excluded := map[string]string{
 		"Description":                  "纯展示文案，网关链路不读",
+		"I18n":                         "分组名称/描述多语言（上游 v0.2.19），纯展示，网关链路不读",
 		"Hydrated":                     "加载状态标志，快照本身即已 hydrate",
 		"DuplicateOperationID":         "仅管理端去重用，不参与网关判定与计费",
 		"DefaultValidityDays":          "建密钥时用一次，网关链路不读",

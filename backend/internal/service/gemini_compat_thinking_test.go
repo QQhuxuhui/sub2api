@@ -162,9 +162,11 @@ func TestGeminiForwardAsChatCompletions_NonStreamForwardsEffortWithoutThoughts(t
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Len(t, upstream.requestBodies, 1)
 	cfg := gjson.GetBytes(upstream.requestBodies[0], "generationConfig.thinkingConfig")
-	require.Equal(t, "minimal", cfg.Get("thinkingLevel").String())
+	// 本仓：客户端显式给 reasoning_effort 时按本仓档位表覆盖（applyGeminiThinkingConfigFromOpenAIBody）：
+	// 3.7+ flash 的最低档是 low（上游表给 minimal）。见 side-notes「Gemini 3.7+ flash 最低思考档」。
+	require.Equal(t, "low", cfg.Get("thinkingLevel").String())
 	require.False(t, cfg.Get("includeThoughts").Exists(), cfg.Raw)
-	require.Equal(t, "minimal", optionalStringValue(result.ReasoningEffort))
+	require.Equal(t, "low", optionalStringValue(result.ReasoningEffort), "用量记录取实际转发的档位")
 	require.Equal(t, "ok", gjson.Get(recorder.Body.String(), "choices.0.message.content").String())
 }
 
