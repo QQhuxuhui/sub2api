@@ -56,4 +56,26 @@ describe('IQShowcaseTab', () => {
     expect(setEnabled).toHaveBeenCalledWith(3, false)
     expect(updateItem).not.toHaveBeenCalled()
   })
+
+  it('shows running before the last result, then success, failure or a dash', async () => {
+    const future = new Date(Date.now() + 60_000).toISOString()
+    listItems.mockResolvedValue({
+      data: [
+        { ...brokenItem, id: 1, lease_until: future, last_result_at: '2026-11-04T08:00:00Z', last_success: false },
+        { ...brokenItem, id: 2, last_result_at: '2026-11-04T08:00:00Z', last_success: true },
+        { ...brokenItem, id: 3, last_result_at: '2026-11-04T08:00:00Z', last_success: false },
+        { ...brokenItem, id: 4, last_result_at: null, last_success: null },
+      ],
+    })
+    const wrapper = mount(IQShowcaseTab, {
+      props: { groups: [] },
+      global: { stubs: { IQShowcaseItemDialog: true, IQShowcaseResultsDialog: true, Toggle: true } },
+    })
+    await flushPromises()
+    const status = (id: number) => wrapper.find(`[data-test="iq-showcase-status-${id}"]`).attributes('data-status')
+    expect([status(1), status(2), status(3), status(4)]).toEqual(['running', 'ok', 'failed', 'none'])
+    expect(wrapper.find('[data-test="iq-showcase-run-1"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="iq-showcase-run-2"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
 })

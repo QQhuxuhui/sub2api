@@ -40,10 +40,10 @@ export default {
         },
         iqShowcase: {
           title: '智力展示',
-          description: '向已登录用户展示各分组的智力探测卡片：后台配置的提示词按真实用户线路（含意图路由）调用模型，输出的 SVG 按时间逐张展示。默认关闭。',
+          description: '向已登录用户展示各分组模型画的图，默认关闭',
           configureLink: '前往 智力探测 > 分组智力展示 配置探测项',
           enabled: '启用智力展示页',
-          enabledHint: '关闭后用户端侧边栏入口隐藏，接口返回 404。探测是否执行由各探测项的启用开关决定。',
+          enabledHint: '关闭后用户端入口隐藏',
         },
         availableChannels: {
           title: '可用渠道',

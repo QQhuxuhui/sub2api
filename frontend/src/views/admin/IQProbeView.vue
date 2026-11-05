@@ -4,9 +4,6 @@
       <div>
         <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ t('iqProbe.title') }}</h1>
         <p class="mt-1 max-w-4xl text-sm text-gray-500 dark:text-gray-400">{{ t('iqProbe.description') }}</p>
-        <p class="mt-2 max-w-4xl rounded-lg bg-gray-50 p-3 text-sm leading-6 text-gray-600 dark:bg-dark-800 dark:text-gray-300">
-          {{ t('iqProbe.howItWorks') }}
-        </p>
       </div>
 
       <div class="flex gap-1 border-b border-gray-200 dark:border-dark-700">

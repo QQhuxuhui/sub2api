@@ -40,10 +40,10 @@ export default {
         },
         iqShowcase: {
           title: 'IQ Showcase',
-          description: 'Show logged-in users per-group IQ cards: admin-configured prompts are sent through the real user path (intent routing included) and the SVGs the models draw appear one by one. Disabled by default.',
+          description: 'Show logged-in users what each group\'s models draw. Off by default',
           configureLink: 'Configure items in IQ Probe > Group IQ Showcase',
           enabled: 'Enable IQ Showcase page',
-          enabledHint: 'When off, the sidebar entry is hidden and the endpoints return 404. Whether probes run is decided by each item\'s own switch.',
+          enabledHint: 'When off, the user entry is hidden',
         },
         availableChannels: {
           title: 'Available Channels',

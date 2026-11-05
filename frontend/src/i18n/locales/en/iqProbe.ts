@@ -2,9 +2,7 @@ export default {
   iqProbe: {
     nav: 'IQ Probe',
     title: 'IQ Probe',
-    description: 'Periodically ask a chosen account + model a set of questions with known answers, and watch the score trend to catch upstreams that swap in a weaker model.',
-    howItWorks:
-      'Probes go straight to the account upstream (the same path as the account "Test" button), bypass group scheduling, are not billed or logged as usage, and never change account state. Every question gets "On the last line output: 答案：xxx" appended, and only the last "答案：" is judged. Failed requests are left out of the denominator; a round where more than half fail is invalid. Rounds are skipped while the account is disabled, in error or cooling down.',
+    description: 'Scheduled quizzes per account to catch upstreams that swap in a weaker model',
     minutes: '{n} min',
     tabs: {
       monitors: 'Monitors',

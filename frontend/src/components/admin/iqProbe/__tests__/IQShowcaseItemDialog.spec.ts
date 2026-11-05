@@ -28,9 +28,9 @@ const groups = [
   { id: 7, name: 'claude', platform: 'anthropic' },
 ]
 
-function mountDialog() {
+function mountDialog(editing: Record<string, unknown> | null = null) {
   return mount(IQShowcaseItemDialog, {
-    props: { show: true, editing: null, groups },
+    props: { show: true, editing: editing as never, groups },
     global: {
       stubs: {
         BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
@@ -70,5 +70,45 @@ describe('IQShowcaseItemDialog', () => {
     const input = createItem.mock.calls[0][0]
     expect(input).toMatchObject({ title: 'pelican', group_id: 7, api_key_id: 9, protocol: 'anthropic_messages', model: 'claude-x', reasoning_effort: '' })
     expect(wrapper.emitted('saved')).toBeTruthy()
+  })
+
+  const existing = {
+    id: 3, title: 'pelican', group_id: 4, api_key_id: 9, protocol: 'openai_responses', model: 'gpt-x', prompt: 'draw',
+    reasoning_effort: '', max_output_tokens: 0, interval_minutes: 60, max_cards: 12, enabled: true, sort_order: 0,
+  }
+
+  it('folds the advanced fields for new items and opens them when an item uses one', async () => {
+    const created = mountDialog()
+    await flushPromises()
+    expect((created.find('[data-test="iq-showcase-advanced"]').element as HTMLDetailsElement).open).toBe(false)
+
+    const plain = mountDialog(existing)
+    await flushPromises()
+    expect((plain.find('[data-test="iq-showcase-advanced"]').element as HTMLDetailsElement).open).toBe(false)
+
+    const tuned = mountDialog({ ...existing, max_output_tokens: 4000 })
+    await flushPromises()
+    expect((tuned.find('[data-test="iq-showcase-advanced"]').element as HTMLDetailsElement).open).toBe(true)
+  })
+
+  it('still saves the advanced fields while the section is folded', async () => {
+    updateItem.mockResolvedValue({ data: {} })
+    const wrapper = mountDialog({ ...existing, reasoning_effort: 'high', sort_order: 2 })
+    await flushPromises()
+    const details = wrapper.find('[data-test="iq-showcase-advanced"]')
+    ;(details.element as HTMLDetailsElement).open = false
+    await details.trigger('toggle')
+    await wrapper.find('[data-test="iq-showcase-max-tokens"]').setValue(900)
+    await wrapper.find('[data-test="iq-showcase-save"]').trigger('click')
+    await flushPromises()
+    expect(updateItem).toHaveBeenCalledWith(3, expect.objectContaining({ reasoning_effort: 'high', max_output_tokens: 900, sort_order: 2 }))
+  })
+
+  it('explains what 0 means for the output limit per protocol', async () => {
+    const wrapper = mountDialog()
+    const hint = () => wrapper.find('[data-test="iq-showcase-max-tokens-hint"]').text()
+    expect(hint()).toBe('iqShowcase.admin.fields.maxTokensHint')
+    await wrapper.find('[data-test="iq-showcase-protocol"]').setValue('anthropic_messages')
+    expect(hint()).toBe('iqShowcase.admin.fields.maxTokensHintAnthropic')
   })
 })
