@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"strings"
 )
 
@@ -247,22 +248,28 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 	}
 	resolved.BasePricing.FastMultiplier = chPricing.FastMultiplier
 	resolved.BasePricing.FlexMultiplier = chPricing.FlexMultiplier
-	if chPricing.MaxReasoningEffortMultiplier != nil {
-		resolved.BasePricing.MaxReasoningEffortMultiplier = chPricing.MaxReasoningEffortMultiplier
-	}
-	// 渠道定价覆盖一切：显式配置则用配置值，未配置则归零（不回退到 LiteLLM）
-	if chPricing.ImageOutputPrice != nil {
-		resolved.BasePricing.ImageOutputPricePerToken = *chPricing.ImageOutputPrice
-	} else {
-		resolved.BasePricing.ImageOutputPricePerToken = 0
-	}
-	resolved.BasePricing.ImageOutputPriceExplicit = true
-	// 图片输入价：显式配置则用配置值（含显式 0 = 免费）；未配置则归零回退到渠道
-	// input 价，避免 LiteLLM 的 input_cost_per_image_token 穿透渠道定价。
-	applyChannelImageInputPrice(chPricing, resolved.BasePricing)
+	resolved.BasePricing.ReasoningEffortMultipliers = maps.Clone(chPricing.ReasoningEffortMultipliers)
+	applyChannelImagePriceOverrides(chPricing, resolved.BasePricing)
 
 	// 区间未命中时回退到上面已经应用渠道覆盖的基础价。
 	resolved.Intervals = filterValidIntervals(chPricing.Intervals)
+}
+
+// applyChannelImagePriceOverrides 应用渠道图片输入/输出价。
+//   - 图片输出价（采用上游 v0.2.19 语义）：渠道填写了（含 0）覆盖目录价并标记
+//     ImageOutputPriceExplicit（显式 0 = 免费，不回退文本输出价）；留空沿用目录价，
+//     目录也没有图片输出价时 computeTokenBreakdown 回退文本输出价。
+//   - 图片输入价（保留本仓语义，见 applyChannelImageInputPrice）：留空归零回退文本输入价，
+//     不让 LiteLLM 的 input_cost_per_image_token 穿透渠道定价；显式 0 = 免费。
+func applyChannelImagePriceOverrides(chPricing *ChannelModelPricing, pricing *ModelPricing) {
+	if chPricing == nil || pricing == nil {
+		return
+	}
+	if chPricing.ImageOutputPrice != nil {
+		pricing.ImageOutputPricePerToken = *chPricing.ImageOutputPrice
+		pricing.ImageOutputPriceExplicit = true
+	}
+	applyChannelImageInputPrice(chPricing, pricing)
 }
 
 // applyChannelImageInputPrice 应用渠道图片输入价到定价快照。
@@ -373,15 +380,8 @@ func intervalToModelPricing(iv *PricingInterval, base *ModelPricing, chPricing *
 		pricing.CacheReadPricePerToken = applyMultiplier(pricing.CacheReadPricePerToken, iv.CacheReadMultiplier)
 		pricing.CacheReadPricePerTokenPriority = applyMultiplier(pricing.CacheReadPricePerTokenPriority, iv.CacheReadMultiplier)
 	}
-	// 渠道定价存在时，ImageOutputPrice / ImageInputPrice 显式覆盖
-	// （区间不携带图片输入价，图片输入价用渠道级配置，与 image_output 一致）。
-	if chPricing != nil {
-		pricing.ImageOutputPriceExplicit = true
-		if chPricing.ImageOutputPrice != nil {
-			pricing.ImageOutputPricePerToken = *chPricing.ImageOutputPrice
-		}
-		applyChannelImageInputPrice(chPricing, pricing)
-	}
+	// 区间不携带图片价，沿用渠道级配置；渠道留空时保留基础价里的目录图片价。
+	applyChannelImagePriceOverrides(chPricing, pricing)
 	return pricing
 }
 

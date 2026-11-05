@@ -404,7 +404,7 @@ func TestHandleNativeNonStreamingResponseRepairsFlashUsageWithoutOverlap(t *test
 	}
 	params := newGeminiImageUsageParams("gemini-3.1-flash-image", "generateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 
-	usage, err := svc.handleNativeNonStreamingResponse(c, resp, false, params)
+	usage, err := svc.handleNativeNonStreamingResponse(c, resp, false, params, &Account{}, "")
 	require.NoError(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 2091, usage.OutputTokens)
@@ -436,7 +436,7 @@ func TestHandleNativeStreamingResponseRepairsFlashUsageFromSeparateChunk(t *test
 	}
 	params := newGeminiImageUsageParams("gemini-3.1-flash-image", "streamGenerateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 
-	result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params)
+	result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params, &Account{}, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 2091, result.usage.OutputTokens)

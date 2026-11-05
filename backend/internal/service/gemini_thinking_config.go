@@ -25,9 +25,28 @@ func applyGeminiThinkingConfigFromOpenAIBody(geminiReq []byte, openAIBody []byte
 	if cfg == nil {
 		return geminiReq
 	}
-	out, err := sjson.SetBytes(geminiReq, "generationConfig.thinkingConfig", cfg)
-	if err != nil {
-		return geminiReq
+	// 只写档位字段，不整体替换 thinkingConfig：上游 applyGeminiCompatThinkingConfig
+	// 可能已设置 includeThoughts（流式返回思考摘要），这里要保留。
+	out := geminiReq
+	for _, key := range []string{"thinkingLevel", "thinkingBudget"} {
+		if _, ok := cfg[key]; ok {
+			continue
+		}
+		if updated, err := sjson.DeleteBytes(out, "generationConfig.thinkingConfig."+key); err == nil {
+			out = updated
+		}
+	}
+	for key, value := range cfg {
+		updated, err := sjson.SetBytes(out, "generationConfig.thinkingConfig."+key, value)
+		if err != nil {
+			return geminiReq
+		}
+		out = updated
+	}
+	if budget, ok := cfg["thinkingBudget"].(int); ok && budget == 0 {
+		if updated, err := sjson.DeleteBytes(out, "generationConfig.thinkingConfig.includeThoughts"); err == nil {
+			out = updated
+		}
 	}
 	return out
 }

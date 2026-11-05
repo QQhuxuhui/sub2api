@@ -8,76 +8,55 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/gemini"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
-func TestGeminiV1BetaListModels_CustomGroupListUsesNativeResponse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1beta/models", nil)
-	// 本仓语义（与 /v1/models 一致）：自定义列表按账号可用模型过滤，无可用模型时退回平台默认列表；
-	// 不在基准内的名字被丢弃，不会原样透传。
-	knownModel := geminiV1BetaFallbackModelIDs(service.PlatformGemini)[0]
-	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
-		Group: &service.Group{
-			Platform: service.PlatformGemini,
-			ModelsListConfig: service.GroupModelsListConfig{
-				Enabled: true,
-				Models:  []string{knownModel, "not-a-real-model"},
-			},
-		},
-	})
-
-	(&GatewayHandler{}).GeminiV1BetaListModels(c)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	var got gemini.ModelsListResponse
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Equal(t, []gemini.Model{gemini.FallbackModel(knownModel)}, got.Models)
+func TestGeminiV1BetaListModels_AllowlistFiltersNativeResponse(t *testing.T) {
+	body := []byte(`{"models":[{"name":"models/gemini-2.5-pro"},{"name":"models/gemini-2.5-flash"}],"nextPageToken":"next"}`)
+	filtered, dropped, ok := filterUpstreamGeminiModelsBody(body, service.GroupModelAllowlist{Enabled: true, Models: []string{"gemini-2.5-pro"}})
+	require.True(t, ok)
+	require.True(t, dropped)
+	require.JSONEq(t, `{"models":[{"name":"models/gemini-2.5-pro"}],"nextPageToken":"next"}`, string(filtered))
 }
 
-// 本仓语义（与上游「强制 antigravity 忽略自定义列表」不同）：/antigravity/v1beta/models 同样
-// 应用分组自定义列表，按 antigravity 平台默认模型过滤——线上 antigravity 分组正是靠它收窄模型列表。
-func TestGeminiV1BetaListModels_ForcedAntigravityAppliesCustomGroupList(t *testing.T) {
+func TestGeminiV1BetaListModels_ForcedAntigravityAppliesAllowlist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodGet, "/antigravity/v1beta/models", nil)
-	knownModel := geminiV1BetaFallbackModelIDs(service.PlatformAntigravity)[0]
 	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
 		Group: &service.Group{
 			Platform: service.PlatformGemini,
-			ModelsListConfig: service.GroupModelsListConfig{
+			ModelAllowlist: service.GroupModelAllowlist{
 				Enabled: true,
-				Models:  []string{knownModel, "gemini-custom"},
+				Models:  []string{"gemini-custom"},
 			},
 		},
 	})
 	c.Set(string(middleware.ContextKeyForcePlatform), service.PlatformAntigravity)
 
-	(&GatewayHandler{}).GeminiV1BetaListModels(c)
+	groupID := int64(42)
+	key, _ := middleware.GetAPIKeyFromContext(c)
+	key.GroupID = &groupID
+	repo := &geminiAllowlistAccountRepoStub{}
+	(&GatewayHandler{geminiCompatService: service.NewGeminiMessagesCompatService(repo, nil, nil, nil, nil, nil, nil, nil, nil)}).GeminiV1BetaListModels(c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	var got gemini.ModelsListResponse
+	var got antigravity.GeminiModelsListResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Equal(t, []gemini.Model{gemini.FallbackModel(knownModel)}, got.Models)
+	require.Empty(t, got.Models)
 }
 
-func TestCustomGeminiModelsList_DisabledKeepsExistingFlow(t *testing.T) {
-	group := &service.Group{
-		ModelsListConfig: service.GroupModelsListConfig{
-			Enabled: false,
-			Models:  []string{"gemini-2.5-pro"},
-		},
-	}
-
-	_, ok := geminiCustomModelsListResponse(service.PlatformGemini, []string{"gemini-2.5-pro"}, group)
-	require.False(t, ok)
+func TestGeminiModelAllowlist_DisabledPreservesNativeResponse(t *testing.T) {
+	body := []byte(`{"models":[{"name":"models/gemini-2.5-pro"}]}`)
+	filtered, dropped, ok := filterUpstreamGeminiModelsBody(body, service.GroupModelAllowlist{Enabled: false, Models: []string{"other"}})
+	require.True(t, ok)
+	require.False(t, dropped)
+	require.Equal(t, body, filtered)
 }
 
 // TestGeminiV1BetaHandler_PlatformRoutingInvariant 文档化并验证 Handler 层的平台路由逻辑不变量
@@ -130,7 +109,7 @@ func TestGeminiV1BetaHandler_ListModelsAntigravityFallback(t *testing.T) {
 		expectedBehavior string
 	}{
 		{
-			name:             "有Gemini账户-调用ForwardAIStudioGET",
+			name:             "有Gemini账户-调用ForwardListModels",
 			hasGeminiAccount: true,
 			hasAntigravity:   false,
 			expectedBehavior: "forward_to_upstream",
@@ -176,7 +155,7 @@ func TestGeminiV1BetaHandler_GetModelAntigravityFallback(t *testing.T) {
 		expectedBehavior string
 	}{
 		{
-			name:             "有Gemini账户-调用ForwardAIStudioGET",
+			name:             "有Gemini账户-调用ForwardGetModel",
 			hasGeminiAccount: true,
 			hasAntigravity:   false,
 			expectedBehavior: "forward_to_upstream",
@@ -213,86 +192,6 @@ func TestGeminiV1BetaHandler_GetModelAntigravityFallback(t *testing.T) {
 	}
 }
 
-// TestGeminiCustomModelsListResponse 验证分组自定义模型列表在 Gemini 原生 /v1beta/models 上生效:
-// 启用自定义列表时只返回配置的模型(v1beta 格式,带 models/ 前缀),未启用时不拦截。
-func TestGeminiCustomModelsListResponse(t *testing.T) {
-	t.Parallel()
-
-	t.Run("启用自定义列表-只返回配置的模型", func(t *testing.T) {
-		group := &service.Group{
-			Platform: service.PlatformAntigravity,
-			ModelsListConfig: service.GroupModelsListConfig{
-				Enabled: true,
-				Models:  []string{"gemini-3.1-pro-high", "gemini-2.5-flash"},
-			},
-		}
-		resp, ok := geminiCustomModelsListResponse(service.PlatformAntigravity, nil, group)
-		require.True(t, ok)
-		names := make([]string, 0, len(resp.Models))
-		for _, m := range resp.Models {
-			names = append(names, m.Name)
-		}
-		require.Equal(t, []string{"models/gemini-3.1-pro-high", "models/gemini-2.5-flash"}, names)
-	})
-
-	t.Run("配置外的模型被过滤", func(t *testing.T) {
-		group := &service.Group{
-			Platform: service.PlatformAntigravity,
-			ModelsListConfig: service.GroupModelsListConfig{
-				Enabled: true,
-				Models:  []string{"gemini-2.5-flash", "not-a-real-model"},
-			},
-		}
-		resp, ok := geminiCustomModelsListResponse(service.PlatformAntigravity, nil, group)
-		require.True(t, ok)
-		require.Len(t, resp.Models, 1)
-		require.Equal(t, "models/gemini-2.5-flash", resp.Models[0].Name)
-	})
-
-	t.Run("账号可用模型作为过滤基准", func(t *testing.T) {
-		group := &service.Group{
-			Platform: service.PlatformGemini,
-			ModelsListConfig: service.GroupModelsListConfig{
-				Enabled: true,
-				Models:  []string{"gemini-2.5-pro", "gemini-custom-model"},
-			},
-		}
-		available := []string{"gemini-2.5-pro", "gemini-custom-model", "gemini-extra"}
-		resp, ok := geminiCustomModelsListResponse(service.PlatformGemini, available, group)
-		require.True(t, ok)
-		names := make([]string, 0, len(resp.Models))
-		for _, m := range resp.Models {
-			names = append(names, m.Name)
-		}
-		require.Equal(t, []string{"models/gemini-2.5-pro", "models/gemini-custom-model"}, names)
-	})
-
-	t.Run("Gemini原生回退保留native-only模型", func(t *testing.T) {
-		group := &service.Group{
-			Platform: service.PlatformGemini,
-			ModelsListConfig: service.GroupModelsListConfig{
-				Enabled: true,
-				Models:  []string{"gemini-3.1-pro-preview-customtools"},
-			},
-		}
-		resp, ok := geminiCustomModelsListResponse(service.PlatformGemini, nil, group)
-		require.True(t, ok)
-		require.Len(t, resp.Models, 1)
-		require.Equal(t, "models/gemini-3.1-pro-preview-customtools", resp.Models[0].Name)
-	})
-
-	t.Run("未启用自定义列表-不拦截", func(t *testing.T) {
-		group := &service.Group{Platform: service.PlatformGemini}
-		_, ok := geminiCustomModelsListResponse(service.PlatformGemini, nil, group)
-		require.False(t, ok)
-	})
-
-	t.Run("Group为nil-不拦截", func(t *testing.T) {
-		_, ok := geminiCustomModelsListResponse(service.PlatformGemini, nil, nil)
-		require.False(t, ok)
-	})
-}
-
 func TestShouldFallbackGeminiModel_KnownFallbackOn404(t *testing.T) {
 	t.Parallel()
 
@@ -316,4 +215,76 @@ func TestShouldFallbackGeminiModel_DelegatesScopeFallback(t *testing.T) {
 		Body:       []byte("insufficient authentication scopes"),
 	}
 	require.True(t, shouldFallbackGeminiModel("gemini-future-model", res))
+}
+
+func TestGeminiV1BetaGetModel_CompositeAntigravityRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("composite route to antigravity gemini model succeeds", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		req := httptest.NewRequest(http.MethodGet, "/v1beta/models/gemini-4-argon", nil)
+		req = req.WithContext(service.WithCompositeRouteDecision(req.Context(), service.CompositeRouteDecision{
+			Matched:        true,
+			TargetPlatform: service.PlatformAntigravity,
+			UpstreamModel:  "gemini-4-argon-high",
+		}))
+		c.Request = req
+		c.Params = gin.Params{{Key: "model", Value: "gemini-4-argon"}}
+		groupID := int64(4)
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+			ID:      1,
+			GroupID: &groupID,
+			Group:   &service.Group{ID: groupID, Platform: service.PlatformComposite},
+		})
+
+		(&GatewayHandler{}).GeminiV1BetaGetModel(c)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), "models/gemini-4-argon-high")
+	})
+
+	t.Run("composite route to antigravity claude model is rejected on v1beta", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		req := httptest.NewRequest(http.MethodGet, "/v1beta/models/claude-sonnet-5-5-high", nil)
+		req = req.WithContext(service.WithCompositeRouteDecision(req.Context(), service.CompositeRouteDecision{
+			Matched:        true,
+			TargetPlatform: service.PlatformAntigravity,
+			UpstreamModel:  "claude-sonnet-5-5-high",
+		}))
+		c.Request = req
+		c.Params = gin.Params{{Key: "model", Value: "claude-sonnet-5-5-high"}}
+		groupID := int64(4)
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+			ID:      1,
+			GroupID: &groupID,
+			Group:   &service.Group{ID: groupID, Platform: service.PlatformComposite},
+		})
+
+		(&GatewayHandler{}).GeminiV1BetaGetModel(c)
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	})
+
+	t.Run("composite route to antigravity claude model is rejected on generateContent", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		req := httptest.NewRequest(http.MethodPost, "/v1beta/models/claude-sonnet-5-5-high:generateContent", nil)
+		req = req.WithContext(service.WithCompositeRouteDecision(req.Context(), service.CompositeRouteDecision{
+			Matched:        true,
+			TargetPlatform: service.PlatformAntigravity,
+			UpstreamModel:  "claude-sonnet-5-5-high",
+		}))
+		c.Request = req
+		c.Params = gin.Params{{Key: "modelAction", Value: "/claude-sonnet-5-5-high:generateContent"}}
+		groupID := int64(4)
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+			ID:      1,
+			GroupID: &groupID,
+			Group:   &service.Group{ID: groupID, Platform: service.PlatformComposite},
+		})
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1, Concurrency: 1})
+
+		(&GatewayHandler{}).GeminiV1BetaModels(c)
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	})
 }

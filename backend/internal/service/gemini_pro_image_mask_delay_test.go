@@ -126,7 +126,7 @@ func TestHandleNativeNonStreamingResponseDelaysOnlyWhenProMasked(t *testing.T) {
 		}
 		params := newGeminiImageUsageParams(model, "generateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 		svc := &GeminiMessagesCompatService{}
-		_, err := svc.handleNativeNonStreamingResponse(c, resp, false, params)
+		_, err := svc.handleNativeNonStreamingResponse(c, resp, false, params, &Account{}, "")
 		require.NoError(t, err)
 		return *calls
 	}
@@ -159,7 +159,7 @@ func TestHandleNativeNonStreamingResponseNoDelayForCountTokens(t *testing.T) {
 	}
 	params := newGeminiImageUsageParams("gemini-3-pro-image-preview", "countTokens", "2K", nil)
 	svc := &GeminiMessagesCompatService{}
-	_, err := svc.handleNativeNonStreamingResponse(c, resp, false, params)
+	_, err := svc.handleNativeNonStreamingResponse(c, resp, false, params, &Account{}, "")
 	require.NoError(t, err)
 	require.Empty(t, *calls)
 }
@@ -186,7 +186,7 @@ func TestHandleNativeStreamingResponseDelaysOnceWhenProMasked(t *testing.T) {
 	}
 	params := newGeminiImageUsageParams("gemini-3-pro-image-preview", "streamGenerateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 	svc := &GeminiMessagesCompatService{}
-	result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params)
+	result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params, &Account{}, "")
 	require.NoError(t, err)
 	require.Equal(t, 1120, result.usage.ImageOutputTokens, "伪装本身仍要生效")
 	require.NotContains(t, w.Body.String(), `"modelVersion":"gemini-3.1-flash-image"`)
@@ -223,7 +223,7 @@ func TestHandleNativeStreamingResponseDelaysBeforeBufferedImageChunk(t *testing.
 	}
 	params := newGeminiImageUsageParams("gemini-3-pro-image-preview", "streamGenerateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 	svc := &GeminiMessagesCompatService{}
-	_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params)
+	_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params, &Account{}, "")
 	require.NoError(t, err)
 	require.Len(t, calls, 1)
 	require.Contains(t, w.Body.String(), `"modelVersion":"gemini-3-pro-image-preview"`)
@@ -246,7 +246,7 @@ func TestHandleNativeStreamingResponseFirstTokenIncludesDeferredMaskDelay(t *tes
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(stream))}
 	params := newGeminiImageUsageParams("gemini-3-pro-image-preview", "streamGenerateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 	svc := &GeminiMessagesCompatService{}
-	result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params)
+	result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params, &Account{}, "")
 	require.NoError(t, err)
 	require.NotNil(t, result.firstTokenMs)
 	require.GreaterOrEqual(t, *result.firstTokenMs, 20)
@@ -271,7 +271,7 @@ func TestHandleNativeStreamingResponseMasksSplitFinishAndUsageChunks(t *testing.
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(stream))}
 	params := newGeminiImageUsageParams("gemini-3-pro-image-preview", "streamGenerateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 	svc := &GeminiMessagesCompatService{}
-	result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params)
+	result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params, &Account{}, "")
 	require.NoError(t, err)
 	require.Len(t, *calls, 1)
 	require.Equal(t, 1120, result.usage.ImageOutputTokens)
@@ -297,7 +297,7 @@ func TestHandleNativeStreamingResponseDoesNotDelayGenuineProSplitTerminalChunks(
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(stream))}
 	params := newGeminiImageUsageParams("gemini-3-pro-image-preview", "streamGenerateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 	svc := &GeminiMessagesCompatService{}
-	result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params)
+	result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params, &Account{}, "")
 	require.NoError(t, err)
 	require.Empty(t, *calls)
 	require.Equal(t, 1120, result.usage.ImageOutputTokens)
@@ -335,7 +335,7 @@ func TestHandleNativeNonStreamingResponseClosesBodyBeforeMaskDelay(t *testing.T)
 	}
 	params := newGeminiImageUsageParams("gemini-3-pro-image-preview", "generateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 	svc := &GeminiMessagesCompatService{}
-	_, err := svc.handleNativeNonStreamingResponse(c, resp, false, params)
+	_, err := svc.handleNativeNonStreamingResponse(c, resp, false, params, &Account{}, "")
 	require.NoError(t, err)
 	require.True(t, body.closed)
 	require.Equal(t, http.NoBody, resp.Body)
@@ -355,7 +355,7 @@ func TestHandleNativeStreamingResponseFlushesPendingChunksOnEOF(t *testing.T) {
 	}
 	params := newGeminiImageUsageParams("gemini-3-pro-image-preview", "streamGenerateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 	svc := &GeminiMessagesCompatService{}
-	_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params)
+	_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params, &Account{}, "")
 	require.NoError(t, err)
 	require.Equal(t, stream, w.Body.String())
 	require.Empty(t, *calls, "an unresolved truncated stream must not invent a mask delay")
@@ -374,7 +374,7 @@ func TestHandleNativeStreamingResponseFlushesPendingChunksBeforeReadError(t *tes
 	}
 	params := newGeminiImageUsageParams("gemini-3-pro-image-preview", "streamGenerateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 	svc := &GeminiMessagesCompatService{}
-	_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params)
+	_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params, &Account{}, "")
 	require.EqualError(t, err, "upstream read failed")
 	require.Equal(t, first, w.Body.String())
 }
@@ -405,7 +405,7 @@ func TestHandleNativeStreamingResponseNoDelayForGenuinePro(t *testing.T) {
 	}
 	params := newGeminiImageUsageParams("gemini-3-pro-image-preview", "streamGenerateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 	svc := &GeminiMessagesCompatService{}
-	_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params)
+	_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params, &Account{}, "")
 	require.NoError(t, err)
 	require.Empty(t, *calls)
 }
@@ -426,7 +426,7 @@ func TestHandleNativeStreamingResponseGenuineProWritesBeforeTerminalChunk(t *tes
 	svc := &GeminiMessagesCompatService{}
 	done := make(chan error, 1)
 	go func() {
-		_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params)
+		_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params, &Account{}, "")
 		done <- err
 	}()
 	<-body.firstRead
@@ -458,7 +458,7 @@ func TestHandleNativeStreamingResponseGenuineProDecisionIsSticky(t *testing.T) {
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(stream))}
 	params := newGeminiImageUsageParams("gemini-3-pro-image-preview", "streamGenerateContent", "2K", []byte(`{"contents":[{"parts":[{"text":"draw"}]}]}`))
 	svc := &GeminiMessagesCompatService{}
-	result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params)
+	result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params, &Account{}, "")
 	require.NoError(t, err)
 	require.Empty(t, *calls, "a conclusive genuine-pro decision must not be reversed by later sparse usage")
 	require.Equal(t, 1120, result.usage.ImageOutputTokens)

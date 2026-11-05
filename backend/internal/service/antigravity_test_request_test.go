@@ -15,7 +15,7 @@ import (
 func TestBuildGeminiTestRequest_OmitsMaxOutputTokens(t *testing.T) {
 	svc := &AntigravityGatewayService{}
 
-	raw, err := svc.buildGeminiTestRequest("proj-1", "gemini-3.1-pro-high")
+	raw, err := svc.buildGeminiTestRequestWithPrompt("proj-1", "gemini-3.1-pro-high", "")
 	require.NoError(t, err)
 
 	j := string(raw)

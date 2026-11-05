@@ -49,6 +49,9 @@ var bypassPathPrefixes = []string{
 	"/images/",
 	"/videos/",
 	"/custom-voices/",
+	"/models/",
+	"/contents/generations/tasks/",
+	"/v3/contents/generations/tasks/",
 }
 
 // bypassExactPaths 是按全等放行的路径。
@@ -70,4 +73,6 @@ var bypassExactPaths = []string{
 	"/stt",
 	"/web_search",
 	"/x_search",
+	"/contents/generations/tasks",
+	"/v3/contents/generations/tasks",
 }

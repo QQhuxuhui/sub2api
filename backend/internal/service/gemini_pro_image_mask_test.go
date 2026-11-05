@@ -341,7 +341,7 @@ func TestApplyGeminiProImageMaskCountsImagesFromBody(t *testing.T) {
 func TestMaskGeminiProImageStreamChunkUsesCarriedImageCount(t *testing.T) {
 	const model = "gemini-3-pro-image-preview"
 	final := []byte(`{"modelVersion":"gemini-3.1-flash-image","candidates":[{"content":{"parts":[{"text":"done"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":7,"totalTokenCount":107}}`)
-	require.Equal(t, 0, countGeminiInlineImageOutputs(final),
+	require.Equal(t, 0, countGeminiImageOutputs(final),
 		"前提：终结分块自身没有图片 part，否则本用例测不到「靠累计值」这件事")
 
 	base := geminiProImageMaskParams{Enabled: true, Model: model, Tier: "2K"}

@@ -230,7 +230,7 @@ func TestGeminiNativeOutput_StreamErrorOnlyThenReadErrorFailsOver(t *testing.T) 
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body:       io.NopCloser(&geminiMeterErrAfterReader{data: []byte(geminiMeterErrorOnlyStream), err: errors.New("connection reset")}),
 	}
-	_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, geminiImageUsageParams{})
+	_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, geminiImageUsageParams{}, &Account{}, "")
 	var fe *UpstreamFailoverError
 	require.True(t, errors.As(err, &fe))
 	require.False(t, c.Writer.Written())
@@ -253,7 +253,7 @@ func TestGeminiNativeOutput_StreamErrorOnlyWithProMaskFailsOver(t *testing.T) {
 				Body:       io.NopCloser(reader),
 			}
 			params := geminiImageUsageParams{ProMaskEnabled: true, Model: "gemini-3-pro-image-preview"}
-			_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params)
+			_, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), false, params, &Account{}, "")
 			var fe *UpstreamFailoverError
 			require.True(t, errors.As(err, &fe))
 			require.False(t, c.Writer.Written())

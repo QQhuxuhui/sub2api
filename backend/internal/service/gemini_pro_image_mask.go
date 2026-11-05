@@ -247,7 +247,7 @@ func applyGeminiProImageMaskWithObservedModel(respBody []byte, model, tier strin
 	}
 	promptTokens := int(gjson.GetBytes(respBody, "usageMetadata.promptTokenCount").Int())
 	if imageCount < 1 {
-		imageCount = countGeminiInlineImageOutputs(respBody)
+		imageCount = countGeminiImageOutputs(respBody)
 	}
 	synth := synthesizeGeminiProImageUsage(tier, promptTokens, imageCount)
 	nb, ok := maskGeminiProImageResponseBody(respBody, model, synth)

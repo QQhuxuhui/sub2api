@@ -12,7 +12,7 @@ ARG NODE_IMAGE=node:24-alpine
 # 版本低于 go.mod 要求时 `go mod download` 直接失败（不会自动下载工具链）。
 # 上游 CI 用 `go-version-file: backend/go.mod` 自动取版本，只有「自己 docker build」的人会撞上。
 # 同步上游后如果构建报 `go.mod requires go >= X (running go Y)`，改这一行。
-ARG GOLANG_IMAGE=golang:1.27.0-alpine
+ARG GOLANG_IMAGE=golang:1.27.3-alpine
 ARG ALPINE_IMAGE=alpine:3.21
 ARG POSTGRES_IMAGE=postgres:18-alpine
 ARG GOPROXY=https://goproxy.cn,direct

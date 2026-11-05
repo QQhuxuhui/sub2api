@@ -107,8 +107,8 @@ func forEachOpenAIKeepaliveCase(t *testing.T, run func(t *testing.T, handler ope
 func TestOpenAIStreamKeepaliveEventsAreNotOutput(t *testing.T) {
 	for _, event := range openAIKeepaliveStatusEvents {
 		t.Run(event.eventType, func(t *testing.T) {
-			require.True(t, openAIStreamEventIsPreamble(event.eventType))
-			require.True(t, openAIStreamEventIsPreamble(" "+event.eventType+" "))
+			require.True(t, openAIStreamEventIsMetadata(event.eventType))
+			require.True(t, openAIStreamEventIsMetadata(" "+event.eventType+" "))
 			require.False(t, openAIStreamDataStartsClientOutput(event.data, event.eventType))
 			require.False(t, openAIStreamDataStartsSemanticTTFT(event.data, event.eventType))
 			require.False(t, openAIStreamDataStartsSemanticTTFT(event.data, ""), "the type may only be in the data")
