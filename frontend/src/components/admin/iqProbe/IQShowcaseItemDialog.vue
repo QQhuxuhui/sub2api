@@ -17,7 +17,7 @@
         <select id="iq-showcase-f-key" v-model="form.api_key_id" data-test="iq-showcase-key" class="input" :disabled="!form.group_id || keysLoading">
           <option :value="null" disabled>{{ keysLoading ? t('common.loading') : t('iqShowcase.admin.fields.pickKey') }}</option>
           <option v-for="k in keys" :key="k.id" :value="k.id">
-            {{ k.name || '#' + k.id }} · {{ k.masked }}{{ k.status !== 'active' ? ' · ' + k.status : '' }}
+            {{ k.name || '#' + k.id }} · {{ k.masked }}{{ k.user_email ? ' · ' + k.user_email : '' }}{{ k.status !== 'active' ? ' · ' + k.status : '' }}
           </option>
         </select>
         <p v-if="form.group_id && !keysLoading && keys.length === 0" class="input-hint" data-test="iq-showcase-no-keys">{{ t('iqShowcase.admin.fields.noKeys') }}</p>

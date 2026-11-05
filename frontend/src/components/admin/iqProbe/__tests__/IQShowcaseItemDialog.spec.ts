@@ -53,6 +53,8 @@ describe('IQShowcaseItemDialog', () => {
     await flushPromises()
     expect(keyOptions).toHaveBeenLastCalledWith(7)
     expect(wrapper.find('[data-test="iq-showcase-key"]').text()).toContain('sk-…ABCD')
+    // The owner is shown: keys of every user in the group are listed, and the probe bills the chosen one.
+    expect(wrapper.find('[data-test="iq-showcase-key"]').text()).toContain('a@b.c')
     expect((wrapper.find('[data-test="iq-showcase-protocol"]').element as HTMLSelectElement).value).toBe('anthropic_messages')
   })
 
