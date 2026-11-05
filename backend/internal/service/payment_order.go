@@ -22,6 +22,25 @@ import (
 
 // --- Order Creation ---
 
+// rechargeBonusConfigForPaymentType 让 USDT 订单按无优惠档位计算到账，其余配置不变。
+// 本仓决策 U4：USDT 走自己的报价与补单口径，不参与上游 v0.2.19 的充值赠送/折扣。
+func rechargeBonusConfigForPaymentType(cfg *PaymentConfig, paymentType string) *PaymentConfig {
+	if cfg == nil || paymentType != payment.TypeUSDT {
+		return cfg
+	}
+	cloned := *cfg
+	cloned.RechargeBonusTiers = nil
+	return &cloned
+}
+
+// balanceOrderAmounts 计算余额充值订单的到账金额、实付基数与赠送额。
+// 阈值按支付金额命中。赠金模式：到账 = 基数 + 赠送；折扣模式：到账 = 基数，实付基数按折扣减少。
+// USDT 不参与充值优惠（U4）：实付基数 = 输入金额、赠送额恒为 0。
+func balanceOrderAmounts(cfg *PaymentConfig, paymentType string, amount float64, currency string) (orderAmount, limitAmount, bonusAmount float64) {
+	quote := quoteRechargeBonus(rechargeBonusConfigForPaymentType(cfg, paymentType), amount, currency)
+	return quote.Credited, quote.PayBase, quote.Bonus
+}
+
 func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest) (*CreateOrderResponse, error) {
 	if req.OrderType == "" {
 		req.OrderType = payment.OrderTypeBalance
@@ -68,11 +87,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		orderAmount = plan.Price
 		limitAmount = plan.Price
 	} else if req.OrderType == payment.OrderTypeBalance {
-		// 阈值按支付金额命中。赠金模式：到账 = 基数 + 赠送；折扣模式：到账 = 基数，实付基数按折扣减少。
-		quote := quoteRechargeBonus(cfg, req.Amount, methodCurrency)
-		limitAmount = quote.PayBase
-		bonusAmount = quote.Bonus
-		orderAmount = quote.Credited
+		orderAmount, limitAmount, bonusAmount = balanceOrderAmounts(cfg, req.PaymentType, req.Amount, methodCurrency)
 	}
 	payAmountStr, payAmount, err := calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, methodCurrency, req.OrderType, cfg.SubscriptionUSDToCNYRate)
 	if err != nil {
