@@ -214,14 +214,18 @@ func (s *IntentRouterService) Stop(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
-	var errs []error
+	// Both logs drain at once so neither waits out the other's share of ctx.
+	var templateErr, hitErr error
+	var wg sync.WaitGroup
 	if log, ok := s.templateSink.(*intentTemplateLog); ok {
-		errs = append(errs, log.Stop(ctx))
+		wg.Add(1)
+		go func() { defer wg.Done(); templateErr = log.Stop(ctx) }()
 	}
 	if log, ok := s.hits.(*intentRouteHitLog); ok {
-		errs = append(errs, log.Stop(ctx))
+		hitErr = log.Stop(ctx)
 	}
-	return errors.Join(errs...)
+	wg.Wait()
+	return errors.Join(templateErr, hitErr)
 }
 
 const intentRouteHitColumns = 13

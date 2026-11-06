@@ -448,6 +448,39 @@ func TestIntentTemplate_TestClassifyProbeWithoutTarget(t *testing.T) {
 
 // ---- write queue ----
 
+// A prune stuck on a row lock must not eat the shutdown budget: Stop ends it
+// and the queued observations are still written.
+type stuckPruneStore struct {
+	*memoryIntentTemplateStore
+	pruning chan struct{}
+}
+
+func (s *stuckPruneStore) prune(ctx context.Context, _ time.Time) error {
+	close(s.pruning)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (s *stuckPruneStore) upsert(ctx context.Context, aggs []intentTemplateAgg) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.memoryIntentTemplateStore.upsert(ctx, aggs)
+}
+
+func TestIntentTemplateLog_StopEndsStuckPruneAndStillDrains(t *testing.T) {
+	store := &stuckPruneStore{memoryIntentTemplateStore: &memoryIntentTemplateStore{}, pruning: make(chan struct{})}
+	l := newIntentTemplateLog(store)
+	l.Start()
+	<-store.pruning
+	require.True(t, l.add(intentTemplateObservation{Key: "k", Time: time.Unix(1_800_000_000, 0), ReasonA: true, Final: intentTemplateFinalHealth}))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, l.Stop(ctx))
+	require.Len(t, store.upserts, 1)
+	require.Zero(t, l.dropped.Load())
+}
+
 func TestIntentTemplateLog_DrainsOnStopAndMerges(t *testing.T) {
 	store := &memoryIntentTemplateStore{}
 	l := newIntentTemplateLog(store)

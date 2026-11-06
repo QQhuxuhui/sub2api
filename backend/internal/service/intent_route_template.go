@@ -654,13 +654,18 @@ type intentTemplateLog struct {
 	stop, done       chan struct{}
 	ctx              context.Context
 	cancel           context.CancelFunc
-	dropped          atomic.Int64
-	now              func() time.Time
+	// Pruning has its own context so Stop can end a prune stuck on a lock
+	// and leave the shutdown budget to draining the queue.
+	pruneCtx    context.Context
+	pruneCancel context.CancelFunc
+	dropped     atomic.Int64
+	now         func() time.Time
 }
 
 func newIntentTemplateLog(store intentTemplateStore) *intentTemplateLog {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &intentTemplateLog{store: store, ch: make(chan intentTemplateObservation, intentTemplateBuffer), stop: make(chan struct{}), done: make(chan struct{}), ctx: ctx, cancel: cancel, now: time.Now}
+	pruneCtx, pruneCancel := context.WithCancel(ctx)
+	return &intentTemplateLog{store: store, ch: make(chan intentTemplateObservation, intentTemplateBuffer), stop: make(chan struct{}), done: make(chan struct{}), ctx: ctx, cancel: cancel, pruneCtx: pruneCtx, pruneCancel: pruneCancel, now: time.Now}
 }
 
 func (l *intentTemplateLog) Start() {
@@ -704,6 +709,7 @@ func (l *intentTemplateLog) Stop(ctx context.Context) error {
 		l.cancel()
 		return nil
 	}
+	l.pruneCancel()
 	close(l.stop)
 	select {
 	case <-l.done:
@@ -780,7 +786,7 @@ func (l *intentTemplateLog) write(batch []intentTemplateObservation) {
 }
 
 func (l *intentTemplateLog) prune() {
-	ctx, cancel := context.WithTimeout(l.ctx, time.Minute)
+	ctx, cancel := context.WithTimeout(l.pruneCtx, time.Minute)
 	defer cancel()
 	if err := l.store.prune(ctx, l.now()); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Warn("intent_route.template_prune_failed", "error", err)
