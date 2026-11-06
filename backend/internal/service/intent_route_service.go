@@ -115,6 +115,10 @@ func (c *intentRouterConfig) usable() bool {
 	if _, ok := c.jevRule(); ok {
 		return true
 	}
+	// Judged templates route to the Jev target rule even with Jev switched off.
+	if _, ok := c.manualTarget(); ok {
+		return true
+	}
 	return len(c.classifierRules()) > 0 || c.hasKeywords()
 }
 
@@ -280,6 +284,11 @@ type IntentRouterService struct {
 	classifier intentClassifier
 	hits       intentRouteHitSink  // nil keeps no hit log
 	capture    *intentRouteCapture // nil captures no misses
+	// Admin judgements of message templates (intent_route_template.go).
+	templateStore intentTemplateStore                // nil: no judgements, no doubtful verdicts kept
+	templateSink  intentTemplateSink                 // nil keeps no doubtful verdicts
+	templateFlips *intentTemplateFlips               // nil detects no flips
+	templates     atomic.Pointer[map[string]string] // judged templates: key -> probe|health|normal
 	judge      intentProbeJudge    // Jev; nil judges nothing
 	jevStats   intentJevStats      // nil keeps no Jev statistics
 	jevMu      sync.Mutex
@@ -330,15 +339,24 @@ func NewIntentRouterService(entClient *dbent.Client, rdb *redis.Client, cfg *con
 		preludeLog = &redisOpenAIStreamPreludeLog{rdb: rdb}
 	}
 	var hits intentRouteHitSink
+	var templateStore intentTemplateStore
+	var templateSink intentTemplateSink
 	if entClient != nil {
 		log := newIntentRouteHitLog(entClient)
 		log.Start()
 		hits = log
+		templateStore = &pgIntentTemplateStore{db: entClient}
+		templateLog := newIntentTemplateLog(templateStore)
+		templateLog.Start()
+		templateSink = templateLog
 	}
 	return &IntentRouterService{
-		entClient:  entClient,
-		store:      store,
-		hits:       hits,
+		entClient:     entClient,
+		store:         store,
+		hits:          hits,
+		templateStore: templateStore,
+		templateSink:  templateSink,
+		templateFlips: newIntentTemplateFlips(intentTemplateLRUSize),
 		capture:    newIntentRouteCaptureFromEnv(),
 		judge:      newHTTPIntentProbeJudge(),
 		jevStats:   jevStats,
@@ -410,11 +428,21 @@ func (s *IntentRouterService) Decide(ctx context.Context, in IntentRouteInput) *
 
 // classify returns the matched rule's decision, or nil for "no preference".
 func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterConfig, in IntentRouteInput) (decision *IntentRouteDecision) {
+	// A doubtful Jev verdict is filed once the final decision is known. This
+	// defer runs after the recover below, so a panic files nothing.
+	var jevObs *intentJevObservation
+	panicked := false
+	defer func() {
+		if !panicked {
+			s.observeTemplate(in, jevObs, decision != nil)
+		}
+	}()
 	// Nothing in here may ever take a request down.
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("intent_route.panic", "group_id", in.GroupID, "panic", r)
 			decision = nil
+			panicked = true
 		}
 	}()
 	view := newIntentRequestView(in.Body)
@@ -444,10 +472,34 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 	if s.capture.watching(in.APIKeyID) {
 		s.capture.add(in, view, texts)
 	}
+	// An admin judgement of the message's template comes before Jev, for
+	// short conversations only: a judged "ok" must not pull a long session.
+	manualTargetMissing := false
+	if len(texts) > 0 && len(view.turns()) <= cfg.Jev.MaxTurns {
+		if manual := s.manualLabel(s.templateLabels(), texts[0]); manual.Label != "" {
+			switch manual.Label {
+			case IntentTemplateProbe:
+				if rule, ok := cfg.manualTarget(); ok {
+					s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "manual", Intent: rule.Name, Detail: "template " + manual.Key[:12]})
+					s.recordHit(in, view, rule.Name, "manual:"+IntentTemplateProbe, 0, texts[0], texts[0], truncateRunes(texts[0], intentJevHitExcerpt))
+					return s.newDecision(cfg, rule, "", 0, 0)
+				}
+				manualTargetMissing = true
+				s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "manual_target_missing", Detail: "template " + manual.Key[:12]})
+			case IntentTemplateHealth, IntentTemplateNormal:
+				s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "manual", Detail: manual.Label + " template " + manual.Key[:12]})
+				s.recordHit(in, view, "", "manual:"+manual.Label, 0, texts[0], texts[0], truncateRunes(texts[0], intentJevHitExcerpt))
+				return nil
+			}
+		}
+	}
 	// Jev judges what keywords missed, per turn and without memory, exactly
 	// like a keyword: a probe goes to the rule's accounts this turn only.
 	if len(texts) > 0 {
 		verdict := s.judgeProbe(ctx, cfg, in, view, texts[0])
+		if verdict.Answered && !manualTargetMissing {
+			jevObs = &intentJevObservation{text: texts[0], p: verdict.P, health: verdict.Health, concl: verdict.Concl, cfg: cfg}
+		}
 		if verdict.Route || verdict.Decided {
 			// A health check left to ordinary scheduling is recorded with
 			// no rule, so reviews can see what Jev let through.
@@ -707,6 +759,7 @@ func (s *IntentRouterService) reloadConfigs(ctx context.Context) error {
 	defer s.configMu.Unlock()
 	s.reloadMonitorProbeConfigs(ctx)
 	s.reloadOpenAIStreamPreludeConfigs(ctx)
+	s.reloadTemplateLabels(ctx)
 	rows, err := s.entClient.IntentRouter.Query().All(ctx)
 	if err != nil {
 		slog.Warn("intent_route.config_load_failed", "error", err)

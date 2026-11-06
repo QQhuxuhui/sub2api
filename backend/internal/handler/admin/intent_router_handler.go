@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -293,4 +294,60 @@ func (h *IntentRouterHandler) StreamPreludeStatus(c *gin.Context) {
 		return
 	}
 	response.Success(c, status)
+}
+
+// Templates lists message templates queued for, or given, an admin judgement.
+// GET /api/v1/admin/intent-routers/templates
+func (h *IntentRouterHandler) Templates(c *gin.Context) {
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	items, total, err := h.router.ListTemplates(c.Request.Context(), service.IntentRouteTemplateQuery{
+		Status: c.Query("status"), Reason: c.Query("reason"), Search: c.Query("q"), Page: page, PageSize: pageSize,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"items": items, "total": total})
+}
+
+type intentTemplateDecisionRequest struct {
+	Status   string `json:"status" binding:"required"`
+	Revision *int64 `json:"revision" binding:"required"`
+}
+
+// DecideTemplate judges a template for every group.
+// PUT /api/v1/admin/intent-routers/templates/:key/decision
+func (h *IntentRouterHandler) DecideTemplate(c *gin.Context) {
+	var req intentTemplateDecisionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	var adminID int64
+	if sub, ok := middleware.GetAuthSubjectFromContext(c); ok {
+		adminID = sub.UserID
+	}
+	t, err := h.router.DecideTemplate(c.Request.Context(), c.Param("key"), req.Status, *req.Revision, adminID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, t)
+}
+
+// RevokeTemplate returns a judged template to the queue.
+// DELETE /api/v1/admin/intent-routers/templates/:key/decision?revision=
+func (h *IntentRouterHandler) RevokeTemplate(c *gin.Context) {
+	revision, err := strconv.ParseInt(c.Query("revision"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "revision is required")
+		return
+	}
+	t, err := h.router.RevokeTemplate(c.Request.Context(), c.Param("key"), revision)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, t)
 }

@@ -4,7 +4,7 @@ import IntentRoutersView from '../IntentRoutersView.vue'
 
 const api = vi.hoisted(() => ({
   list: vi.fn(), save: vi.fn(), remove: vi.fn(), test: vi.fn(), clearCache: vi.fn(), events: vi.fn(),
-  hits: vi.fn(), hitStats: vi.fn(), jevStatus: vi.fn(), monitorAnswer: vi.fn(), saveMonitorAnswer: vi.fn(), monitorAnswerStatus: vi.fn(), streamPrelude: vi.fn(), saveStreamPrelude: vi.fn(), streamPreludeStatus: vi.fn(),
+  hits: vi.fn(), hitStats: vi.fn(), templates: vi.fn(), jevStatus: vi.fn(), monitorAnswer: vi.fn(), saveMonitorAnswer: vi.fn(), monitorAnswerStatus: vi.fn(), streamPrelude: vi.fn(), saveStreamPrelude: vi.fn(), streamPreludeStatus: vi.fn(),
 }))
 const admin = vi.hoisted(() => ({ getAllIncludingInactive: vi.fn(), listAccounts: vi.fn(), searchUsers: vi.fn(), searchApiKeys: vi.fn() }))
 const toast = vi.hoisted(() => ({ showSuccess: vi.fn(), showError: vi.fn() }))
@@ -73,6 +73,7 @@ describe('IntentRoutersView', () => {
     api.events.mockResolvedValue({ data: [] })
     api.hitStats.mockResolvedValue({ data: [] })
     api.hits.mockResolvedValue({ data: { items: [], total: 0 } })
+    api.templates.mockResolvedValue({ data: { items: [], total: 0 } })
     api.jevStatus.mockResolvedValue({ data: { state: 'off', days: [], usd_per_mtok: 0.042, cny_per_usd: 7 } })
     api.monitorAnswer.mockResolvedValue({ data: { group_id: 1, config: { enabled: false, scope: 'all', user_ids: [], api_keys: [] }, scope_labels: { users: [], api_keys: [] } } })
     api.monitorAnswerStatus.mockResolvedValue({ data: { days: [], recent: [] } })
@@ -561,6 +562,28 @@ describe('IntentRoutersView', () => {
     const text = wrapper.get('[data-test="intent-test-result"]').text()
     expect(text).toContain('intentRouter.test.byJev:{"p":"0.91"}')
     expect(text).toContain('intentRouter.test.latency:{"ms":80}')
+  })
+
+  it('says when an admin judgement decided the try-it result', async () => {
+    api.test.mockResolvedValue({ data: { matched_by: 'manual', manual_label: 'probe', template_key: 'a'.repeat(64), answer: '', intent: 'coding', understood: true, account_ids: [21], latency_ms: 0 } })
+    const wrapper = await mountView()
+    expect(api.templates).toHaveBeenCalled()
+    expect(wrapper.find('[data-test="template-review"]').exists()).toBe(true)
+    await wrapper.get('[data-test="intent-test-text"]').setValue('{"fp":"7Q2K"}')
+    await wrapper.get('[data-test="intent-test-run"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="intent-test-manual"]').text()).toContain('intentRouter.test.byManual:{"label":"intentRouter.templates.status.probe"}')
+    expect(wrapper.find('[data-test="intent-test-manual-missing"]').exists()).toBe(false)
+  })
+
+  it('says when a probe judgement had no target and Jev decided', async () => {
+    api.test.mockResolvedValue({ data: { matched_by: 'jev', manual_label: 'probe', manual_target_missing: true, answer: 'p=0.30', intent: '', understood: true, account_ids: [], latency_ms: 50, probe_probability: 0.3 } })
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-test-text"]').setValue('x')
+    await wrapper.get('[data-test="intent-test-run"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="intent-test-manual-missing"]').text()).toContain('intentRouter.test.byManualTargetMissing')
+    expect(wrapper.get('[data-test="intent-test-result"]').text()).toContain('intentRouter.test.byJev')
   })
 
   it('says when a keyword decided the try-it result', async () => {

@@ -505,6 +505,12 @@ type intentJevVerdict struct {
 	Decided bool
 	// Label is the hit's keyword column: "jev:0.93" or "health:0.97".
 	Label string
+	// Answered is set when Jev returned scores; P, Health and Concl are then
+	// what it said, for filing doubtful verdicts (intent_route_template.go).
+	Answered bool
+	P        float64
+	Health   *float64
+	Concl    uint8
 }
 
 // judgeProbe asks Jev about a keyword miss and decides where it goes.
@@ -552,6 +558,17 @@ func (s *IntentRouterService) judgeProbe(ctx context.Context, cfg *intentRouterC
 	}
 	s.jevSuccess(in.GroupID)
 	s.jevSpend(in.GroupID, answer.Tokens)
+	answered := intentJevVerdict{Answered: true, P: answer.P, Health: answer.Health, Concl: intentJevConclLow}
+	switch {
+	case answer.Health != nil && *answer.Health >= cfg.Jev.HealthThreshold:
+		answered.Concl = intentJevConclHealth
+	case answer.P >= cfg.Jev.Threshold:
+		answered.Concl = intentJevConclProbe
+	}
+	withScores := func(v intentJevVerdict) intentJevVerdict {
+		v.Answered, v.P, v.Health, v.Concl = true, answered.P, answered.Health, answered.Concl
+		return v
+	}
 	timelyHit := cfg.Jev.TimelyEnabled && answer.Timely != nil && *answer.Timely >= cfg.Jev.TimelyThreshold
 	if cfg.Jev.TimelyEnabled && answer.Timely != nil {
 		s.jevCount(in.GroupID, intentJevStatTimelyAnswered, 1)
@@ -569,7 +586,7 @@ func (s *IntentRouterService) judgeProbe(ctx context.Context, cfg *intentRouterC
 			verdict.Decided = true
 		}
 		s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "jev_health", Intent: intent, LatencyMS: latency, Detail: fmt.Sprintf("health=%.2f p=%.2f", *answer.Health, answer.P)})
-		return verdict
+		return withScores(verdict)
 	}
 	if answer.P < cfg.Jev.Threshold {
 		// Time sensitivity only decides what health checks and probes leave.
@@ -577,14 +594,14 @@ func (s *IntentRouterService) judgeProbe(ctx context.Context, cfg *intentRouterC
 			if timelyRule, ok := cfg.rule(cfg.Jev.TimelyRule); ok {
 				s.jevCount(in.GroupID, intentJevStatTimelyRouted, 1)
 				s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "jev_timely", Intent: timelyRule.Name, LatencyMS: latency, Detail: fmt.Sprintf("timely=%.2f p=%.2f", *answer.Timely, answer.P)})
-				return intentJevVerdict{Rule: timelyRule, Route: true, Label: fmt.Sprintf("timely:%.2f", *answer.Timely)}
+				return withScores(intentJevVerdict{Rule: timelyRule, Route: true, Label: fmt.Sprintf("timely:%.2f", *answer.Timely)})
 			}
 		}
-		return intentJevVerdict{}
+		return answered
 	}
 	s.jevCount(in.GroupID, intentJevStatProbes, 1)
 	s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "jev", Intent: rule.Name, LatencyMS: latency, Detail: fmt.Sprintf("p=%.2f", answer.P)})
-	return intentJevVerdict{Rule: rule, Route: true, Label: fmt.Sprintf("jev:%.2f", answer.P)}
+	return withScores(intentJevVerdict{Rule: rule, Route: true, Label: fmt.Sprintf("jev:%.2f", answer.P)})
 }
 
 func (s *IntentRouterService) rollPercent() int {

@@ -141,7 +141,7 @@ export interface IntentRouterInput {
 
 export interface IntentClassifyTestResult {
   /** keyword: decided by a keyword, the classifier was not asked; '' when neither applied. */
-  matched_by: 'keyword' | 'jev' | 'classifier' | ''
+  matched_by: 'keyword' | 'manual' | 'jev' | 'classifier' | ''
   keyword?: string
   answer: string
   intent: string
@@ -158,6 +158,50 @@ export interface IntentClassifyTestResult {
   timely?: boolean
   /** Jev's latency when the classifier decided after it. */
   jev_latency_ms?: number
+  /** Admin judgement of the text's template, when there is one. */
+  manual_label?: IntentTemplateDecision
+  /** Judged "probe" but the group's Jev target rule is missing: testing went on. */
+  manual_target_missing?: boolean
+  template_key?: string
+}
+
+export type IntentTemplateDecision = 'probe' | 'health' | 'normal'
+export type IntentTemplateStatus = 'pending' | IntentTemplateDecision
+
+/** A message template queued for, or given, an admin judgement (applies to every group). */
+export interface IntentRouteTemplate {
+  key: string
+  template: string
+  sample: string
+  text_chars: number
+  status: IntentTemplateStatus
+  first_seen_at: string
+  last_seen_at: string
+  seen_count: number
+  /** a: called a health check yet the probe score is high; b: judged two ways; c: probe score just under the line. */
+  reason_a: number
+  reason_b: number
+  reason_c: number
+  verdict_route: number
+  verdict_health: number
+  verdict_normal: number
+  probe_min: number | null
+  probe_max: number | null
+  health_min: number | null
+  health_max: number | null
+  user_ids: number[]
+  group_ids: number[]
+  decided_at: string | null
+  decided_by: number | null
+  revision: number
+}
+
+export interface IntentRouteTemplateQuery {
+  status?: IntentTemplateStatus | 'all'
+  reason?: '' | 'a' | 'b' | 'c'
+  q?: string
+  page?: number
+  page_size?: number
 }
 
 export interface IntentRouteEvent {
@@ -335,6 +379,15 @@ export const intentRoutersAPI = {
   },
   streamPreludeStatus(groupId: number) {
     return apiClient.get<OpenAIStreamPreludeStatus>(`/admin/intent-routers/${groupId}/stream-prelude/status`)
+  },
+  templates(query: IntentRouteTemplateQuery) {
+    return apiClient.get<{ items: IntentRouteTemplate[]; total: number }>('/admin/intent-routers/templates', { params: query })
+  },
+  decideTemplate(key: string, status: IntentTemplateDecision, revision: number) {
+    return apiClient.put<IntentRouteTemplate>(`/admin/intent-routers/templates/${key}/decision`, { status, revision })
+  },
+  revokeTemplate(key: string, revision: number) {
+    return apiClient.delete<IntentRouteTemplate>(`/admin/intent-routers/templates/${key}/decision`, { params: { revision } })
   },
   hitStats(query: IntentRouteHitQuery) {
     return apiClient.get<IntentRouteKeywordStat[]>('/admin/intent-routers/hits/stats', { params: query })

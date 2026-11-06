@@ -155,6 +155,13 @@ type IntentClassifyTestResult struct {
 	// JevLatencyMS is the Jev call's latency when the classifier decided
 	// after it (LatencyMS is then the classifier's).
 	JevLatencyMS int64 `json:"jev_latency_ms,omitempty"`
+	// ManualLabel is the admin judgement of the text's template (probe,
+	// health or normal), when there is one; MatchedBy is then "manual",
+	// unless the judgement is "probe" and its target rule is missing
+	// (ManualTargetMissing), in which case testing goes on as live traffic does.
+	ManualLabel         string `json:"manual_label,omitempty"`
+	ManualTargetMissing bool   `json:"manual_target_missing,omitempty"`
+	TemplateKey         string `json:"template_key,omitempty"`
 }
 
 func intentRouterViewFromEnt(row *dbent.IntentRouter) *IntentRouterView {
@@ -789,6 +796,27 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 	if rule, keyword, ok := cfg.matchKeywords(text); ok {
 		return &IntentClassifyTestResult{MatchedBy: "keyword", Keyword: keyword, Intent: rule.Name, Understood: true, AccountIDs: rule.AccountIDs}, nil
 	}
+	// Then admin judgements of the template, as live traffic sees them (the
+	// turn limit does not apply: the test is one message).
+	labels, err := s.manualSnapshot(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	var manual intentManualVerdict
+	if manual = s.manualLabel(labels, text); manual.Label != "" {
+		if manual.Label != IntentTemplateProbe {
+			return &IntentClassifyTestResult{MatchedBy: "manual", ManualLabel: manual.Label, TemplateKey: manual.Key, Understood: true, AccountIDs: []int64{}}, nil
+		}
+		if rule, ok := cfg.manualTarget(); ok {
+			return &IntentClassifyTestResult{MatchedBy: "manual", ManualLabel: manual.Label, TemplateKey: manual.Key, Intent: rule.Name, Understood: true, AccountIDs: rule.AccountIDs}, nil
+		}
+	}
+	withManual := func(r *IntentClassifyTestResult) *IntentClassifyTestResult {
+		if r != nil && manual.Label == IntentTemplateProbe {
+			r.ManualLabel, r.ManualTargetMissing, r.TemplateKey = manual.Label, true, manual.Key
+		}
+		return r
+	}
 	// Then Jev — whenever a key is stored, even switched off, so a topped-up
 	// account can be checked before Jev is turned back on. Its scope, turn
 	// limit, sampling and pauses do not apply, and its errors here neither
@@ -815,25 +843,25 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 			if rule, ok := cfg.rule(cfg.Jev.HealthRule); ok {
 				jevResult.Intent, jevResult.AccountIDs = rule.Name, rule.AccountIDs
 			}
-			return jevResult, nil
+			return withManual(jevResult), nil
 		}
 		if rule, ok := cfg.rule(cfg.Jev.Rule); ok && p >= cfg.Jev.Threshold {
 			jevResult.Intent, jevResult.AccountIDs = rule.Name, rule.AccountIDs
-			return jevResult, nil
+			return withManual(jevResult), nil
 		}
 		// Time sensitivity decides only what health checks and probes leave.
 		if cfg.Jev.TimelyEnabled && answer.Timely != nil && *answer.Timely >= cfg.Jev.TimelyThreshold {
 			if rule, ok := cfg.rule(cfg.Jev.TimelyRule); ok {
 				jevResult.Timely = true
 				jevResult.Intent, jevResult.AccountIDs = rule.Name, rule.AccountIDs
-				return jevResult, nil
+				return withManual(jevResult), nil
 			}
 		}
 	}
 	rules := cfg.classifierRules()
 	if len(rules) == 0 {
 		if jevResult != nil {
-			return jevResult, nil
+			return withManual(jevResult), nil
 		}
 		if !cfg.classifierReady() {
 			for _, rule := range cfg.activeRules() {
@@ -843,7 +871,7 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 			}
 		}
 		// Keyword-only router (or no rule the classifier may pick): no match.
-		return &IntentClassifyTestResult{Understood: true, AccountIDs: []int64{}}, nil
+		return withManual(&IntentClassifyTestResult{Understood: true, AccountIDs: []int64{}}), nil
 	}
 	started := s.now()
 	classifyCtx, cancel := context.WithTimeout(ctx, cfg.ClassifierTimeout)
@@ -864,7 +892,7 @@ func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, t
 	if rule, ok := cfg.rule(result.Intent); ok {
 		result.AccountIDs = rule.AccountIDs
 	}
-	return result, nil
+	return withManual(result), nil
 }
 
 // ClearCache forgets remembered conversations of one group (or all, with 0).

@@ -214,10 +214,14 @@ func (s *IntentRouterService) Stop(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
-	if log, ok := s.hits.(*intentRouteHitLog); ok {
-		return log.Stop(ctx)
+	var errs []error
+	if log, ok := s.templateSink.(*intentTemplateLog); ok {
+		errs = append(errs, log.Stop(ctx))
 	}
-	return nil
+	if log, ok := s.hits.(*intentRouteHitLog); ok {
+		errs = append(errs, log.Stop(ctx))
+	}
+	return errors.Join(errs...)
 }
 
 const intentRouteHitColumns = 13

@@ -421,8 +421,14 @@
             </button>
             <div v-if="testResult" data-test="intent-test-result" class="rounded-lg bg-gray-50 p-3 text-sm leading-6 dark:bg-dark-800">
               <p class="font-medium text-gray-900 dark:text-white">{{ testSummary }}</p>
+              <p v-if="testResult.manual_target_missing" data-test="intent-test-manual-missing" class="text-amber-700 dark:text-amber-300">
+                {{ t('intentRouter.test.byManualTargetMissing') }}
+              </p>
               <p v-if="testResult.matched_by === 'keyword'" class="text-gray-500 dark:text-gray-400">
                 {{ t('intentRouter.test.byKeyword', { keyword: testResult.keyword }) }}
+              </p>
+              <p v-else-if="testResult.matched_by === 'manual'" data-test="intent-test-manual" class="text-gray-500 dark:text-gray-400">
+                {{ t('intentRouter.test.byManual', { label: t(`intentRouter.templates.status.${testResult.manual_label}`) }) }}
               </p>
               <p v-else-if="testResult.matched_by === 'jev'" class="text-gray-500 dark:text-gray-400">
                 {{ t('intentRouter.test.byJev', { p: (testResult.probe_probability ?? 0).toFixed(2) }) }}<template v-if="testResult.health_probability !== undefined"> · {{ t(testResult.health_check ? 'intentRouter.test.byJevHealthHit' : 'intentRouter.test.byJevHealth', { p: testResult.health_probability.toFixed(2) }) }}</template><template v-if="testResult.timely_probability !== undefined"> · <span data-test="intent-test-timely">{{ t(testResult.timely ? 'intentRouter.test.byJevTimelyHit' : 'intentRouter.test.byJevTimely', { p: testResult.timely_probability.toFixed(2) }) }}</span></template> · {{ t('intentRouter.test.latency', { ms: testResult.latency_ms }) }}
@@ -476,6 +482,9 @@
           </table>
         </div>
       </div>
+
+      <!-- Template judgements: global, not tied to the selected group -->
+      <TemplateReviewCard v-if="!loading" :group-names="groupNameMap" />
 
       <!-- Keyword hit review -->
       <div v-if="!loading" class="card p-5" data-test="intent-hits">
@@ -586,6 +595,7 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import MonitorAnswerCard from '@/components/admin/intentRouter/MonitorAnswerCard.vue'
 import StreamPreludeCard from '@/components/admin/intentRouter/StreamPreludeCard.vue'
+import TemplateReviewCard from '@/components/admin/intentRouter/TemplateReviewCard.vue'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import { intentRoutersAPI } from '@/api/admin/intentRouters'
@@ -1031,6 +1041,7 @@ async function runTest() {
 }
 
 function groupName(id: number) { return groups.value.find((g) => g.id === id)?.name ?? `#${id}` }
+const groupNameMap = computed(() => Object.fromEntries(groups.value.map((g) => [g.id, g.name])) as Record<number, string>)
 function formatTime(value: string) {
   const d = new Date(value)
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString()
