@@ -285,14 +285,14 @@ type IntentRouterService struct {
 	hits       intentRouteHitSink  // nil keeps no hit log
 	capture    *intentRouteCapture // nil captures no misses
 	// Admin judgements of message templates (intent_route_template.go).
-	templateStore intentTemplateStore                // nil: no judgements, no doubtful verdicts kept
-	templateSink  intentTemplateSink                 // nil keeps no doubtful verdicts
-	templateFlips *intentTemplateFlips               // nil detects no flips
+	templateStore intentTemplateStore               // nil: no judgements, no doubtful verdicts kept
+	templateSink  intentTemplateSink                // nil keeps no doubtful verdicts
+	templateFlips *intentTemplateFlips              // nil detects no flips
 	templates     atomic.Pointer[map[string]string] // judged templates: key -> probe|health|normal
-	judge      intentProbeJudge    // Jev; nil judges nothing
-	jevStats   intentJevStats      // nil keeps no Jev statistics
-	jevMu      sync.Mutex
-	jevHealth  map[int64]*intentJevHealth
+	judge         intentProbeJudge                  // Jev; nil judges nothing
+	jevStats      intentJevStats                    // nil keeps no Jev statistics
+	jevMu         sync.Mutex
+	jevHealth     map[int64]*intentJevHealth
 	// roll returns 0-99 for Jev sampling; tests make it deterministic.
 	roll func() int
 
@@ -357,11 +357,11 @@ func NewIntentRouterService(entClient *dbent.Client, rdb *redis.Client, cfg *con
 		templateStore: templateStore,
 		templateSink:  templateSink,
 		templateFlips: newIntentTemplateFlips(intentTemplateLRUSize),
-		capture:    newIntentRouteCaptureFromEnv(),
-		judge:      newHTTPIntentProbeJudge(),
-		jevStats:   jevStats,
-		probeLog:   probeLog,
-		preludeLog: preludeLog,
+		capture:       newIntentRouteCaptureFromEnv(),
+		judge:         newHTTPIntentProbeJudge(),
+		jevStats:      jevStats,
+		probeLog:      probeLog,
+		preludeLog:    preludeLog,
 		classifier: &httpIntentClassifier{
 			// The per-request context carries the real deadline.
 			client:      &http.Client{Timeout: 30 * time.Second},

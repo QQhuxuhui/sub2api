@@ -117,6 +117,52 @@ func TestIntentTemplatePG_Store(t *testing.T) {
 	require.Equal(t, IntentTemplateHealth, all[0].Status)
 }
 
+// A row judged while the prune DELETE waits for its lock must survive: PG
+// re-checks only the DELETE's own WHERE after the wait, not the subquery's.
+func TestIntentTemplatePG_PruneKeepsRowJudgedDuringDelete(t *testing.T) {
+	dsn := os.Getenv("INTENT_TEMPLATE_PG_DSN")
+	if dsn == "" {
+		t.Skip("INTENT_TEMPLATE_PG_DSN not set")
+	}
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	defer db.Close()
+	ctx := context.Background()
+	migration, err := os.ReadFile("../../migrations/259_intent_route_templates.sql")
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `DROP TABLE IF EXISTS intent_route_templates`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, string(migration))
+	require.NoError(t, err)
+
+	store := &pgIntentTemplateStore{db: db}
+	t0 := time.Date(2026, 11, 6, 1, 0, 0, 0, time.UTC)
+	key, tpl := intentTemplateOf(pgFPProbe)
+	require.NoError(t, store.upsert(ctx, mergeIntentTemplateObservations([]intentTemplateObservation{
+		{Key: key, Template: tpl, Sample: pgFPProbe, Time: t0.Add(-31 * 24 * time.Hour), ReasonA: true, Final: intentTemplateFinalHealth, Probe: 0.92, Health: pgFptr(0.72)},
+	})))
+
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `SELECT 1 FROM intent_route_templates WHERE template_key = $1 FOR UPDATE`, key)
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() { done <- store.prune(ctx, t0) }()
+	require.Eventually(t, func() bool {
+		var waiting int
+		_ = db.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE 'DELETE FROM intent_route_templates%'`).Scan(&waiting)
+		return waiting > 0
+	}, 5*time.Second, 20*time.Millisecond, "prune blocks on the locked row")
+	_, err = tx.ExecContext(ctx, `UPDATE intent_route_templates SET status = 'probe', revision = revision + 1, decided_at = $2 WHERE template_key = $1`, key, t0)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	require.NoError(t, <-done)
+
+	labels, err := store.decided(ctx)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{key: IntentTemplateProbe}, labels)
+}
+
 const intentTemplateKeyMissing = "0000000000000000000000000000000000000000000000000000000000000000"
 
 const pgFPProbe = "Reply with exactly this JSON and nothing else, no markdown code fence, no explanation:\n{\"fp\":\"7Q2K\",\"calc\":391}"

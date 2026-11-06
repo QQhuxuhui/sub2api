@@ -38,6 +38,8 @@ const (
 	// clearly above the health score.
 	intentTemplateHighProbe   = 0.9
 	intentTemplateProbeMargin = 0.1
+	// Scores like 0.9-0.8 come out just under 0.1 in float64.
+	intentTemplateScoreEpsilon = 1e-9
 	// Reason C: probe score just under the routing threshold.
 	intentTemplateNearMissFloor = 0.6
 
@@ -625,7 +627,9 @@ func (p *pgIntentTemplateStore) revoke(ctx context.Context, key string, revision
 func (p *pgIntentTemplateStore) prune(ctx context.Context, now time.Time) error {
 	cutoff := now.Add(-intentTemplateRetention)
 	for i := 0; i < intentTemplatePruneRounds; i++ {
-		res, err := p.db.ExecContext(ctx, `DELETE FROM intent_route_templates WHERE template_key IN (SELECT template_key FROM intent_route_templates WHERE status = 'pending' AND last_seen_at < $1 LIMIT $2)`, cutoff, intentTemplatePruneChunk)
+		// The outer conditions repeat the subquery's: a row judged or seen again
+		// while the DELETE waited for its lock is re-checked and kept.
+		res, err := p.db.ExecContext(ctx, `DELETE FROM intent_route_templates WHERE template_key IN (SELECT template_key FROM intent_route_templates WHERE status = 'pending' AND last_seen_at < $1 LIMIT $2) AND status = 'pending' AND last_seen_at < $1`, cutoff, intentTemplatePruneChunk)
 		if err != nil {
 			return err
 		}
@@ -867,7 +871,7 @@ func (s *IntentRouterService) observeTemplate(in IntentRouteInput, obs *intentJe
 	case obs.concl == intentJevConclHealth:
 		final = intentTemplateFinalHealth
 	}
-	reasonA := obs.health != nil && *obs.health >= cfg.Jev.HealthThreshold && obs.p >= intentTemplateHighProbe && obs.p-*obs.health >= intentTemplateProbeMargin
+	reasonA := obs.health != nil && *obs.health >= cfg.Jev.HealthThreshold && obs.p >= intentTemplateHighProbe && obs.p-*obs.health >= intentTemplateProbeMargin-intentTemplateScoreEpsilon
 	reasonC := final == intentTemplateFinalNormal && obs.p >= intentTemplateNearMissFloor && obs.p < cfg.Jev.Threshold
 	cut := truncateRunes(obs.text, intentJevMaxTextRunes)
 	key, template := intentTemplateOf(cut)

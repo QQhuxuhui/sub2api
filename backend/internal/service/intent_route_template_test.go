@@ -333,6 +333,14 @@ func TestIntentTemplate_ReasonAHealthCheckWithHighProbeScore(t *testing.T) {
 	require.Empty(t, sink.obs, "a health check scoring high on both is not doubtful")
 }
 
+func TestIntentTemplate_ReasonAMarginExactlyAtBoundary(t *testing.T) {
+	f, judge, _, sink, _ := newTemplateFixture(t, 0.9, nil, nil)
+	judge.health = fptr(0.8) // 0.9-0.8 is 0.0999... in float64
+	f.svc.Decide(context.Background(), f.request(userTurns(fpProbe)))
+	require.Len(t, sink.obs, 1)
+	require.True(t, sink.obs[0].ReasonA, "a margin of exactly 0.1 counts")
+}
+
 func TestIntentTemplate_ReasonCNearMiss(t *testing.T) {
 	f, judge, _, sink, _ := newTemplateFixture(t, 0.7, nil, nil)
 	judge.health = fptr(0.2)
