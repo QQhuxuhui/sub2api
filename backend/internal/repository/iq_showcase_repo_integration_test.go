@@ -94,7 +94,7 @@ func TestIQShowcaseRepositoryLifecycle(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, ok)
 	}
-	meta, err := repo.ListCardMeta(ctx, item.ID, 1, 10)
+	meta, err := repo.ListCardMeta(ctx, item.ID, group.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, meta, 2, "only max_cards success cards are kept")
 	svgs, err := repo.GetCardSVGs(ctx, []int64{meta[0].ID, meta[1].ID, 999999999})
@@ -108,7 +108,7 @@ func TestIQShowcaseRepositoryLifecycle(t *testing.T) {
 	ok, err := repo.CompleteRound(ctx, item.ID, "f", &service.IQShowcaseResult{ItemID: item.ID, ConfigRev: 1, GroupID: group.ID, Model: "gpt-x", Error: "boom"})
 	require.NoError(t, err)
 	require.True(t, ok)
-	meta, err = repo.ListCardMeta(ctx, item.ID, 1, 10)
+	meta, err = repo.ListCardMeta(ctx, item.ID, group.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, meta, 2)
 	fails := false
@@ -140,11 +140,11 @@ func TestIQShowcaseRepositoryLifecycle(t *testing.T) {
 	updated, err := repo.UpdateItem(ctx, item)
 	require.NoError(t, err)
 	require.Equal(t, 1, updated.ConfigRev)
-	meta, err = repo.ListCardMeta(ctx, item.ID, 1, 10)
+	meta, err = repo.ListCardMeta(ctx, item.ID, group.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, meta, 2, "cards survive a cosmetic edit")
 
-	// An edit that changes the output starts a new rev and drops old cards.
+	// An edit that changes the output starts a new rev; old cards stay.
 	item.Model = "gpt-y"
 	updated, err = repo.UpdateItem(ctx, item)
 	require.NoError(t, err)
@@ -168,20 +168,41 @@ func TestIQShowcaseRepositoryLifecycle(t *testing.T) {
 	require.Equal(t, 4, updated.ConfigRev)
 	require.Equal(t, "draw", updated.Prompt)
 	item = updated
-	meta, err = repo.ListCardMeta(ctx, item.ID, 1, 10)
+	meta, err = repo.ListCardMeta(ctx, item.ID, group.ID, 10)
 	require.NoError(t, err)
-	require.Empty(t, meta)
-	// A late result of the old rev is written but pruned at once.
+	require.Len(t, meta, 2, "cards of earlier revs stay after the prompt or model changes")
+	kept := meta[0].ID
+	svgs, err = repo.GetCardSVGs(ctx, []int64{kept})
+	require.NoError(t, err)
+	require.Len(t, svgs, 1, "and their SVGs are still served")
+	// A new card pushes the oldest one out, whatever rev drew it.
 	c, err = repo.ClaimItem(ctx, item.ID, "late", 7*time.Minute, false)
 	require.NoError(t, err)
 	require.NotNil(t, c)
-	ok, err = repo.CompleteRound(ctx, item.ID, "late", card(1))
+	ok, err = repo.CompleteRound(ctx, item.ID, "late", card(item.ConfigRev))
 	require.NoError(t, err)
 	require.True(t, ok)
+	meta, err = repo.ListCardMeta(ctx, item.ID, group.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, meta, 2)
+	require.Equal(t, kept, meta[1].ID)
 	successes := true
 	all, err := repo.ListResults(ctx, item.ID, &successes, 10)
 	require.NoError(t, err)
+	require.Len(t, all, 2)
+
+	// Moving the item to another group drops the old group's cards.
+	moved := *item
+	moved.GroupID = other.ID
+	moved.APIKeyID = nil
+	updated, err = repo.UpdateItem(ctx, &moved)
+	require.NoError(t, err)
+	all, err = repo.ListResults(ctx, item.ID, &successes, 10)
+	require.NoError(t, err)
 	require.Empty(t, all)
+	updated.GroupID, updated.APIKeyID = group.ID, item.APIKeyID
+	item, err = repo.UpdateItem(ctx, updated)
+	require.NoError(t, err)
 
 	// The user view only lists enabled items of live groups.
 	visible, err := repo.ListVisibleItems(ctx)
@@ -208,7 +229,7 @@ func TestIQShowcaseRepositoryLifecycle(t *testing.T) {
 	failed, err = repo.ListResults(ctx, item.ID, &fails, 10)
 	require.NoError(t, err)
 	require.Empty(t, failed)
-	meta, err = repo.ListCardMeta(ctx, item.ID, item.ConfigRev, 10)
+	meta, err = repo.ListCardMeta(ctx, item.ID, group.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, meta, 2)
 

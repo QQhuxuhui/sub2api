@@ -88,11 +88,12 @@
                   :data-test="`iq-showcase-card-${item.cards[0].id}`"
                   data-role="latest"
                   :aria-label="t('iqShowcase.zoom', { title: item.title, time: fullTime(item.cards[0].created_at) })"
-                  :class="['flex aspect-square max-w-full cursor-zoom-in items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white transition-colors hover:border-primary-400 dark:border-dark-600', enterClass(item.cards[0].id)]"
+                  :class="['flex aspect-square w-full max-w-full cursor-zoom-in items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white transition-colors hover:border-primary-400 dark:border-dark-600', enterClass(item.cards[0].id)]"
                   @click="openCard(item, item.cards[0])"
                   @animationend="settle(item.cards[0].id)"
                 >
-                  <img v-if="svgs[item.cards[0].id]" :src="svgs[item.cards[0].id]" alt="" class="h-[92%] w-[92%] object-contain" decoding="async" />
+                  <span v-if="broken.has(item.cards[0].id)" data-role="unavailable" class="flex h-[92%] w-[92%] items-center justify-center rounded-lg bg-gray-50 px-3 text-center text-xs text-gray-400 dark:bg-dark-800 dark:text-gray-500">{{ t('iqShowcase.unavailable') }}</span>
+                  <img v-else-if="svgs[item.cards[0].id]" :src="svgs[item.cards[0].id]" alt="" class="h-[92%] w-[92%] object-contain" decoding="async" @error="markBroken(item.cards[0].id)" />
                   <span v-else class="h-[92%] w-[92%] animate-pulse rounded-lg bg-gray-100"></span>
                 </button>
                 <div class="flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
@@ -112,8 +113,9 @@
                   @click="openCard(item, card)"
                   @animationend="settle(card.id)"
                 >
-                  <span class="flex aspect-square max-w-full items-center justify-center bg-white">
-                    <img v-if="svgs[card.id]" :src="svgs[card.id]" alt="" class="h-[88%] w-[88%] object-contain" loading="lazy" decoding="async" />
+                  <span class="flex aspect-square w-full max-w-full items-center justify-center bg-white">
+                    <span v-if="broken.has(card.id)" data-role="unavailable" class="flex h-[88%] w-[88%] items-center justify-center rounded bg-gray-50 px-1 text-center text-[11px] leading-4 text-gray-400 dark:bg-dark-700 dark:text-gray-500">{{ t('iqShowcase.unavailable') }}</span>
+                    <img v-else-if="svgs[card.id]" :src="svgs[card.id]" alt="" class="h-[88%] w-[88%] object-contain" loading="lazy" decoding="async" @error="markBroken(card.id)" />
                     <span v-else class="h-[88%] w-[88%] animate-pulse rounded bg-gray-100"></span>
                   </span>
                   <span class="border-t border-gray-100 px-2 py-1 text-[11px] tabular-nums text-gray-500 dark:border-dark-700 dark:text-gray-400">{{ shortTime(card.created_at) }}</span>
@@ -128,7 +130,8 @@
     <BaseDialog :show="preview.show" :title="preview.title" width="wide" :close-on-click-outside="true" @close="preview.show = false">
       <div v-if="preview.card" class="space-y-3">
         <div class="flex items-center justify-center rounded-xl bg-white p-4">
-          <img v-if="svgs[preview.card.id]" :src="svgs[preview.card.id]" :alt="preview.title" class="aspect-square max-h-[64vh] w-full max-w-md object-contain" />
+          <p v-if="broken.has(preview.card.id)" class="py-16 text-sm text-gray-400">{{ t('iqShowcase.unavailable') }}</p>
+          <img v-else-if="svgs[preview.card.id]" :src="svgs[preview.card.id]" :alt="preview.title" class="aspect-square max-h-[64vh] w-full max-w-md object-contain" @error="markBroken(preview.card.id)" />
         </div>
         <p class="text-center text-sm tabular-nums text-gray-500 dark:text-gray-400">
           {{ preview.card.model }} · {{ fullTime(preview.card.created_at) }}
@@ -152,6 +155,7 @@ import { formatDateTime, formatDateTimeToMinute } from '@/utils/format'
 import { useAppStore } from '@/stores/app'
 
 const POLL_MS = 60_000
+const IQ_SHOWCASE_MAX_MISSES = 3
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -163,6 +167,13 @@ const svgs = reactive<Record<number, string>>({})
 /** Ids already shown once; only ids that arrive later animate in. */
 const seen = new Set<number>()
 const fresh = reactive(new Set<number>())
+/**
+ * Cards that will not show: the browser could not draw the SVG, or the server
+ * left the card out of IQ_SHOWCASE_MAX_MISSES answers in a row. They get a
+ * static notice instead of a placeholder that pulses forever.
+ */
+const broken = reactive(new Set<number>())
+const misses = new Map<number, number>()
 const loading = ref(false)
 const firstLoad = ref(true)
 const disabled = ref(false)
@@ -189,7 +200,13 @@ function settle(id: number) {
   fresh.delete(id)
 }
 
+function markBroken(id: number) {
+  broken.add(id)
+}
+
 function clearSVGs() {
+  broken.clear()
+  misses.clear()
   for (const id of Object.keys(svgs)) delete svgs[Number(id)]
 }
 
@@ -198,8 +215,18 @@ async function loadSVGs(ids: number[]) {
     const batch = ids.slice(i, i + IQ_SHOWCASE_SVG_BATCH)
     try {
       const { data } = await iqShowcaseAPI.cards(batch)
+      const got = new Set<number>()
       for (const card of data.cards ?? []) {
+        if (!card.svg) continue
         svgs[card.id] = iqShowcaseSVGDataURL(card.svg)
+        got.add(card.id)
+        misses.delete(card.id)
+      }
+      for (const id of batch) {
+        if (got.has(id)) continue
+        const n = (misses.get(id) ?? 0) + 1
+        misses.set(id, n)
+        if (n >= IQ_SHOWCASE_MAX_MISSES) broken.add(id)
       }
     } catch {
       // Cards of this batch stay placeholders; the next poll asks for them again.
@@ -213,6 +240,8 @@ function applyListing(next: IQShowcaseUserGroup[]) {
   const live = new Set<number>()
   for (const g of next) for (const it of g.items) for (const c of it.cards) live.add(c.id)
   for (const id of Object.keys(svgs).map(Number)) if (!live.has(id)) delete svgs[id]
+  for (const id of [...broken]) if (!live.has(id)) broken.delete(id)
+  for (const id of [...misses.keys()]) if (!live.has(id)) misses.delete(id)
   fresh.clear()
   for (const id of live) {
     if (!seen.has(id)) {
@@ -225,7 +254,7 @@ function applyListing(next: IQShowcaseUserGroup[]) {
   if (!next.some((g) => g.group_id === activeGroupId.value)) {
     activeGroupId.value = next.length ? next[0].group_id : null
   }
-  return [...live].filter((id) => !(id in svgs))
+  return [...live].filter((id) => !(id in svgs) && !broken.has(id))
 }
 
 async function refresh() {

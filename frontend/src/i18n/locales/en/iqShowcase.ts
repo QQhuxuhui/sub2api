@@ -5,6 +5,7 @@ export default {
     groupsLabel: 'Groups',
     latest: 'Latest',
     waiting: 'Waiting for the first card',
+    unavailable: 'This card cannot be shown',
     zoom: 'Enlarge {title} {time}',
     emptyTitle: 'Nothing to show',
     emptyDescription: 'No IQ showcase has been configured yet',
@@ -36,7 +37,7 @@ export default {
       statusFailed: 'Failed · {time}',
       keyMissing: 'Key deleted',
       recentFailures: '{n} failed in 24h',
-      revHint: 'Changing the model, prompt and similar clears the existing cards',
+      revHint: 'Cards drawn before a model or prompt change stay in the history; moving to another group clears them',
       advanced: 'Advanced',
       columns: {
         item: 'Item',

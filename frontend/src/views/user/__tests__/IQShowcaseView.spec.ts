@@ -186,6 +186,35 @@ describe('IQShowcaseView', () => {
     expect(wrapper.find('[data-test="iq-showcase-card-12"] img').exists()).toBe(true)
   })
 
+  it('replaces a card the browser cannot draw with a static notice', async () => {
+    view.mockResolvedValue(groups([12, 11]))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="iq-showcase-card-11"] img').trigger('error')
+    expect(wrapper.find('[data-test="iq-showcase-card-11"] img').exists()).toBe(false)
+    expect(wrapper.find('[data-test="iq-showcase-card-11"] [data-role="unavailable"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="iq-showcase-card-11"] .animate-pulse').exists()).toBe(false)
+    expect(wrapper.find('[data-test="iq-showcase-card-12"] img').exists()).toBe(true)
+  })
+
+  it('stops pulsing for a card the server keeps leaving out', async () => {
+    view.mockResolvedValue(groups([12, 11]))
+    cards.mockImplementation(async (ids: number[]) => ({ data: { cards: ids.filter((id) => id !== 11).map((id) => ({ id, svg: evilSVG })) } }))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.find('[data-test="iq-showcase-card-11"] .animate-pulse').exists()).toBe(true)
+    for (let i = 0; i < 2; i++) {
+      await vi.advanceTimersByTimeAsync(60_000)
+      await flushPromises()
+    }
+    expect(cards).toHaveBeenCalledTimes(3)
+    expect(wrapper.find('[data-test="iq-showcase-card-11"] .animate-pulse').exists()).toBe(false)
+    expect(wrapper.find('[data-test="iq-showcase-card-11"] [data-role="unavailable"]').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+    expect(cards).toHaveBeenCalledTimes(3)
+  })
+
   it('shows the closed state when the feature is off', async () => {
     view.mockRejectedValue({ status: 404, reason: 'IQ_SHOWCASE_DISABLED', message: 'iq showcase is not enabled' })
     const wrapper = mountView()

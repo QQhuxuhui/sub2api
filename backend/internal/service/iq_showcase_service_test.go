@@ -108,10 +108,10 @@ func (r *iqShowcaseFakeRepo) ListVisibleItems(context.Context) ([]*IQShowcaseVis
 		{ID: 3, Title: "owl", GroupID: 6, GroupName: "pro", ConfigRev: 1, MaxCards: 3},
 	}, nil
 }
-func (r *iqShowcaseFakeRepo) ListCardMeta(_ context.Context, itemID int64, rev int, limit int) ([]*IQShowcaseCardMeta, error) {
+func (r *iqShowcaseFakeRepo) ListCardMeta(_ context.Context, itemID, groupID int64, limit int) ([]*IQShowcaseCardMeta, error) {
 	if itemID == 1 {
-		if rev != 2 || limit != 3 {
-			return nil, fmt.Errorf("cards asked for rev %d limit %d", rev, limit)
+		if groupID != 5 || limit != 3 {
+			return nil, fmt.Errorf("cards asked for group %d limit %d", groupID, limit)
 		}
 		return []*IQShowcaseCardMeta{{ID: 11, Model: "m"}}, nil
 	}

@@ -5,6 +5,7 @@ export default {
     groupsLabel: '分组',
     latest: '最新',
     waiting: '等待第一张',
+    unavailable: '这张图无法显示',
     zoom: '放大 {title} {time}',
     emptyTitle: '暂无展示',
     emptyDescription: '管理员还没有配置智力展示',
@@ -36,7 +37,7 @@ export default {
       statusFailed: '失败 · {time}',
       keyMissing: 'Key 已删除',
       recentFailures: '24h 失败 {n}',
-      revHint: '改模型、提示词等会清空已有卡片',
+      revHint: '改模型、提示词后旧卡片保留在历史里；换分组会清空已有卡片',
       advanced: '高级',
       columns: {
         item: '探测项',

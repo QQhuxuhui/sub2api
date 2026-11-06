@@ -141,8 +141,8 @@ type IQShowcaseRepository interface {
 	CreateItem(ctx context.Context, item *IQShowcaseItem) (*IQShowcaseItem, error)
 	// UpdateItem writes the item and, in the same statement, bumps config_rev
 	// when a field that changes the output differs from the row as it is now
-	// (not as some earlier read saw it), then prunes success cards that no
-	// longer belong to the current rev or exceed max_cards.
+	// (not as some earlier read saw it), then prunes success cards of another
+	// group or beyond max_cards. Cards of earlier revs stay on the page.
 	UpdateItem(ctx context.Context, item *IQShowcaseItem) (*IQShowcaseItem, error)
 	// SetEnabled only switches the item on or off. It never validates the
 	// rest of the item, so an item whose key or group is gone can be stopped.
@@ -158,17 +158,17 @@ type IQShowcaseRepository interface {
 	// have passed and moves it forward; due=false (manual run) leaves the
 	// schedule alone. Returns nil when someone else holds it or it is not due.
 	ClaimItem(ctx context.Context, id int64, token string, lease time.Duration, due bool) (*IQShowcaseItem, error)
-	// CompleteRound stores the result, prunes cards to the item's current rev
-	// and max_cards, and releases the lease, but only while token still owns
+	// CompleteRound stores the result, prunes cards to the item's current
+	// group and max_cards, and releases the lease, but only while token still owns
 	// an unexpired lease. Returns false when ownership was lost.
 	CompleteRound(ctx context.Context, itemID int64, token string, result *IQShowcaseResult) (bool, error)
 
 	ListResults(ctx context.Context, itemID int64, success *bool, limit int) ([]*IQShowcaseResult, error)
 	ListVisibleItems(ctx context.Context) ([]*IQShowcaseVisibleItem, error)
-	ListCardMeta(ctx context.Context, itemID int64, rev int, limit int) ([]*IQShowcaseCardMeta, error)
+	ListCardMeta(ctx context.Context, itemID, groupID int64, limit int) ([]*IQShowcaseCardMeta, error)
 	GetCardSVGs(ctx context.Context, ids []int64) ([]*IQShowcaseCardSVG, error)
 
 	// Maintenance prunes failures older than failRetention and success cards
-	// outside the current rev or max_cards.
+	// of another group or beyond max_cards.
 	Maintenance(ctx context.Context, failRetention time.Duration) error
 }

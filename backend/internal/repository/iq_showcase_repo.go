@@ -31,7 +31,7 @@ const iqShowcaseItemSelect = `
 	       COALESCE(g.name, ''), COALESCE(g.platform, ''), COALESCE(k.name, ''), COALESCE(k.key, ''),
 	       lr.created_at, lr.success,
 	       (SELECT COUNT(*) FROM iq_showcase_results r
-	         WHERE r.item_id = i.id AND r.success AND r.config_rev = i.config_rev),
+	         WHERE r.item_id = i.id AND r.success AND r.group_id = i.group_id),
 	       (SELECT COUNT(*) FROM iq_showcase_results r
 	         WHERE r.item_id = i.id AND NOT r.success AND r.created_at > NOW() - INTERVAL '24 hours')
 	FROM iq_showcase_items i
@@ -343,20 +343,22 @@ func (r *iqShowcaseRepository) CompleteRound(ctx context.Context, itemID int64, 
 	return true, nil
 }
 
-// pruneIQShowcaseCards keeps only the item's current-rev success cards, at
-// most max_cards of them.
+// pruneIQShowcaseCards keeps the item's newest max_cards success cards of its
+// current group. Cards drawn before an edit of the prompt or model stay: the
+// page is a history of what the group answered, and each card keeps the model
+// it ran with. Only cards of a group the item moved away from go.
 func pruneIQShowcaseCards(ctx context.Context, tx *sql.Tx, itemID int64) error {
 	_, err := tx.ExecContext(ctx, iqShowcasePruneCardsSQL+` AND r2.item_id = $1) x
 		WHERE r.id = x.id AND (x.stale OR x.rn > x.max_cards)`, itemID)
 	return err
 }
 
-// iqShowcasePruneCardsSQL ranks success cards per item, current rev apart
-// from stale ones; callers close the subquery and filter.
+// iqShowcasePruneCardsSQL ranks success cards per item, those of the item's
+// current group apart from stale ones; callers close the subquery and filter.
 const iqShowcasePruneCardsSQL = `
 	DELETE FROM iq_showcase_results r USING (
-		SELECT r2.id, r2.config_rev <> i.config_rev AS stale,
-		       ROW_NUMBER() OVER (PARTITION BY r2.item_id, r2.config_rev = i.config_rev
+		SELECT r2.id, r2.group_id <> i.group_id AS stale,
+		       ROW_NUMBER() OVER (PARTITION BY r2.item_id, r2.group_id = i.group_id
 		                          ORDER BY r2.created_at DESC, r2.id DESC) AS rn,
 		       i.max_cards
 		FROM iq_showcase_results r2 JOIN iq_showcase_items i ON i.id = r2.item_id
@@ -407,11 +409,11 @@ func (r *iqShowcaseRepository) ListVisibleItems(ctx context.Context) ([]*service
 	return out, rows.Err()
 }
 
-func (r *iqShowcaseRepository) ListCardMeta(ctx context.Context, itemID int64, rev int, limit int) ([]*service.IQShowcaseCardMeta, error) {
+func (r *iqShowcaseRepository) ListCardMeta(ctx context.Context, itemID, groupID int64, limit int) ([]*service.IQShowcaseCardMeta, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, model, created_at FROM iq_showcase_results
-		WHERE item_id = $1 AND config_rev = $2 AND success
-		ORDER BY created_at DESC, id DESC LIMIT $3`, itemID, rev, limit)
+		WHERE item_id = $1 AND group_id = $2 AND success
+		ORDER BY created_at DESC, id DESC LIMIT $3`, itemID, groupID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -430,7 +432,7 @@ func (r *iqShowcaseRepository) ListCardMeta(ctx context.Context, itemID int64, r
 func (r *iqShowcaseRepository) GetCardSVGs(ctx context.Context, ids []int64) ([]*service.IQShowcaseCardSVG, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT r.id, r.svg FROM iq_showcase_results r
-		JOIN iq_showcase_items i ON i.id = r.item_id AND i.enabled AND i.config_rev = r.config_rev
+		JOIN iq_showcase_items i ON i.id = r.item_id AND i.enabled AND i.group_id = r.group_id
 		JOIN groups g ON g.id = i.group_id AND g.deleted_at IS NULL
 		WHERE r.id = ANY($1) AND r.success`, pq.Array(ids))
 	if err != nil {

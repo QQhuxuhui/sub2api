@@ -401,7 +401,7 @@ func (s *IQShowcaseService) UserView(ctx context.Context) (*IQShowcaseUserView, 
 	view := &IQShowcaseUserView{Groups: []*IQShowcaseUserGroup{}}
 	var current *IQShowcaseUserGroup
 	for _, it := range items {
-		cards, err := s.repo.ListCardMeta(ctx, it.ID, it.ConfigRev, it.MaxCards)
+		cards, err := s.repo.ListCardMeta(ctx, it.ID, it.GroupID, it.MaxCards)
 		if err != nil {
 			return nil, err
 		}
