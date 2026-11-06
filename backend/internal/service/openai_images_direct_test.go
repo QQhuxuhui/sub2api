@@ -232,3 +232,16 @@ func TestCodexDirectImagesAccountTestAndWhitelist(t *testing.T) {
 		require.NotEqual(t, "gpt-image-2.5-sunburst", model.ID)
 	}
 }
+
+// 直连路径：客户端 gpt-image-2.5 映射到上游 gpt-image-2 时，xhigh/max 画质要降成 high，
+// 与 Responses 路径（openAIImagesForwardQuality）保持一致，否则上游拒绝。
+func TestCodexDirectImagesDowngradesQualityWhenV25MappedToV2(t *testing.T) {
+	for quality, want := range map[string]string{"xhigh": "high", "max": "high", "high": "high", "low": "low"} {
+		body, _, err := buildOpenAIImagesOAuthPayload(&OpenAIImagesRequest{Prompt: "draw", Model: "gpt-image-2.5", Quality: quality}, "gpt-image-2")
+		require.NoError(t, err)
+		require.Equal(t, want, gjson.GetBytes(body, "quality").String(), quality)
+	}
+	body, _, err := buildOpenAIImagesOAuthPayload(&OpenAIImagesRequest{Prompt: "draw", Model: "gpt-image-2.5", Quality: "xhigh"}, "gpt-image-2.5-sunburst")
+	require.NoError(t, err)
+	require.Equal(t, "xhigh", gjson.GetBytes(body, "quality").String())
+}

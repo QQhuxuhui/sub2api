@@ -65,7 +65,7 @@ func buildOpenAIImagesOAuthPayload(parsed *OpenAIImagesRequest, model string) ([
 		key   string
 		value string
 	}{
-		{"size", parsed.Size}, {"quality", parsed.Quality},
+		{"size", parsed.Size}, {"quality", openAIImagesForwardQuality(parsed.Model, model, parsed.Quality)},
 		{"background", parsed.Background}, {"output_format", parsed.OutputFormat},
 		{"moderation", parsed.Moderation}, {"input_fidelity", parsed.InputFidelity},
 		{"style", parsed.Style},
