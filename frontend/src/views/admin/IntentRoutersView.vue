@@ -143,7 +143,7 @@
                   <option value="">{{ t('intentRouter.jev.rulePlaceholder') }}</option>
                   <option v-for="name in ruleNames" :key="name" :value="name">{{ name }}</option>
                 </select>
-                <p v-if="jevRuleAccounts.length" data-test="intent-jev-rule-accounts" class="mt-1 text-xs text-gray-700 dark:text-gray-300">{{ t('intentRouter.jev.ruleAccounts', { accounts: jevRuleAccounts.map(accountLabel).join('、') }) }}</p>
+                <p v-if="jevRuleTargetText" data-test="intent-jev-rule-accounts" class="mt-1 text-xs text-gray-700 dark:text-gray-300">{{ t('intentRouter.jev.ruleAccounts', { accounts: jevRuleTargetText }) }}</p>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.ruleHint') }}</p>
               </div>
               <div>
@@ -347,6 +347,57 @@
               </div>
 
               <div>
+                <label class="input-label">{{ t('intentRouter.rules.target') }}</label>
+                <div class="flex flex-wrap gap-4 text-sm text-gray-700 dark:text-gray-300">
+                  <label class="flex items-center gap-2"><input :checked="rule.target === 'accounts'" data-test="intent-rule-target-accounts" type="radio" :name="`intent-rule-target-${rule.uid}`" @change="setRuleTarget(rule, 'accounts')" />{{ t('intentRouter.rules.targetAccounts') }}</label>
+                  <label class="flex items-center gap-2"><input :checked="rule.target === 'key'" data-test="intent-rule-target-key" type="radio" :name="`intent-rule-target-${rule.uid}`" @change="setRuleTarget(rule, 'key')" />{{ t('intentRouter.rules.targetKey') }}</label>
+                </div>
+              </div>
+
+              <div v-if="rule.target === 'key'">
+                <label class="input-label">{{ t('intentRouter.rules.apiKey') }}</label>
+                <div v-if="rule.api_key_id" class="flex flex-wrap gap-2">
+                  <span
+                    data-test="intent-rule-key-chip"
+                    :class="[
+                      'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs',
+                      keyProblem(rule.api_key_id)
+                        ? 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                        : 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-200',
+                    ]"
+                  >
+                    {{ keyLabel(rule.api_key_id) }}
+                    <span v-if="keyProblem(rule.api_key_id)">· {{ keyProblem(rule.api_key_id) }}</span>
+                    <button type="button" class="ml-0.5 text-gray-400 hover:text-red-500" :aria-label="t('common.delete')" @click="rule.api_key_id = 0">×</button>
+                  </span>
+                </div>
+                <input
+                  v-model.trim="rule.keySearch"
+                  data-test="intent-key-search"
+                  type="search"
+                  class="input mt-2"
+                  :placeholder="t('intentRouter.rules.searchKeys')"
+                  @input="searchRuleKeys(rule)"
+                />
+                <ul v-if="rule.keySearch" class="mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 dark:border-dark-600">
+                  <li v-if="(keyResults[rule.uid] ?? []).length === 0" class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">{{ t('intentRouter.rules.noKeys') }}</li>
+                  <li v-for="key in keyResults[rule.uid] ?? []" :key="key.id">
+                    <button
+                      type="button"
+                      :data-test="`intent-key-option-${key.id}`"
+                      class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-dark-700"
+                      :disabled="key.problem !== ''"
+                      @click="chooseRuleKey(rule, key)"
+                    >
+                      <span class="min-w-0 truncate text-gray-900 dark:text-white">#{{ key.id }} {{ key.name }} <span class="text-gray-500 dark:text-gray-400">· {{ key.user_email || `#${key.user_id}` }}</span></span>
+                      <span class="flex-shrink-0 text-xs text-gray-500 dark:text-gray-400">{{ key.problem ? keyProblemText(key.problem) : `${key.group_name} · ${key.group_platform}` }}</span>
+                    </button>
+                  </li>
+                </ul>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.rules.keyHint') }}</p>
+              </div>
+
+              <div v-else>
                 <label class="input-label">{{ t('intentRouter.rules.accounts') }}</label>
                 <div class="flex flex-wrap gap-2">
                   <span
@@ -599,12 +650,13 @@ import TemplateReviewCard from '@/components/admin/intentRouter/TemplateReviewCa
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import { intentRoutersAPI } from '@/api/admin/intentRouters'
-import type { IntentClassifyTestResult, IntentJevConfig, IntentJevStatus, IntentRouteEvent, IntentRouteHit, IntentRouteKeywordStat, IntentRouter, IntentRouterInput } from '@/api/admin/intentRouters'
+import type { IntentClassifyTestResult, IntentJevConfig, IntentJevStatus, IntentRouteEvent, IntentRouteHit, IntentRouteKeywordStat, IntentRouter, IntentRouterInput, IntentRuleKeyLabel } from '@/api/admin/intentRouters'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 
 interface GroupOption { id: number; name: string; platform: string }
 interface AccountOption { id: number; name: string; platform: string }
-interface RuleForm { uid: number; name: string; description: string; keywordsText: string; originalKeywords: string[]; account_ids: number[]; enabled: boolean; search: string }
+type RuleTarget = 'accounts' | 'key'
+interface RuleForm { uid: number; name: string; description: string; keywordsText: string; originalKeywords: string[]; target: RuleTarget; account_ids: number[]; api_key_id: number; enabled: boolean; search: string; keySearch: string }
 interface JevUserForm { id: number; email: string }
 interface JevKeyForm { id: number; name: string; user_id: number }
 type FormState = Omit<IntentRouterInput, 'rules' | 'jev_set_balance_usd' | 'excluded_models'> & { excludedModelsText: string; rules: RuleForm[]; jevUsers: JevUserForm[]; jevKeys: JevKeyForm[]; jevBalanceText: string }
@@ -678,7 +730,12 @@ const selectedGroup = computed(() => groups.value.find((g) => g.id === selectedG
 const savedRouter = computed(() => (selectedGroupId.value ? routers.value[selectedGroupId.value] ?? null : null))
 const jevKeyConfigured = computed(() => savedRouter.value?.jev_api_key_configured === true)
 const ruleNames = computed(() => form.rules.map((rule) => rule.name.trim()).filter(Boolean))
-const jevRuleAccounts = computed(() => form.rules.find((rule) => rule.name.trim() === form.jev.rule)?.account_ids ?? [])
+const jevRuleTargetText = computed(() => {
+  const rule = form.rules.find((r) => r.name.trim() === form.jev.rule)
+  if (!rule) return ''
+  if (rule.target === 'key') return rule.api_key_id ? keyLabel(rule.api_key_id) : ''
+  return rule.account_ids.map(accountLabel).join('、')
+})
 const filteredGroups = computed(() => {
   const q = groupSearch.value.toLowerCase()
   return q ? groups.value.filter((g) => g.name.toLowerCase().includes(q) || String(g.id) === q) : groups.value
@@ -697,8 +754,10 @@ function toInput(): IntentRouterInput {
     max_input_chars: Number(form.max_input_chars) || 0,
     keyword_max_chars: Math.max(0, Math.trunc(Number(form.keyword_max_chars) || 0)),
     unavailable_status: Number(form.unavailable_status) || 503,
-    rules: form.rules.map(({ name, description, keywordsText, originalKeywords, account_ids, enabled }) => ({
-      name, description, keywords: restoreOriginalControls(parseKeywords(keywordsText), originalKeywords), account_ids: [...account_ids], enabled,
+    rules: form.rules.map(({ name, description, keywordsText, originalKeywords, target, account_ids, api_key_id, enabled }) => ({
+      name, description, keywords: restoreOriginalControls(parseKeywords(keywordsText), originalKeywords),
+      ...(target === 'key' ? { account_ids: [], api_key_id } : { account_ids: [...account_ids] }),
+      enabled,
     })),
     excluded_models: form.excludedModelsText.split(/[\n,，、]+/).map((m) => m.trim()).filter(Boolean),
     jev_api_key: form.jev_api_key,
@@ -854,8 +913,10 @@ function fillForm(router: IntentRouter | null) {
     const keyLabels = new Map((router.jev_scope?.api_keys ?? []).map((k) => [k.id, k.name]))
     form.jevUsers = (router.jev?.user_ids ?? []).map((id) => ({ id, email: userLabels.get(id) ?? '' }))
     form.jevKeys = (router.jev?.api_keys ?? []).map((k) => ({ id: k.id, user_id: k.user_id ?? 0, name: keyLabels.get(k.id) ?? '' }))
-    form.rules = (router.rules ?? []).map(({ keywords, ...rule }) => ({
-      ...rule, keywordsText: formatKeywords(keywords ?? []), originalKeywords: [...(keywords ?? [])], account_ids: [...(rule.account_ids ?? [])], uid: nextUid++, search: '',
+    for (const key of router.rule_keys ?? []) ruleKeyLabels.value.set(key.id, key)
+    form.rules = (router.rules ?? []).map(({ keywords, api_key_id, ...rule }) => ({
+      ...rule, keywordsText: formatKeywords(keywords ?? []), originalKeywords: [...(keywords ?? [])], account_ids: [...(rule.account_ids ?? [])],
+      target: (api_key_id ? 'key' : 'accounts') as RuleTarget, api_key_id: api_key_id ?? 0, uid: nextUid++, search: '', keySearch: '',
     }))
   }
   baseline.value = snapshot()
@@ -954,7 +1015,69 @@ function removeAccount(rule: RuleForm, id: number) {
   rule.account_ids = rule.account_ids.filter((x) => x !== id)
 }
 function addRule() {
-  form.rules.push({ uid: nextUid++, name: '', description: '', keywordsText: '', originalKeywords: [], account_ids: [], enabled: true, search: '' })
+  form.rules.push({ uid: nextUid++, name: '', description: '', keywordsText: '', originalKeywords: [], target: 'accounts', account_ids: [], api_key_id: 0, enabled: true, search: '', keySearch: '' })
+}
+
+// API-key targets: the rule is served by the key's group, scheduled as that
+// group schedules. Labels come from the saved router and from searches.
+const ruleKeyLabels = ref(new Map<number, IntentRuleKeyLabel>())
+const keyResults = ref<Record<number, IntentRuleKeyLabel[]>>({})
+const keySearchTimers = new Map<number, ReturnType<typeof setTimeout>>()
+const keySearchSeq = new Map<number, number>()
+function setRuleTarget(rule: RuleForm, target: RuleTarget) {
+  rule.target = target
+  if (target === 'key') {
+    rule.account_ids = []
+    rule.search = ''
+  } else {
+    rule.api_key_id = 0
+    rule.keySearch = ''
+  }
+}
+function keyProblemText(problem: string) {
+  return problem ? t(`intentRouter.rules.keyProblems.${problem}`) : ''
+}
+function keyLabel(id: number) {
+  const key = ruleKeyLabels.value.get(id)
+  if (!key || key.problem === 'key_not_found') return t('intentRouter.rules.missingKey', { id })
+  return t('intentRouter.rules.keyChip', { id, name: key.name, user: key.user_email || `#${key.user_id}`, group: key.group_name || `#${key.group_id}`, platform: key.group_platform })
+}
+function keyProblem(id: number) {
+  const key = ruleKeyLabels.value.get(id)
+  if (!key) return ''
+  if (key.problem) return keyProblemText(key.problem)
+  const groupPlatform = selectedGroup.value?.platform ?? ''
+  return groupPlatform && groupPlatform !== 'composite' && key.group_platform !== groupPlatform ? t('intentRouter.rules.incompatible') : ''
+}
+function searchRuleKeys(rule: RuleForm) {
+  const uid = rule.uid
+  const prev = keySearchTimers.get(uid)
+  if (prev) clearTimeout(prev)
+  const seq = (keySearchSeq.get(uid) ?? 0) + 1
+  keySearchSeq.set(uid, seq)
+  const query = rule.keySearch.trim()
+  if (!query) {
+    keyResults.value = { ...keyResults.value, [uid]: [] }
+    return
+  }
+  const groupPlatform = selectedGroup.value?.platform ?? ''
+  keySearchTimers.set(uid, setTimeout(async () => {
+    let found: IntentRuleKeyLabel[] = []
+    try {
+      found = (await intentRoutersAPI.targetKeys(query, groupPlatform && groupPlatform !== 'composite' ? groupPlatform : undefined)).data ?? []
+    } catch {
+      found = []
+    }
+    if (keySearchSeq.get(uid) !== seq) return
+    keyResults.value = { ...keyResults.value, [uid]: found }
+  }, 250))
+}
+function chooseRuleKey(rule: RuleForm, key: IntentRuleKeyLabel) {
+  if (key.problem) return
+  ruleKeyLabels.value.set(key.id, key)
+  rule.api_key_id = key.id
+  rule.keySearch = ''
+  keyResults.value = { ...keyResults.value, [rule.uid]: [] }
 }
 
 function errorText(err: unknown) {
@@ -1021,7 +1144,8 @@ const testSummary = computed(() => {
   if (!result) return ''
   if (!result.understood) return t('intentRouter.test.resultUnclear')
   if (!result.intent) return t('intentRouter.test.resultNone')
-  return t('intentRouter.test.resultIntent', { intent: result.intent, accounts: result.account_ids.map(accountLabel).join('、') })
+  const targets = result.api_key_id ? keyLabel(result.api_key_id) : result.account_ids.map(accountLabel).join('、')
+  return t('intentRouter.test.resultIntent', { intent: result.intent, accounts: targets })
 })
 
 async function runTest() {
@@ -1103,6 +1227,7 @@ let hitsDisposed = false
 onBeforeUnmount(() => {
   hitsDisposed = true
   hitRequestVersion++
+  for (const timer of keySearchTimers.values()) clearTimeout(timer)
 })
 
 function isCurrentHitRequest(version: number) {

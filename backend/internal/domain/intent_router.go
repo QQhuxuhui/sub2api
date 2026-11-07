@@ -16,7 +16,17 @@ type IntentRule struct {
 	// (case-insensitive substring). Checked on every turn, before the model.
 	Keywords   []string `json:"keywords,omitempty"`
 	AccountIDs []int64  `json:"account_ids"`
-	Enabled    bool     `json:"enabled"`
+	// APIKeyID, when set, replaces AccountIDs: a matched request is scheduled
+	// among the accounts of the group this platform API key belongs to, by
+	// that group's ordinary scheduling. The key is only a pointer to the
+	// group; it is never billed. A rule has either AccountIDs or APIKeyID.
+	APIKeyID int64 `json:"api_key_id,omitempty"`
+	Enabled  bool  `json:"enabled"`
+}
+
+// HasTarget reports whether the rule names somewhere to route to.
+func (r IntentRule) HasTarget() bool {
+	return len(r.AccountIDs) > 0 || r.APIKeyID > 0
 }
 
 const (

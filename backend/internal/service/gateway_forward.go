@@ -937,6 +937,7 @@ func (s *GatewayService) ResolveChannelMappingAndRestrict(ctx context.Context, g
 // 供调度阶段预检查（requested / channel_mapped）。
 // upstream 需逐账号检查，此处返回 false。
 func (s *GatewayService) checkChannelPricingRestriction(ctx context.Context, groupID *int64, requestedModel string) bool {
+	groupID = intentRouteChannelGroup(ctx, groupID)
 	if groupID == nil || s.channelService == nil || requestedModel == "" {
 		return false
 	}
@@ -970,6 +971,7 @@ func billingModelForRestriction(source, requestedModel, channelMappedModel strin
 // isUpstreamModelRestrictedByChannel 检查账号映射后的上游模型是否受渠道定价限制。
 // 仅在 BillingModelSource="upstream" 且 RestrictModels=true 时由调度循环调用。
 func (s *GatewayService) isUpstreamModelRestrictedByChannel(ctx context.Context, groupID int64, account *Account, requestedModel string) bool {
+	groupID = intentRouteChannelGroupID(ctx, groupID)
 	if s.channelService == nil {
 		return false
 	}
@@ -990,6 +992,7 @@ func resolveAccountUpstreamModel(account *Account, requestedModel string) string
 
 // needsUpstreamChannelRestrictionCheck 判断是否需要在调度循环中逐账号检查上游模型的渠道限制。
 func (s *GatewayService) needsUpstreamChannelRestrictionCheck(ctx context.Context, groupID *int64) bool {
+	groupID = intentRouteChannelGroup(ctx, groupID)
 	if groupID == nil || s.channelService == nil {
 		return false
 	}

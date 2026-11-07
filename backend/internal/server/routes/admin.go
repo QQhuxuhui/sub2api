@@ -220,6 +220,7 @@ func registerIntentRouterRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		routers.GET("", h.Admin.IntentRouter.List)
 		routers.GET("/events", h.Admin.IntentRouter.Events)
+		routers.GET("/target-keys", h.Admin.IntentRouter.TargetKeys)
 		routers.GET("/hits", h.Admin.IntentRouter.Hits)
 		routers.GET("/hits/stats", h.Admin.IntentRouter.HitStats)
 		routers.GET("/templates", h.Admin.IntentRouter.Templates)

@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import IntentRoutersView from '../IntentRoutersView.vue'
 
 const api = vi.hoisted(() => ({
-  list: vi.fn(), save: vi.fn(), remove: vi.fn(), test: vi.fn(), clearCache: vi.fn(), events: vi.fn(),
+  list: vi.fn(), save: vi.fn(), remove: vi.fn(), test: vi.fn(), targetKeys: vi.fn(), clearCache: vi.fn(), events: vi.fn(),
   hits: vi.fn(), hitStats: vi.fn(), templates: vi.fn(), jevStatus: vi.fn(), monitorAnswer: vi.fn(), saveMonitorAnswer: vi.fn(), monitorAnswerStatus: vi.fn(), streamPrelude: vi.fn(), saveStreamPrelude: vi.fn(), streamPreludeStatus: vi.fn(),
 }))
 const admin = vi.hoisted(() => ({ getAllIncludingInactive: vi.fn(), listAccounts: vi.fn(), searchUsers: vi.fn(), searchApiKeys: vi.fn() }))
@@ -200,6 +200,62 @@ describe('IntentRoutersView', () => {
     expect(input).toMatchObject({ classifier_model: 'flash-lite', classifier_timeout_ms: 3000, cache_ttl_seconds: 7200, max_input_chars: 2000 })
     expect(input.classifier_api_key).toBe('') // blank keeps the stored key
     expect(toast.showSuccess).toHaveBeenCalledWith('intentRouter.actions.saved')
+  })
+
+  it('targets a platform API key instead of accounts, searching keys of the group platform', async () => {
+    vi.useFakeTimers()
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    api.targetKeys.mockResolvedValue({ data: [
+      { id: 7, name: 'internal-coding', user_id: 3, user_email: 'ops@example.com', group_id: 20, group_name: 'coding-pool', group_platform: 'anthropic', problem: '' },
+      { id: 8, name: 'retired', user_id: 3, user_email: 'ops@example.com', group_id: 21, group_name: 'old', group_platform: 'anthropic', problem: 'key_disabled' },
+    ] })
+    const wrapper = await mountView()
+
+    await wrapper.get('[data-test="intent-rule-target-key"]').trigger('change')
+    expect(wrapper.find('[data-test="intent-account-search"]').exists()).toBe(false)
+    await wrapper.get('[data-test="intent-key-search"]').setValue('internal')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    expect(api.targetKeys).toHaveBeenCalledWith('internal', 'anthropic')
+    expect(wrapper.get('[data-test="intent-key-option-8"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="intent-key-option-8"]').text()).toContain('intentRouter.rules.keyProblems.key_disabled')
+    await wrapper.get('[data-test="intent-key-option-7"]').trigger('click')
+    expect(wrapper.get('[data-test="intent-rule-key-chip"]').text()).toContain('coding-pool')
+
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    const [, input] = api.save.mock.calls[0]
+    expect(input.rules).toEqual([{ name: 'coding', description: 'code', keywords: [], account_ids: [], api_key_id: 7, enabled: true }])
+    vi.useRealTimers()
+  })
+
+  it('shows a saved key rule with its group and flags a key that broke since', async () => {
+    api.list.mockResolvedValue({ data: [{
+      ...savedRouter,
+      rules: [{ name: 'coding', description: 'code', account_ids: [], api_key_id: 7, enabled: true }],
+      rule_keys: [{ id: 7, name: 'internal-coding', user_id: 3, user_email: 'ops@example.com', group_id: 20, group_name: 'coding-pool', group_platform: 'anthropic', problem: 'group_inactive' }],
+    }] })
+    api.test.mockResolvedValue({ data: { matched_by: 'keyword', keyword: 'go', answer: '', intent: 'coding', understood: true, account_ids: [], api_key_id: 7, latency_ms: 0 } })
+    const wrapper = await mountView()
+
+    expect((wrapper.get('[data-test="intent-rule-target-key"]').element as HTMLInputElement).checked).toBe(true)
+    const chip = wrapper.get('[data-test="intent-rule-key-chip"]').text()
+    expect(chip).toContain('internal-coding')
+    expect(chip).toContain('intentRouter.rules.keyProblems.group_inactive')
+
+    await wrapper.get('[data-test="intent-test-text"]').setValue('go build')
+    await wrapper.get('[data-test="intent-test-run"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="intent-test-result"]').text()).toContain('coding-pool')
+
+    // Switching back to accounts drops the key.
+    await wrapper.get('[data-test="intent-rule-target-accounts"]').trigger('change')
+    api.save.mockResolvedValue({ data: savedRouter })
+    await wrapper.get('[data-test="intent-account-search"]').setValue('chat')
+    await wrapper.get('[data-test="intent-account-option-22"]').trigger('click')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].rules[0]).toEqual({ name: 'coding', description: 'code', keywords: [], account_ids: [22], enabled: true })
   })
 
   it('tries a text against the saved router, but not while edits are unsaved', async () => {

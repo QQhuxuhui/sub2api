@@ -112,9 +112,14 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	cfg := s.schedulingConfig()
 
 	// 检查 Claude Code 客户端限制（可能会替换 groupID 为降级分组）
+	requestedGroupID := groupID
 	group, groupID, err := s.checkClaudeCodeRestriction(ctx, groupID)
 	if err != nil {
 		return nil, err
+	}
+	// 意图路由令牌规则在目标分组内调度时，Claude Code 限制不得把请求转去降级分组。
+	if _, nested := intentRouteNestedFromContext(ctx); nested && derefGroupID(groupID) != derefGroupID(requestedGroupID) {
+		return nil, fmt.Errorf("%w: intent route target group %d requires Claude Code", ErrNoAvailableAccounts, derefGroupID(requestedGroupID))
 	}
 	ctx = s.withGroupContext(ctx, group)
 	ctx = s.withGatewayProfitControlGate(ctx, groupID)
@@ -130,7 +135,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 	// 意图路由：请求命中规则时只在规则指定的账号（可能属于其它分组）里选；
 	// 都选不上就返回 ErrIntentRouteUnavailable（按路由配置的状态码报给客户端），不回落本组。
-	if routed, err := s.selectIntentRoutedAccount(ctx, groupID, group, sessionHash, requestedModel, excludedIDs); err != nil {
+	if routed, err := s.selectIntentRoutedAccount(ctx, groupID, group, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID); err != nil {
 		return nil, err
 	} else if routed != nil {
 		return routed, nil

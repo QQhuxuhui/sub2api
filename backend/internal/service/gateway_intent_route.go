@@ -22,9 +22,16 @@ func (s *GatewayService) selectIntentRoutedAccount(
 	sessionHash string,
 	requestedModel string,
 	excludedIDs map[int64]struct{},
+	metadataUserID string,
+	sub2apiUserID int64,
 ) (*AccountSelectionResult, error) {
 	decision := IntentRouteDecisionFromContext(ctx)
 	if decision == nil {
+		return nil, nil
+	}
+	// Scheduling inside an API-key rule's target group: intent routing has
+	// already decided this request.
+	if _, nested := intentRouteNestedFromContext(ctx); nested {
 		return nil, nil
 	}
 	decision.clearSelected()
@@ -39,7 +46,7 @@ func (s *GatewayService) selectIntentRoutedAccount(
 	if decision.GroupID != 0 && groupID != nil && *groupID != decision.GroupID {
 		return nil, nil
 	}
-	if len(decision.AccountIDs) == 0 {
+	if !decision.routed() {
 		// Scope only: this turn has no preference, and these protocols bind no
 		// server-side state to an account that would have to be honored.
 		return nil, nil
@@ -48,6 +55,9 @@ func (s *GatewayService) selectIntentRoutedAccount(
 	platform, hasForcePlatform, err := s.resolvePlatform(ctx, groupID, group, requestedModel)
 	if err != nil {
 		return nil, nil
+	}
+	if decision.viaKey() {
+		return s.selectIntentRoutedGroupAccount(ctx, decision, groupID, platform, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
 	}
 	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
 	// Channel pricing of the key's own group still governs which upstream
@@ -90,6 +100,52 @@ func (s *GatewayService) selectIntentRoutedAccount(
 	slog.Info("intent_route.unavailable",
 		"group_id", derefGroupID(groupID), "intent", decision.Intent, "model", requestedModel, "excluded", len(excludedIDs))
 	return nil, decision.unavailable()
+}
+
+// selectIntentRoutedGroupAccount serves an API-key rule: the request is
+// scheduled in the key's group by that group's ordinary scheduling (priority,
+// concurrency, load, sticky sessions, wait plans). Any failure is the rule's
+// unavailability; the request never falls back to its own group.
+func (s *GatewayService) selectIntentRoutedGroupAccount(
+	ctx context.Context,
+	decision *IntentRouteDecision,
+	groupID *int64,
+	platform string,
+	sessionHash string,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+	metadataUserID string,
+	sub2apiUserID int64,
+) (*AccountSelectionResult, error) {
+	logUnavailable := func(reason string) (*AccountSelectionResult, error) {
+		slog.Info("intent_route.unavailable",
+			"group_id", derefGroupID(groupID), "intent", decision.Intent, "model", requestedModel,
+			"api_key_id", decision.TargetAPIKeyID, "target_group_id", decision.TargetGroupID, "reason", reason, "excluded", len(excludedIDs))
+		return nil, decision.unavailable()
+	}
+	if decision.TargetGroupID <= 0 {
+		return logUnavailable(decision.TargetProblem)
+	}
+	if decision.TargetPlatform != platform {
+		return logUnavailable("platform_mismatch:" + decision.TargetPlatform + "!=" + platform)
+	}
+	targetGroupID := decision.TargetGroupID
+	result, err := s.SelectAccountWithLoadAwareness(withIntentRouteNested(ctx, derefGroupID(groupID)), &targetGroupID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
+	if err != nil || result == nil || result.Account == nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		reason := "no_account"
+		if err != nil {
+			reason = err.Error()
+		}
+		return logUnavailable(reason)
+	}
+	decision.markSelectedViaGroup(result.Account.ID)
+	slog.Debug("intent_route.selected",
+		"group_id", derefGroupID(groupID), "intent", decision.Intent, "account_id", result.Account.ID,
+		"target_group_id", targetGroupID, "model", requestedModel, "wait", result.WaitPlan != nil)
+	return result, nil
 }
 
 func (s *GatewayService) isIntentRoutedAccountUsable(ctx context.Context, account *Account, platform string, useMixed bool, requestedModel string) bool {

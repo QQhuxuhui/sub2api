@@ -58,6 +58,19 @@ type IntentRouteDecision struct {
 	// can take the request (429, 502 or 503).
 	UnavailableStatus int
 
+	// TargetAPIKeyID is set when the matched rule targets a platform API key
+	// instead of accounts: the request is scheduled in TargetGroupID by that
+	// group's ordinary scheduling. TargetGroupID is 0 when the key no longer
+	// resolves (TargetProblem says why); the rule still binds, so the request
+	// is refused.
+	TargetAPIKeyID int64
+	TargetGroupID  int64
+	TargetPlatform string
+	TargetProblem  string
+	// ScopeGroupIDs are the target groups of every API-key rule of the router
+	// (in rule order): accounts in them may have served an earlier turn.
+	ScopeGroupIDs []int64
+
 	mu sync.Mutex
 	// selected is the routed account of the latest attempt; announced is the
 	// account onSelect was last told about. They differ on purpose: every
@@ -66,6 +79,33 @@ type IntentRouteDecision struct {
 	selected  int64
 	announced int64
 	onSelect  func(accountID int64)
+	// selectedViaGroup reports that selected was picked by an API-key rule's
+	// group scheduling (its sticky session belongs to TargetGroupID).
+	selectedViaGroup bool
+}
+
+// routed reports whether the turn matched a rule (of either kind).
+func (d *IntentRouteDecision) routed() bool {
+	return d != nil && (len(d.AccountIDs) > 0 || d.TargetAPIKeyID > 0)
+}
+
+// viaKey reports whether the matched rule targets an API key's group.
+func (d *IntentRouteDecision) viaKey() bool {
+	return d != nil && d.TargetAPIKeyID > 0
+}
+
+// markSelectedViaGroup is markSelected for an account picked by an API-key
+// rule's group scheduling.
+func (d *IntentRouteDecision) markSelectedViaGroup(accountID int64) {
+	if d == nil || accountID <= 0 {
+		return
+	}
+	d.markSelected(accountID)
+	d.mu.Lock()
+	if d.selected == accountID {
+		d.selectedViaGroup = true
+	}
+	d.mu.Unlock()
 }
 
 // orderedAccountIDs lists the pinned account first so a conversation stays on
@@ -116,6 +156,7 @@ func (d *IntentRouteDecision) markSelected(accountID int64) {
 	}
 	d.mu.Lock()
 	d.selected = accountID
+	d.selectedViaGroup = false
 	changed := d.announced != accountID && d.PinnedAccountID != accountID
 	d.announced = accountID
 	notify := d.onSelect
@@ -134,6 +175,7 @@ func (d *IntentRouteDecision) noteSelected(accountID int64) {
 	}
 	d.mu.Lock()
 	d.selected = accountID
+	d.selectedViaGroup = false
 	d.mu.Unlock()
 }
 
@@ -165,6 +207,7 @@ func (d *IntentRouteDecision) clearSelected() {
 	}
 	d.mu.Lock()
 	d.selected = 0
+	d.selectedViaGroup = false
 	d.mu.Unlock()
 }
 
@@ -172,7 +215,7 @@ type intentRouteDecisionContextKey struct{}
 
 // WithIntentRouteDecision attaches a decision to the request context.
 func WithIntentRouteDecision(ctx context.Context, decision *IntentRouteDecision) context.Context {
-	if decision == nil || (len(decision.AccountIDs) == 0 && len(decision.ScopeAccountIDs) == 0) {
+	if decision == nil || (!decision.routed() && len(decision.ScopeAccountIDs) == 0 && len(decision.ScopeGroupIDs) == 0) {
 		return ctx
 	}
 	return context.WithValue(ctx, intentRouteDecisionContextKey{}, decision)

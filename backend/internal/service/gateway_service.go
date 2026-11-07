@@ -597,6 +597,10 @@ type AccountSelectionResult struct {
 	// 局部 ctx 上，handler 必须经 ContextWithSelectionProfitGate 重放后才能在
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。
 	profitGate *openAIProfitControlGate
+	// profitGateCleared 标记调度栈明确清除了入口分组的门（被调度分组未启用利润
+	// 控制，如意图路由令牌规则/composite 调到另一分组）。handler 重放时据此清除
+	// 入口门，否则终检会用入口分组的门否决被调度分组允许的账号。
+	profitGateCleared bool
 }
 
 // ProfitGateActive 报告本次选号是否处于利润门之下。

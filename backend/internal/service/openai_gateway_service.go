@@ -643,6 +643,7 @@ func (s *OpenAIGatewayService) isCodexImageGenerationBridgeEnabled(ctx context.C
 }
 
 func (s *OpenAIGatewayService) checkChannelPricingRestriction(ctx context.Context, groupID *int64, requestedModel string) bool {
+	groupID = intentRouteChannelGroup(ctx, groupID)
 	if groupID == nil || s.channelService == nil || requestedModel == "" {
 		return false
 	}
@@ -655,6 +656,7 @@ func (s *OpenAIGatewayService) checkChannelPricingRestriction(ctx context.Contex
 }
 
 func (s *OpenAIGatewayService) isUpstreamModelRestrictedByChannel(ctx context.Context, groupID int64, account *Account, requestedModel string, requireCompact bool) bool {
+	groupID = intentRouteChannelGroupID(ctx, groupID)
 	if s.channelService == nil {
 		return false
 	}
@@ -670,6 +672,7 @@ func (s *OpenAIGatewayService) isUpstreamModelRestrictedByChannel(ctx context.Co
 }
 
 func (s *OpenAIGatewayService) needsUpstreamChannelRestrictionCheck(ctx context.Context, groupID *int64) bool {
+	groupID = intentRouteChannelGroup(ctx, groupID)
 	if groupID == nil || s.channelService == nil {
 		return false
 	}

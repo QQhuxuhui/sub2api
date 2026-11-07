@@ -59,6 +59,20 @@ type intentRouterConfig struct {
 	// ExcludedModels (lower-cased; a trailing * matches a prefix) skip
 	// intent routing entirely.
 	ExcludedModels []string
+	// KeyTargets resolves the API key of every API-key rule (switched off
+	// ones included) to its group, as of the last config load.
+	KeyTargets map[int64]intentRuleTarget
+}
+
+// keyTarget is the resolved target of an API-key rule.
+func (c *intentRouterConfig) keyTarget(apiKeyID int64) intentRuleTarget {
+	if c == nil || apiKeyID <= 0 {
+		return intentRuleTarget{Problem: intentKeyProblemNotFound}
+	}
+	if target, ok := c.KeyTargets[apiKeyID]; ok {
+		return target
+	}
+	return intentRuleTarget{Problem: intentKeyProblemNotFound}
 }
 
 // excludesModel reports whether requests for model skip intent routing.
@@ -99,7 +113,7 @@ func (c *intentRouterConfig) activeRules() []domain.IntentRule {
 	}
 	rules := make([]domain.IntentRule, 0, len(c.Rules))
 	for _, rule := range c.Rules {
-		if rule.Enabled && strings.TrimSpace(rule.Name) != "" && len(rule.AccountIDs) > 0 {
+		if rule.Enabled && strings.TrimSpace(rule.Name) != "" && rule.HasTarget() {
 			rules = append(rules, rule)
 		}
 	}
@@ -200,6 +214,31 @@ func (c *intentRouterConfig) scopeAccountIDs() []int64 {
 				seen[id] = struct{}{}
 				scope = append(scope, id)
 			}
+		}
+	}
+	return scope
+}
+
+// scopeGroupIDs lists, in rule order, the groups of every API-key rule whose
+// key currently resolves — switched-off rules included, for the same reason
+// as scopeAccountIDs.
+func (c *intentRouterConfig) scopeGroupIDs() []int64 {
+	if c == nil {
+		return nil
+	}
+	seen := make(map[int64]struct{})
+	var scope []int64
+	for _, rule := range c.Rules {
+		if rule.APIKeyID <= 0 {
+			continue
+		}
+		target := c.keyTarget(rule.APIKeyID)
+		if !target.usable() {
+			continue
+		}
+		if _, dup := seen[target.GroupID]; !dup {
+			seen[target.GroupID] = struct{}{}
+			scope = append(scope, target.GroupID)
 		}
 	}
 	return scope
@@ -389,10 +428,11 @@ func (s *IntentRouterService) ScopeOnly(ctx context.Context, groupID int64) *Int
 	}
 	cfg := s.config(ctx, groupID)
 	scope := cfg.scopeAccountIDs()
-	if len(scope) == 0 {
+	scopeGroups := cfg.scopeGroupIDs()
+	if len(scope) == 0 && len(scopeGroups) == 0 {
 		return nil
 	}
-	return &IntentRouteDecision{GroupID: groupID, ScopeAccountIDs: scope}
+	return &IntentRouteDecision{GroupID: groupID, ScopeAccountIDs: scope, ScopeGroupIDs: scopeGroups}
 }
 
 // MaxBodyBytes is the largest request body worth buffering for classification.
@@ -416,13 +456,14 @@ func (s *IntentRouterService) Decide(ctx context.Context, in IntentRouteInput) *
 	// Excluded models are scheduled as if the group had no router — except
 	// that the scope still travels, so earlier routed turns can continue.
 	if cfg.excludesModel(intentRequestModel(in)) {
-		return &IntentRouteDecision{GroupID: cfg.GroupID, ScopeAccountIDs: cfg.scopeAccountIDs()}
+		return &IntentRouteDecision{GroupID: cfg.GroupID, ScopeAccountIDs: cfg.scopeAccountIDs(), ScopeGroupIDs: cfg.scopeGroupIDs()}
 	}
 	decision := s.classify(ctx, cfg, in)
 	if decision == nil {
 		decision = &IntentRouteDecision{GroupID: cfg.GroupID}
 	}
 	decision.ScopeAccountIDs = cfg.scopeAccountIDs()
+	decision.ScopeGroupIDs = cfg.scopeGroupIDs()
 	return decision
 }
 
@@ -654,23 +695,38 @@ func (s *IntentRouterService) nextRequestVersion(ctx context.Context, sessionKey
 func (s *IntentRouterService) newDecision(cfg *intentRouterConfig, rule domain.IntentRule, sessionKey string, pinned int64, version int64) *IntentRouteDecision {
 	groupID, ttl, intent := cfg.GroupID, cfg.CacheTTL, rule.Name
 	var sequence atomic.Int64
-	return &IntentRouteDecision{
+	decision := &IntentRouteDecision{
 		GroupID:           groupID,
 		Intent:            intent,
-		AccountIDs:        append([]int64(nil), rule.AccountIDs...),
 		PinnedAccountID:   pinned,
 		UnavailableStatus: cfg.UnavailableStatus,
-		onSelect: func(accountID int64) {
-			s.record(IntentRouteEvent{GroupID: groupID, Kind: "routed", Intent: intent, AccountID: accountID})
-			if s.store == nil || sessionKey == "" || version <= 0 {
-				return
-			}
-			seq := sequence.Add(1)
-			s.detached(func(ctx context.Context) error {
-				return s.store.PinSession(ctx, groupID, sessionKey, intentRouteSession{Intent: intent, AccountID: accountID, Version: version, Sequence: seq}, ttl)
-			})
-		},
 	}
+	routedDetail := ""
+	if rule.APIKeyID > 0 {
+		// An API-key rule is scheduled by its group; the conversation pin
+		// does not steer selection (the group's own sticky sessions do).
+		target := cfg.keyTarget(rule.APIKeyID)
+		decision.TargetAPIKeyID = rule.APIKeyID
+		decision.TargetProblem = target.Problem
+		if target.usable() {
+			decision.TargetGroupID = target.GroupID
+			decision.TargetPlatform = target.Platform
+			routedDetail = fmt.Sprintf("via group %d", target.GroupID)
+		}
+	} else {
+		decision.AccountIDs = append([]int64(nil), rule.AccountIDs...)
+	}
+	decision.onSelect = func(accountID int64) {
+		s.record(IntentRouteEvent{GroupID: groupID, Kind: "routed", Intent: intent, AccountID: accountID, Detail: routedDetail})
+		if s.store == nil || sessionKey == "" || version <= 0 {
+			return
+		}
+		seq := sequence.Add(1)
+		s.detached(func(ctx context.Context) error {
+			return s.store.PinSession(ctx, groupID, sessionKey, intentRouteSession{Intent: intent, AccountID: accountID, Version: version, Sequence: seq}, ttl)
+		})
+	}
+	return decision
 }
 
 // detached runs a store write off the request path: a slow or failing Redis
@@ -772,9 +828,31 @@ func (s *IntentRouterService) reloadConfigs(ctx context.Context) error {
 		s.configLoaded.Store(s.now().UnixNano())
 		return err
 	}
+	var keyIDs []int64
+	seenKeys := make(map[int64]struct{})
+	for _, row := range rows {
+		for _, rule := range row.Rules {
+			if _, dup := seenKeys[rule.APIKeyID]; rule.APIKeyID > 0 && !dup {
+				seenKeys[rule.APIKeyID] = struct{}{}
+				keyIDs = append(keyIDs, rule.APIKeyID)
+			}
+		}
+	}
+	keyTargets, _, err := loadIntentKeyTargets(ctx, s.entClient, keyIDs, s.now())
+	if err != nil {
+		slog.Warn("intent_route.config_load_failed", "error", err)
+		if s.configs.Load() == nil {
+			empty := map[int64]*intentRouterConfig{}
+			s.configs.Store(&empty)
+		}
+		s.configLoaded.Store(s.now().UnixNano())
+		return err
+	}
 	next := make(map[int64]*intentRouterConfig, len(rows))
 	for _, row := range rows {
-		next[row.GroupID] = intentRouterConfigFromEnt(row)
+		cfg := intentRouterConfigFromEnt(row)
+		cfg.KeyTargets = keyTargets
+		next[row.GroupID] = cfg
 	}
 	s.configs.Store(&next)
 	s.configLoaded.Store(s.now().UnixNano())

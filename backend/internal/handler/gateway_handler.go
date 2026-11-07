@@ -132,8 +132,13 @@ func NewGatewayHandler(
 // bindStickySessionUnlessIntentRouted 绑定粘性会话，但本轮由意图路由选中的账号除外：
 // 关键字只决定当前这一轮，不能把整段对话的粘性改到规则账号上，下一轮没有命中
 // 关键字时要回到对话原来所在的账号。plain 为 true 走无准入门的直接绑定。
+//
+// 意图路由令牌规则选中的账号属于规则目标分组的普通调度，粘性绑在目标分组下，
+// 原分组粘性不动。
 func (h *GatewayHandler) bindStickySessionUnlessIntentRouted(ctx context.Context, groupID *int64, sessionKey string, accountID int64, plain bool) error {
-	if service.IntentRouteSelectedAccount(ctx) == accountID {
+	if targetGroupID, viaGroup := service.IntentRouteStickyGroup(ctx, accountID); viaGroup {
+		groupID = &targetGroupID
+	} else if service.IntentRouteSelectedAccount(ctx) == accountID {
 		return nil
 	}
 	if plain {

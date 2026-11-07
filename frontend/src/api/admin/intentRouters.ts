@@ -6,7 +6,21 @@ export interface IntentRule {
   /** Matched against the two latest user messages on every turn, before the classifier. */
   keywords?: string[]
   account_ids: number[]
+  /** Replaces account_ids: matched requests are scheduled by the group of this platform API key (never billed to it). */
+  api_key_id?: number
   enabled: boolean
+}
+
+/** An API key a rule may target; problem is empty when the key resolves to an active group. */
+export interface IntentRuleKeyLabel {
+  id: number
+  name: string
+  user_id: number
+  user_email: string
+  group_id: number
+  group_name: string
+  group_platform: string
+  problem: '' | 'key_not_found' | 'key_disabled' | 'key_expired' | 'key_no_group' | 'group_not_found' | 'group_inactive'
 }
 
 export type IntentClassifierProtocol = 'openai_chat' | 'gemini'
@@ -115,6 +129,8 @@ export interface IntentRouter {
   jev: IntentJevConfig
   /** Names of the users and keys in jev; deleted ones are missing. */
   jev_scope?: { users: { id: number; email: string; username: string }[]; api_keys: { id: number; name: string; user_id: number }[] }
+  /** The API keys of the rules that target one; broken ones carry a problem. */
+  rule_keys?: IntentRuleKeyLabel[]
   updated_at: string
 }
 
@@ -147,6 +163,9 @@ export interface IntentClassifyTestResult {
   intent: string
   understood: boolean
   account_ids: number[]
+  /** Set when the matched rule targets an API key; target_group_id is absent when the key does not resolve. */
+  api_key_id?: number
+  target_group_id?: number
   latency_ms: number
   /** Jev's answer when Jev was asked. */
   probe_probability?: number
@@ -345,6 +364,10 @@ export const intentRoutersAPI = {
   },
   remove(groupId: number) {
     return apiClient.delete(`/admin/intent-routers/${groupId}`)
+  },
+  /** API keys a rule may target, by key name, ID or owner email; platform narrows to groups of one platform. */
+  targetKeys(q: string, platform?: string) {
+    return apiClient.get<IntentRuleKeyLabel[]>('/admin/intent-routers/target-keys', { params: { q, ...(platform ? { platform } : {}) } })
   },
   test(groupId: number, text: string) {
     return apiClient.post<IntentClassifyTestResult>(`/admin/intent-routers/${groupId}/test`, { text })

@@ -40,6 +40,17 @@ func (h *IntentRouterHandler) List(c *gin.Context) {
 	response.Success(c, routers)
 }
 
+// TargetKeys searches the API keys a rule may target.
+// GET /api/v1/admin/intent-routers/target-keys?q=&platform=
+func (h *IntentRouterHandler) TargetKeys(c *gin.Context) {
+	keys, err := h.router.SearchRuleTargetKeys(c.Request.Context(), c.Query("q"), c.Query("platform"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, keys)
+}
+
 // Get returns the router of one group.
 // GET /api/v1/admin/intent-routers/:group_id
 func (h *IntentRouterHandler) Get(c *gin.Context) {

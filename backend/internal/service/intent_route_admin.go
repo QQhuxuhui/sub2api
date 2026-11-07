@@ -6,13 +6,16 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
+	entgroup "github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/intentrouter"
+	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -102,9 +105,25 @@ type IntentRouterView struct {
 	ExcludedModels      []string `json:"excluded_models"`
 	JevAPIKeyConfigured bool     `json:"jev_api_key_configured"`
 	// JevScope names the users and keys Jev is scoped to, for display.
-	JevScope  IntentJevScopeLabels   `json:"jev_scope"`
-	Jev       domain.IntentJevConfig `json:"jev"`
-	UpdatedAt time.Time              `json:"updated_at"`
+	JevScope IntentJevScopeLabels   `json:"jev_scope"`
+	Jev      domain.IntentJevConfig `json:"jev"`
+	// RuleKeys describes the API key of every API-key rule, for display;
+	// keys that no longer resolve carry a Problem.
+	RuleKeys  []IntentRuleKeyLabel `json:"rule_keys"`
+	UpdatedAt time.Time            `json:"updated_at"`
+}
+
+// IntentRuleKeyLabel describes an API key a rule may target: its owner, its
+// group, and why it cannot be used (Problem, empty when it can).
+type IntentRuleKeyLabel struct {
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	UserID        int64  `json:"user_id"`
+	UserEmail     string `json:"user_email"`
+	GroupID       int64  `json:"group_id"`
+	GroupName     string `json:"group_name"`
+	GroupPlatform string `json:"group_platform"`
+	Problem       string `json:"problem"`
 }
 
 // IntentRouterInput is a full router document. An empty ClassifierAPIKey keeps
@@ -141,7 +160,11 @@ type IntentClassifyTestResult struct {
 	Intent     string  `json:"intent"`
 	Understood bool    `json:"understood"`
 	AccountIDs []int64 `json:"account_ids"`
-	LatencyMS  int64   `json:"latency_ms"`
+	// APIKeyID and TargetGroupID are set when the matched rule targets an
+	// API key (TargetGroupID 0 when the key does not resolve).
+	APIKeyID      int64 `json:"api_key_id,omitempty"`
+	TargetGroupID int64 `json:"target_group_id,omitempty"`
+	LatencyMS     int64 `json:"latency_ms"`
 	// ProbeProbability is Jev's answer when Jev was asked.
 	ProbeProbability *float64 `json:"probe_probability,omitempty"`
 	// HealthProbability is Jev's health-check answer, when health checks are
@@ -288,7 +311,8 @@ func (s *IntentRouterService) withJevScopeLabels(ctx context.Context, views ...*
 			}
 		}
 	}
-	return nil
+	// Rule key labels travel with the Jev labels: every caller shows both.
+	return s.withRuleKeyLabels(ctx, views...)
 }
 
 func (s *IntentRouterService) ListRouters(ctx context.Context) ([]*IntentRouterView, error) {
@@ -469,6 +493,7 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 	}
 	names := make(map[string]struct{}, len(in.Rules))
 	accountIDs := make(map[int64]struct{})
+	keyIDs := make(map[int64]struct{})
 	for i := range in.Rules {
 		rule := &in.Rules[i]
 		rule.Name = strings.TrimSpace(rule.Name)
@@ -495,8 +520,20 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 			return infraerrors.BadRequest("INTENT_RULE_MATCHER_REQUIRED", "rule \""+rule.Name+"\" needs keywords or a description: keywords are matched directly, the description is what the classifier decides by").
 				WithMetadata(map[string]string{"name": rule.Name})
 		}
+		if rule.APIKeyID < 0 {
+			rule.APIKeyID = 0
+		}
+		if rule.APIKeyID > 0 && len(rule.AccountIDs) > 0 {
+			return infraerrors.BadRequest("INTENT_RULE_TARGET_CONFLICT", "rule \""+rule.Name+"\" targets either accounts or an API key, not both").
+				WithMetadata(map[string]string{"name": rule.Name})
+		}
+		if rule.APIKeyID > 0 {
+			rule.AccountIDs = []int64{}
+			keyIDs[rule.APIKeyID] = struct{}{}
+			continue
+		}
 		if len(rule.AccountIDs) == 0 {
-			return infraerrors.BadRequest("INTENT_RULE_ACCOUNTS_REQUIRED", "rule \""+rule.Name+"\" needs at least one account").
+			return infraerrors.BadRequest("INTENT_RULE_ACCOUNTS_REQUIRED", "rule \""+rule.Name+"\" needs at least one account or an API key").
 				WithMetadata(map[string]string{"name": rule.Name})
 		}
 		if len(rule.AccountIDs) > intentRouteMaxAccountsPerRule {
@@ -538,7 +575,10 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 			}
 		}
 	}
-	return s.validateIntentRuleAccounts(ctx, accountIDs, groupPlatform)
+	if err := s.validateIntentRuleAccounts(ctx, accountIDs, groupPlatform); err != nil {
+		return err
+	}
+	return s.validateIntentRuleKeys(ctx, keyIDs, groupPlatform)
 }
 
 // normalizeIntentJev applies defaults and checks the Jev settings. Disabled
@@ -716,7 +756,7 @@ func normalizeIntentKeywords(rule *domain.IntentRule) error {
 
 func intentRulesHaveKeywords(rules []domain.IntentRule) bool {
 	for _, rule := range rules {
-		if rule.Enabled && len(rule.Keywords) > 0 && len(rule.AccountIDs) > 0 {
+		if rule.Enabled && len(rule.Keywords) > 0 && rule.HasTarget() {
 			return true
 		}
 	}
@@ -757,6 +797,143 @@ func (s *IntentRouterService) validateIntentRuleAccounts(ctx context.Context, id
 	return nil
 }
 
+// validateIntentRuleKeys rejects API-key targets that could not serve the
+// group's requests now: missing, disabled or expired keys, keys without an
+// active group, and groups of another platform.
+func (s *IntentRouterService) validateIntentRuleKeys(ctx context.Context, ids map[int64]struct{}, groupPlatform string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	list := make([]int64, 0, len(ids))
+	for id := range ids {
+		list = append(list, id)
+	}
+	targets, _, err := loadIntentKeyTargets(ctx, s.entClient, list, s.now())
+	if err != nil {
+		return err
+	}
+	for _, id := range list {
+		target := targets[id]
+		meta := map[string]string{"api_key_id": fmt.Sprint(id)}
+		switch target.Problem {
+		case "":
+		case intentKeyProblemNotFound:
+			return infraerrors.BadRequest("INTENT_API_KEY_NOT_FOUND", fmt.Sprintf("API key %d does not exist", id)).WithMetadata(meta)
+		case intentKeyProblemDisabled, intentKeyProblemExpired:
+			return infraerrors.BadRequest("INTENT_API_KEY_INACTIVE", fmt.Sprintf("API key %d is disabled or expired", id)).WithMetadata(meta)
+		case intentKeyProblemNoGroup:
+			return infraerrors.BadRequest("INTENT_API_KEY_NO_GROUP", fmt.Sprintf("API key %d belongs to no group", id)).WithMetadata(meta)
+		default:
+			return infraerrors.BadRequest("INTENT_API_KEY_GROUP_INACTIVE", fmt.Sprintf("the group of API key %d is missing or not active", id)).WithMetadata(meta)
+		}
+		if !intentKeyGroupPlatformCompatible(groupPlatform, target.Platform) {
+			meta["key_group_platform"], meta["group_platform"] = target.Platform, groupPlatform
+			return infraerrors.BadRequest("INTENT_API_KEY_PLATFORM_MISMATCH",
+				fmt.Sprintf("API key %d belongs to a %s group, which cannot serve requests of a %s group", id, target.Platform, groupPlatform)).WithMetadata(meta)
+		}
+	}
+	return nil
+}
+
+// intentKeyGroupPlatformCompatible: a key's group must be of the router
+// group's own platform, because the request is scheduled by that group as is.
+// Group platforms resolved per request (composite) are not second-guessed
+// here; request time checks them.
+func intentKeyGroupPlatformCompatible(groupPlatform, targetPlatform string) bool {
+	switch {
+	case groupPlatform == PlatformAnthropic, groupPlatform == PlatformGemini, groupPlatform == PlatformAntigravity,
+		domain.UsesOpenAIGateway(groupPlatform):
+		return groupPlatform == targetPlatform
+	default:
+		return true
+	}
+}
+
+// intentRuleKeyLabelFromEnt labels a loaded key (row nil = not found).
+func intentRuleKeyLabelFromEnt(id int64, row *dbent.APIKey, now time.Time) IntentRuleKeyLabel {
+	label := IntentRuleKeyLabel{ID: id, Problem: intentKeyTargetFromEnt(row, now).Problem}
+	if row == nil {
+		return label
+	}
+	label.Name, label.UserID = row.Name, row.UserID
+	if row.Edges.User != nil {
+		label.UserEmail = row.Edges.User.Email
+	}
+	if row.GroupID != nil {
+		label.GroupID = *row.GroupID
+	}
+	if g := row.Edges.Group; g != nil {
+		label.GroupName, label.GroupPlatform = g.Name, g.Platform
+	}
+	return label
+}
+
+// withRuleKeyLabels describes the API keys of the views' rules, with one query.
+func (s *IntentRouterService) withRuleKeyLabels(ctx context.Context, views ...*IntentRouterView) error {
+	var ids []int64
+	seen := map[int64]struct{}{}
+	for _, v := range views {
+		for _, rule := range v.Rules {
+			if _, dup := seen[rule.APIKeyID]; rule.APIKeyID > 0 && !dup {
+				seen[rule.APIKeyID] = struct{}{}
+				ids = append(ids, rule.APIKeyID)
+			}
+		}
+	}
+	rows := map[int64]*dbent.APIKey{}
+	if len(ids) > 0 {
+		_, loaded, err := loadIntentKeyTargets(ctx, s.entClient, ids, s.now())
+		if err != nil {
+			return err
+		}
+		for _, row := range loaded {
+			rows[row.ID] = row
+		}
+	}
+	now := s.now()
+	for _, v := range views {
+		v.RuleKeys = []IntentRuleKeyLabel{}
+		listed := map[int64]struct{}{}
+		for _, rule := range v.Rules {
+			if _, dup := listed[rule.APIKeyID]; rule.APIKeyID <= 0 || dup {
+				continue
+			}
+			listed[rule.APIKeyID] = struct{}{}
+			v.RuleKeys = append(v.RuleKeys, intentRuleKeyLabelFromEnt(rule.APIKeyID, rows[rule.APIKeyID], now))
+		}
+	}
+	return nil
+}
+
+// intentRuleTargetKeySearchLimit caps one target key search.
+const intentRuleTargetKeySearchLimit = 30
+
+// SearchRuleTargetKeys finds API keys a rule may target, by key name, key ID
+// or owner email, optionally narrowed to groups of one platform.
+func (s *IntentRouterService) SearchRuleTargetKeys(ctx context.Context, query, platform string) ([]IntentRuleKeyLabel, error) {
+	q := s.entClient.APIKey.Query().WithGroup().WithUser()
+	if query = strings.TrimSpace(query); query != "" {
+		preds := []predicate.APIKey{apikey.NameContainsFold(query), apikey.HasUserWith(user.EmailContainsFold(query))}
+		if id, err := strconv.ParseInt(strings.TrimPrefix(query, "#"), 10, 64); err == nil && id > 0 {
+			preds = append(preds, apikey.IDEQ(id))
+		}
+		q = q.Where(apikey.Or(preds...))
+	}
+	if platform = strings.TrimSpace(platform); platform != "" {
+		q = q.Where(apikey.HasGroupWith(entgroup.PlatformEQ(platform)))
+	}
+	rows, err := q.Order(dbent.Desc(apikey.FieldID)).Limit(intentRuleTargetKeySearchLimit).All(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("search api keys: %w", err)
+	}
+	now := s.now()
+	out := make([]IntentRuleKeyLabel, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, intentRuleKeyLabelFromEnt(row.ID, row, now))
+	}
+	return out, nil
+}
+
 // intentAccountPlatformCompatible mirrors what selection accepts: the same
 // platform, or an Antigravity account for Claude/Gemini groups (mixed
 // scheduling — whether the account opted in is re-checked at request time).
@@ -777,6 +954,23 @@ func intentAccountPlatformCompatible(groupPlatform, accountPlatform string) bool
 // rules can be tuned before they affect traffic. Unlike Decide it reports
 // failures, because here the caller is the admin who needs to see them.
 func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, text string) (*IntentClassifyTestResult, error) {
+	result, err := s.testClassify(ctx, groupID, text)
+	if err != nil || result == nil || result.Intent == "" {
+		return result, err
+	}
+	cfg := s.config(ctx, groupID)
+	for _, rule := range cfg.activeRules() {
+		if rule.Name == result.Intent && rule.APIKeyID > 0 {
+			result.APIKeyID = rule.APIKeyID
+			if target := cfg.keyTarget(rule.APIKeyID); target.usable() {
+				result.TargetGroupID = target.GroupID
+			}
+		}
+	}
+	return result, nil
+}
+
+func (s *IntentRouterService) testClassify(ctx context.Context, groupID int64, text string) (*IntentClassifyTestResult, error) {
 	text = stripIntentInjectedText(text)
 	if text == "" {
 		return nil, infraerrors.BadRequest("INTENT_TEST_TEXT_REQUIRED", "enter a message to classify")

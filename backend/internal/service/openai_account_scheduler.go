@@ -2183,7 +2183,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	// 意图路由：请求命中规则时只在规则指定的账号（可能属于其它分组）里选；
 	// 都选不上就返回 ErrIntentRouteUnavailable（按路由配置的状态码报给客户端），不回落本组。
-	if routed, routedDecision, ok, err := s.selectIntentRoutedAccount(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform); err != nil {
+	if routed, routedDecision, ok, err := s.selectIntentRoutedAccount(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, sessionHash, previousResponseCanMove, useUpstreamTokenCost); err != nil {
 		return nil, routedDecision, err
 	} else if ok {
 		return routed, routedDecision, nil
