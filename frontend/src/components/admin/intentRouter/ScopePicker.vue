@@ -23,7 +23,7 @@
       </div>
     </div>
     <div>
-      <label class="input-label">{{ t('intentRouter.jev.scopeKeys') }}</label>
+      <label class="input-label flex items-center gap-1">{{ t('intentRouter.jev.scopeKeys') }} <InfoTip :text="t('intentRouter.jev.scopeKeysHint')" :label="t('intentRouter.jev.scopeKeys')" /></label>
       <div class="relative">
         <input
           v-model="keyQuery"
@@ -58,7 +58,6 @@
           <button type="button" class="text-gray-500 hover:text-red-600" :aria-label="t('intentRouter.jev.scopeRemove')" @click="removeKey(k.id)">×</button>
         </span>
       </div>
-      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.scopeKeysHint') }}</p>
     </div>
   </div>
 </template>
@@ -68,6 +67,7 @@
 // nobody has to look IDs up. A user without listed keys means all their keys.
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import InfoTip from './InfoTip.vue'
 import { adminAPI } from '@/api/admin'
 
 export interface ScopeUser { id: number; email: string }

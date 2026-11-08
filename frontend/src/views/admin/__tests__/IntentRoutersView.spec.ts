@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import type { VueWrapper } from '@vue/test-utils'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import IntentRoutersView from '../IntentRoutersView.vue'
 
 const api = vi.hoisted(() => ({
@@ -32,12 +34,24 @@ const savedRouter = {
   rules: [{ name: 'coding', description: 'code', account_ids: [21, 99], enabled: true }],
 }
 
-async function mountView() {
+function makeRouter() {
+  const blank = { template: '<div />' }
+  return createRouter({ history: createMemoryHistory(), routes: [{ path: '/admin/intent-routers', component: blank }, { path: '/elsewhere', component: blank }] })
+}
+
+async function mountView(query: Record<string, string> = {}, router = makeRouter()) {
+  await router.push({ path: '/admin/intent-routers', query })
+  await router.isReady()
   const wrapper = mount(IntentRoutersView, {
-    global: { stubs: { AppLayout: { template: '<div><slot /></div>' } } },
+    global: { plugins: [router], stubs: { AppLayout: { template: '<div><slot /></div>' }, teleport: true } },
   })
   await flushPromises()
   return wrapper
+}
+
+async function openTab(wrapper: VueWrapper, tab: 'config' | 'hits' | 'templates') {
+  await wrapper.get(`[data-test="intent-tab-${tab}"]`).trigger('click')
+  await flushPromises()
 }
 
 function deferred<T>() {
@@ -84,6 +98,7 @@ describe('IntentRoutersView', () => {
   it('keeps statistics and details on the newest group when requests finish out of order', async () => {
     api.list.mockResolvedValue({ data: [savedRouter, { ...savedRouter, group_id: 2 }] })
     const wrapper = await mountView()
+    await openTab(wrapper, 'hits')
     const old = deferred<{ data: ReturnType<typeof keywordStat>[] }>()
     const current = deferred<{ data: ReturnType<typeof keywordStat>[] }>()
     api.hitStats.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
@@ -105,6 +120,7 @@ describe('IntentRoutersView', () => {
   it('ignores stale detail responses after a newer keyword is selected', async () => {
     api.hitStats.mockResolvedValue({ data: [keywordStat('one'), keywordStat('two')] })
     const wrapper = await mountView()
+    await openTab(wrapper, 'hits')
     const old = deferred<{ data: { items: ReturnType<typeof hitRow>[]; total: number } }>()
     const current = deferred<{ data: { items: ReturnType<typeof hitRow>[]; total: number } }>()
     api.hits.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
@@ -122,6 +138,7 @@ describe('IntentRoutersView', () => {
 
   it('does not show errors from an obsolete filter or an unmounted view', async () => {
     const wrapper = await mountView()
+    await openTab(wrapper, 'hits')
     const old = deferred<never>()
     api.hitStats.mockReturnValueOnce(old.promise).mockResolvedValueOnce({ data: [] })
     const hours = wrapper.get('[data-test="intent-hits"]').findAll('select')[1]
@@ -150,6 +167,7 @@ describe('IntentRoutersView', () => {
         rule: 'coding', keyword: '动画', user_turn: 1, message_chars: 3000, excerpt: '…给按钮加个动画效果…', account_id: 21, input_tokens: 95000, total_cost: 0.9 },
     ], total: 1 } })
     const wrapper = await mountView()
+    await openTab(wrapper, 'hits')
 
     expect(api.hitStats).toHaveBeenCalledWith({ group_id: undefined, hours: 24 })
     const section = wrapper.get('[data-test="intent-hits"]')
@@ -169,7 +187,8 @@ describe('IntentRoutersView', () => {
   it('opens the configured group, shows its rules and flags accounts that vanished', async () => {
     const wrapper = await mountView()
 
-    expect(wrapper.get('[data-test="intent-group-1"]').text()).toContain('intentRouter.status.on')
+    // Account 99 is gone, so the configured group shows a broken target.
+    expect(wrapper.get('[data-test="intent-group-1"]').text()).toContain('intentRouter.status.problem')
     expect(wrapper.get('[data-test="intent-group-2"]').text()).toContain('intentRouter.status.none')
     expect((wrapper.get('[data-test="intent-rule-name"]').element as HTMLInputElement).value).toBe('coding')
     const rule = wrapper.get('[data-test="intent-rule-0"]').text()
@@ -442,9 +461,10 @@ describe('IntentRoutersView', () => {
     expect(day).toContain('10-29')
     expect(day).toContain('$0.0029 / ¥0.0206')
     const balance = status.get('[data-test="intent-jev-balance-estimate"]')
-    expect(balance.text()).toContain('"estimated":"$0.78"')
+    expect(balance.text()).toContain('$0.78')
+    expect(balance.attributes('title')).toContain('"estimated":"$0.78"')
     expect(balance.text()).toContain('intentRouter.jev.status.lowBalance')
-    expect(balance.classes()).toContain('text-red-700')
+    expect(balance.find('.bg-red-500').exists()).toBe(true)
   })
 
   it('sends a newly entered balance once, and follows a switch-off made by the server', async () => {
@@ -623,8 +643,12 @@ describe('IntentRoutersView', () => {
   it('says when an admin judgement decided the try-it result', async () => {
     api.test.mockResolvedValue({ data: { matched_by: 'manual', manual_label: 'probe', template_key: 'a'.repeat(64), answer: '', intent: 'coding', understood: true, account_ids: [21], latency_ms: 0 } })
     const wrapper = await mountView()
+    expect(api.templates).not.toHaveBeenCalled() // loaded on first visit
+    expect(wrapper.find('[data-test="template-review"]').exists()).toBe(false)
+    await openTab(wrapper, 'templates')
     expect(api.templates).toHaveBeenCalled()
     expect(wrapper.find('[data-test="template-review"]').exists()).toBe(true)
+    await openTab(wrapper, 'config')
     await wrapper.get('[data-test="intent-test-text"]').setValue('{"fp":"7Q2K"}')
     await wrapper.get('[data-test="intent-test-run"]').trigger('click')
     await flushPromises()
@@ -700,9 +724,175 @@ describe('IntentRoutersView', () => {
     const wrapper = await mountView()
     await wrapper.get('[data-test="intent-group-2"]').trigger('click')
     expect(wrapper.find('[data-test="intent-rule-0"]').exists()).toBe(false)
-    expect((wrapper.get('[data-test="intent-enabled"]').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.get('[data-test="intent-enabled"]').attributes('aria-checked')).toBe('false')
     expect(wrapper.find('[data-test="intent-test-text"]').exists()).toBe(false) // nothing saved to try yet
     await wrapper.get('[data-test="intent-add-rule"]').trigger('click')
     expect(wrapper.find('[data-test="intent-rule-0"]').exists()).toBe(true)
+  })
+
+  function button(wrapper: VueWrapper, text: string) {
+    const found = wrapper.findAll('button').find((b) => b.text() === text)
+    if (!found) throw new Error(`no button ${text}`)
+    return found
+  }
+
+  it('opens the tab, group and section named in the URL, and keeps the URL current', async () => {
+    api.list.mockResolvedValue({ data: [savedRouter, { ...savedRouter, group_id: 2 }] })
+    const router = makeRouter()
+    const wrapper = await mountView({ tab: 'config', group: '2', sub: 'settings' }, router)
+    expect(wrapper.get('[data-test="intent-sub-settings"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-test="intent-group-2"]').classes()).toContain('bg-primary-50')
+    await wrapper.get('[data-test="intent-sub-jev"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query).toMatchObject({ tab: 'config', group: '2', sub: 'jev' })
+    await wrapper.get('[data-test="intent-group-1"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query.group).toBe('1')
+  })
+
+  it('falls back to the first configured group and the rules for unknown URL values', async () => {
+    const router = makeRouter()
+    const wrapper = await mountView({ tab: 'nope', group: '999', sub: 'nope' }, router)
+    expect(wrapper.get('[data-test="intent-tab-config"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-test="intent-sub-rules"]').attributes('aria-selected')).toBe('true')
+    expect(router.currentRoute.value.query).toMatchObject({ tab: 'config', group: '1', sub: 'rules' })
+  })
+
+  it('loads the routing log and keyword hits only when their tab is first opened', async () => {
+    const wrapper = await mountView()
+    expect(api.events).not.toHaveBeenCalled()
+    expect(api.hitStats).not.toHaveBeenCalled()
+    await openTab(wrapper, 'hits')
+    expect(api.events).toHaveBeenCalledTimes(1)
+    expect(api.hitStats).toHaveBeenCalledTimes(1)
+    await openTab(wrapper, 'config')
+    await openTab(wrapper, 'hits')
+    expect(api.events).toHaveBeenCalledTimes(1) // kept, not reloaded
+  })
+
+  it('asks before switching groups with unsaved edits, and stays when told to', async () => {
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-rule-name"]').setValue('renamed')
+    expect(wrapper.get('[data-test="intent-save-bar"]').text()).toContain('intentRouter.saveBar.unsaved')
+    await wrapper.get('[data-test="intent-group-2"]').trigger('click')
+    expect(wrapper.text()).toContain('intentRouter.leave.message')
+    await button(wrapper, 'intentRouter.leave.stay').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('[data-test="intent-rule-name"]').element as HTMLInputElement).value).toBe('renamed')
+    await wrapper.get('[data-test="intent-group-2"]').trigger('click')
+    await button(wrapper, 'intentRouter.leave.discard').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="intent-rule-0"]').exists()).toBe(false) // group 2 has no router
+  })
+
+  it('discards edits of the routing configuration from the save bar', async () => {
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-rule-name"]').setValue('renamed')
+    await wrapper.get('[data-test="intent-discard"]').trigger('click')
+    expect((wrapper.get('[data-test="intent-rule-name"]').element as HTMLInputElement).value).toBe('coding')
+    expect(wrapper.get('[data-test="intent-save-bar"]').text()).toContain('intentRouter.saveBar.saved')
+  })
+
+  it('counts unsaved extras as edits worth asking about, and points to them', async () => {
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="monitor-answer-enabled"]').setValue(true)
+    await flushPromises()
+    const bar = wrapper.get('[data-test="intent-save-bar"]')
+    expect(bar.text()).toContain('intentRouter.saveBar.saved') // the routing form itself is clean
+    await bar.get('[data-test="intent-extras-unsaved"]').trigger('click')
+    expect(wrapper.get('[data-test="intent-sub-extras"]').attributes('aria-selected')).toBe('true')
+    await wrapper.get('[data-test="intent-group-2"]').trigger('click')
+    expect(wrapper.text()).toContain('intentRouter.leave.message')
+  })
+
+  it('guards a page reload only while something is unsaved', async () => {
+    const add = vi.spyOn(window, 'addEventListener')
+    const remove = vi.spyOn(window, 'removeEventListener')
+    const wrapper = await mountView()
+    expect(add.mock.calls.some(([type]) => type === 'beforeunload')).toBe(false)
+    await wrapper.get('[data-test="intent-rule-name"]').setValue('renamed')
+    expect(add.mock.calls.some(([type]) => type === 'beforeunload')).toBe(true)
+    await wrapper.get('[data-test="intent-discard"]').trigger('click')
+    expect(remove.mock.calls.some(([type]) => type === 'beforeunload')).toBe(true)
+    add.mockRestore()
+    remove.mockRestore()
+  })
+
+  it('reorders rules with the up and down buttons and saves that order', async () => {
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, rules: [
+      { name: 'first', description: '', keywords: ['a'], account_ids: [21], enabled: true },
+      { name: 'second', description: '', keywords: ['b'], account_ids: [22], enabled: true },
+    ] }] })
+    api.save.mockImplementation(async (_id: number, input: unknown) => ({ data: { ...savedRouter, ...(input as object) } }))
+    const wrapper = await mountView()
+    expect(wrapper.get('[data-test="intent-rule-up-0"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="intent-rule-down-1"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="intent-rule-down-0"]').trigger('click')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].rules.map((r: { name: string }) => r.name)).toEqual(['second', 'first'])
+  })
+
+  it('collapses rules to one line and opens one in place', async () => {
+    const wrapper = await mountView()
+    const editor = wrapper.get('[data-test="intent-rule-name"]').element.closest('div[style]') as HTMLElement
+    expect(editor.style.display).toBe('none')
+    await wrapper.get('[data-test="intent-rule-toggle-0"]').trigger('click')
+    expect(editor.style.display).toBe('')
+  })
+
+  it('shows a configured group with healthy targets as green and an unconfigured one as grey', async () => {
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, rules: [{ name: 'coding', description: '', keywords: ['x'], account_ids: [21], enabled: true }] }] })
+    const wrapper = await mountView()
+    expect(wrapper.get('[data-test="intent-group-1"]').find('.bg-green-500').exists()).toBe(true)
+    expect(wrapper.get('[data-test="intent-group-2"]').find('.bg-green-500').exists()).toBe(false)
+    expect(wrapper.get('[data-test="intent-group-2"]').text()).toContain('intentRouter.status.none')
+  })
+
+  it('draws the routing flow from the form: keywords, templates, Jev readiness and the classifier', async () => {
+    const wrapper = await mountView()
+    const flow = () => wrapper.get('[data-test="intent-flow"]')
+    // savedRouter: a stored classifier key and a rule with a description, no keywords.
+    expect(flow().find('[data-test="intent-flow-classifier"]').exists()).toBe(true)
+    expect(flow().get('[data-test="intent-flow-keyword"]').text()).toContain('intentRouter.flow.none')
+    expect(flow().get('[data-test="intent-flow-jev"]').text()).toContain('intentRouter.flow.off')
+    expect(flow().text()).toContain('intentRouter.flow.unavailable:{"status":503}')
+    await wrapper.get('[data-test="intent-jev-enabled"]').setValue(true)
+    expect(flow().get('[data-test="intent-flow-jev"]').text()).toContain('intentRouter.flow.jev.pending')
+  })
+
+  it('reports Jev as incomplete without a key or a usable target, and as paused or auto-disabled from its status', async () => {
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, jev: { enabled: true, rule: '' }, jev_api_key_configured: false }] })
+    api.jevStatus.mockResolvedValue({ data: { state: 'paused', days: [], usd_per_mtok: 0.042, cny_per_usd: 7 } })
+    const wrapper = await mountView()
+    const jev = () => wrapper.get('[data-test="intent-flow-jev"]').text()
+    expect(jev()).toContain('intentRouter.flow.jev.incomplete')
+    await wrapper.get('[data-test="intent-jev-api-key"]').setValue('secret')
+    await wrapper.get('[data-test="intent-jev-rule"]').setValue('coding')
+    expect(jev()).toContain('intentRouter.flow.jev.paused')
+    wrapper.unmount()
+
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, jev: { enabled: true, rule: 'coding' }, jev_api_key_configured: true }] })
+    api.jevStatus.mockResolvedValue({ data: { state: 'auto_disabled', auto_disabled_status: 402, days: [], usd_per_mtok: 0.042, cny_per_usd: 7 } })
+    const after = await mountView()
+    // The page follows the server's switch-off; the flow keeps showing the failure.
+    expect(after.get('[data-test="intent-flow-jev"]').text()).toContain('intentRouter.flow.jev.autoDisabled')
+  })
+
+  it('hides the classifier step when no active rule has a description', async () => {
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, rules: [{ name: 'coding', description: '', keywords: ['x'], account_ids: [21], enabled: true }] }] })
+    const wrapper = await mountView()
+    expect(wrapper.find('[data-test="intent-flow-classifier"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="intent-flow-keyword"]').text()).toContain('intentRouter.flow.ruleCount:{"n":1}')
+  })
+
+  it('confirms before deleting a group\'s configuration', async () => {
+    api.remove.mockResolvedValue({})
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-delete"]').trigger('click')
+    expect(api.remove).not.toHaveBeenCalled()
+    await button(wrapper, 'common.delete').trigger('click')
+    await flushPromises()
+    expect(api.remove).toHaveBeenCalledWith(1)
   })
 })

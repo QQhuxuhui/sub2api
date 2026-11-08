@@ -1,27 +1,30 @@
 <template>
   <div class="card space-y-4 p-5" data-test="stream-prelude">
-    <div class="flex items-start justify-between gap-3">
-      <label class="flex items-start gap-3">
-        <input v-model="form.enabled" data-test="stream-prelude-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-        <span>
-          <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('intentRouter.streamPrelude.title') }}</span>
-          <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.streamPrelude.intro') }}</span>
-        </span>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <label class="flex min-w-0 items-center gap-2.5">
+        <input v-model="form.enabled" data-test="stream-prelude-enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+        <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('intentRouter.streamPrelude.title') }}</span>
+        <InfoTip :text="t('intentRouter.streamPrelude.intro')" :label="t('intentRouter.streamPrelude.title')" />
+        <span v-if="status" data-test="stream-prelude-badge" class="rounded-full bg-primary-50 px-2 py-0.5 text-xs tabular-nums text-primary-700 dark:bg-primary-900/30 dark:text-primary-300" :title="t('intentRouter.streamPrelude.today', { n: status.days[0]?.sent ?? 0, failed: status.days[0]?.failed ?? 0 })">{{ status.days[0]?.sent ?? 0 }}</span>
+        <span v-if="status && (status.days[0]?.failed ?? 0) > 0" class="text-xs text-red-600 dark:text-red-400">{{ t('intentRouter.streamPrelude.failedToday', { n: status.days[0]?.failed ?? 0 }) }}</span>
       </label>
-      <button type="button" data-test="stream-prelude-save" class="btn btn-primary btn-sm shrink-0" :disabled="loading || saving || !dirty" @click="save">
-        {{ saving ? t('common.saving') : t('common.save') }}
-      </button>
+      <div class="flex items-center gap-2">
+        <span v-if="dirty" class="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300"><span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>{{ t('intentRouter.unsaved') }}</span>
+        <span v-else class="text-xs text-gray-400">{{ t('intentRouter.savedSeparately') }}</span>
+        <button type="button" data-test="stream-prelude-save" class="btn btn-primary btn-sm shrink-0" :disabled="loading || saving || !dirty" @click="save">
+          {{ saving ? t('common.saving') : t('common.save') }}
+        </button>
+      </div>
     </div>
 
     <div>
-      <label class="input-label">{{ t('intentRouter.streamPrelude.delay') }}</label>
+      <label class="input-label flex items-center gap-1">{{ t('intentRouter.streamPrelude.delay') }} <InfoTip :text="t('intentRouter.streamPrelude.delayHint')" :label="t('intentRouter.streamPrelude.delay')" /></label>
       <div class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
         <input v-model.number="form.delayMin" data-test="stream-prelude-delay-min" type="number" min="0" max="10000" step="100" class="input w-28" />
         <span>~</span>
         <input v-model.number="form.delayMax" data-test="stream-prelude-delay-max" type="number" min="0" max="10000" step="100" class="input w-28" />
         <span>ms</span>
       </div>
-      <p class="input-hint">{{ t('intentRouter.streamPrelude.delayHint') }}</p>
     </div>
 
     <div>
@@ -33,11 +36,12 @@
       <ScopePicker v-if="form.scope === 'listed'" v-model:users="form.users" v-model:keys="form.keys" test-prefix="stream-prelude" class="mt-3" />
     </div>
 
-    <div v-if="status" data-test="stream-prelude-status" class="space-y-3 rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800">
-      <div class="flex items-center justify-between">
-        <span class="text-gray-700 dark:text-gray-300">{{ t('intentRouter.streamPrelude.today', { n: status.days[0]?.sent ?? 0, failed: status.days[0]?.failed ?? 0 }) }}</span>
-        <button type="button" class="text-xs text-primary-600 hover:underline dark:text-primary-400" @click="loadStatus">{{ t('intentRouter.jev.status.refresh') }}</button>
-      </div>
+    <details v-if="status" data-test="stream-prelude-status" class="text-sm">
+      <summary class="flex cursor-pointer select-none items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
+        <span>{{ t('intentRouter.details') }} · {{ t('intentRouter.streamPrelude.today', { n: status.days[0]?.sent ?? 0, failed: status.days[0]?.failed ?? 0 }) }}</span>
+        <button type="button" class="text-xs text-primary-600 hover:underline dark:text-primary-400" @click.prevent="loadStatus">{{ t('intentRouter.jev.status.refresh') }}</button>
+      </summary>
+      <div class="mt-2 space-y-3 rounded-lg bg-gray-50 p-3 dark:bg-dark-800">
       <div class="overflow-x-auto">
         <table class="min-w-full text-xs">
           <thead class="text-left text-gray-500 dark:text-gray-400">
@@ -91,7 +95,8 @@
           </table>
         </div>
       </div>
-    </div>
+      </div>
+    </details>
   </div>
 </template>
 
@@ -102,10 +107,12 @@ import { intentRoutersAPI } from '@/api/admin/intentRouters'
 import type { OpenAIStreamPreludeConfig, OpenAIStreamPreludeStatus, OpenAIStreamPreludeView } from '@/api/admin/intentRouters'
 import { useAppStore } from '@/stores/app'
 import { extractI18nErrorMessage } from '@/utils/apiError'
+import InfoTip from './InfoTip.vue'
 import ScopePicker from './ScopePicker.vue'
 import type { ScopeKey, ScopeUser } from './ScopePicker.vue'
 
 const props = defineProps<{ groupId: number }>()
+const emit = defineEmits<{ 'dirty-change': [dirty: boolean] }>()
 const { t } = useI18n()
 const appStore = useAppStore()
 
@@ -121,6 +128,8 @@ function toConfig(): OpenAIStreamPreludeConfig {
   return { enabled: form.enabled, delay_min_ms: Number(form.delayMin) || 0, delay_max_ms: Number(form.delayMax) || 0, scope: form.scope, user_ids: form.users.map((u) => u.id), api_keys: form.keys.map((k) => ({ id: k.id })) }
 }
 const dirty = computed(() => JSON.stringify(toConfig()) !== baseline.value)
+// Nothing typed before this group's setting arrived can be lost.
+watch(() => dirty.value && !loading.value, (now) => emit('dirty-change', now), { immediate: true })
 
 function fill(view: OpenAIStreamPreludeView) {
   const userLabels = new Map(view.scope_labels.users.map((u) => [u.id, u.email]))

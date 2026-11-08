@@ -1,703 +1,171 @@
 <template>
   <AppLayout>
-    <div class="space-y-6">
-      <div>
-        <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ t('intentRouter.title') }}</h1>
-        <p class="mt-1 max-w-4xl text-sm text-gray-500 dark:text-gray-400">{{ t('intentRouter.description') }}</p>
-        <p class="mt-2 max-w-4xl rounded-lg bg-gray-50 p-3 text-sm leading-6 text-gray-600 dark:bg-dark-800 dark:text-gray-300">
-          {{ t('intentRouter.howItWorks') }}
-        </p>
+    <div class="space-y-5">
+      <!-- The three places this page has (the layout header carries the title) -->
+      <div class="border-b border-gray-200 dark:border-dark-700">
+        <nav class="-mb-px flex overflow-x-auto" role="tablist">
+          <button
+            v-for="item in TABS"
+            :key="item"
+            type="button"
+            role="tab"
+            :data-test="`intent-tab-${item}`"
+            :aria-selected="tab === item"
+            :class="['ir-tab', tab === item ? 'ir-tab-active' : 'ir-tab-inactive']"
+            @click="setTab(item)"
+          >{{ t(`intentRouter.tabs.${item}`) }}</button>
+        </nav>
       </div>
 
       <div v-if="loading" class="flex items-center justify-center py-16">
         <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"></div>
       </div>
 
-      <div v-else class="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <!-- Groups -->
-        <aside class="card h-fit p-3">
-          <p class="px-2 pb-2 text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('intentRouter.groups') }}</p>
-          <input v-model.trim="groupSearch" type="search" class="input mb-2" :placeholder="t('intentRouter.searchGroups')" />
-          <p v-if="filteredGroups.length === 0" class="px-2 py-4 text-sm text-gray-500 dark:text-gray-400">{{ t('intentRouter.noGroups') }}</p>
-          <ul class="max-h-[32rem] space-y-1 overflow-y-auto">
-            <li v-for="group in filteredGroups" :key="group.id">
-              <button
-                type="button"
-                :data-test="`intent-group-${group.id}`"
-                :class="[
-                  'flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors',
-                  selectedGroupId === group.id
-                    ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'
-                    : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-dark-700',
-                ]"
-                @click="selectGroup(group.id)"
-              >
-                <span class="min-w-0">
-                  <span class="block truncate font-medium">{{ group.name }}</span>
-                  <span class="block text-xs text-gray-500 dark:text-gray-400">{{ group.platform }}</span>
-                </span>
-                <span :class="['flex-shrink-0 rounded-full px-2 py-0.5 text-xs', statusClass(group.id)]">
-                  {{ t(`intentRouter.status.${routerStatus(group.id)}`) }}
-                </span>
-              </button>
-            </li>
-          </ul>
-          <button type="button" class="btn btn-secondary mt-3 w-full text-sm" :disabled="busy" @click="clearCache(0)">
-            {{ t('intentRouter.actions.clearCacheAll') }}
-          </button>
-        </aside>
+      <template v-else>
+        <!-- Routing configuration -->
+        <div v-show="tab === 'config'" class="grid gap-5 lg:grid-cols-[17rem_minmax(0,1fr)]">
+          <GroupList :groups="groups" :selected-id="selectedGroupId" :status-of="groupStatus" :busy="busy" @select="requestGroup" @clear-all="clearCache(0)" />
 
-        <!-- Editor -->
-        <section v-if="selectedGroup" class="min-w-0 space-y-6">
-          <div class="card space-y-5 p-5">
-            <label class="flex items-start gap-3">
-              <input v-model="form.enabled" data-test="intent-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-              <span>
-                <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('intentRouter.enabled') }} — {{ selectedGroup.name }}</span>
-                <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.enabledHint') }}</span>
-              </span>
-            </label>
-            <div>
-              <label class="input-label">{{ t('intentRouter.excludedModels') }}</label>
-              <textarea v-model="form.excludedModelsText" data-test="intent-excluded-models" rows="2" class="input font-mono text-sm" :placeholder="t('intentRouter.excludedModelsPlaceholder')"></textarea>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.excludedModelsHint') }}</p>
-            </div>
-            <div>
-              <label class="input-label">{{ t('intentRouter.keywordMaxChars') }}</label>
-              <input v-model.number="form.keyword_max_chars" data-test="intent-keyword-max-chars" type="number" min="0" max="1000000" step="1" class="input w-40" />
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.keywordMaxCharsHint') }}</p>
-            </div>
-            <div>
-              <label class="input-label">{{ t('intentRouter.unavailableStatus') }}</label>
-              <select v-model.number="form.unavailable_status" data-test="intent-unavailable-status" class="input w-40">
-                <option :value="503">503</option>
-                <option :value="502">502</option>
-                <option :value="429">429</option>
-              </select>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.unavailableStatusHint') }}</p>
-            </div>
-
-          </div>
-
-          <!-- Jev probe detection -->
-          <div class="card space-y-4 p-5" data-test="intent-jev">
-            <label class="flex items-start gap-3">
-              <input v-model="form.jev.enabled" data-test="intent-jev-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-              <span>
-                <span class="block text-base font-semibold text-gray-900 dark:text-white">{{ t('intentRouter.jev.title') }}</span>
-                <span class="mt-1 block text-sm leading-6 text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.intro') }}</span>
-              </span>
-            </label>
-            <div v-if="jevStatus" data-test="intent-jev-status" class="space-y-3 rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800">
-              <div class="flex flex-wrap items-center gap-2">
-                <span :class="['rounded-full px-2 py-0.5 text-xs', jevStateClass(jevStatus.state)]">{{ t(`intentRouter.jev.status.${jevStatus.state}`) }}</span>
-                <span v-if="jevStatus.state === 'normal' && jevStatus.last_success_at" class="text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.status.lastSuccess', { time: formatTime(jevStatus.last_success_at) }) }}</span>
-                <span v-if="jevStatus.state === 'paused'" class="text-amber-700 dark:text-amber-300">{{ t('intentRouter.jev.status.pausedUntil', { time: formatTime(jevStatus.paused_until ?? ''), reason: jevStatus.reason ?? '' }) }}</span>
-                <button type="button" class="ml-auto text-xs text-primary-600 hover:underline dark:text-primary-400" @click="selectedGroupId && loadJevStatus(selectedGroupId)">{{ t('intentRouter.jev.status.refresh') }}</button>
-              </div>
-              <p v-if="jevStatus.state === 'auto_disabled'" data-test="intent-jev-auto-disabled" class="text-red-700 dark:text-red-300">
-                {{ t('intentRouter.jev.status.autoDisabledAt', { time: jevStatus.auto_disabled_at ? formatTime(jevStatus.auto_disabled_at) : '—', status: jevStatus.auto_disabled_status ?? '—' }) }}
-                {{ jevAutoDisabledHint(jevStatus.auto_disabled_status) }}
-                <span class="block text-xs opacity-80">{{ jevStatus.auto_disabled_detail || jevStatus.reason }}</span>
-              </p>
-              <p v-if="jevStatus.balance" data-test="intent-jev-balance-estimate" :class="jevStatus.balance.low ? 'font-medium text-red-700 dark:text-red-300' : 'text-gray-700 dark:text-gray-300'">
-                {{ t('intentRouter.jev.status.balance', { estimated: formatUSD(jevStatus.balance.estimated_usd), set: formatUSD(jevStatus.balance.set_usd), at: formatTime(jevStatus.balance.set_at), spent: formatUSD(jevStatus.balance.spent_usd) }) }}
-                <span v-if="jevStatus.balance.low"> · {{ t('intentRouter.jev.status.lowBalance') }}</span>
-              </p>
-              <p v-else class="text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.status.noBalance') }}</p>
-              <div class="overflow-x-auto">
-                <table class="min-w-full text-xs">
-                  <thead class="text-left text-gray-500 dark:text-gray-400">
-                    <tr>
-                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.day') }}</th>
-                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.calls') }}</th>
-                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.skipped') }}</th>
-                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.probes') }}</th>
-                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.health') }}</th>
-                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.timely') }}</th>
-                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.errors') }}</th>
-                      <th class="py-1 pr-4">{{ t('intentRouter.jev.status.tokens') }}</th>
-                      <th class="py-1">{{ t('intentRouter.jev.status.cost') }}</th>
-                    </tr>
-                  </thead>
-                  <tbody class="text-gray-700 dark:text-gray-300">
-                    <tr v-for="day in jevStatus.days" :key="day.date" :data-test="`intent-jev-day-${day.date}`">
-                      <td class="py-1 pr-4">{{ formatDay(day.date) }}</td>
-                      <td class="py-1 pr-4">{{ day.calls }}</td>
-                      <td class="py-1 pr-4">{{ day.skipped }}</td>
-                      <td class="py-1 pr-4">{{ day.probes }}</td>
-                      <td class="py-1 pr-4">{{ day.health ?? 0 }}</td>
-                      <td class="py-1 pr-4" :title="t('intentRouter.jev.status.timelyTitle')">{{ day.timely_routed ?? 0 }} / {{ day.timely_hits ?? 0 }} / {{ day.timely_answered ?? 0 }}</td>
-                      <td class="py-1 pr-4">{{ day.errors }}</td>
-                      <td class="py-1 pr-4">{{ day.tokens }}</td>
-                      <td class="py-1">{{ formatUSD(day.cost_usd) }} / {{ formatCNY(day.cost_usd) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <div class="grid gap-4 md:grid-cols-2">
-              <div>
-                <label class="input-label">{{ t('intentRouter.jev.rule') }}</label>
-                <select v-model="form.jev.rule" data-test="intent-jev-rule" class="input">
-                  <option value="">{{ t('intentRouter.jev.rulePlaceholder') }}</option>
-                  <option v-for="name in ruleNames" :key="name" :value="name">{{ name }}</option>
-                </select>
-                <p v-if="jevRuleTargetText" data-test="intent-jev-rule-accounts" class="mt-1 text-xs text-gray-700 dark:text-gray-300">{{ t('intentRouter.jev.ruleAccounts', { accounts: jevRuleTargetText }) }}</p>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.ruleHint') }}</p>
-              </div>
-              <div>
-                <label class="input-label">{{ t('intentRouter.jev.apiKey') }}</label>
-                <input
-                  v-model.trim="form.jev_api_key"
-                  data-test="intent-jev-api-key"
-                  type="password"
-                  autocomplete="new-password"
-                  class="input"
-                  :placeholder="jevKeyConfigured ? t('intentRouter.classifier.apiKeyKeep') : t('intentRouter.jev.apiKeyPlaceholder')"
-                />
-              </div>
-              <div>
-                <label class="input-label">{{ t('intentRouter.jev.threshold') }}</label>
-                <input v-model.number="form.jev.threshold" data-test="intent-jev-threshold" type="number" min="0.05" max="1" step="0.05" class="input" />
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.thresholdHint') }}</p>
-              </div>
-              <div>
-                <label class="input-label">{{ t('intentRouter.jev.maxTurns') }}</label>
-                <input v-model.number="form.jev.max_turns" type="number" min="1" max="50" class="input" />
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.maxTurnsHint') }}</p>
-              </div>
-              <div>
-                <label class="input-label">{{ t('intentRouter.jev.timeout') }}</label>
-                <input v-model.number="form.jev.timeout_ms" type="number" min="200" max="5000" step="100" class="input" />
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.timeoutHint') }}</p>
-              </div>
-              <div>
-                <label class="input-label">{{ t('intentRouter.jev.model') }}</label>
-                <input v-model.trim="form.jev.model" type="text" class="input" placeholder="jev-latest" />
-              </div>
-            </div>
-            <div class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600" data-test="intent-jev-health">
-              <label class="flex items-start gap-3">
-                <input v-model="form.jev.health_enabled" data-test="intent-jev-health-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-                <span>
-                  <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('intentRouter.jev.health.enabled') }}</span>
-                  <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.health.enabledHint') }}</span>
-                </span>
-              </label>
-              <div v-if="form.jev.health_enabled" class="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label class="input-label">{{ t('intentRouter.jev.health.threshold') }}</label>
-                  <input v-model.number="form.jev.health_threshold" data-test="intent-jev-health-threshold" type="number" min="0.01" max="1" step="0.05" class="input" />
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.health.thresholdHint') }}</p>
+          <section v-if="selectedGroup" class="min-w-0 space-y-5">
+            <div class="card px-5 pt-4">
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div class="flex min-w-0 items-center gap-2">
+                  <h2 class="truncate text-lg font-semibold text-gray-900 dark:text-white">{{ selectedGroup.name }}</h2>
+                  <span class="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-400">{{ selectedGroup.platform }}</span>
                 </div>
-                <div>
-                  <label class="input-label">{{ t('intentRouter.jev.health.rule') }}</label>
-                  <select v-model="form.jev.health_rule" data-test="intent-jev-health-rule" class="input">
-                    <option value="">{{ t('intentRouter.jev.health.ruleNone') }}</option>
-                    <option v-for="name in ruleNames" :key="name" :value="name">{{ name }}</option>
-                  </select>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.health.ruleHint') }}</p>
-                </div>
-              </div>
-            </div>
-            <div class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600" data-test="intent-jev-timely">
-              <label class="flex items-start gap-3">
-                <input v-model="form.jev.timely_enabled" data-test="intent-jev-timely-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-                <span>
-                  <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('intentRouter.jev.timely.enabled') }}</span>
-                  <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.timely.enabledHint') }}</span>
-                </span>
-              </label>
-              <div v-if="form.jev.timely_enabled" class="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label class="input-label">{{ t('intentRouter.jev.timely.threshold') }}</label>
-                  <input v-model.number="form.jev.timely_threshold" data-test="intent-jev-timely-threshold" type="number" min="0.01" max="1" step="0.05" class="input" />
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.timely.thresholdHint') }}</p>
-                </div>
-                <div>
-                  <label class="input-label">{{ t('intentRouter.jev.timely.rule') }}</label>
-                  <select v-model="form.jev.timely_rule" data-test="intent-jev-timely-rule" class="input">
-                    <option value="">{{ t('intentRouter.jev.timely.ruleNone') }}</option>
-                    <option v-for="name in ruleNames" :key="name" :value="name">{{ name }}</option>
-                  </select>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.timely.ruleHint') }}</p>
-                </div>
-              </div>
-            </div>
-            <div class="grid gap-4 md:grid-cols-3">
-              <div>
-                <label class="input-label">{{ t('intentRouter.jev.samplePercent') }}</label>
-                <input v-model.number="form.jev.sample_percent" data-test="intent-jev-sample" type="number" min="1" max="100" class="input" />
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.samplePercentHint') }}</p>
-              </div>
-              <div>
-                <label class="input-label">{{ t('intentRouter.jev.setBalance') }}</label>
-                <input v-model="form.jevBalanceText" data-test="intent-jev-balance" type="number" min="0" step="0.01" class="input" :placeholder="t('intentRouter.jev.setBalancePlaceholder')" />
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.setBalanceHint') }} <a href="https://console.typesafe.ai" target="_blank" rel="noopener noreferrer" class="text-primary-600 hover:underline dark:text-primary-400">console.typesafe.ai</a></p>
-              </div>
-              <div>
-                <label class="input-label">{{ t('intentRouter.jev.lowBalance') }}</label>
-                <input v-model.number="form.jev.low_balance_usd" data-test="intent-jev-low-balance" type="number" min="0" step="0.5" class="input" />
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.lowBalanceHint') }}</p>
-              </div>
-            </div>
-            <div>
-              <label class="input-label">{{ t('intentRouter.jev.scope') }}</label>
-              <div class="flex flex-wrap gap-4 text-sm text-gray-700 dark:text-gray-300">
-                <label class="flex items-center gap-2"><input v-model="form.jev.scope" data-test="intent-jev-scope-all" type="radio" value="all" />{{ t('intentRouter.jev.scopeAll') }}</label>
-                <label class="flex items-center gap-2"><input v-model="form.jev.scope" data-test="intent-jev-scope-listed" type="radio" value="listed" />{{ t('intentRouter.jev.scopeListed') }}</label>
-              </div>
-              <div v-if="form.jev.scope === 'listed'" class="mt-3 grid gap-4 md:grid-cols-2">
-                <div>
-                  <label class="input-label">{{ t('intentRouter.jev.scopeUsers') }}</label>
-                  <div class="relative">
-                    <input v-model="jevUserQuery" data-test="intent-jev-user-search" type="text" class="input" :placeholder="t('intentRouter.jev.scopeUserSearch')" @input="searchJevUsers" />
-                    <div v-if="jevUserResults.length" class="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800">
-                      <button
-                        v-for="u in jevUserResults"
-                        :key="u.id"
-                        type="button"
-                        :data-test="`intent-jev-user-option-${u.id}`"
-                        class="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-dark-700"
-                        @click="addJevUser(u)"
-                      >#{{ u.id }} {{ u.email }}</button>
-                    </div>
-                  </div>
-                  <div class="mt-2 flex flex-wrap gap-2">
-                    <span v-for="u in form.jevUsers" :key="u.id" :data-test="`intent-jev-user-${u.id}`" class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs dark:bg-dark-700">
-                      #{{ u.id }} {{ u.email || t('intentRouter.jev.scopeDeleted') }}
-                      <button type="button" class="text-gray-500 hover:text-red-600" :aria-label="t('intentRouter.jev.scopeRemove')" @click="removeJevUser(u.id)">×</button>
-                    </span>
-                  </div>
-                </div>
-                <div>
-                  <label class="input-label">{{ t('intentRouter.jev.scopeKeys') }}</label>
-                  <div class="relative">
-                    <input
-                      v-model="jevKeyQuery"
-                      data-test="intent-jev-key-search"
-                      type="text"
-                      class="input"
-                      :disabled="!form.jevUsers.length"
-                      :placeholder="form.jevUsers.length ? t('intentRouter.jev.scopeKeyPlaceholder') : t('intentRouter.jev.scopeKeyChooseUserFirst')"
-                      @focus="openJevKeyPicker"
-                      @input="searchJevKeys"
-                    />
-                    <div v-if="jevKeyPickerOpen && form.jevUsers.length" data-test="intent-jev-key-results" class="absolute z-10 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800">
-                      <template v-for="u in form.jevUsers" :key="u.id">
-                        <div class="bg-gray-50 px-3 py-1 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-400">#{{ u.id }} {{ u.email }}</div>
-                        <button
-                          v-for="k in jevKeyChoices(u.id)"
-                          :key="k.id"
-                          type="button"
-                          :data-test="`intent-jev-key-option-${k.id}`"
-                          class="block w-full px-3 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-dark-700"
-                          @click="addJevKey(k)"
-                        >{{ k.name }}（#{{ k.id }}）</button>
-                        <p v-if="!jevKeyChoices(u.id).length" class="px-3 py-1.5 text-xs text-gray-400">{{ t('intentRouter.jev.scopeKeyNone') }}</p>
-                        <p v-else-if="(jevUserKeys[u.id] ?? []).length >= JEV_KEY_PAGE" class="px-3 py-1 text-xs text-gray-400">{{ t('intentRouter.jev.scopeKeyMore', { n: JEV_KEY_PAGE }) }}</p>
-                      </template>
-                      <button type="button" class="block w-full border-t border-gray-100 px-3 py-1.5 text-right text-xs text-gray-500 hover:text-gray-700 dark:border-dark-600" @click="jevKeyPickerOpen = false">{{ t('intentRouter.jev.scopeKeyClose') }}</button>
-                    </div>
-                  </div>
-                  <div class="mt-2 flex flex-wrap gap-2">
-                    <span v-for="k in form.jevKeys" :key="k.id" :data-test="`intent-jev-key-${k.id}`" class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs dark:bg-dark-700">
-                      {{ k.name || t('intentRouter.jev.scopeDeleted') }}（#{{ k.id }} · {{ jevUserEmail(k.user_id) }}）
-                      <button type="button" class="text-gray-500 hover:text-red-600" :aria-label="t('intentRouter.jev.scopeRemove')" @click="removeJevKey(k.id)">×</button>
-                    </span>
-                  </div>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.jev.scopeKeysHint') }}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Answering channel-monitor challenges: the group's own setting, saved on its own -->
-          <MonitorAnswerCard :group-id="selectedGroup.id" />
-
-          <!-- Early first event on OpenAI streams: the group's own setting, saved on its own -->
-          <StreamPreludeCard :group-id="selectedGroup.id" />
-
-          <!-- Rules -->
-          <div class="card space-y-4 p-5">
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('intentRouter.rules.title') }}</h2>
-                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('intentRouter.rules.intro') }}</p>
-              </div>
-              <button type="button" data-test="intent-add-rule" class="btn btn-secondary text-sm" @click="addRule">{{ t('intentRouter.rules.add') }}</button>
-            </div>
-            <p v-if="form.rules.length === 0" class="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500 dark:border-dark-600 dark:text-gray-400">
-              {{ t('intentRouter.rules.empty') }}
-            </p>
-
-            <div v-for="(rule, index) in form.rules" :key="rule.uid" :data-test="`intent-rule-${index}`" class="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-dark-600">
-              <div class="grid gap-3 md:grid-cols-[14rem_minmax(0,1fr)]">
-                <div>
-                  <label class="input-label">{{ t('intentRouter.rules.name') }}</label>
-                  <input v-model.trim="rule.name" data-test="intent-rule-name" type="text" maxlength="40" class="input" :placeholder="t('intentRouter.rules.namePlaceholder')" />
-                </div>
-              </div>
-
-              <div>
-                <label class="input-label">{{ t('intentRouter.rules.keywords') }}</label>
-                <textarea v-model="rule.keywordsText" data-test="intent-rule-keywords" rows="2" class="input" :placeholder="t('intentRouter.rules.keywordsPlaceholder')"></textarea>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.rules.keywordsHint') }}</p>
-              </div>
-
-              <div>
-                <label class="input-label">{{ t('intentRouter.rules.target') }}</label>
-                <div class="flex flex-wrap gap-4 text-sm text-gray-700 dark:text-gray-300">
-                  <label class="flex items-center gap-2"><input :checked="rule.target === 'accounts'" data-test="intent-rule-target-accounts" type="radio" :name="`intent-rule-target-${rule.uid}`" @change="setRuleTarget(rule, 'accounts')" />{{ t('intentRouter.rules.targetAccounts') }}</label>
-                  <label class="flex items-center gap-2"><input :checked="rule.target === 'key'" data-test="intent-rule-target-key" type="radio" :name="`intent-rule-target-${rule.uid}`" @change="setRuleTarget(rule, 'key')" />{{ t('intentRouter.rules.targetKey') }}</label>
-                </div>
-              </div>
-
-              <div v-if="rule.target === 'key'">
-                <label class="input-label">{{ t('intentRouter.rules.apiKey') }}</label>
-                <div v-if="rule.api_key_id" class="flex flex-wrap gap-2">
-                  <span
-                    data-test="intent-rule-key-chip"
-                    :class="[
-                      'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs',
-                      keyProblem(rule.api_key_id)
-                        ? 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                        : 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-200',
-                    ]"
-                  >
-                    {{ keyLabel(rule.api_key_id) }}
-                    <span v-if="keyProblem(rule.api_key_id)">· {{ keyProblem(rule.api_key_id) }}</span>
-                    <button type="button" class="ml-0.5 text-gray-400 hover:text-red-500" :aria-label="t('common.delete')" @click="rule.api_key_id = 0">×</button>
-                  </span>
-                </div>
-                <input
-                  v-model.trim="rule.keySearch"
-                  data-test="intent-key-search"
-                  type="search"
-                  class="input mt-2"
-                  :placeholder="t('intentRouter.rules.searchKeys')"
-                  @input="searchRuleKeys(rule)"
-                />
-                <ul v-if="rule.keySearch" class="mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 dark:border-dark-600">
-                  <li v-if="(keyResults[rule.uid] ?? []).length === 0" class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">{{ t('intentRouter.rules.noKeys') }}</li>
-                  <li v-for="key in keyResults[rule.uid] ?? []" :key="key.id">
-                    <button
-                      type="button"
-                      :data-test="`intent-key-option-${key.id}`"
-                      class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-dark-700"
-                      :disabled="key.problem !== ''"
-                      @click="chooseRuleKey(rule, key)"
-                    >
-                      <span class="min-w-0 truncate text-gray-900 dark:text-white">#{{ key.id }} {{ key.name }} <span class="text-gray-500 dark:text-gray-400">· {{ key.user_email || `#${key.user_id}` }}</span></span>
-                      <span class="flex-shrink-0 text-xs text-gray-500 dark:text-gray-400">{{ key.problem ? keyProblemText(key.problem) : `${key.group_name} · ${key.group_platform}` }}</span>
-                    </button>
-                  </li>
-                </ul>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.rules.keyHint') }}</p>
-              </div>
-
-              <div v-else>
-                <label class="input-label">{{ t('intentRouter.rules.accounts') }}</label>
-                <div class="flex flex-wrap gap-2">
-                  <span
-                    v-for="id in rule.account_ids"
-                    :key="id"
-                    :class="[
-                      'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs',
-                      accountProblem(id)
-                        ? 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                        : 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-200',
-                    ]"
-                  >
-                    {{ accountLabel(id) }}
-                    <span v-if="accountProblem(id)">· {{ accountProblem(id) }}</span>
-                    <button type="button" class="ml-0.5 text-gray-400 hover:text-red-500" :aria-label="t('common.delete')" @click="removeAccount(rule, id)">×</button>
-                  </span>
-                </div>
-                <input
-                  v-model.trim="rule.search"
-                  data-test="intent-account-search"
-                  type="search"
-                  class="input mt-2"
-                  :placeholder="t('intentRouter.rules.searchAccounts')"
-                />
-                <ul v-if="rule.search" class="mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 dark:border-dark-600">
-                  <li v-if="accountMatches(rule).length === 0" class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">{{ t('intentRouter.rules.noAccounts') }}</li>
-                  <li v-for="account in accountMatches(rule)" :key="account.id">
-                    <button
-                      type="button"
-                      :data-test="`intent-account-option-${account.id}`"
-                      class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-dark-700"
-                      @click="addAccount(rule, account.id)"
-                    >
-                      <span class="min-w-0 truncate text-gray-900 dark:text-white">#{{ account.id }} {{ account.name }}</span>
-                      <span class="flex-shrink-0 text-xs text-gray-500 dark:text-gray-400">{{ account.platform }}</span>
-                    </button>
-                  </li>
-                </ul>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.rules.accountsHint') }}</p>
-              </div>
-
-              <div class="flex items-center justify-between">
-                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                  <input v-model="rule.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-                  {{ t('intentRouter.rules.ruleEnabled') }}
+                <label class="ml-auto flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <span>{{ form.enabled ? t('intentRouter.enabledOn') : t('intentRouter.enabledOff') }}</span>
+                  <Toggle v-model="form.enabled" data-test="intent-enabled" :aria-label="t('intentRouter.enabled')" />
                 </label>
-                <button type="button" class="text-sm text-red-600 hover:underline dark:text-red-400" @click="form.rules.splice(index, 1)">{{ t('intentRouter.rules.remove') }}</button>
+              </div>
+              <nav class="-mx-2 mt-2 flex overflow-x-auto" role="tablist">
+                <button
+                  v-for="item in SUBS"
+                  :key="item"
+                  type="button"
+                  role="tab"
+                  :data-test="`intent-sub-${item}`"
+                  :aria-selected="sub === item"
+                  :class="['ir-tab', sub === item ? 'ir-tab-active' : 'ir-tab-inactive']"
+                  @click="setSub(item)"
+                >
+                  {{ t(`intentRouter.subs.${item}`) }}
+                  <StatusDot v-if="item === 'jev' && form.jev.enabled" :tone="jevTone" :label="t('intentRouter.subs.jev')" />
+                  <span v-if="item === 'extras' && extrasDirty" class="h-1.5 w-1.5 rounded-full bg-amber-500" :title="t('intentRouter.unsaved')"></span>
+                </button>
+              </nav>
+            </div>
+
+            <div v-show="sub === 'rules'" class="card space-y-6 p-5">
+              <RouteFlow />
+              <RuleList />
+              <div v-if="savedRouter" class="border-t border-gray-100 pt-5 dark:border-dark-700">
+                <TryItPanel />
               </div>
             </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-3">
-            <button type="button" data-test="intent-save" class="btn btn-primary" :disabled="busy" @click="save">
-              {{ saving ? t('intentRouter.actions.saving') : t('intentRouter.actions.save') }}
-            </button>
-            <button v-if="savedRouter" type="button" class="btn btn-secondary" :disabled="busy" @click="clearCache(selectedGroup.id)">{{ t('intentRouter.actions.clearCache') }}</button>
-            <button v-if="savedRouter" type="button" class="ml-auto text-sm text-red-600 hover:underline dark:text-red-400" :disabled="busy" @click="removeRouter">
-              {{ t('intentRouter.actions.delete') }}
-            </button>
-          </div>
-
-          <!-- Try it -->
-          <div v-if="savedRouter" class="card space-y-3 p-5">
-            <div>
-              <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('intentRouter.test.title') }}</h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('intentRouter.test.intro') }}</p>
+            <div v-show="sub === 'jev'" class="card p-5">
+              <JevPanel />
             </div>
-            <textarea v-model.trim="testText" data-test="intent-test-text" rows="3" class="input" :placeholder="t('intentRouter.test.placeholder')"></textarea>
-            <p v-if="dirty" class="text-sm text-amber-700 dark:text-amber-300">{{ t('intentRouter.test.saveFirst') }}</p>
-            <button type="button" data-test="intent-test-run" class="btn btn-secondary" :disabled="testing || dirty || !testText" @click="runTest">
-              {{ testing ? t('intentRouter.test.running') : t('intentRouter.test.run') }}
-            </button>
-            <div v-if="testResult" data-test="intent-test-result" class="rounded-lg bg-gray-50 p-3 text-sm leading-6 dark:bg-dark-800">
-              <p class="font-medium text-gray-900 dark:text-white">{{ testSummary }}</p>
-              <p v-if="testResult.manual_target_missing" data-test="intent-test-manual-missing" class="text-amber-700 dark:text-amber-300">
-                {{ t('intentRouter.test.byManualTargetMissing') }}
-              </p>
-              <p v-if="testResult.matched_by === 'keyword'" class="text-gray-500 dark:text-gray-400">
-                {{ t('intentRouter.test.byKeyword', { keyword: testResult.keyword }) }}
-              </p>
-              <p v-else-if="testResult.matched_by === 'manual'" data-test="intent-test-manual" class="text-gray-500 dark:text-gray-400">
-                {{ t('intentRouter.test.byManual', { label: t(`intentRouter.templates.status.${testResult.manual_label}`) }) }}
-              </p>
-              <p v-else-if="testResult.matched_by === 'jev'" class="text-gray-500 dark:text-gray-400">
-                {{ t('intentRouter.test.byJev', { p: (testResult.probe_probability ?? 0).toFixed(2) }) }}<template v-if="testResult.health_probability !== undefined"> · {{ t(testResult.health_check ? 'intentRouter.test.byJevHealthHit' : 'intentRouter.test.byJevHealth', { p: testResult.health_probability.toFixed(2) }) }}</template><template v-if="testResult.timely_probability !== undefined"> · <span data-test="intent-test-timely">{{ t(testResult.timely ? 'intentRouter.test.byJevTimelyHit' : 'intentRouter.test.byJevTimely', { p: testResult.timely_probability.toFixed(2) }) }}</span></template> · {{ t('intentRouter.test.latency', { ms: testResult.latency_ms }) }}
-              </p>
-              <p v-else-if="testResult.matched_by === 'classifier'" class="text-gray-500 dark:text-gray-400">
-                {{ t('intentRouter.test.answer', { answer: testResult.answer || '—' }) }} · {{ t('intentRouter.test.latency', { ms: testResult.latency_ms }) }}
-              </p>
-              <p v-if="testResult.matched_by === 'classifier' && testResult.probe_probability !== undefined" data-test="intent-test-jev-before" class="text-gray-500 dark:text-gray-400">
-                {{ t('intentRouter.test.byJev', { p: testResult.probe_probability.toFixed(2) }) }}<template v-if="testResult.health_probability !== undefined"> · {{ t('intentRouter.test.byJevHealth', { p: testResult.health_probability.toFixed(2) }) }}</template><template v-if="testResult.timely_probability !== undefined"> · {{ t('intentRouter.test.byJevTimely', { p: testResult.timely_probability.toFixed(2) }) }}</template><template v-if="testResult.jev_latency_ms !== undefined"> · {{ t('intentRouter.test.latency', { ms: testResult.jev_latency_ms }) }}</template>
-              </p>
+            <div v-show="sub === 'extras'" class="grid gap-5 xl:grid-cols-2">
+              <MonitorAnswerCard :group-id="selectedGroup.id" @dirty-change="extras.monitor = $event" />
+              <StreamPreludeCard :group-id="selectedGroup.id" @dirty-change="extras.prelude = $event" />
             </div>
-            <p v-if="testError" data-test="intent-test-error" class="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ testError }}</p>
-          </div>
-        </section>
-        <section v-else class="card p-8 text-sm text-gray-500 dark:text-gray-400">{{ t('intentRouter.selectGroup') }}</section>
-      </div>
-
-      <!-- Recent routing -->
-      <div v-if="!loading" class="card p-5">
-        <div class="flex items-center justify-between">
-          <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('intentRouter.events.title') }}</h2>
-          <button type="button" class="btn btn-secondary text-sm" :disabled="eventsLoading" @click="loadEvents">{{ t('intentRouter.events.refresh') }}</button>
-        </div>
-        <p v-if="events.length === 0" class="mt-3 text-sm text-gray-500 dark:text-gray-400">{{ t('intentRouter.events.empty') }}</p>
-        <div v-else class="mt-3 overflow-x-auto">
-          <table class="min-w-full text-left text-sm">
-            <thead class="text-xs text-gray-500 dark:text-gray-400">
-              <tr>
-                <th class="py-2 pr-4 font-medium">{{ t('intentRouter.events.time') }}</th>
-                <th class="py-2 pr-4 font-medium">{{ t('intentRouter.events.group') }}</th>
-                <th class="py-2 pr-4 font-medium">{{ t('intentRouter.events.kind') }}</th>
-                <th class="py-2 pr-4 font-medium">{{ t('intentRouter.events.intent') }}</th>
-                <th class="py-2 pr-4 font-medium">{{ t('intentRouter.events.account') }}</th>
-                <th class="py-2 pr-4 font-medium">{{ t('intentRouter.events.latency') }}</th>
-                <th class="py-2 font-medium">{{ t('intentRouter.events.detail') }}</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-              <tr v-for="(event, i) in events" :key="i" class="text-gray-700 dark:text-gray-300">
-                <td class="whitespace-nowrap py-2 pr-4 tabular-nums">{{ formatTime(event.time) }}</td>
-                <td class="whitespace-nowrap py-2 pr-4">{{ groupName(event.group_id) }}</td>
-                <td class="whitespace-nowrap py-2 pr-4">
-                  <span :class="['rounded-full px-2 py-0.5 text-xs', eventClass(event.kind)]">{{ t(`intentRouter.events.kinds.${event.kind}`) }}</span>
-                </td>
-                <td class="whitespace-nowrap py-2 pr-4">{{ event.kind === 'classified' && !event.intent ? t('intentRouter.events.noIntent') : event.intent || '—' }}</td>
-                <td class="whitespace-nowrap py-2 pr-4">{{ event.account_id ? accountLabel(event.account_id) : '—' }}</td>
-                <td class="whitespace-nowrap py-2 pr-4 tabular-nums">{{ event.latency_ms ? `${event.latency_ms} ms` : '—' }}</td>
-                <td class="max-w-md break-words py-2 text-xs text-gray-500 dark:text-gray-400">{{ event.kind === 'keyword' ? t('intentRouter.events.keywordDetail', { keyword: event.detail }) : event.detail || '' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Template judgements: global, not tied to the selected group -->
-      <TemplateReviewCard v-if="!loading" :group-names="groupNameMap" />
-
-      <!-- Keyword hit review -->
-      <div v-if="!loading" class="card p-5" data-test="intent-hits">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('intentRouter.hits.title') }}</h2>
-          <div class="flex flex-wrap items-center gap-2">
-            <select v-model.number="hitGroupId" class="input w-auto text-sm" @change="reloadHits">
-              <option :value="0">{{ t('intentRouter.hits.allGroups') }}</option>
-              <option v-for="id in routedGroupIds" :key="id" :value="id">{{ groupName(id) }}</option>
-            </select>
-            <select v-model.number="hitHours" class="input w-auto text-sm" @change="reloadHits">
-              <option v-for="h in HIT_HOURS" :key="h" :value="h">{{ t(`intentRouter.hits.hours.${h}`) }}</option>
-            </select>
-            <button type="button" class="btn btn-secondary text-sm" :disabled="hitsLoading" @click="reloadHits">{{ t('intentRouter.hits.refresh') }}</button>
-          </div>
-        </div>
-        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.hits.help') }}</p>
-        <p v-if="hitStats.length === 0" class="mt-3 text-sm text-gray-500 dark:text-gray-400">{{ t('intentRouter.hits.empty') }}</p>
-        <div v-else class="mt-3 overflow-x-auto">
-          <table class="min-w-full text-left text-sm">
-            <thead class="text-xs text-gray-500 dark:text-gray-400">
-              <tr>
-                <th class="py-2 pr-4 font-medium">{{ t('intentRouter.hits.keyword') }}</th>
-                <th class="py-2 pr-4 text-right font-medium">{{ t('intentRouter.hits.hitCount') }}</th>
-                <th class="py-2 pr-4 text-right font-medium">{{ t('intentRouter.hits.users') }}</th>
-                <th class="py-2 pr-4 text-right font-medium">{{ t('intentRouter.hits.apiKeys') }}</th>
-                <th class="py-2 pr-4 text-right font-medium">{{ t('intentRouter.hits.avgChars') }}</th>
-                <th class="py-2 pr-4 text-right font-medium">{{ t('intentRouter.hits.avgInputTokens') }}</th>
-                <th class="py-2 pr-4 text-right font-medium">{{ t('intentRouter.hits.cost') }}</th>
-                <th class="py-2 pr-4 font-medium">{{ t('intentRouter.hits.lastHit') }}</th>
-                <th class="py-2 font-medium"></th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-              <tr v-for="stat in hitStats" :key="stat.keyword" :class="['text-gray-700 dark:text-gray-300', stat.keyword === hitKeyword ? 'bg-primary-50 dark:bg-dark-700' : '']">
-                <td class="max-w-xs break-words py-2 pr-4">
-                  <span class="font-mono text-xs">{{ showKeyword(stat.keyword) }}</span>
-                  <span v-if="stat.avg_input_tokens > SUSPECT_INPUT_TOKENS" class="ml-2 whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" :title="t('intentRouter.hits.suspectHelp', { n: SUSPECT_INPUT_TOKENS })">{{ t('intentRouter.hits.suspect') }}</span>
-                </td>
-                <td class="py-2 pr-4 text-right tabular-nums">{{ stat.hits }}</td>
-                <td class="py-2 pr-4 text-right tabular-nums">{{ stat.users }}</td>
-                <td class="py-2 pr-4 text-right tabular-nums">{{ stat.api_keys }}</td>
-                <td class="py-2 pr-4 text-right tabular-nums">{{ stat.avg_chars }}</td>
-                <td class="py-2 pr-4 text-right tabular-nums">{{ stat.avg_input_tokens.toLocaleString() }}</td>
-                <td class="py-2 pr-4 text-right tabular-nums">${{ stat.total_cost.toFixed(2) }}</td>
-                <td class="whitespace-nowrap py-2 pr-4 tabular-nums">{{ formatTime(stat.last_hit) }}</td>
-                <td class="whitespace-nowrap py-2"><button type="button" class="text-xs text-primary-600 hover:underline dark:text-primary-400" @click="filterHits(stat.keyword)">{{ t('intentRouter.hits.view') }}</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div v-if="hitStats.length > 0" class="mt-5">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
-              {{ hitKeyword ? t('intentRouter.hits.detailFiltered', { keyword: showKeyword(hitKeyword) }) : t('intentRouter.hits.detailTitle') }}
-              <button v-if="hitKeyword" type="button" class="ml-2 text-xs font-normal text-primary-600 hover:underline dark:text-primary-400" @click="filterHits('')">{{ t('intentRouter.hits.clearFilter') }}</button>
-            </h3>
-            <div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-              <span>{{ t('intentRouter.hits.total', { n: hitTotal }) }}</span>
-              <button type="button" class="btn btn-secondary px-2 py-1 text-xs" :disabled="hitsLoading || hitPage <= 1" @click="loadHitPage(hitPage - 1)">{{ t('intentRouter.hits.prev') }}</button>
-              <span class="tabular-nums">{{ hitPage }} / {{ hitPages }}</span>
-              <button type="button" class="btn btn-secondary px-2 py-1 text-xs" :disabled="hitsLoading || hitPage >= hitPages" @click="loadHitPage(hitPage + 1)">{{ t('intentRouter.hits.next') }}</button>
+            <div v-show="sub === 'settings'" class="card p-5">
+              <SettingsPanel :busy="busy" @clear-cache="clearCache(selectedGroup.id)" @delete="askDelete" />
             </div>
-          </div>
-          <div class="mt-2 overflow-x-auto">
-            <table class="min-w-full text-left text-sm">
-              <thead class="text-xs text-gray-500 dark:text-gray-400">
-                <tr>
-                  <th class="py-2 pr-4 font-medium">{{ t('intentRouter.hits.time') }}</th>
-                  <th class="py-2 pr-4 font-medium">{{ t('intentRouter.hits.group') }}</th>
-                  <th class="py-2 pr-4 font-medium">{{ t('intentRouter.hits.user') }}</th>
-                  <th class="py-2 pr-4 font-medium">{{ t('intentRouter.hits.keyword') }}</th>
-                  <th class="py-2 pr-4 font-medium">{{ t('intentRouter.hits.excerpt') }}</th>
-                  <th class="py-2 pr-4 font-medium">{{ t('intentRouter.hits.account') }}</th>
-                  <th class="py-2 pr-4 text-right font-medium">{{ t('intentRouter.hits.inputTokens') }}</th>
-                  <th class="py-2 text-right font-medium">{{ t('intentRouter.hits.cost') }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-                <tr v-for="hit in hits" :key="hit.id" class="align-top text-gray-700 dark:text-gray-300">
-                  <td class="whitespace-nowrap py-2 pr-4 tabular-nums">{{ formatTime(hit.time) }}</td>
-                  <td class="whitespace-nowrap py-2 pr-4">{{ groupName(hit.group_id) }}</td>
-                  <td class="whitespace-nowrap py-2 pr-4 tabular-nums">#{{ hit.user_id }}</td>
-                  <td class="max-w-[10rem] break-words py-2 pr-4 font-mono text-xs">{{ showKeyword(hit.keyword) }}</td>
-                  <td class="min-w-[20rem] max-w-xl py-2 pr-4 text-xs">
-                    <div class="whitespace-pre-wrap break-words"><template v-for="(part, i) in highlight(hit.excerpt, hit.keyword)" :key="i"><mark v-if="part.match" class="rounded bg-yellow-200 px-0.5 text-gray-900 dark:bg-yellow-600/60 dark:text-white">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></div>
-                    <div class="mt-1 text-gray-400 dark:text-gray-500">
-                      {{ hit.user_turn === 0 ? t('intentRouter.hits.turnLatest') : t('intentRouter.hits.turnPrevious') }} · {{ t('intentRouter.hits.chars', { n: hit.message_chars }) }}<template v-if="hit.model"> · {{ hit.model }}</template>
-                    </div>
-                  </td>
-                  <td class="whitespace-nowrap py-2 pr-4">{{ hit.account_id ? accountLabel(hit.account_id) : t('intentRouter.hits.noUsage') }}</td>
-                  <td class="py-2 pr-4 text-right tabular-nums">{{ hit.input_tokens != null ? hit.input_tokens.toLocaleString() : '—' }}</td>
-                  <td class="py-2 text-right tabular-nums">{{ hit.total_cost != null ? `$${hit.total_cost.toFixed(4)}` : '—' }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+
+            <!-- Saving the routing configuration (the extras save on their own) -->
+            <div v-show="sub !== 'extras'" data-test="intent-save-bar" class="sticky bottom-0 z-20 -mx-1 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur dark:border-dark-600 dark:bg-dark-800/95">
+              <span v-if="dirty" class="flex items-center gap-1.5 text-sm text-amber-700 dark:text-amber-300"><span class="h-2 w-2 rounded-full bg-amber-500"></span>{{ t('intentRouter.saveBar.unsaved') }}</span>
+              <span v-else class="text-sm text-gray-500 dark:text-gray-400">{{ savedRouter ? t('intentRouter.saveBar.saved') : t('intentRouter.saveBar.new') }}</span>
+              <button v-if="extrasDirty" type="button" data-test="intent-extras-unsaved" class="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 hover:underline dark:bg-amber-900/30 dark:text-amber-300" @click="setSub('extras')">{{ t('intentRouter.saveBar.extrasUnsaved') }}</button>
+              <div class="ml-auto flex items-center gap-2">
+                <button type="button" data-test="intent-discard" class="btn btn-secondary btn-sm" :disabled="busy || !dirty" @click="fillForm(savedRouter)">{{ t('intentRouter.saveBar.discard') }}</button>
+                <button type="button" data-test="intent-save" class="btn btn-primary btn-sm" :disabled="busy" @click="save">
+                  {{ saving ? t('intentRouter.actions.saving') : t('intentRouter.actions.save') }}
+                </button>
+              </div>
+            </div>
+          </section>
+          <section v-else class="card p-8 text-sm text-gray-500 dark:text-gray-400">{{ t('intentRouter.noGroups') }}</section>
         </div>
-      </div>
+
+        <!-- Looking back at what happened -->
+        <HitsPanel v-if="visited.has('hits')" v-show="tab === 'hits'" :routed-group-ids="routedGroupIds" :group-name="groupName" :account-label="accountLabel" />
+
+        <!-- Global template judgements -->
+        <TemplateReviewCard v-if="visited.has('templates')" v-show="tab === 'templates'" :group-names="groupNameMap" />
+      </template>
     </div>
+
+    <ConfirmDialog
+      :show="confirm.open"
+      :title="confirm.kind === 'delete' ? t('intentRouter.actions.delete') : t('intentRouter.leave.title')"
+      :message="confirm.kind === 'delete' ? t('intentRouter.actions.deleteConfirm', { group: selectedGroup?.name ?? '' }) : t('intentRouter.leave.message')"
+      :confirm-text="confirm.kind === 'delete' ? t('common.delete') : t('intentRouter.leave.discard')"
+      :cancel-text="confirm.kind === 'delete' ? t('common.cancel') : t('intentRouter.leave.stay')"
+      danger
+      @confirm="onConfirm"
+      @cancel="onCancel"
+    />
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import Toggle from '@/components/common/Toggle.vue'
+import GroupList from '@/components/admin/intentRouter/GroupList.vue'
+import HitsPanel from '@/components/admin/intentRouter/HitsPanel.vue'
+import JevPanel from '@/components/admin/intentRouter/JevPanel.vue'
 import MonitorAnswerCard from '@/components/admin/intentRouter/MonitorAnswerCard.vue'
+import RouteFlow from '@/components/admin/intentRouter/RouteFlow.vue'
+import RuleList from '@/components/admin/intentRouter/RuleList.vue'
+import SettingsPanel from '@/components/admin/intentRouter/SettingsPanel.vue'
+import StatusDot from '@/components/admin/intentRouter/StatusDot.vue'
 import StreamPreludeCard from '@/components/admin/intentRouter/StreamPreludeCard.vue'
 import TemplateReviewCard from '@/components/admin/intentRouter/TemplateReviewCard.vue'
+import TryItPanel from '@/components/admin/intentRouter/TryItPanel.vue'
+import { provideIntentRouter } from '@/components/admin/intentRouter/context'
+import { formatKeywords, keyPlatformCompatible, parseKeywords, platformCompatible, restoreOriginalControls, routerHasTargetProblem } from '@/components/admin/intentRouter/ruleUtils'
+import type { AccountOption, FormState, GroupOption, RuleForm, RuleTarget, Tone } from '@/components/admin/intentRouter/ruleUtils'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import { intentRoutersAPI } from '@/api/admin/intentRouters'
-import type { IntentClassifyTestResult, IntentJevConfig, IntentJevStatus, IntentRouteEvent, IntentRouteHit, IntentRouteKeywordStat, IntentRouter, IntentRouterInput, IntentRuleKeyLabel } from '@/api/admin/intentRouters'
+import type { IntentJevConfig, IntentJevStatus, IntentRouter, IntentRouterInput, IntentRuleKeyLabel } from '@/api/admin/intentRouters'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 
-interface GroupOption { id: number; name: string; platform: string }
-interface AccountOption { id: number; name: string; platform: string }
-type RuleTarget = 'accounts' | 'key'
-interface RuleForm { uid: number; name: string; description: string; keywordsText: string; originalKeywords: string[]; target: RuleTarget; account_ids: number[]; api_key_id: number; enabled: boolean; search: string; keySearch: string }
-interface JevUserForm { id: number; email: string }
-interface JevKeyForm { id: number; name: string; user_id: number }
-type FormState = Omit<IntentRouterInput, 'rules' | 'jev_set_balance_usd' | 'excluded_models'> & { excludedModelsText: string; rules: RuleForm[]; jevUsers: JevUserForm[]; jevKeys: JevKeyForm[]; jevBalanceText: string }
-
+const TABS = ['config', 'hits', 'templates'] as const
+const SUBS = ['rules', 'jev', 'extras', 'settings'] as const
+type Tab = typeof TABS[number]
+type Sub = typeof SUBS[number]
 const ACCOUNT_PAGE_SIZE = 1000
 const ACCOUNT_MAX_PAGES = 10
-const HIT_HOURS = [1, 24, 168, 720] as const
-const HIT_PAGE_SIZE = 50
-/** Detection prompts are a few hundred tokens; far above that is a long conversation. */
-const SUSPECT_INPUT_TOKENS = 20000
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const route = useRoute()
+const router = useRouter()
 
 const loading = ref(true)
 const saving = ref(false)
 const working = ref(false)
-const testing = ref(false)
-const eventsLoading = ref(false)
 const busy = computed(() => saving.value || working.value)
 
 const groups = ref<GroupOption[]>([])
 const accounts = ref<AccountOption[]>([])
 const routers = ref<Record<number, IntentRouter>>({})
-const events = ref<IntentRouteEvent[]>([])
-const hitsLoading = ref(false)
-const hitGroupId = ref(0)
-const hitHours = ref<number>(24)
-const hitKeyword = ref('')
-const hitStats = ref<IntentRouteKeywordStat[]>([])
-const hits = ref<IntentRouteHit[]>([])
-const hitTotal = ref(0)
-const hitPage = ref(1)
-const hitPages = computed(() => Math.max(1, Math.ceil(hitTotal.value / HIT_PAGE_SIZE)))
 const routedGroupIds = computed(() => Object.keys(routers.value).map(Number))
-const groupSearch = ref('')
 const selectedGroupId = ref<number | null>(null)
-const testText = ref('')
-const testResult = ref<IntentClassifyTestResult | null>(null)
-const testError = ref('')
 const jevStatus = ref<IntentJevStatus | null>(null)
+const tab = ref<Tab>('config')
+const sub = ref<Sub>('rules')
+const visited = reactive(new Set<Tab>(['config']))
+const extras = reactive({ monitor: false, prelude: false })
+const extrasDirty = computed(() => extras.monitor || extras.prelude)
 
 let nextUid = 1
 const blankForm = (): FormState => ({
@@ -723,24 +191,16 @@ function blankJev(): IntentJevConfig {
   return { enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, health_enabled: false, health_threshold: 0.7, health_rule: '', timely_enabled: false, timely_threshold: 0.9, timely_rule: '', low_balance_usd: 1, balance_usd: 0 }
 }
 const form = reactive<FormState>(blankForm())
-const baseline = ref('')
+// The blank form counts as saved until a group is loaded into it.
+const baseline = ref(JSON.stringify(toInput()))
+const formGeneration = ref(0)
 
 const accountsById = computed(() => new Map(accounts.value.map((a) => [a.id, a])))
 const selectedGroup = computed(() => groups.value.find((g) => g.id === selectedGroupId.value) ?? null)
 const savedRouter = computed(() => (selectedGroupId.value ? routers.value[selectedGroupId.value] ?? null : null))
-const jevKeyConfigured = computed(() => savedRouter.value?.jev_api_key_configured === true)
-const ruleNames = computed(() => form.rules.map((rule) => rule.name.trim()).filter(Boolean))
-const jevRuleTargetText = computed(() => {
-  const rule = form.rules.find((r) => r.name.trim() === form.jev.rule)
-  if (!rule) return ''
-  if (rule.target === 'key') return rule.api_key_id ? keyLabel(rule.api_key_id) : ''
-  return rule.account_ids.map(accountLabel).join('、')
-})
-const filteredGroups = computed(() => {
-  const q = groupSearch.value.toLowerCase()
-  return q ? groups.value.filter((g) => g.name.toLowerCase().includes(q) || String(g.id) === q) : groups.value
-})
 const dirty = computed(() => snapshot() !== baseline.value)
+/** Anything on this group that leaving would lose; a save under way is not lost. */
+const unsaved = computed(() => !loading.value && ((dirty.value && !saving.value) || extrasDirty.value))
 
 function toInput(): IntentRouterInput {
   return {
@@ -776,123 +236,6 @@ function toInput(): IntentRouterInput {
     ...(String(form.jevBalanceText).trim() !== '' ? { jev_set_balance_usd: Number(form.jevBalanceText) } : {}),
   }
 }
-// Jev scope pickers: users are searched like on the usage page; keys come
-// from the chosen users, so nobody has to look IDs up.
-const jevUserQuery = ref('')
-const jevUserResults = ref<{ id: number; email: string }[]>([])
-const jevUserKeys = ref<Record<number, { id: number; name: string; user_id: number }[]>>({})
-let jevUserSearchTimer: ReturnType<typeof setTimeout> | null = null
-let jevUserSearchSeq = 0
-function searchJevUsers() {
-  if (jevUserSearchTimer) clearTimeout(jevUserSearchTimer)
-  const query = jevUserQuery.value.trim()
-  const seq = ++jevUserSearchSeq
-  if (!query) {
-    jevUserResults.value = []
-    return
-  }
-  jevUserSearchTimer = setTimeout(async () => {
-    try {
-      const users = await adminAPI.usage.searchUsers(query)
-      if (seq === jevUserSearchSeq) jevUserResults.value = users.filter((u) => !u.deleted && !form.jevUsers.some((x) => x.id === u.id))
-    } catch {
-      if (seq === jevUserSearchSeq) jevUserResults.value = []
-    }
-  }, 250)
-}
-function addJevUser(u: { id: number; email: string }) {
-  if (!form.jevUsers.some((x) => x.id === u.id)) form.jevUsers.push({ id: u.id, email: u.email })
-  jevUserQuery.value = ''
-  jevUserResults.value = []
-}
-function removeJevUser(id: number) {
-  form.jevUsers = form.jevUsers.filter((u) => u.id !== id)
-  form.jevKeys = form.jevKeys.filter((k) => k.user_id !== id)
-}
-// The key search returns a user's 30 newest keys matching the name typed
-// (all of them when nothing is typed); older keys are found by name.
-const JEV_KEY_PAGE = 30
-const jevKeyQuery = ref('')
-const jevKeyPickerOpen = ref(false)
-let jevKeySearchTimer: ReturnType<typeof setTimeout> | null = null
-let jevKeySearchSeq = 0
-function openJevKeyPicker() {
-  jevKeyPickerOpen.value = true
-  searchJevKeys()
-}
-function searchJevKeys() {
-  if (jevKeySearchTimer) clearTimeout(jevKeySearchTimer)
-  const seq = ++jevKeySearchSeq
-  const query = jevKeyQuery.value.trim()
-  jevKeySearchTimer = setTimeout(async () => {
-    const users = form.jevUsers.map((u) => u.id)
-    const results = await Promise.all(users.map(async (id) => {
-      try {
-        return [id, await adminAPI.usage.searchApiKeys(id, query || undefined)] as const
-      } catch {
-        return [id, []] as const
-      }
-    }))
-    if (seq !== jevKeySearchSeq) return
-    const next = { ...jevUserKeys.value }
-    for (const [id, keys] of results) next[id] = [...keys]
-    jevUserKeys.value = next
-  }, 250)
-}
-function jevKeyChoices(userId: number) {
-  return (jevUserKeys.value[userId] ?? []).filter((k) => !form.jevKeys.some((x) => x.id === k.id))
-}
-function addJevKey(key: { id: number; name: string; user_id: number }) {
-  if (!form.jevKeys.some((k) => k.id === key.id)) form.jevKeys.push({ id: key.id, name: key.name, user_id: key.user_id })
-}
-function removeJevKey(id: number) {
-  form.jevKeys = form.jevKeys.filter((k) => k.id !== id)
-}
-function jevUserEmail(userId: number) {
-  return form.jevUsers.find((u) => u.id === userId)?.email || `#${userId}`
-}
-// Keywords are typed one per line or comma-separated (ASCII or Chinese commas).
-function parseKeywords(text: string): string[] {
-  const result: string[] = []
-  let current = ''
-  let quoted = false
-  const finish = () => {
-    const keyword = current.trim()
-    if (keyword) result.push(keyword)
-    current = ''
-  }
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i]
-    if (quoted) {
-      if (char === '"' && text[i + 1] === '"') {
-        current += '"'
-        i++
-      } else if (char === '"') {
-        quoted = false
-      } else {
-        current += char
-      }
-    } else if (char === '"' && current.trim() === '') {
-      quoted = true
-    } else if (/[\n,，、]/.test(char)) {
-      finish()
-    } else {
-      current += char
-    }
-  }
-  finish()
-  return result
-}
-function formatKeywords(keywords: string[]): string {
-  return keywords.map((keyword) => /[\r\n,，、"]/.test(keyword)
-    ? `"${keyword.replace(/\r/g, '\\r').replace(/"/g, '""')}"`
-    : keyword).join(', ')
-}
-function restoreOriginalControls(parsed: string[], originals: string[]): string[] {
-  const controls = new Map(originals.filter((keyword) => keyword.includes('\r'))
-    .map((keyword) => [keyword.replace(/\r/g, '\\r'), keyword]))
-  return parsed.map((keyword) => controls.get(keyword) ?? keyword)
-}
 function snapshot() { return JSON.stringify(toInput()) }
 
 function fillForm(router: IntentRouter | null) {
@@ -920,15 +263,58 @@ function fillForm(router: IntentRouter | null) {
     }))
   }
   baseline.value = snapshot()
-  testResult.value = null
-  testError.value = ''
+  formGeneration.value++
 }
 
-function selectGroup(id: number) {
-  selectedGroupId.value = id
-  fillForm(routers.value[id] ?? null)
-  void loadJevStatus(id)
+function newRule(): RuleForm {
+  return { uid: nextUid++, name: '', description: '', keywordsText: '', originalKeywords: [], target: 'accounts', account_ids: [], api_key_id: 0, enabled: true, search: '', keySearch: '' }
 }
+
+// ---- labels and target health ----
+
+const ruleKeyLabels = ref(new Map<number, IntentRuleKeyLabel>())
+function accountLabel(id: number) {
+  const account = accountsById.value.get(id)
+  return account ? `#${id} ${account.name}` : t('intentRouter.rules.missingAccount', { id })
+}
+function accountProblem(id: number) {
+  const account = accountsById.value.get(id)
+  if (!account || !selectedGroup.value) return ''
+  return platformCompatible(selectedGroup.value.platform, account.platform) ? '' : t('intentRouter.rules.incompatible')
+}
+function keyLabel(id: number) {
+  const key = ruleKeyLabels.value.get(id)
+  if (!key || key.problem === 'key_not_found') return t('intentRouter.rules.missingKey', { id })
+  return t('intentRouter.rules.keyChip', { id, name: key.name, user: key.user_email || `#${key.user_id}`, group: key.group_name || `#${key.group_id}`, platform: key.group_platform })
+}
+function keyProblem(id: number) {
+  const key = ruleKeyLabels.value.get(id)
+  if (!key) return ''
+  if (key.problem) return t(`intentRouter.rules.keyProblems.${key.problem}`)
+  return keyPlatformCompatible(selectedGroup.value?.platform ?? '', key.group_platform) ? '' : t('intentRouter.rules.incompatible')
+}
+function ruleTargetBroken(rule: RuleForm) {
+  if (rule.target === 'key') return !rule.api_key_id || keyProblem(rule.api_key_id) !== ''
+  if (rule.account_ids.length === 0) return true
+  return rule.account_ids.some((id) => !accountsById.value.has(id) || accountProblem(id) !== '')
+}
+
+function groupStatus(groupId: number): { tone: Tone; label: string } {
+  const saved = routers.value[groupId]
+  if (!saved) return { tone: 'gray', label: t('intentRouter.status.none') }
+  if (!saved.enabled) return { tone: 'gray', label: t('intentRouter.status.off') }
+  const platform = groups.value.find((g) => g.id === groupId)?.platform ?? ''
+  if (routerHasTargetProblem(saved, platform, accountsById.value)) return { tone: 'red', label: t('intentRouter.status.problem') }
+  return { tone: 'green', label: t('intentRouter.status.on') }
+}
+const jevTone = computed((): Tone => {
+  const state = jevStatus.value?.state
+  if (state === 'auto_disabled') return 'red'
+  if (state === 'paused') return 'amber'
+  return 'green'
+})
+
+// ---- Jev status ----
 
 // Every status request and every save takes a new sequence number; only the
 // answer to the latest request may touch the page. An answer that left the
@@ -958,127 +344,101 @@ async function loadJevStatus(groupId: number) {
     if (seq === jevStatusSeq && selectedGroupId.value === groupId) jevStatus.value = null
   }
 }
-function formatUSD(value: number) { return `$${value.toFixed(value !== 0 && Math.abs(value) < 0.01 ? 4 : 2)}` }
-function formatCNY(usd: number) { return `¥${(usd * (jevStatus.value?.cny_per_usd ?? 7)).toFixed(usd !== 0 && Math.abs(usd) < 0.01 ? 4 : 2)}` }
-function formatDay(day: string) { return `${day.slice(4, 6)}-${day.slice(6, 8)}` }
-function jevAutoDisabledHint(status?: number) {
-  switch (status) {
-    case 401: return t('intentRouter.jev.status.why401')
-    case 402: return t('intentRouter.jev.status.why402')
-    case 403: return t('intentRouter.jev.status.why403')
-    case 451: return t('intentRouter.jev.status.why451')
-    default: return ''
-  }
-}
 
-function routerStatus(groupId: number): 'on' | 'off' | 'none' {
-  const router = routers.value[groupId]
-  if (!router) return 'none'
-  return router.enabled ? 'on' : 'off'
-}
-function statusClass(groupId: number) {
-  switch (routerStatus(groupId)) {
-    case 'on': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-    case 'off': return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-    default: return 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400'
-  }
-}
+provideIntentRouter({
+  form, accounts, selectedGroup, savedRouter, jevStatus, dirty, formGeneration,
+  accountLabel, accountProblem, keyLabel, keyProblem, ruleTargetBroken, newRule,
+  rememberKey: (key) => { ruleKeyLabels.value.set(key.id, key) },
+  loadJevStatus: () => { if (selectedGroupId.value) void loadJevStatus(selectedGroupId.value) },
+})
 
-// Mirrors the server's rule: same platform, or Antigravity for Claude/Gemini groups.
-function platformCompatible(groupPlatform: string, accountPlatform: string) {
-  if (groupPlatform === 'anthropic' || groupPlatform === 'gemini') return accountPlatform === groupPlatform || accountPlatform === 'antigravity'
-  if (groupPlatform === 'openai' || groupPlatform === 'antigravity') return accountPlatform === groupPlatform
-  return true
-}
-function accountLabel(id: number) {
-  const account = accountsById.value.get(id)
-  return account ? `#${id} ${account.name}` : t('intentRouter.rules.missingAccount', { id })
-}
-function accountProblem(id: number) {
-  const account = accountsById.value.get(id)
-  if (!account || !selectedGroup.value) return ''
-  return platformCompatible(selectedGroup.value.platform, account.platform) ? '' : t('intentRouter.rules.incompatible')
-}
-function accountMatches(rule: RuleForm) {
-  const q = rule.search.toLowerCase()
-  const groupPlatform = selectedGroup.value?.platform ?? ''
-  return accounts.value
-    .filter((a) => !rule.account_ids.includes(a.id) && platformCompatible(groupPlatform, a.platform))
-    .filter((a) => a.name.toLowerCase().includes(q) || String(a.id) === q)
-    .slice(0, 30)
-}
-function addAccount(rule: RuleForm, id: number) {
-  if (!rule.account_ids.includes(id)) rule.account_ids.push(id)
-  rule.search = ''
-}
-function removeAccount(rule: RuleForm, id: number) {
-  rule.account_ids = rule.account_ids.filter((x) => x !== id)
-}
-function addRule() {
-  form.rules.push({ uid: nextUid++, name: '', description: '', keywordsText: '', originalKeywords: [], target: 'accounts', account_ids: [], api_key_id: 0, enabled: true, search: '', keySearch: '' })
-}
+// ---- navigation: tabs, the group, and the URL ----
 
-// API-key targets: the rule is served by the key's group, scheduled as that
-// group schedules. Labels come from the saved router and from searches.
-const ruleKeyLabels = ref(new Map<number, IntentRuleKeyLabel>())
-const keyResults = ref<Record<number, IntentRuleKeyLabel[]>>({})
-const keySearchTimers = new Map<number, ReturnType<typeof setTimeout>>()
-const keySearchSeq = new Map<number, number>()
-function setRuleTarget(rule: RuleForm, target: RuleTarget) {
-  rule.target = target
-  if (target === 'key') {
-    rule.account_ids = []
-    rule.search = ''
-  } else {
-    rule.api_key_id = 0
-    rule.keySearch = ''
-  }
+function selectGroup(id: number) {
+  selectedGroupId.value = id
+  extras.monitor = false
+  extras.prelude = false
+  fillForm(routers.value[id] ?? null)
+  void loadJevStatus(id)
 }
-function keyProblemText(problem: string) {
-  return problem ? t(`intentRouter.rules.keyProblems.${problem}`) : ''
+function syncQuery() {
+  const query = { ...route.query, tab: tab.value, sub: sub.value, group: selectedGroupId.value ? String(selectedGroupId.value) : undefined }
+  if (query.tab === route.query.tab && query.sub === route.query.sub && query.group === route.query.group) return
+  void router.replace({ query })
 }
-function keyLabel(id: number) {
-  const key = ruleKeyLabels.value.get(id)
-  if (!key || key.problem === 'key_not_found') return t('intentRouter.rules.missingKey', { id })
-  return t('intentRouter.rules.keyChip', { id, name: key.name, user: key.user_email || `#${key.user_id}`, group: key.group_name || `#${key.group_id}`, platform: key.group_platform })
+function setTab(next: Tab) {
+  tab.value = next
+  visited.add(next)
+  syncQuery()
 }
-function keyProblem(id: number) {
-  const key = ruleKeyLabels.value.get(id)
-  if (!key) return ''
-  if (key.problem) return keyProblemText(key.problem)
-  const groupPlatform = selectedGroup.value?.platform ?? ''
-  return groupPlatform && groupPlatform !== 'composite' && key.group_platform !== groupPlatform ? t('intentRouter.rules.incompatible') : ''
+function setSub(next: Sub) {
+  sub.value = next
+  syncQuery()
 }
-function searchRuleKeys(rule: RuleForm) {
-  const uid = rule.uid
-  const prev = keySearchTimers.get(uid)
-  if (prev) clearTimeout(prev)
-  const seq = (keySearchSeq.get(uid) ?? 0) + 1
-  keySearchSeq.set(uid, seq)
-  const query = rule.keySearch.trim()
-  if (!query) {
-    keyResults.value = { ...keyResults.value, [uid]: [] }
+/** Moves to another group, asking first when that would lose edits. */
+function requestGroup(id: number) {
+  if (id === selectedGroupId.value) return
+  if (unsaved.value) {
+    openConfirm('group', id)
     return
   }
-  const groupPlatform = selectedGroup.value?.platform ?? ''
-  keySearchTimers.set(uid, setTimeout(async () => {
-    let found: IntentRuleKeyLabel[] = []
-    try {
-      found = (await intentRoutersAPI.targetKeys(query, groupPlatform && groupPlatform !== 'composite' ? groupPlatform : undefined)).data ?? []
-    } catch {
-      found = []
-    }
-    if (keySearchSeq.get(uid) !== seq) return
-    keyResults.value = { ...keyResults.value, [uid]: found }
-  }, 250))
+  selectGroup(id)
+  syncQuery()
 }
-function chooseRuleKey(rule: RuleForm, key: IntentRuleKeyLabel) {
-  if (key.problem) return
-  ruleKeyLabels.value.set(key.id, key)
-  rule.api_key_id = key.id
-  rule.keySearch = ''
-  keyResults.value = { ...keyResults.value, [rule.uid]: [] }
+// Back and forward change the query under us.
+watch(() => route.query, (query) => {
+  if (loading.value) return
+  const nextTab = TABS.find((x) => x === query.tab)
+  if (nextTab && nextTab !== tab.value) {
+    tab.value = nextTab
+    visited.add(nextTab)
+  }
+  const nextSub = SUBS.find((x) => x === query.sub)
+  if (nextSub && nextSub !== sub.value) sub.value = nextSub
+  const id = Number(query.group)
+  if (id && id !== selectedGroupId.value && groups.value.some((g) => g.id === id)) requestGroup(id)
+})
+
+// ---- confirmation: leaving edits behind, deleting ----
+
+const confirm = reactive<{ open: boolean; kind: 'group' | 'leave' | 'delete'; groupId: number; path: string }>({ open: false, kind: 'group', groupId: 0, path: '' })
+let leaveApproved = false
+function openConfirm(kind: 'group' | 'leave' | 'delete', groupId = 0, path = '') {
+  Object.assign(confirm, { open: true, kind, groupId, path })
 }
+function onConfirm() {
+  confirm.open = false
+  if (confirm.kind === 'group') {
+    selectGroup(confirm.groupId)
+    syncQuery()
+  } else if (confirm.kind === 'leave') {
+    leaveApproved = true
+    void router.push(confirm.path)
+  } else {
+    void removeRouter()
+  }
+}
+function onCancel() {
+  confirm.open = false
+  // The URL may already name the group the admin decided not to open.
+  if (confirm.kind === 'group') syncQuery()
+}
+onBeforeRouteLeave((to) => {
+  if (leaveApproved || !unsaved.value) return true
+  openConfirm('leave', 0, to.fullPath)
+  return false
+})
+function onBeforeUnload(event: BeforeUnloadEvent) {
+  event.preventDefault()
+  event.returnValue = ''
+}
+watch(unsaved, (now) => {
+  if (now) window.addEventListener('beforeunload', onBeforeUnload)
+  else window.removeEventListener('beforeunload', onBeforeUnload)
+})
+onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
+
+// ---- saving ----
 
 function errorText(err: unknown) {
   return extractI18nErrorMessage(err, t, 'intentRouter.errors', t('common.error'))
@@ -1108,9 +468,12 @@ async function save() {
   }
 }
 
+function askDelete() {
+  if (selectedGroup.value && !busy.value) openConfirm('delete', selectedGroup.value.id)
+}
 async function removeRouter() {
-  const group = selectedGroup.value
-  if (!group || busy.value || !window.confirm(t('intentRouter.actions.deleteConfirm', { group: group.name }))) return
+  const group = groups.value.find((g) => g.id === confirm.groupId)
+  if (!group || busy.value) return
   working.value = true
   try {
     await intentRoutersAPI.remove(group.id)
@@ -1139,156 +502,8 @@ async function clearCache(groupId: number) {
   }
 }
 
-const testSummary = computed(() => {
-  const result = testResult.value
-  if (!result) return ''
-  if (!result.understood) return t('intentRouter.test.resultUnclear')
-  if (!result.intent) return t('intentRouter.test.resultNone')
-  const targets = result.api_key_id ? keyLabel(result.api_key_id) : result.account_ids.map(accountLabel).join('、')
-  return t('intentRouter.test.resultIntent', { intent: result.intent, accounts: targets })
-})
-
-async function runTest() {
-  const groupId = selectedGroupId.value
-  if (!groupId || testing.value || dirty.value || !testText.value) return
-  testing.value = true
-  testResult.value = null
-  testError.value = ''
-  try {
-    const result = (await intentRoutersAPI.test(groupId, testText.value)).data
-    if (selectedGroupId.value === groupId) testResult.value = result
-  } catch (err) {
-    if (selectedGroupId.value === groupId) testError.value = errorText(err)
-  } finally {
-    testing.value = false
-  }
-}
-
 function groupName(id: number) { return groups.value.find((g) => g.id === id)?.name ?? `#${id}` }
 const groupNameMap = computed(() => Object.fromEntries(groups.value.map((g) => [g.id, g.name])) as Record<number, string>)
-function formatTime(value: string) {
-  const d = new Date(value)
-  return Number.isNaN(d.getTime()) ? value : d.toLocaleString()
-}
-function jevStateClass(state: IntentJevStatus['state']) {
-  if (state === 'normal') return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-  if (state === 'paused') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-  if (state === 'auto_disabled') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-  return 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
-}
-function eventClass(kind: IntentRouteEvent['kind']) {
-  if (kind === 'error') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-  if (kind === 'skipped') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-  if (kind === 'keyword') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-  if (kind === 'jev') return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
-  if (kind === 'routed') return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-  return 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
-}
-
-async function loadEvents() {
-  eventsLoading.value = true
-  try {
-    events.value = (await intentRoutersAPI.events(100)).data ?? []
-  } catch {
-    // The log is a convenience; the page works without it.
-  } finally {
-    eventsLoading.value = false
-  }
-}
-
-/** Keywords may hold line breaks; show them as \n so the row stays on one line. */
-function showKeyword(keyword: string) { return keyword.replace(/\r/g, '\\r').replace(/\n/g, '\\n') }
-
-/** Splits the excerpt around case-insensitive occurrences of the keyword. */
-function highlight(text: string, keyword: string) {
-  const needle = keyword.trim().toLowerCase()
-  const parts: { text: string; match: boolean }[] = []
-  if (!needle) return [{ text, match: false }]
-  const lower = text.toLowerCase()
-  // toLowerCase can change the length of a few characters; fall back to plain text then.
-  if (lower.length !== text.length) return [{ text, match: false }]
-  let from = 0
-  for (let at = lower.indexOf(needle); at >= 0; at = lower.indexOf(needle, from)) {
-    if (at > from) parts.push({ text: text.slice(from, at), match: false })
-    parts.push({ text: text.slice(at, at + needle.length), match: true })
-    from = at + needle.length
-  }
-  if (from < text.length) parts.push({ text: text.slice(from), match: false })
-  return parts
-}
-
-function hitQuery() {
-  return { group_id: hitGroupId.value || undefined, hours: hitHours.value, keyword: hitKeyword.value || undefined }
-}
-
-// A generation binds filters, statistics and details; stale requests never publish.
-let hitRequestVersion = 0
-let hitsDisposed = false
-onBeforeUnmount(() => {
-  hitsDisposed = true
-  hitRequestVersion++
-  for (const timer of keySearchTimers.values()) clearTimeout(timer)
-})
-
-function isCurrentHitRequest(version: number) {
-  return !hitsDisposed && version === hitRequestVersion
-}
-
-function clearHitPage() {
-  hits.value = []
-  hitTotal.value = 0
-  hitPage.value = 1
-}
-
-async function loadHitPage(page: number) {
-  if (hitsDisposed) return
-  const version = ++hitRequestVersion
-  const query = { ...hitQuery(), page, page_size: HIT_PAGE_SIZE }
-  hitsLoading.value = true
-  clearHitPage()
-  try {
-    const res = (await intentRoutersAPI.hits(query)).data
-    if (!isCurrentHitRequest(version)) return
-    hits.value = res?.items ?? []
-    hitTotal.value = res?.total ?? 0
-    hitPage.value = page
-  } catch (err) {
-    if (isCurrentHitRequest(version)) appStore.showError(errorText(err))
-  } finally {
-    if (isCurrentHitRequest(version)) hitsLoading.value = false
-  }
-}
-
-async function reloadHits() {
-  if (hitsDisposed) return
-  const version = ++hitRequestVersion
-  const { keyword: selectedKeyword, ...query } = hitQuery()
-  hitsLoading.value = true
-  hitStats.value = []
-  clearHitPage()
-  try {
-    const stats = (await intentRoutersAPI.hitStats(query)).data ?? []
-    if (!isCurrentHitRequest(version)) return
-    const keyword = selectedKeyword && stats.some((s) => s.keyword === selectedKeyword) ? selectedKeyword : undefined
-    const res = (await intentRoutersAPI.hits({ ...query, keyword, page: 1, page_size: HIT_PAGE_SIZE })).data
-    if (!isCurrentHitRequest(version)) return
-    // Publish both responses together using the same captured filter snapshot.
-    hitStats.value = stats
-    hitKeyword.value = keyword ?? ''
-    hits.value = res?.items ?? []
-    hitTotal.value = res?.total ?? 0
-    hitPage.value = 1
-  } catch (err) {
-    if (isCurrentHitRequest(version)) appStore.showError(errorText(err))
-  } finally {
-    if (isCurrentHitRequest(version)) hitsLoading.value = false
-  }
-}
-
-function filterHits(keyword: string) {
-  hitKeyword.value = keyword
-  void loadHitPage(1)
-}
 
 async function loadAccounts() {
   const all: AccountOption[] = []
@@ -1310,14 +525,30 @@ onMounted(async () => {
     ])
     groups.value = groupList.map((g) => ({ id: g.id, name: g.name, platform: g.platform }))
     routers.value = Object.fromEntries((routerList.data ?? []).map((r) => [r.group_id, r]))
-    const first = groups.value.find((g) => routers.value[g.id]) ?? groups.value[0]
+    // Open where the URL points, falling back to the first configured group.
+    tab.value = TABS.find((x) => x === route.query.tab) ?? 'config'
+    sub.value = SUBS.find((x) => x === route.query.sub) ?? 'rules'
+    visited.add(tab.value)
+    const wanted = groups.value.find((g) => g.id === Number(route.query.group))
+    const first = wanted ?? groups.value.find((g) => routers.value[g.id]) ?? groups.value[0]
     if (first) selectGroup(first.id)
   } catch (err) {
     appStore.showError(errorText(err))
   } finally {
     loading.value = false
   }
-  void loadEvents()
-  void reloadHits()
+  syncQuery()
 })
 </script>
+
+<style scoped>
+.ir-tab {
+  @apply flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors;
+}
+.ir-tab-active {
+  @apply border-primary-600 text-primary-600 dark:border-primary-400 dark:text-primary-400;
+}
+.ir-tab-inactive {
+  @apply border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300;
+}
+</style>

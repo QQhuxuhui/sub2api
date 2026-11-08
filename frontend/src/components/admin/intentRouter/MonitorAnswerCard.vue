@@ -1,16 +1,19 @@
 <template>
   <div class="card space-y-4 p-5" data-test="monitor-answer">
-    <div class="flex items-start justify-between gap-3">
-      <label class="flex items-start gap-3">
-        <input v-model="form.enabled" data-test="monitor-answer-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-        <span>
-          <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('intentRouter.monitorAnswer.title') }}</span>
-          <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('intentRouter.monitorAnswer.intro') }}</span>
-        </span>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <label class="flex min-w-0 items-center gap-2.5">
+        <input v-model="form.enabled" data-test="monitor-answer-enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+        <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('intentRouter.monitorAnswer.title') }}</span>
+        <InfoTip :text="t('intentRouter.monitorAnswer.intro')" :label="t('intentRouter.monitorAnswer.title')" />
+        <span v-if="status" data-test="monitor-answer-badge" class="rounded-full bg-primary-50 px-2 py-0.5 text-xs tabular-nums text-primary-700 dark:bg-primary-900/30 dark:text-primary-300" :title="t('intentRouter.monitorAnswer.today', { n: status.days[0]?.answers ?? 0 })">{{ status.days[0]?.answers ?? 0 }}</span>
       </label>
-      <button type="button" data-test="monitor-answer-save" class="btn btn-primary btn-sm shrink-0" :disabled="loading || saving || !dirty" @click="save">
-        {{ saving ? t('common.saving') : t('common.save') }}
-      </button>
+      <div class="flex items-center gap-2">
+        <span v-if="dirty" class="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300"><span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>{{ t('intentRouter.unsaved') }}</span>
+        <span v-else class="text-xs text-gray-400">{{ t('intentRouter.savedSeparately') }}</span>
+        <button type="button" data-test="monitor-answer-save" class="btn btn-primary btn-sm shrink-0" :disabled="loading || saving || !dirty" @click="save">
+          {{ saving ? t('common.saving') : t('common.save') }}
+        </button>
+      </div>
     </div>
 
     <div>
@@ -22,11 +25,12 @@
       <ScopePicker v-if="form.scope === 'listed'" v-model:users="form.users" v-model:keys="form.keys" test-prefix="monitor-answer" class="mt-3" />
     </div>
 
-    <div v-if="status" data-test="monitor-answer-status" class="space-y-3 rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800">
-      <div class="flex items-center justify-between">
-        <span class="text-gray-700 dark:text-gray-300">{{ t('intentRouter.monitorAnswer.today', { n: status.days[0]?.answers ?? 0 }) }}</span>
-        <button type="button" class="text-xs text-primary-600 hover:underline dark:text-primary-400" @click="loadStatus">{{ t('intentRouter.jev.status.refresh') }}</button>
-      </div>
+    <details v-if="status" data-test="monitor-answer-status" class="text-sm">
+      <summary class="flex cursor-pointer select-none items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
+        <span>{{ t('intentRouter.details') }} · {{ t('intentRouter.monitorAnswer.today', { n: status.days[0]?.answers ?? 0 }) }}</span>
+        <button type="button" class="text-xs text-primary-600 hover:underline dark:text-primary-400" @click.prevent="loadStatus">{{ t('intentRouter.jev.status.refresh') }}</button>
+      </summary>
+      <div class="mt-2 space-y-3 rounded-lg bg-gray-50 p-3 dark:bg-dark-800">
       <div class="overflow-x-auto">
         <table class="min-w-full text-xs">
           <thead class="text-left text-gray-500 dark:text-gray-400">
@@ -68,7 +72,8 @@
           </table>
         </div>
       </div>
-    </div>
+      </div>
+    </details>
   </div>
 </template>
 
@@ -79,10 +84,12 @@ import { intentRoutersAPI } from '@/api/admin/intentRouters'
 import type { MonitorProbeAnswerConfig, MonitorProbeAnswerStatus, MonitorProbeAnswerView } from '@/api/admin/intentRouters'
 import { useAppStore } from '@/stores/app'
 import { extractI18nErrorMessage } from '@/utils/apiError'
+import InfoTip from './InfoTip.vue'
 import ScopePicker from './ScopePicker.vue'
 import type { ScopeKey, ScopeUser } from './ScopePicker.vue'
 
 const props = defineProps<{ groupId: number }>()
+const emit = defineEmits<{ 'dirty-change': [dirty: boolean] }>()
 const { t } = useI18n()
 const appStore = useAppStore()
 
@@ -98,6 +105,8 @@ function toConfig(): MonitorProbeAnswerConfig {
   return { enabled: form.enabled, scope: form.scope, user_ids: form.users.map((u) => u.id), api_keys: form.keys.map((k) => ({ id: k.id })) }
 }
 const dirty = computed(() => JSON.stringify(toConfig()) !== baseline.value)
+// Nothing typed before this group's setting arrived can be lost.
+watch(() => dirty.value && !loading.value, (now) => emit('dirty-change', now), { immediate: true })
 
 function fill(view: MonitorProbeAnswerView) {
   const userLabels = new Map(view.scope_labels.users.map((u) => [u.id, u.email]))
