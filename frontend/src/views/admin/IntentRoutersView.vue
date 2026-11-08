@@ -204,8 +204,8 @@ const dirty = computed(() => snapshot() !== baseline.value)
 // form is exempt from the guard — another group, or edits made after
 // pressing save, are still unsaved.
 const inFlight = ref<{ groupId: number; snapshot: string } | null>(null)
-/** Leaving the page or the route: nothing counts as saved until the save succeeded. */
-const unsavedOnLeave = computed(() => !loading.value && (dirty.value || extrasDirty.value))
+/** Leaving the page or the route: nothing counts as saved until its save has finished, whichever group it was for. */
+const unsavedOnLeave = computed(() => !loading.value && (dirty.value || extrasDirty.value || inFlight.value !== null))
 /** Switching groups: the form being saved may be left, its save carries on. */
 const unsaved = computed(() => {
   if (loading.value) return false

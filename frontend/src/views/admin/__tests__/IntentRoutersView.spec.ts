@@ -982,4 +982,33 @@ describe('IntentRoutersView', () => {
     await flushPromises()
     expect(api.clearCache).toHaveBeenCalledWith(0)
   })
+
+  it('keeps the page-leave guard after moving on to a clean group while another group is still saving', async () => {
+    const pending = deferred<{ data: typeof savedRouter }>()
+    api.save.mockReturnValueOnce(pending.promise)
+    const remove = vi.spyOn(window, 'removeEventListener')
+    const router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/admin/intent-routers', component: IntentRoutersView },
+      { path: '/elsewhere', component: { template: '<div />' } },
+    ] })
+    await router.push('/admin/intent-routers')
+    await router.isReady()
+    const wrapper = mount({ template: '<router-view />' }, {
+      global: { plugins: [router], stubs: { AppLayout: { template: '<div><slot /></div>' }, teleport: true } },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="intent-rule-name"]').setValue('renamed')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await wrapper.get('[data-test="intent-group-2"]').trigger('click') // clean group, no question asked
+    await flushPromises()
+    expect(remove.mock.calls.some(([type]) => type === 'beforeunload')).toBe(false)
+    await router.push('/elsewhere')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/admin/intent-routers')
+    await button(wrapper, 'intentRouter.leave.stay').trigger('click')
+    pending.resolve({ data: savedRouter })
+    await flushPromises()
+    expect(remove.mock.calls.some(([type]) => type === 'beforeunload')).toBe(true)
+    remove.mockRestore()
+  })
 })
