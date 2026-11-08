@@ -89,6 +89,8 @@ func TestPaymentHashlessEvidenceSurvivesOrderDeletion(t *testing.T) {
 	second := newSecondSettlementOrder(t, f)
 	require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, f.order.PaymentTradeNo, 30, payment.TypeEpusdt, nil))
 	require.NoError(t, f.client.PaymentOrder.DeleteOneID(f.order.ID).Exec(ctx))
+	// A transfer made before that confirmation, so it may be what it confirmed.
+	f.fetcher.byNetwork["binance"][0].BlockTime = time.Now().Add(-time.Minute)
 	_, err := f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
 	requireManualSettleReason(t, err, "HASHLESS_PAYMENT_NEARBY")
 }
