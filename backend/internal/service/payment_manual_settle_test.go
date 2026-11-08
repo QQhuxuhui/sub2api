@@ -542,6 +542,25 @@ func TestPaymentManualSettleRefusesTransferNearHashlessPayment(t *testing.T) {
 	require.Equal(t, 60.0, f.userRepo.getByIDUser.Balance)
 }
 
+// Order 501/504 on 2026-11-08: a hashless confirmation at 15:12 kept blocking
+// a 22:31 transfer for another order because the first order's window ran 24h.
+func TestPaymentManualSettleIgnoresTransferAfterHashlessConfirmation(t *testing.T) {
+	ctx := context.Background()
+	f := newManualSettleFixture(t, OrderStatusPending, "4.48")
+	second := newSecondSettlementOrder(t, f)
+	require.NoError(t, f.svc.confirmPayment(ctx, f.order.ID, "gateway-trade-1", 30, payment.TypeEpusdt, map[string]string{"token": "USDT"}))
+	confirmedAt := time.Now().Add(-7 * time.Hour)
+	_, err := f.client.ExecContext(ctx, "UPDATE payment_orders SET created_at = ? WHERE id = ?", confirmedAt.Add(-3*time.Minute), f.order.ID)
+	require.NoError(t, err)
+	_, err = f.client.ExecContext(ctx, "UPDATE payment_transaction_claims SET created_at = ?, order_created_at = ? WHERE order_id = ?", confirmedAt, confirmedAt.Add(-3*time.Minute), f.order.ID)
+	require.NoError(t, err)
+
+	f.fetcher.byNetwork["binance"][0].BlockTime = time.Now().Add(-time.Minute)
+	_, err = f.svc.AdminSettleOrderByTxHash(ctx, second.ID, ManualSettleRequest{TxHash: manualSettleTxHash})
+	require.NoError(t, err)
+	require.Equal(t, 60.0, f.userRepo.getByIDUser.Balance)
+}
+
 func TestPaymentManualSettleIgnoresHashlessPaymentFromAnotherTime(t *testing.T) {
 	ctx := context.Background()
 	f := newManualSettleFixture(t, OrderStatusPending, "4.48")

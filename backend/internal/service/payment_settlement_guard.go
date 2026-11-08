@@ -81,6 +81,10 @@ func hashlessPaidOrderNear(ctx context.Context, client *dbent.Client, blockTime 
 		paymenttransactionclaim.OrderIDNEQ(exceptOrderID),
 		paymenttransactionclaim.Or(paymenttransactionclaim.OrderCreatedAtIsNil(), paymenttransactionclaim.OrderCreatedAtLTE(blockTime.Add(manualSettleClockSkew))),
 		paymenttransactionclaim.Or(paymenttransactionclaim.OrderWindowEndIsNil(), paymenttransactionclaim.OrderWindowEndGTE(blockTime)),
+		// The claim is written when the gateway confirms the payment, so the
+		// transfer it stands for was made before that. A transfer made later
+		// cannot be it, however long the order's window still runs.
+		paymenttransactionclaim.CreatedAtGTE(blockTime.Add(-manualSettleClockSkew)),
 		func(s *sql.Selector) {
 			linked := sql.Table(paymenttransactionclaim.Table).As("linked")
 			s.Where(sql.Not(sql.Exists(sql.Select(linked.C("id")).From(linked).Where(sql.And(
