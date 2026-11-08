@@ -204,6 +204,9 @@ const dirty = computed(() => snapshot() !== baseline.value)
 // form is exempt from the guard — another group, or edits made after
 // pressing save, are still unsaved.
 const inFlight = ref<{ groupId: number; snapshot: string } | null>(null)
+/** Leaving the page or the route: nothing counts as saved until the save succeeded. */
+const unsavedOnLeave = computed(() => !loading.value && (dirty.value || extrasDirty.value))
+/** Switching groups: the form being saved may be left, its save carries on. */
 const unsaved = computed(() => {
   if (loading.value) return false
   if (extrasDirty.value) return true
@@ -434,7 +437,7 @@ function onCancel() {
   if (confirm.kind === 'group') syncQuery()
 }
 onBeforeRouteLeave((to) => {
-  if (leaveApproved || !unsaved.value) return true
+  if (leaveApproved || !unsavedOnLeave.value) return true
   openConfirm('leave', 0, to.fullPath)
   return false
 })
@@ -442,7 +445,7 @@ function onBeforeUnload(event: BeforeUnloadEvent) {
   event.preventDefault()
   event.returnValue = ''
 }
-watch(unsaved, (now) => {
+watch(unsavedOnLeave, (now) => {
   if (now) window.addEventListener('beforeunload', onBeforeUnload)
   else window.removeEventListener('beforeunload', onBeforeUnload)
 })

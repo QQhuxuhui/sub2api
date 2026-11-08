@@ -22,7 +22,7 @@
         </button>
       </li>
     </ul>
-    <button type="button" class="mt-3 w-full rounded-lg px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-dark-700" :disabled="busy" @click="emit('clear-all')">
+    <button type="button" data-test="intent-clear-all" class="mt-3 w-full rounded-lg px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-dark-700" :disabled="busy" @click="emit('clear-all')">
       {{ t('intentRouter.actions.clearCacheAll') }}
     </button>
   </aside>
@@ -60,6 +60,9 @@
           </button>
         </li>
       </ul>
+      <button type="button" data-test="intent-clear-all-m" class="mt-2 w-full rounded-lg border-t border-gray-100 px-2 py-2 text-xs text-gray-500 hover:bg-gray-50 dark:border-dark-700 dark:text-gray-400 dark:hover:bg-dark-700" :disabled="busy" @click="open = false; emit('clear-all')">
+        {{ t('intentRouter.actions.clearCacheAll') }}
+      </button>
     </div>
   </div>
 </template>

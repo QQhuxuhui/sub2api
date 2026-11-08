@@ -941,4 +941,45 @@ describe('IntentRoutersView', () => {
     await wrapper.get('[data-test="intent-rule-more-0"]').trigger('click')
     expect(wrapper.get('[data-test="intent-rule-menu-0"]').classes()).toContain('top-full')
   })
+
+  it('keeps the page-leave guard while a save is still pending, and drops it once saved', async () => {
+    const pending = deferred<{ data: typeof savedRouter }>()
+    api.save.mockReturnValueOnce(pending.promise)
+    const add = vi.spyOn(window, 'addEventListener')
+    const remove = vi.spyOn(window, 'removeEventListener')
+    // Rendered through a RouterView, as in the app, so its leave guard is live.
+    const router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/admin/intent-routers', component: IntentRoutersView },
+      { path: '/elsewhere', component: { template: '<div />' } },
+    ] })
+    await router.push('/admin/intent-routers')
+    await router.isReady()
+    const wrapper = mount({ template: '<router-view />' }, {
+      global: { plugins: [router], stubs: { AppLayout: { template: '<div><slot /></div>' }, teleport: true } },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="intent-rule-name"]').setValue('renamed')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    expect(remove.mock.calls.some(([type]) => type === 'beforeunload')).toBe(false)
+    await router.push('/elsewhere')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/admin/intent-routers')
+    expect(wrapper.text()).toContain('intentRouter.leave.message')
+    await button(wrapper, 'intentRouter.leave.stay').trigger('click')
+    pending.resolve({ data: { ...savedRouter, rules: [{ ...savedRouter.rules[0], name: 'renamed' }] } })
+    await flushPromises()
+    expect(remove.mock.calls.some(([type]) => type === 'beforeunload')).toBe(true)
+    expect(add.mock.calls.some(([type]) => type === 'beforeunload')).toBe(true)
+    add.mockRestore()
+    remove.mockRestore()
+  })
+
+  it('offers clearing every group\'s memory on narrow screens too', async () => {
+    api.clearCache.mockResolvedValue({ data: { removed: 3 } })
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-group-picker"]').trigger('click')
+    await wrapper.get('[data-test="intent-clear-all-m"]').trigger('click')
+    await flushPromises()
+    expect(api.clearCache).toHaveBeenCalledWith(0)
+  })
 })
