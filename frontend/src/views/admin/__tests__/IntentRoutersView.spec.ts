@@ -895,4 +895,50 @@ describe('IntentRoutersView', () => {
     await flushPromises()
     expect(api.remove).toHaveBeenCalledWith(1)
   })
+
+  it('still guards another group, and edits made after pressing save, while a save is under way', async () => {
+    api.list.mockResolvedValue({ data: [savedRouter] })
+    const pending = deferred<{ data: typeof savedRouter }>()
+    api.save.mockReturnValueOnce(pending.promise)
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-rule-name"]').setValue('renamed')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    // Exactly what is being saved may be left without asking…
+    await wrapper.get('[data-test="intent-group-2"]').trigger('click')
+    expect(wrapper.text()).not.toContain('intentRouter.leave.message')
+    // …but edits to the next group are protected though the save is still pending.
+    await wrapper.get('[data-test="intent-add-rule"]').trigger('click')
+    await wrapper.get('[data-test="intent-group-1"]').trigger('click')
+    expect(wrapper.text()).toContain('intentRouter.leave.message')
+    await button(wrapper, 'intentRouter.leave.stay').trigger('click')
+    pending.resolve({ data: { ...savedRouter, rules: [{ ...savedRouter.rules[0], name: 'renamed' }] } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="intent-rule-0"]').exists()).toBe(true) // still on group 2 with its new rule
+  })
+
+  it('treats edits made after pressing save as unsaved', async () => {
+    const pending = deferred<{ data: typeof savedRouter }>()
+    api.save.mockReturnValueOnce(pending.promise)
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-rule-name"]').setValue('renamed')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await wrapper.get('[data-test="intent-rule-name"]').setValue('renamed again')
+    await wrapper.get('[data-test="intent-group-2"]').trigger('click')
+    expect(wrapper.text()).toContain('intentRouter.leave.message')
+    pending.resolve({ data: savedRouter })
+    await flushPromises()
+  })
+
+  it('opens the narrow-screen menu of the last rule upwards, inside an unclipped list', async () => {
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, rules: [
+      { name: 'first', description: '', keywords: ['a'], account_ids: [21], enabled: true },
+      { name: 'second', description: '', keywords: ['b'], account_ids: [22], enabled: true },
+    ] }] })
+    const wrapper = await mountView()
+    expect(wrapper.get('[data-test="intent-rule-0"]').element.parentElement?.className).not.toContain('overflow-hidden')
+    await wrapper.get('[data-test="intent-rule-more-1"]').trigger('click')
+    expect(wrapper.get('[data-test="intent-rule-menu-1"]').classes()).toContain('bottom-full')
+    await wrapper.get('[data-test="intent-rule-more-0"]').trigger('click')
+    expect(wrapper.get('[data-test="intent-rule-menu-0"]').classes()).toContain('top-full')
+  })
 })

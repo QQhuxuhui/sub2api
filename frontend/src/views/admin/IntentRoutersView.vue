@@ -200,7 +200,17 @@ const selectedGroup = computed(() => groups.value.find((g) => g.id === selectedG
 const savedRouter = computed(() => (selectedGroupId.value ? routers.value[selectedGroupId.value] ?? null : null))
 const dirty = computed(() => snapshot() !== baseline.value)
 /** Anything on this group that leaving would lose; a save under way is not lost. */
-const unsaved = computed(() => !loading.value && ((dirty.value && !saving.value) || extrasDirty.value))
+// The save under way: which group, and exactly what it sent. Only that very
+// form is exempt from the guard — another group, or edits made after
+// pressing save, are still unsaved.
+const inFlight = ref<{ groupId: number; snapshot: string } | null>(null)
+const unsaved = computed(() => {
+  if (loading.value) return false
+  if (extrasDirty.value) return true
+  if (!dirty.value) return false
+  const pending = inFlight.value
+  return !(pending && pending.groupId === selectedGroupId.value && pending.snapshot === snapshot())
+})
 
 function toInput(): IntentRouterInput {
   return {
@@ -453,8 +463,10 @@ async function save() {
   if (!groupId || busy.value) return
   saving.value = true
   jevStatusSeq++
+  const input = toInput()
+  inFlight.value = { groupId, snapshot: JSON.stringify(input) }
   try {
-    const res = await intentRoutersAPI.save(groupId, toInput())
+    const res = await intentRoutersAPI.save(groupId, input)
     routers.value = { ...routers.value, [groupId]: res.data }
     if (selectedGroupId.value === groupId) {
       fillForm(res.data)
@@ -465,6 +477,7 @@ async function save() {
     appStore.showError(errorText(err))
   } finally {
     saving.value = false
+    inFlight.value = null
   }
 }
 

@@ -9,8 +9,8 @@
       {{ t('intentRouter.rules.empty') }}
     </div>
 
-    <ul v-else class="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 dark:divide-dark-700 dark:border-dark-600">
-      <li v-for="(rule, index) in form.rules" :key="rule.uid" :data-test="`intent-rule-${index}`" :class="expanded.has(rule.uid) ? 'bg-gray-50/60 dark:bg-dark-800/40' : ''">
+    <ul v-else class="divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-dark-700 dark:border-dark-600">
+      <li v-for="(rule, index) in form.rules" :key="rule.uid" :data-test="`intent-rule-${index}`" :class="['first:rounded-t-xl last:rounded-b-xl', expanded.has(rule.uid) ? 'bg-gray-50/60 dark:bg-dark-800/40' : '']">
         <!-- Summary row -->
         <div class="flex items-start gap-3 px-3 py-2.5 sm:items-center">
           <button
@@ -24,7 +24,7 @@
               <StatusDot :tone="ruleTone(rule)" :label="ruleStateLabel(rule)" />
               <span :class="['truncate font-medium', rule.name.trim() ? 'text-gray-900 dark:text-white' : 'italic text-gray-400']">{{ rule.name.trim() || t('intentRouter.rules.unnamed') }}</span>
             </span>
-            <span class="flex min-w-0 flex-1 flex-col gap-1 pl-4 sm:pl-0">
+            <span class="flex w-full min-w-0 flex-1 flex-col gap-1 overflow-hidden pl-4 sm:pl-0">
               <span class="flex min-w-0 flex-wrap items-center gap-1.5">
                 <span v-for="role in roles(rule)" :key="role" class="whitespace-nowrap rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">{{ role }}</span>
                 <template v-if="keywordsOf(rule).length">
@@ -44,8 +44,8 @@
               <button type="button" class="icon-btn hover:text-red-600" :aria-label="t('intentRouter.rules.remove')" :title="t('intentRouter.rules.remove')" @click="remove(index)">✕</button>
             </div>
             <div class="relative sm:hidden">
-              <button type="button" class="icon-btn" :aria-label="t('intentRouter.rules.more')" @click.stop="menuFor = menuFor === rule.uid ? 0 : rule.uid">⋯</button>
-              <div v-if="menuFor === rule.uid" class="absolute right-0 z-20 mt-1 w-32 rounded-lg border border-gray-200 bg-white py-1 text-sm shadow-lg dark:border-dark-600 dark:bg-dark-800">
+              <button type="button" :data-test="`intent-rule-more-${index}`" class="icon-btn" :aria-label="t('intentRouter.rules.more')" @click.stop="menuFor = menuFor === rule.uid ? 0 : rule.uid">⋯</button>
+              <div v-if="menuFor === rule.uid" :data-test="`intent-rule-menu-${index}`" :class="['absolute right-0 z-20 w-32 rounded-lg', index === form.rules.length - 1 && index > 0 ? 'bottom-full mb-1' : 'top-full mt-1']" class="border border-gray-200 bg-white py-1 text-sm shadow-lg dark:border-dark-600 dark:bg-dark-800">
                 <button type="button" class="menu-item" :disabled="index === 0" @click="move(index, -1)">{{ t('intentRouter.rules.moveUp') }}</button>
                 <button type="button" class="menu-item" :disabled="index === form.rules.length - 1" @click="move(index, 1)">{{ t('intentRouter.rules.moveDown') }}</button>
                 <button type="button" class="menu-item text-red-600 dark:text-red-400" @click="remove(index)">{{ t('intentRouter.rules.remove') }}</button>
