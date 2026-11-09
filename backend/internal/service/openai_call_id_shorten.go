@@ -42,6 +42,8 @@ func ShortenOpenAIOverlongCallIDs(body []byte) ([]byte, int) {
 	type occurrence struct {
 		path  string
 		value string
+		start int // byte offset of the quoted value in body
+		raw   string
 	}
 	var occurrences []occurrence
 	anchored := make(map[string]bool)
@@ -65,6 +67,8 @@ func ShortenOpenAIOverlongCallIDs(body []byte) ([]byte, int) {
 		occurrences = append(occurrences, occurrence{
 			path:  fmt.Sprintf("input.%d.call_id", index.Int()),
 			value: value,
+			start: callID.Index,
+			raw:   callID.Raw,
 		})
 		if !strings.HasSuffix(itemType, "_output") {
 			anchored[value] = true
@@ -72,11 +76,46 @@ func ShortenOpenAIOverlongCallIDs(body []byte) ([]byte, int) {
 		return true
 	})
 
-	changed := 0
+	targets := occurrences[:0]
 	for _, o := range occurrences {
-		if !anchored[o.value] || referenced[o.value] {
-			continue
+		if anchored[o.value] && !referenced[o.value] {
+			targets = append(targets, o)
 		}
+	}
+	if len(targets) == 0 {
+		return body, 0
+	}
+
+	// Splice every value in one pass: rewriting field by field would copy the
+	// whole body once per field. The offsets gjson reports are checked against
+	// the body; if any is off, fall back to path-based rewriting.
+	spliced := true
+	last := 0
+	for _, o := range targets {
+		end := o.start + len(o.raw)
+		if o.start < last || end > len(body) || string(body[o.start:end]) != o.raw {
+			spliced = false
+			break
+		}
+		last = end
+	}
+	if spliced {
+		var out bytes.Buffer
+		out.Grow(len(body))
+		last = 0
+		for _, o := range targets {
+			out.Write(body[last:o.start])
+			out.WriteByte('"')
+			out.WriteString(shortOpenAICallID(o.value))
+			out.WriteByte('"')
+			last = o.start + len(o.raw)
+		}
+		out.Write(body[last:])
+		return out.Bytes(), len(targets)
+	}
+
+	changed := 0
+	for _, o := range targets {
 		next, err := sjson.SetBytes(body, o.path, shortOpenAICallID(o.value))
 		if err != nil {
 			continue

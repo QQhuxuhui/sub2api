@@ -3,6 +3,8 @@
 package service
 
 import (
+	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -125,4 +127,37 @@ func TestOpenAIBodyMayHaveOverlongCallID(t *testing.T) {
 	require.False(t, openAIBodyMayHaveOverlongCallID([]byte(`{"text":"mentions \"call_id\" in prose `+strings.Repeat("z", 100)+`"}`)))
 	require.True(t, openAIBodyMayHaveOverlongCallID([]byte(`{"a":{"call_id":"short"},"b":{"call_id" : "`+longCallID+`"}}`)))
 	require.False(t, openAIBodyMayHaveOverlongCallID([]byte(`{"call_id":"`+strings.Repeat("u", 40))))
+}
+
+// A long history full of overlong ids must be rewritten in one pass: copying the
+// body once per field would allocate thousands of times its size.
+func TestShortenOpenAIOverlongCallIDs_LargeHistoryIsLinear(t *testing.T) {
+	output := strings.Repeat("o", 16*1024)
+	var b strings.Builder
+	b.WriteString(`{"model":"gpt-5","input":[`)
+	for i := 0; i < 1000; i++ {
+		id := fmt.Sprintf("call_%s%06d", strings.Repeat("a", 76), i)
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(`{"type":"function_call","name":"s","arguments":"{}","call_id":"` + id + `"},`)
+		b.WriteString(`{"type":"function_call_output","call_id":"` + id + `","output":"` + output + `"}`)
+	}
+	b.WriteString(`]}`)
+	body := []byte(b.String())
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	out, n := ShortenOpenAIOverlongCallIDs(body)
+	runtime.ReadMemStats(&after)
+
+	require.Equal(t, 2000, n)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(4*len(body)))
+	first := gjson.GetBytes(out, "input.0.call_id").String()
+	require.Len(t, first, 37)
+	require.Equal(t, first, gjson.GetBytes(out, "input.1.call_id").String())
+	require.NotEqual(t, first, gjson.GetBytes(out, "input.2.call_id").String())
+	require.Equal(t, output, gjson.GetBytes(out, "input.1999.output").String())
+	require.True(t, gjson.ValidBytes(out))
 }
