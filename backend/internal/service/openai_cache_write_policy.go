@@ -62,7 +62,10 @@ func (r openAIResponseModelRewrite) applyResponsesEventUsage(event *apicompat.Re
 		return
 	}
 	terminal := openAIResponsesTerminalEventType(event.Type)
-	event.Usage = r.applyResponsesUsageFinal(event.Usage, terminal)
+	// When the event also carries the response's usage, that one is what
+	// conversions output: only it may record the smoothing baseline.
+	topFinal := terminal && (event.Response == nil || event.Response.Usage == nil)
+	event.Usage = r.applyResponsesUsageFinal(event.Usage, topFinal)
 	if event.Response != nil {
 		response := *event.Response
 		response.Usage = r.applyResponsesUsageFinal(response.Usage, terminal)

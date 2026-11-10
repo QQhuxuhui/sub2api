@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cachesim"
@@ -82,8 +84,14 @@ func newSmoothPlan(store intentCacheSmoothStore, routed bool, baseline *intentCa
 	}
 }
 
+// smoothBaseline is a previous turn whose client saw all of total cached
+// (rate 100%): the candidate then only depends on the cap.
 func smoothBaseline(total int, accountID int64, routed bool, age time.Duration) *intentCacheSmoothBaseline {
-	return &intentCacheSmoothBaseline{Total: total, At: smoothTestNow.Add(-age).UnixMilli(), Seq: "1", AccountID: accountID, Routed: routed}
+	return smoothBaselineShown(total, total, accountID, routed, age)
+}
+
+func smoothBaselineShown(total, shown int, accountID int64, routed bool, age time.Duration) *intentCacheSmoothBaseline {
+	return &intentCacheSmoothBaseline{Total: total, Cached: &shown, At: smoothTestNow.Add(-age).UnixMilli(), Seq: "1", AccountID: accountID, Routed: routed}
 }
 
 func withSmoothPlan(ctx context.Context, plan *IntentCacheSmoothPlan) context.Context {
@@ -92,20 +100,25 @@ func withSmoothPlan(ctx context.Context, plan *IntentCacheSmoothPlan) context.Co
 
 func TestIntentCacheSmoothCandidate(t *testing.T) {
 	cases := []struct {
-		name                        string
-		prev, total, creation, want int
+		name                                         string
+		prevCached, prevTotal, total, creation, want int
 	}{
-		{"previous turn bounds it", 50_000, 60_000, 0, 50_000 / 128 * 128},
-		{"95 percent cap", 100_000, 60_000, 0, 57_000 / 128 * 128},
-		{"cache writes are not reads", 100_000, 60_000, 10_000, 50_000 / 128 * 128},
-		{"below the caching minimum", 900, 60_000, 0, 0},
-		{"small turn", 50_000, 1000, 0, 0},
-		{"no previous turn", 0, 60_000, 0, 0},
-		{"rounds down to whole blocks", 5000, 10_000, 0, 4992},
+		// The live case: 265 under-reports (1878 in, 1536 shown), the routed
+		// account reports the real 4687; the rate carries over, not the count.
+		{"rate carries across accounts that count differently", 1536, 1878, 4687, 0, 3712},
+		{"95 percent cap", 100, 100, 60_000, 0, 57_000 / 128 * 128},
+		{"cache writes are not reads", 100, 100, 60_000, 10_000, 50_000 / 128 * 128},
+		{"rounds down to whole blocks", 1, 2, 10_000, 0, 4992},
+		// 3072*1122/3366 is exactly 1024; a float rate gives 1023.99... and 0.
+		{"integer arithmetic at a block boundary", 3072, 3366, 1122, 0, 1024},
+		{"below the caching minimum", 1, 100, 60_000, 0, 0},
+		{"small turn", 100, 100, 1000, 0, 0},
+		{"client saw no cache", 0, 1878, 60_000, 0, 0},
+		{"no previous input", 10, 0, 60_000, 0, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, intentCacheSmoothCandidate(tc.prev, tc.total, tc.creation))
+			require.Equal(t, tc.want, intentCacheSmoothCandidate(tc.prevCached, tc.prevTotal, tc.total, tc.creation))
 		})
 	}
 }
@@ -129,31 +142,60 @@ func TestIntentCacheSmoothPlan_WhichTurnsAreSmoothed(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			prev, ok := newSmoothPlan(nil, tc.routed, tc.baseline).PrevTotal(tc.account)
+			cached, total, ok := newSmoothPlan(nil, tc.routed, tc.baseline).PrevShown(tc.account)
 			require.Equal(t, tc.want, ok)
 			if tc.want {
-				require.Equal(t, 40_000, prev)
+				require.Equal(t, 40_000, cached)
+				require.Equal(t, 40_000, total)
 			}
 		})
 	}
 	var nilPlan *IntentCacheSmoothPlan
-	_, ok := nilPlan.PrevTotal(1)
+	_, _, ok := nilPlan.PrevShown(1)
 	require.False(t, ok)
+
+	// Baselines that cannot give a rate: none of them smooths.
+	zero, over := 0, 50_000
+	for name, b := range map[string]*intentCacheSmoothBaseline{
+		"client saw no cache":      {Total: 40_000, Cached: &zero, At: smoothTestNow.UnixMilli(), AccountID: original},
+		"shown above the input":    {Total: 40_000, Cached: &over, At: smoothTestNow.UnixMilli(), AccountID: original},
+		"no input":                 {Total: 0, Cached: &zero, At: smoothTestNow.UnixMilli(), AccountID: original},
+		"written before c existed": {Total: 40_000, At: smoothTestNow.UnixMilli(), AccountID: original},
+	} {
+		_, _, ok := newSmoothPlan(nil, true, b).PrevShown(routedAcct)
+		require.False(t, ok, name)
+	}
+}
+
+func TestIntentCacheSmoothRedisStore_OldBaselinesHaveNoShownCount(t *testing.T) {
+	server := miniredis.RunT(t)
+	store := &redisIntentCacheSmoothStore{rdb: redis.NewClient(&redis.Options{Addr: server.Addr()})}
+	// As written by the version before the shown count existed.
+	require.NoError(t, server.Set(intentCacheSmoothKeyPrefix+"old", `{"t":1878,"at":1,"s":"1","a":265,"r":false}`))
+	b, err := store.Get(context.Background(), "old")
+	require.NoError(t, err)
+	require.Nil(t, b.Cached)
 }
 
 func TestIntentCacheSmoothPlan_CommitWritesOnceAndBoundsTheWait(t *testing.T) {
 	store := &memSmoothStore{}
 	plan := newSmoothPlan(store, true, nil)
-	plan.Commit(9, 30_000)
-	plan.Commit(9, 99_999)
+	plan.Commit(9, 30_000, 24_000)
+	plan.Commit(9, 99_999, 1)
 	require.Equal(t, 1, store.puts)
 	b := store.only(t)
-	require.Equal(t, intentCacheSmoothBaseline{Total: 30_000, At: smoothTestNow.UnixMilli(), Seq: plan.seq, AccountID: 9, Routed: true}, b)
+	shown := 24_000
+	require.Equal(t, intentCacheSmoothBaseline{Total: 30_000, Cached: &shown, At: smoothTestNow.UnixMilli(), Seq: plan.seq, AccountID: 9, Routed: true}, b)
+
+	// The shown count is kept within [0, total].
+	clamped := &memSmoothStore{}
+	newSmoothPlan(clamped, false, nil).Commit(9, 30_000, 40_000)
+	require.Equal(t, 30_000, *clamped.only(t).Cached)
 
 	stuck := &memSmoothStore{block: make(chan struct{})}
 	t.Cleanup(func() { close(stuck.block) })
 	started := time.Now()
-	newSmoothPlan(stuck, false, nil).Commit(9, 30_000)
+	newSmoothPlan(stuck, false, nil).Commit(9, 30_000, 0)
 	require.Less(t, time.Since(started), intentCacheSmoothWriteWait+200*time.Millisecond)
 }
 
@@ -393,7 +435,7 @@ func TestCacheSmooth_TakesTheLargerOfAccountSimulationAndSmoothing(t *testing.T)
 	require.Zero(t, win.peeks)
 
 	// Simulation pulls 2000 -> 85% of 10000; smoothing offers a small previous turn: the larger wins.
-	_, rewrite = smoothRewriteContext(t, newSmoothPlan(&memSmoothStore{}, true, smoothBaseline(2048, 1, false, time.Minute)))
+	_, rewrite = smoothRewriteContext(t, newSmoothPlan(&memSmoothStore{}, true, smoothBaselineShown(10_000, 2048, 1, false, time.Minute)))
 	got := rewrite(simTestAccount(simEnabledExtra(85, 85))).applySSELine(`data: {"type":"response.completed","response":{"usage":{"input_tokens":10000,"input_tokens_details":{"cached_tokens":2000}}}}`)
 	require.Contains(t, got, `"cached_tokens":8448`)
 	require.Equal(t, 1, win.peeks)
@@ -456,4 +498,87 @@ func TestCacheSmooth_BilledAsTheClientSawIt(t *testing.T) {
 	state2.Decide(42000, 2000, func(int, int) int { return 30000 })
 	log := smoothRecord(t, cachesim.WithState(context.Background(), state2), account, &OpenAIForwardResult{RequestID: "r3", Model: "gpt-5.4", UpstreamModel: "gpt-5.4", Usage: OpenAIUsage{InputTokens: 42000, CacheReadInputTokens: 2000}, WebSearchCalls: 1, Duration: time.Second})
 	require.Equal(t, 2000, log.CacheReadTokens)
+}
+
+// replayTurn runs one turn through the rewrite layer the way production does:
+// the plan reads the conversation's baseline from store, the response's
+// final usage is rewritten, and its shown cache becomes the next baseline.
+func replayTurn(t *testing.T, store *memSmoothStore, routed bool, account *Account, total, cached int) int {
+	t.Helper()
+	b, err := store.Get(context.Background(), "k")
+	require.NoError(t, err)
+	plan := newSmoothPlan(store, routed, b)
+	plan.seq = strconv.FormatInt(time.Now().UnixNano(), 10)
+	_, rewrite := smoothRewriteContext(t, plan)
+	line := `data: {"type":"response.completed","response":{"usage":{"input_tokens":` + strconv.Itoa(total) + `,"input_tokens_details":{"cached_tokens":` + strconv.Itoa(cached) + `}}}}`
+	got := rewrite(account).applySSELine(line)
+	shown := int(gjson.Get(strings.TrimPrefix(got, "data: "), "response.usage.input_tokens_details.cached_tokens").Int())
+	require.Equal(t, shown, *store.only(t).Cached, "the baseline records what the client saw")
+	return shown
+}
+
+func TestCacheSmooth_LiveReplayKeepsTheRate(t *testing.T) {
+	// Numbers from the 11-10 live test: turns 1-3 on 265 (which under-counts
+	// input), turn 4 routed by "svg" to 137 (real count, no cache), turn 5 back.
+	store := &memSmoothStore{}
+	a265, a137 := &Account{ID: 265, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, &Account{ID: 137, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	require.Equal(t, 1024, replayTurn(t, store, false, a265, 1337, 1024))
+	require.Equal(t, 1280, replayTurn(t, store, false, a265, 1582, 1280))
+	require.Equal(t, 1536, replayTurn(t, store, false, a265, 1878, 1536))
+	routed := replayTurn(t, store, true, a137, 4687, 0)
+	require.Equal(t, 3712, routed)
+	require.InDelta(t, 100*1536.0/1878, 100*float64(routed)/4687, 5, "within 5 points of the previous turn")
+	back := replayTurn(t, store, false, a265, 3097, 2560)
+	require.Equal(t, 2560, back, "the upstream's own cache is higher than the carried rate: kept")
+	require.InDelta(t, 100*float64(routed)/4687, 100*float64(back)/3097, 5)
+}
+
+func TestCacheSmooth_BaselineIsTheFinalUsageNotAnIntermediateOne(t *testing.T) {
+	store := &memSmoothStore{}
+	// The client saw 80% on the previous turn.
+	plan := newSmoothPlan(store, true, smoothBaselineShown(10_000, 8000, 1, false, time.Minute))
+	_, rewrite := smoothRewriteContext(t, plan)
+	rw := rewrite(simTestAccount(nil))
+	mid := `data: {"type":"response.in_progress","response":{"usage":{"input_tokens":2000,"input_tokens_details":{"cached_tokens":0}}}}`
+	require.Contains(t, rw.applySSELine(mid), `"cached_tokens":1536`, "the decision is taken on the first usage seen")
+	require.Zero(t, store.puts, "an intermediate usage records nothing")
+	final := `data: {"type":"response.completed","response":{"usage":{"input_tokens":4000,"input_tokens_details":{"cached_tokens":0}}}}`
+	require.Equal(t, final, rw.applySSELine(final), "a final usage that differs from the decision is shown as is")
+	b := store.only(t)
+	require.Equal(t, 4000, b.Total)
+	require.Equal(t, 0, *b.Cached, "the baseline records the 0 the client saw, not the intermediate 1536")
+	// A second terminal event of the same response does not write again.
+	rw.applySSELine(`data: {"type":"response.done","response":{"usage":{"input_tokens":9999,"input_tokens_details":{"cached_tokens":0}}}}`)
+	require.Equal(t, 1, store.puts)
+}
+
+func TestCacheSmooth_ResponseUsageWinsWhenAnEventCarriesTwo(t *testing.T) {
+	// Typed event: the conversion outputs Response.Usage.
+	store := &memSmoothStore{}
+	_, rewrite := smoothRewriteContext(t, newSmoothPlan(store, false, nil))
+	ev := &apicompat.ResponsesStreamEvent{Type: "response.completed",
+		Usage:    &apicompat.ResponsesUsage{InputTokens: 1500, InputTokensDetails: &apicompat.ResponsesInputTokensDetails{CachedTokens: 1024}},
+		Response: &apicompat.ResponsesResponse{Usage: &apicompat.ResponsesUsage{InputTokens: 3000, InputTokensDetails: &apicompat.ResponsesInputTokensDetails{CachedTokens: 2048}}}}
+	rewrite(simTestAccount(nil)).applyResponsesEventUsage(ev)
+	b := store.only(t)
+	require.Equal(t, 3000, b.Total)
+	require.Equal(t, 2048, *b.Cached)
+
+	// Raw JSON with a top-level usage and the response's usage.
+	store = &memSmoothStore{}
+	_, rewrite = smoothRewriteContext(t, newSmoothPlan(store, false, nil))
+	rewrite(simTestAccount(nil)).applySSELine(`data: {"type":"response.completed","usage":{"input_tokens":1500,"input_tokens_details":{"cached_tokens":1024}},"response":{"usage":{"input_tokens":3000,"input_tokens_details":{"cached_tokens":2048}}}}`)
+	b = store.only(t)
+	require.Equal(t, 3000, b.Total)
+	require.Equal(t, 2048, *b.Cached)
+}
+
+func TestCacheSmooth_BaselineIncludesTheAccountSimulation(t *testing.T) {
+	SetOpenAICacheSimWindowStore(&memCacheSimStore{})
+	t.Cleanup(func() { SetOpenAICacheSimWindowStore(nil) })
+	store := &memSmoothStore{}
+	_, rewrite := smoothRewriteContext(t, newSmoothPlan(store, false, nil))
+	got := rewrite(simTestAccount(simEnabledExtra(85, 85))).applySSELine(`data: {"type":"response.completed","response":{"usage":{"input_tokens":10000,"input_tokens_details":{"cached_tokens":2000}}}}`)
+	require.Contains(t, got, `"cached_tokens":8448`)
+	require.Equal(t, 8448, *store.only(t).Cached, "the rate the client saw includes the account's own simulation")
 }

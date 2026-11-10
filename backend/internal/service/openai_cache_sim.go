@@ -133,12 +133,12 @@ func (r *openAICacheSimRequest) decide(rawTotal, rawCached, rawCreation int) int
 	return r.state.Decide(rawTotal, rawCached, func(total, cached int) int {
 		sim := r.simulateAccount(total, cached, rawCreation)
 		if r.smooth != nil {
-			// Smoothing: the cache the conversation would have had without an
-			// intent-routing switch. Every decided turn becomes the baseline.
-			if prevTotal, ok := r.smooth.PrevTotal(r.accountID); ok {
-				sim = max(sim, intentCacheSmoothCandidate(prevTotal, total, rawCreation))
+			// Smoothing: the cache rate the client saw on the previous turn,
+			// as if there had been no intent-routing switch. The baseline is
+			// committed from the final usage the client gets (commitShown).
+			if prevCached, prevTotal, ok := r.smooth.PrevShown(r.accountID); ok {
+				sim = max(sim, intentCacheSmoothCandidate(prevCached, prevTotal, total, rawCreation))
 			}
-			r.smooth.Commit(r.accountID, total)
 		}
 		return sim
 	})
@@ -166,6 +166,15 @@ func (r *openAICacheSimRequest) simulateAccount(total, cached, rawCreation int) 
 		win = w
 	}
 	return simulateOpenAICachedTokens(r.cfg, win, total, cached, rawCreation, rand.Float64())
+}
+
+// commitShown records, for cache smoothing, the final usage the client gets:
+// its raw total input and the cache reads it shows.
+func (r *openAICacheSimRequest) commitShown(total, shown int) {
+	if r == nil || r.smooth == nil || r.state.Excluded() {
+		return
+	}
+	r.smooth.Commit(r.accountID, total, shown)
 }
 
 // apply 把一个 usage 的 (total, cached) 映射为模拟值：未决策时先决策。
@@ -198,13 +207,25 @@ func (r *openAICacheSimRequest) applyJSON(data []byte, anthropicShape bool) []by
 	updated := data
 	// Only smoothing decides on a usage without a cache-read field, and only on
 	// a final one: a streamed intermediate usage must not fix the decision.
-	fillMissing := r.smooth != nil && openAICacheSimTerminalPayload(data)
+	// The final usage is also what the smoothing baseline records: the
+	// response's own usage when the payload carries one (conversions output
+	// that one), otherwise the first usage found.
+	final := r.smooth != nil && openAICacheSimTerminalPayload(data)
+	commitPrefix := ""
+	if final {
+		if gjson.GetBytes(data, "response.usage").IsObject() {
+			commitPrefix = "response.usage"
+		}
+	}
+	committed := false
 	for _, prefix := range openAICacheSimUsagePrefixes {
 		usage := gjson.GetBytes(updated, prefix)
 		if !usage.IsObject() {
 			continue
 		}
-		updated = r.applyUsageAt(updated, prefix, usage, anthropicShape, fillMissing)
+		commit := final && !committed && (commitPrefix == "" || commitPrefix == prefix)
+		updated = r.applyUsageAt(updated, prefix, usage, anthropicShape, final, commit)
+		committed = committed || commit
 	}
 	return updated
 }
@@ -229,7 +250,9 @@ func openAICacheSimTerminalPayload(data []byte) bool {
 	return false
 }
 
-func (r *openAICacheSimRequest) applyUsageAt(data []byte, prefix string, usage gjson.Result, anthropicShape, fillMissing bool) []byte {
+// fillMissing lets smoothing decide on a final usage without a cache-read
+// field; commit records the usage as the smoothing baseline.
+func (r *openAICacheSimRequest) applyUsageAt(data []byte, prefix string, usage gjson.Result, anthropicShape, fillMissing, commit bool) []byte {
 	setInt := func(doc []byte, path string, v int) []byte {
 		if next, err := sjson.SetBytes(doc, path, v); err == nil {
 			return next
@@ -245,6 +268,9 @@ func (r *openAICacheSimRequest) applyUsageAt(data []byte, prefix string, usage g
 		creation := int(usage.Get("cache_creation_input_tokens").Int())
 		total := int(input.Int()) + int(cacheRead.Int()) + creation
 		sim, changed := r.apply(total, int(cacheRead.Int()), creation)
+		if commit {
+			r.commitShown(total, sim)
+		}
 		if !changed {
 			return data
 		}
@@ -291,6 +317,9 @@ func (r *openAICacheSimRequest) applyUsageAt(data []byte, prefix string, usage g
 	}
 	cached := int(usage.Get(cachedField).Int())
 	sim, changed := r.apply(total, cached, openAICacheCreationTokensFromUsage(usage))
+	if commit {
+		r.commitShown(total, sim)
+	}
 	if !changed {
 		return data
 	}
@@ -309,6 +338,9 @@ func (r *openAICacheSimRequest) applyResponsesUsage(usage *apicompat.ResponsesUs
 		cached = usage.InputTokensDetails.CachedTokens
 	}
 	sim, changed := r.apply(usage.InputTokens, cached, usage.CacheCreationInputTokens)
+	if terminal {
+		r.commitShown(usage.InputTokens, sim)
+	}
 	if !changed {
 		return usage
 	}
@@ -334,6 +366,7 @@ func (r *openAICacheSimRequest) applyChatUsage(usage *apicompat.ChatUsage) *apic
 		cached, creation = d.CachedTokens, max(d.CacheCreationTokens, d.CacheWriteTokens)
 	}
 	sim, changed := r.apply(usage.PromptTokens, cached, creation)
+	r.commitShown(usage.PromptTokens, sim)
 	if !changed {
 		return usage
 	}

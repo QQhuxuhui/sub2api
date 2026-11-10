@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,12 +41,18 @@ const (
 )
 
 // intentCacheSmoothBaseline is what the latest turn of a conversation left:
-// its raw upstream input (Total, cache reads included), when its usage was
-// decided (At, unix ms), when it started (Seq, unix ns as a decimal string,
-// the write order), the account that served it and whether intent routing
-// moved it.
+// the raw upstream input of its final usage (Total, cache reads included) and
+// the cache reads the client was shown for it (Cached; nil in baselines
+// written before it existed), when it was recorded (At, unix ms), when the
+// turn started (Seq, unix ns as a decimal string, the write order), the
+// account that served it and whether intent routing moved it.
+//
+// Accounts count the same input differently (one reports a third of
+// another's tokens), so smoothing carries the shown cache rate Cached/Total
+// over, never an absolute token count.
 type intentCacheSmoothBaseline struct {
 	Total     int    `json:"t"`
+	Cached    *int   `json:"c,omitempty"`
 	At        int64  `json:"at"`
 	Seq       string `json:"s"`
 	AccountID int64  `json:"a"`
@@ -85,37 +90,41 @@ func IntentCacheSmoothPlanFromContext(ctx context.Context) *IntentCacheSmoothPla
 	return IntentRouteDecisionFromContext(ctx).CacheSmoothPlan()
 }
 
-// PrevTotal reports the previous turn's raw input when this turn, served by
+// PrevShown reports the previous turn's shown cache reads and raw input (the
+// cache rate the client saw, as integers) when this turn, served by
 // accountID, lost the conversation's cache to an intent-routing switch: it
 // was moved to another account, or it is the first turn after a routed one
-// and is served elsewhere. A turn served where the previous one was, or a
-// baseline older than the TTL, gets nothing.
-func (p *IntentCacheSmoothPlan) PrevTotal(accountID int64) (int, bool) {
+// and is served elsewhere. A turn served where the previous one was, a
+// baseline older than the TTL, one without a shown count, or one whose client
+// saw no cache gets nothing.
+func (p *IntentCacheSmoothPlan) PrevShown(accountID int64) (cached, total int, ok bool) {
 	if p == nil || p.baseline == nil || accountID <= 0 {
-		return 0, false
+		return 0, 0, false
 	}
 	b := p.baseline
-	if b.Total <= 0 || b.AccountID == accountID {
-		return 0, false
+	if b.Total <= 0 || b.Cached == nil || *b.Cached <= 0 || *b.Cached > b.Total || b.AccountID == accountID {
+		return 0, 0, false
 	}
 	if p.clock().Sub(time.UnixMilli(b.At)) > intentCacheSmoothTTL {
-		return 0, false
+		return 0, 0, false
 	}
 	if !p.routed && !b.Routed {
-		return 0, false
+		return 0, 0, false
 	}
-	return b.Total, true
+	return *b.Cached, b.Total, true
 }
 
-// Commit records this turn as the conversation's baseline, once. The caller
-// waits at most intentCacheSmoothWriteWait; a slow write only costs the next
-// turn its smoothing.
-func (p *IntentCacheSmoothPlan) Commit(accountID int64, rawTotal int) {
+// Commit records this turn as the conversation's baseline, once: the raw
+// input of the final usage the client got and the cache reads it was shown.
+// The caller waits at most intentCacheSmoothWriteWait; a slow write only
+// costs the next turn its smoothing.
+func (p *IntentCacheSmoothPlan) Commit(accountID int64, rawTotal, shownCached int) {
 	if p == nil || p.store == nil || accountID <= 0 || rawTotal <= 0 {
 		return
 	}
+	shown := min(max(shownCached, 0), rawTotal)
 	p.once.Do(func() {
-		b := intentCacheSmoothBaseline{Total: rawTotal, At: p.clock().UnixMilli(), Seq: p.seq, AccountID: accountID, Routed: p.routed}
+		b := intentCacheSmoothBaseline{Total: rawTotal, Cached: &shown, At: p.clock().UnixMilli(), Seq: p.seq, AccountID: accountID, Routed: p.routed}
 		ctx, cancel := context.WithTimeout(context.Background(), intentCacheSmoothWriteWait)
 		done := make(chan error, 1)
 		go func() { done <- p.store.Put(ctx, p.key, b, intentCacheSmoothTTL) }()
@@ -140,13 +149,16 @@ func (p *IntentCacheSmoothPlan) clock() time.Time {
 
 // intentCacheSmoothCandidate is the cache read a turn of total input tokens
 // (creation of them written to the cache) reports after a switch: the
-// previous turn's input, within the cap, in whole blocks, or 0 below the
-// caching minimum.
-func intentCacheSmoothCandidate(prevTotal, total, creation int) int {
-	if prevTotal <= 0 || total < intentCacheSmoothMinTokens {
+// previous turn's shown cache rate (prevCached/prevTotal) applied to total,
+// within the cap, in whole blocks, or 0 below the caching minimum. Integer
+// arithmetic throughout: a float rate can land a hair under a block boundary
+// and round a whole block (or the whole candidate) away.
+func intentCacheSmoothCandidate(prevCached, prevTotal, total, creation int) int {
+	if prevCached <= 0 || prevTotal <= 0 || total < intentCacheSmoothMinTokens {
 		return 0
 	}
-	limit := min(prevTotal, int(math.Floor(float64(total)*intentCacheSmoothCapPercent/100)), total-max(creation, 0))
+	want := int(int64(prevCached) * int64(total) / int64(prevTotal))
+	limit := min(want, int(int64(total)*intentCacheSmoothCapPercent/100), total-max(creation, 0))
 	if limit <= 0 {
 		return 0
 	}
