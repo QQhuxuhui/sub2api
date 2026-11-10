@@ -39,6 +39,8 @@ const (
 	FieldKeywordMaxChars = "keyword_max_chars"
 	// FieldUnavailableStatus holds the string denoting the unavailable_status field in the database.
 	FieldUnavailableStatus = "unavailable_status"
+	// FieldCacheSmoothEnabled holds the string denoting the cache_smooth_enabled field in the database.
+	FieldCacheSmoothEnabled = "cache_smooth_enabled"
 	// FieldRules holds the string denoting the rules field in the database.
 	FieldRules = "rules"
 	// FieldExcludedModels holds the string denoting the excluded_models field in the database.
@@ -67,6 +69,7 @@ var Columns = []string{
 	FieldMaxInputChars,
 	FieldKeywordMaxChars,
 	FieldUnavailableStatus,
+	FieldCacheSmoothEnabled,
 	FieldRules,
 	FieldExcludedModels,
 	FieldJevAPIKey,
@@ -118,6 +121,8 @@ var (
 	DefaultKeywordMaxChars int
 	// DefaultUnavailableStatus holds the default value on creation for the "unavailable_status" field.
 	DefaultUnavailableStatus int
+	// DefaultCacheSmoothEnabled holds the default value on creation for the "cache_smooth_enabled" field.
+	DefaultCacheSmoothEnabled bool
 	// DefaultJevAPIKey holds the default value on creation for the "jev_api_key" field.
 	DefaultJevAPIKey string
 	// JevAPIKeyValidator is a validator for the "jev_api_key" field. It is called by the builders before save.
@@ -195,6 +200,11 @@ func ByKeywordMaxChars(opts ...sql.OrderTermOption) OrderOption {
 // ByUnavailableStatus orders the results by the unavailable_status field.
 func ByUnavailableStatus(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldUnavailableStatus, opts...).ToFunc()
+}
+
+// ByCacheSmoothEnabled orders the results by the cache_smooth_enabled field.
+func ByCacheSmoothEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCacheSmoothEnabled, opts...).ToFunc()
 }
 
 // ByJevAPIKey orders the results by the jev_api_key field.

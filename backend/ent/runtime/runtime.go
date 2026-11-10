@@ -1374,8 +1374,12 @@ func init() {
 	intentrouterDescUnavailableStatus := intentrouterFields[10].Descriptor()
 	// intentrouter.DefaultUnavailableStatus holds the default value on creation for the unavailable_status field.
 	intentrouter.DefaultUnavailableStatus = intentrouterDescUnavailableStatus.Default.(int)
+	// intentrouterDescCacheSmoothEnabled is the schema descriptor for cache_smooth_enabled field.
+	intentrouterDescCacheSmoothEnabled := intentrouterFields[11].Descriptor()
+	// intentrouter.DefaultCacheSmoothEnabled holds the default value on creation for the cache_smooth_enabled field.
+	intentrouter.DefaultCacheSmoothEnabled = intentrouterDescCacheSmoothEnabled.Default.(bool)
 	// intentrouterDescJevAPIKey is the schema descriptor for jev_api_key field.
-	intentrouterDescJevAPIKey := intentrouterFields[13].Descriptor()
+	intentrouterDescJevAPIKey := intentrouterFields[14].Descriptor()
 	// intentrouter.DefaultJevAPIKey holds the default value on creation for the jev_api_key field.
 	intentrouter.DefaultJevAPIKey = intentrouterDescJevAPIKey.Default.(string)
 	// intentrouter.JevAPIKeyValidator is a validator for the "jev_api_key" field. It is called by the builders before save.

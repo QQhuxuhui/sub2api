@@ -45,6 +45,8 @@ type IntentRouter struct {
 	KeywordMaxChars int `json:"keyword_max_chars,omitempty"`
 	// UnavailableStatus holds the value of the "unavailable_status" field.
 	UnavailableStatus int `json:"unavailable_status,omitempty"`
+	// CacheSmoothEnabled holds the value of the "cache_smooth_enabled" field.
+	CacheSmoothEnabled bool `json:"cache_smooth_enabled,omitempty"`
 	// Rules holds the value of the "rules" field.
 	Rules []domain.IntentRule `json:"rules,omitempty"`
 	// ExcludedModels holds the value of the "excluded_models" field.
@@ -63,7 +65,7 @@ func (*IntentRouter) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case intentrouter.FieldRules, intentrouter.FieldExcludedModels, intentrouter.FieldJev:
 			values[i] = new([]byte)
-		case intentrouter.FieldEnabled:
+		case intentrouter.FieldEnabled, intentrouter.FieldCacheSmoothEnabled:
 			values[i] = new(sql.NullBool)
 		case intentrouter.FieldID, intentrouter.FieldGroupID, intentrouter.FieldClassifierTimeoutMs, intentrouter.FieldCacheTTLSeconds, intentrouter.FieldMaxInputChars, intentrouter.FieldKeywordMaxChars, intentrouter.FieldUnavailableStatus:
 			values[i] = new(sql.NullInt64)
@@ -170,6 +172,12 @@ func (_m *IntentRouter) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.UnavailableStatus = int(value.Int64)
 			}
+		case intentrouter.FieldCacheSmoothEnabled:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field cache_smooth_enabled", values[i])
+			} else if value.Valid {
+				_m.CacheSmoothEnabled = value.Bool
+			}
 		case intentrouter.FieldRules:
 			if value, ok := values[i].(*[]byte); !ok {
 				return fmt.Errorf("unexpected type %T for field rules", values[i])
@@ -273,6 +281,9 @@ func (_m *IntentRouter) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("unavailable_status=")
 	builder.WriteString(fmt.Sprintf("%v", _m.UnavailableStatus))
+	builder.WriteString(", ")
+	builder.WriteString("cache_smooth_enabled=")
+	builder.WriteString(fmt.Sprintf("%v", _m.CacheSmoothEnabled))
 	builder.WriteString(", ")
 	builder.WriteString("rules=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Rules))

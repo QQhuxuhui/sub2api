@@ -197,6 +197,20 @@ func (_c *IntentRouterCreate) SetNillableUnavailableStatus(v *int) *IntentRouter
 	return _c
 }
 
+// SetCacheSmoothEnabled sets the "cache_smooth_enabled" field.
+func (_c *IntentRouterCreate) SetCacheSmoothEnabled(v bool) *IntentRouterCreate {
+	_c.mutation.SetCacheSmoothEnabled(v)
+	return _c
+}
+
+// SetNillableCacheSmoothEnabled sets the "cache_smooth_enabled" field if the given value is not nil.
+func (_c *IntentRouterCreate) SetNillableCacheSmoothEnabled(v *bool) *IntentRouterCreate {
+	if v != nil {
+		_c.SetCacheSmoothEnabled(*v)
+	}
+	return _c
+}
+
 // SetRules sets the "rules" field.
 func (_c *IntentRouterCreate) SetRules(v []domain.IntentRule) *IntentRouterCreate {
 	_c.mutation.SetRules(v)
@@ -320,6 +334,10 @@ func (_c *IntentRouterCreate) defaults() {
 		v := intentrouter.DefaultUnavailableStatus
 		_c.mutation.SetUnavailableStatus(v)
 	}
+	if _, ok := _c.mutation.CacheSmoothEnabled(); !ok {
+		v := intentrouter.DefaultCacheSmoothEnabled
+		_c.mutation.SetCacheSmoothEnabled(v)
+	}
 	if _, ok := _c.mutation.JevAPIKey(); !ok {
 		v := intentrouter.DefaultJevAPIKey
 		_c.mutation.SetJevAPIKey(v)
@@ -386,6 +404,9 @@ func (_c *IntentRouterCreate) check() error {
 	}
 	if _, ok := _c.mutation.UnavailableStatus(); !ok {
 		return &ValidationError{Name: "unavailable_status", err: errors.New(`ent: missing required field "IntentRouter.unavailable_status"`)}
+	}
+	if _, ok := _c.mutation.CacheSmoothEnabled(); !ok {
+		return &ValidationError{Name: "cache_smooth_enabled", err: errors.New(`ent: missing required field "IntentRouter.cache_smooth_enabled"`)}
 	}
 	if _, ok := _c.mutation.JevAPIKey(); !ok {
 		return &ValidationError{Name: "jev_api_key", err: errors.New(`ent: missing required field "IntentRouter.jev_api_key"`)}
@@ -473,6 +494,10 @@ func (_c *IntentRouterCreate) createSpec() (*IntentRouter, *sqlgraph.CreateSpec)
 	if value, ok := _c.mutation.UnavailableStatus(); ok {
 		_spec.SetField(intentrouter.FieldUnavailableStatus, field.TypeInt, value)
 		_node.UnavailableStatus = value
+	}
+	if value, ok := _c.mutation.CacheSmoothEnabled(); ok {
+		_spec.SetField(intentrouter.FieldCacheSmoothEnabled, field.TypeBool, value)
+		_node.CacheSmoothEnabled = value
 	}
 	if value, ok := _c.mutation.Rules(); ok {
 		_spec.SetField(intentrouter.FieldRules, field.TypeJSON, value)
@@ -719,6 +744,18 @@ func (u *IntentRouterUpsert) UpdateUnavailableStatus() *IntentRouterUpsert {
 // AddUnavailableStatus adds v to the "unavailable_status" field.
 func (u *IntentRouterUpsert) AddUnavailableStatus(v int) *IntentRouterUpsert {
 	u.Add(intentrouter.FieldUnavailableStatus, v)
+	return u
+}
+
+// SetCacheSmoothEnabled sets the "cache_smooth_enabled" field.
+func (u *IntentRouterUpsert) SetCacheSmoothEnabled(v bool) *IntentRouterUpsert {
+	u.Set(intentrouter.FieldCacheSmoothEnabled, v)
+	return u
+}
+
+// UpdateCacheSmoothEnabled sets the "cache_smooth_enabled" field to the value that was provided on create.
+func (u *IntentRouterUpsert) UpdateCacheSmoothEnabled() *IntentRouterUpsert {
+	u.SetExcluded(intentrouter.FieldCacheSmoothEnabled)
 	return u
 }
 
@@ -1040,6 +1077,20 @@ func (u *IntentRouterUpsertOne) AddUnavailableStatus(v int) *IntentRouterUpsertO
 func (u *IntentRouterUpsertOne) UpdateUnavailableStatus() *IntentRouterUpsertOne {
 	return u.Update(func(s *IntentRouterUpsert) {
 		s.UpdateUnavailableStatus()
+	})
+}
+
+// SetCacheSmoothEnabled sets the "cache_smooth_enabled" field.
+func (u *IntentRouterUpsertOne) SetCacheSmoothEnabled(v bool) *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.SetCacheSmoothEnabled(v)
+	})
+}
+
+// UpdateCacheSmoothEnabled sets the "cache_smooth_enabled" field to the value that was provided on create.
+func (u *IntentRouterUpsertOne) UpdateCacheSmoothEnabled() *IntentRouterUpsertOne {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.UpdateCacheSmoothEnabled()
 	})
 }
 
@@ -1538,6 +1589,20 @@ func (u *IntentRouterUpsertBulk) AddUnavailableStatus(v int) *IntentRouterUpsert
 func (u *IntentRouterUpsertBulk) UpdateUnavailableStatus() *IntentRouterUpsertBulk {
 	return u.Update(func(s *IntentRouterUpsert) {
 		s.UpdateUnavailableStatus()
+	})
+}
+
+// SetCacheSmoothEnabled sets the "cache_smooth_enabled" field.
+func (u *IntentRouterUpsertBulk) SetCacheSmoothEnabled(v bool) *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.SetCacheSmoothEnabled(v)
+	})
+}
+
+// UpdateCacheSmoothEnabled sets the "cache_smooth_enabled" field to the value that was provided on create.
+func (u *IntentRouterUpsertBulk) UpdateCacheSmoothEnabled() *IntentRouterUpsertBulk {
+	return u.Update(func(s *IntentRouterUpsert) {
+		s.UpdateCacheSmoothEnabled()
 	})
 }
 

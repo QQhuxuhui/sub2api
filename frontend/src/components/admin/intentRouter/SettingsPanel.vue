@@ -20,6 +20,13 @@
           <option :value="429">429</option>
         </select>
       </div>
+      <div class="md:col-span-2">
+        <label class="flex items-center gap-3">
+          <input v-model="form.cache_smooth_enabled" data-test="intent-cache-smooth" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+          <span class="input-label mb-0">{{ t('intentRouter.cacheSmooth') }}</span>
+          <InfoTip :text="t('intentRouter.cacheSmoothHint')" :label="t('intentRouter.cacheSmooth')" />
+        </label>
+      </div>
     </div>
 
     <div v-if="savedRouter" class="flex flex-wrap items-center gap-3 border-t border-gray-100 pt-4 dark:border-dark-700">

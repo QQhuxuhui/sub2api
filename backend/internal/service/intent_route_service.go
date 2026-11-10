@@ -54,6 +54,9 @@ type intentRouterConfig struct {
 	MaxInputChars      int
 	KeywordMaxChars    int // keywords only count in a user message of at most this many runes; 0 = no limit
 	UnavailableStatus  int // reported when a matched rule's accounts are all unavailable
+	// CacheSmoothEnabled smooths the cache numbers of turns intent routing
+	// moved to another account (intent_route_cache_smooth.go).
+	CacheSmoothEnabled bool
 	Rules              []domain.IntentRule
 	Jev                intentJevConfig
 	// ExcludedModels (lower-cased; a trailing * matches a prefix) skip
@@ -350,6 +353,9 @@ type IntentRouterService struct {
 	configMu     sync.Mutex
 	reloading    atomic.Bool
 
+	// Conversation baselines for cache smoothing (intent_route_cache_smooth.go).
+	smoothStore intentCacheSmoothStore // nil smooths nothing
+
 	breakerMu sync.Mutex
 	breakers  map[int64]*intentRouteBreaker
 	now       func() time.Time
@@ -371,8 +377,10 @@ func NewIntentRouterService(entClient *dbent.Client, rdb *redis.Client, cfg *con
 	var jevStats intentJevStats
 	var probeLog monitorProbeAnswerLog
 	var preludeLog openAIStreamPreludeLog
+	var smoothStore intentCacheSmoothStore
 	if rdb != nil {
 		store = &redisIntentRouteStore{rdb: rdb}
+		smoothStore = &redisIntentCacheSmoothStore{rdb: rdb}
 		jevStats = &redisIntentJevStats{rdb: rdb}
 		probeLog = &redisMonitorProbeAnswerLog{rdb: rdb}
 		preludeLog = &redisOpenAIStreamPreludeLog{rdb: rdb}
@@ -392,6 +400,7 @@ func NewIntentRouterService(entClient *dbent.Client, rdb *redis.Client, cfg *con
 	return &IntentRouterService{
 		entClient:     entClient,
 		store:         store,
+		smoothStore:   smoothStore,
 		hits:          hits,
 		templateStore: templateStore,
 		templateSink:  templateSink,
@@ -464,6 +473,9 @@ func (s *IntentRouterService) Decide(ctx context.Context, in IntentRouteInput) *
 	}
 	decision.ScopeAccountIDs = cfg.scopeAccountIDs()
 	decision.ScopeGroupIDs = cfg.scopeGroupIDs()
+	if cfg.CacheSmoothEnabled {
+		decision.cacheSmooth = s.cacheSmoothPlan(ctx, cfg, in, decision.routed())
+	}
 	return decision
 }
 
@@ -878,6 +890,7 @@ func intentRouterConfigFromEnt(row *dbent.IntentRouter) *intentRouterConfig {
 		MaxInputChars:      row.MaxInputChars,
 		KeywordMaxChars:    row.KeywordMaxChars,
 		UnavailableStatus:  row.UnavailableStatus,
+		CacheSmoothEnabled: row.CacheSmoothEnabled,
 		Rules:              row.Rules,
 		Jev:                newIntentJevConfig(row.JevAPIKey, row.Jev),
 	}

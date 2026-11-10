@@ -126,7 +126,7 @@ func TestOpenAICacheSim_ApplyJSONShapesAndIdempotency(t *testing.T) {
 
 	// typed 路径。
 	typed := &apicompat.ResponsesUsage{InputTokens: 10000, InputTokensDetails: &apicompat.ResponsesInputTokensDetails{CachedTokens: 2000}}
-	got := sim.applyResponsesUsage(typed)
+	got := sim.applyResponsesUsage(typed, true)
 	require.Equal(t, 2000, typed.InputTokensDetails.CachedTokens, "原对象不动")
 	require.Equal(t, 8448, got.InputTokensDetails.CachedTokens)
 	chatTyped := &apicompat.ChatUsage{PromptTokens: 10000, PromptTokensDetails: &apicompat.ChatTokenDetails{CachedTokens: 2000}}

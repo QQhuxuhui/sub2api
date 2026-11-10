@@ -119,6 +119,11 @@ func UnavailableStatus(v int) predicate.IntentRouter {
 	return predicate.IntentRouter(sql.FieldEQ(FieldUnavailableStatus, v))
 }
 
+// CacheSmoothEnabled applies equality check predicate on the "cache_smooth_enabled" field. It's identical to CacheSmoothEnabledEQ.
+func CacheSmoothEnabled(v bool) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldEQ(FieldCacheSmoothEnabled, v))
+}
+
 // JevAPIKey applies equality check predicate on the "jev_api_key" field. It's identical to JevAPIKeyEQ.
 func JevAPIKey(v string) predicate.IntentRouter {
 	return predicate.IntentRouter(sql.FieldEQ(FieldJevAPIKey, v))
@@ -712,6 +717,16 @@ func UnavailableStatusLT(v int) predicate.IntentRouter {
 // UnavailableStatusLTE applies the LTE predicate on the "unavailable_status" field.
 func UnavailableStatusLTE(v int) predicate.IntentRouter {
 	return predicate.IntentRouter(sql.FieldLTE(FieldUnavailableStatus, v))
+}
+
+// CacheSmoothEnabledEQ applies the EQ predicate on the "cache_smooth_enabled" field.
+func CacheSmoothEnabledEQ(v bool) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldEQ(FieldCacheSmoothEnabled, v))
+}
+
+// CacheSmoothEnabledNEQ applies the NEQ predicate on the "cache_smooth_enabled" field.
+func CacheSmoothEnabledNEQ(v bool) predicate.IntentRouter {
+	return predicate.IntentRouter(sql.FieldNEQ(FieldCacheSmoothEnabled, v))
 }
 
 // RulesIsNil applies the IsNil predicate on the "rules" field.

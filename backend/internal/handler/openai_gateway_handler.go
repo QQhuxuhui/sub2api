@@ -267,6 +267,11 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if state := cachesim.FromContext(parent); state != nil {
 		base = cachesim.WithState(base, state)
 	}
+	// 带切号缓存平滑计划的意图路由决策同样带过去：落库据此判断这一笔是否参与平滑。
+	// 没有平滑计划时不带，落库路径与原来完全一致。
+	if decision := service.IntentRouteDecisionFromContext(parent); decision.CacheSmoothPlan() != nil {
+		base = service.WithIntentRouteDecision(base, decision)
+	}
 	return base
 }
 

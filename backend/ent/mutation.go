@@ -29697,6 +29697,7 @@ type IntentRouterMutation struct {
 	addkeyword_max_chars     *int
 	unavailable_status       *int
 	addunavailable_status    *int
+	cache_smooth_enabled     *bool
 	rules                    *[]domain.IntentRule
 	appendrules              []domain.IntentRule
 	excluded_models          *[]string
@@ -30395,6 +30396,42 @@ func (m *IntentRouterMutation) ResetUnavailableStatus() {
 	m.addunavailable_status = nil
 }
 
+// SetCacheSmoothEnabled sets the "cache_smooth_enabled" field.
+func (m *IntentRouterMutation) SetCacheSmoothEnabled(b bool) {
+	m.cache_smooth_enabled = &b
+}
+
+// CacheSmoothEnabled returns the value of the "cache_smooth_enabled" field in the mutation.
+func (m *IntentRouterMutation) CacheSmoothEnabled() (r bool, exists bool) {
+	v := m.cache_smooth_enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCacheSmoothEnabled returns the old "cache_smooth_enabled" field's value of the IntentRouter entity.
+// If the IntentRouter object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *IntentRouterMutation) OldCacheSmoothEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCacheSmoothEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCacheSmoothEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCacheSmoothEnabled: %w", err)
+	}
+	return oldValue.CacheSmoothEnabled, nil
+}
+
+// ResetCacheSmoothEnabled resets all changes to the "cache_smooth_enabled" field.
+func (m *IntentRouterMutation) ResetCacheSmoothEnabled() {
+	m.cache_smooth_enabled = nil
+}
+
 // SetRules sets the "rules" field.
 func (m *IntentRouterMutation) SetRules(dr []domain.IntentRule) {
 	m.rules = &dr
@@ -30644,7 +30681,7 @@ func (m *IntentRouterMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *IntentRouterMutation) Fields() []string {
-	fields := make([]string, 0, 17)
+	fields := make([]string, 0, 18)
 	if m.created_at != nil {
 		fields = append(fields, intentrouter.FieldCreatedAt)
 	}
@@ -30683,6 +30720,9 @@ func (m *IntentRouterMutation) Fields() []string {
 	}
 	if m.unavailable_status != nil {
 		fields = append(fields, intentrouter.FieldUnavailableStatus)
+	}
+	if m.cache_smooth_enabled != nil {
+		fields = append(fields, intentrouter.FieldCacheSmoothEnabled)
 	}
 	if m.rules != nil {
 		fields = append(fields, intentrouter.FieldRules)
@@ -30730,6 +30770,8 @@ func (m *IntentRouterMutation) Field(name string) (ent.Value, bool) {
 		return m.KeywordMaxChars()
 	case intentrouter.FieldUnavailableStatus:
 		return m.UnavailableStatus()
+	case intentrouter.FieldCacheSmoothEnabled:
+		return m.CacheSmoothEnabled()
 	case intentrouter.FieldRules:
 		return m.Rules()
 	case intentrouter.FieldExcludedModels:
@@ -30773,6 +30815,8 @@ func (m *IntentRouterMutation) OldField(ctx context.Context, name string) (ent.V
 		return m.OldKeywordMaxChars(ctx)
 	case intentrouter.FieldUnavailableStatus:
 		return m.OldUnavailableStatus(ctx)
+	case intentrouter.FieldCacheSmoothEnabled:
+		return m.OldCacheSmoothEnabled(ctx)
 	case intentrouter.FieldRules:
 		return m.OldRules(ctx)
 	case intentrouter.FieldExcludedModels:
@@ -30880,6 +30924,13 @@ func (m *IntentRouterMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetUnavailableStatus(v)
+		return nil
+	case intentrouter.FieldCacheSmoothEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCacheSmoothEnabled(v)
 		return nil
 	case intentrouter.FieldRules:
 		v, ok := value.([]domain.IntentRule)
@@ -31092,6 +31143,9 @@ func (m *IntentRouterMutation) ResetField(name string) error {
 		return nil
 	case intentrouter.FieldUnavailableStatus:
 		m.ResetUnavailableStatus()
+		return nil
+	case intentrouter.FieldCacheSmoothEnabled:
+		m.ResetCacheSmoothEnabled()
 		return nil
 	case intentrouter.FieldRules:
 		m.ResetRules()

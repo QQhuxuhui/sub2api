@@ -1115,6 +1115,7 @@ var (
 		{Name: "max_input_chars", Type: field.TypeInt, Default: 2000},
 		{Name: "keyword_max_chars", Type: field.TypeInt, Default: 0},
 		{Name: "unavailable_status", Type: field.TypeInt, Default: 503},
+		{Name: "cache_smooth_enabled", Type: field.TypeBool, Default: false},
 		{Name: "rules", Type: field.TypeJSON, Nullable: true, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "excluded_models", Type: field.TypeJSON, Nullable: true, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "jev_api_key", Type: field.TypeString, Size: 512, Default: ""},

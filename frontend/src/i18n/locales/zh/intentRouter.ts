@@ -66,6 +66,8 @@ export default {
     keywordMaxChars: '关键字最多匹配字数',
     keywordMaxCharsHint: '消息超过这个字数就不认关键字，交给 Jev。长消息多是编程上下文，容易误伤。',
     unavailableStatus: '目标账号都不可用时返回',
+    cacheSmooth: '切号缓存平滑',
+    cacheSmoothHint: '意图路由把这一轮切到别的账号、或切回来时，按会话上一轮的输入补报缓存命中并按此计费，客户看起来像没换号。真实值留底在管理端。',
     unavailableStatusHint: '命中规则但目标都选不上时返回，不回落本组。503：下游 sub2api 只换号；429：下游会冷却你的令牌。',
     classifier: {
       title: '识别用的模型',

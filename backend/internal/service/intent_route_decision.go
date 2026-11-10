@@ -82,6 +82,10 @@ type IntentRouteDecision struct {
 	// selectedViaGroup reports that selected was picked by an API-key rule's
 	// group scheduling (its sticky session belongs to TargetGroupID).
 	selectedViaGroup bool
+
+	// cacheSmooth is set when the router smooths cache numbers across
+	// intent-routing switches (intent_route_cache_smooth.go).
+	cacheSmooth *IntentCacheSmoothPlan
 }
 
 // routed reports whether the turn matched a rule (of either kind).
@@ -215,7 +219,7 @@ type intentRouteDecisionContextKey struct{}
 
 // WithIntentRouteDecision attaches a decision to the request context.
 func WithIntentRouteDecision(ctx context.Context, decision *IntentRouteDecision) context.Context {
-	if decision == nil || (!decision.routed() && len(decision.ScopeAccountIDs) == 0 && len(decision.ScopeGroupIDs) == 0) {
+	if decision == nil || (!decision.routed() && len(decision.ScopeAccountIDs) == 0 && len(decision.ScopeGroupIDs) == 0 && decision.cacheSmooth == nil) {
 		return ctx
 	}
 	return context.WithValue(ctx, intentRouteDecisionContextKey{}, decision)

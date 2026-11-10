@@ -556,6 +556,23 @@ describe('IntentRoutersView', () => {
     expect(api.save.mock.calls[0][1].unavailable_status).toBe(429)
   })
 
+  it('loads and saves cache smoothing, off by default', async () => {
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
+    const wrapper = await mountView()
+    const box = wrapper.get('[data-test="intent-cache-smooth"]')
+    expect((box.element as HTMLInputElement).checked).toBe(false)
+    await box.setValue(true)
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].cache_smooth_enabled).toBe(true)
+  })
+
+  it('shows a stored cache smoothing switch', async () => {
+    api.list.mockResolvedValue({ data: [{ ...savedRouter, cache_smooth_enabled: true }] })
+    const wrapper = await mountView()
+    expect((wrapper.get('[data-test="intent-cache-smooth"]').element as HTMLInputElement).checked).toBe(true)
+  })
+
   it('edits the Jev health-check settings', async () => {
     api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...savedRouter, ...input } }))
     const wrapper = await mountView()

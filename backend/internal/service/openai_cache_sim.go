@@ -96,6 +96,9 @@ type openAICacheSimRequest struct {
 	state     *cachesim.State
 	store     OpenAICacheSimWindowStore
 	ctx       context.Context
+	// smooth is the intent-routing cache smoothing plan (nil when off); the
+	// simulator then also runs for accounts without their own simulation.
+	smooth *IntentCacheSmoothPlan
 }
 
 // openAICacheSimForRequest 在账号开了模拟且请求 context 带状态时返回模拟器，否则 nil。
@@ -104,7 +107,8 @@ func openAICacheSimForRequest(c *gin.Context, account *Account) *openAICacheSimR
 		return nil
 	}
 	cfg := account.OpenAICacheSimulation()
-	if !cfg.Enabled {
+	smooth := IntentCacheSmoothPlanFromContext(c.Request.Context())
+	if !cfg.Enabled && smooth == nil {
 		return nil
 	}
 	state := cachesim.FromContext(c.Request.Context())
@@ -117,6 +121,7 @@ func openAICacheSimForRequest(c *gin.Context, account *Account) *openAICacheSimR
 		state:     state,
 		store:     currentOpenAICacheSimStore(),
 		ctx:       c.Request.Context(),
+		smooth:    smooth,
 	}
 }
 
@@ -126,27 +131,41 @@ func (r *openAICacheSimRequest) decide(rawTotal, rawCached, rawCreation int) int
 		return rawCached
 	}
 	return r.state.Decide(rawTotal, rawCached, func(total, cached int) int {
-		if cached <= 0 || total < openAICacheSimMinPromptTokens {
+		sim := r.simulateAccount(total, cached, rawCreation)
+		if r.smooth != nil {
+			// Smoothing: the cache the conversation would have had without an
+			// intent-routing switch. Every decided turn becomes the baseline.
+			if prevTotal, ok := r.smooth.PrevTotal(r.accountID); ok {
+				sim = max(sim, intentCacheSmoothCandidate(prevTotal, total, rawCreation))
+			}
+			r.smooth.Commit(r.accountID, total)
+		}
+		return sim
+	})
+}
+
+// simulateAccount is the account's own simulation (its switch, its window).
+func (r *openAICacheSimRequest) simulateAccount(total, cached, rawCreation int) int {
+	if !r.cfg.Enabled || cached <= 0 || total < openAICacheSimMinPromptTokens {
+		return cached
+	}
+	var win OpenAICacheSimWindow
+	if r.store != nil {
+		ctx := r.ctx
+		if ctx == nil || ctx.Err() != nil {
+			ctx = context.Background()
+		}
+		peekCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 300*time.Millisecond)
+		defer cancel()
+		w, err := r.store.Peek(peekCtx, r.accountID, r.cfg.HalfLife())
+		if err != nil {
+			logger.L().Warn("openai_cache_sim.window_peek_failed",
+				zap.Int64("account_id", r.accountID), zap.Error(err))
 			return cached
 		}
-		var win OpenAICacheSimWindow
-		if r.store != nil {
-			ctx := r.ctx
-			if ctx == nil || ctx.Err() != nil {
-				ctx = context.Background()
-			}
-			peekCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 300*time.Millisecond)
-			defer cancel()
-			w, err := r.store.Peek(peekCtx, r.accountID, r.cfg.HalfLife())
-			if err != nil {
-				logger.L().Warn("openai_cache_sim.window_peek_failed",
-					zap.Int64("account_id", r.accountID), zap.Error(err))
-				return cached
-			}
-			win = w
-		}
-		return simulateOpenAICachedTokens(r.cfg, win, total, cached, rawCreation, rand.Float64())
-	})
+		win = w
+	}
+	return simulateOpenAICachedTokens(r.cfg, win, total, cached, rawCreation, rand.Float64())
 }
 
 // apply 把一个 usage 的 (total, cached) 映射为模拟值：未决策时先决策。
@@ -177,17 +196,40 @@ func (r *openAICacheSimRequest) applyJSON(data []byte, anthropicShape bool) []by
 		return data
 	}
 	updated := data
+	// Only smoothing decides on a usage without a cache-read field, and only on
+	// a final one: a streamed intermediate usage must not fix the decision.
+	fillMissing := r.smooth != nil && openAICacheSimTerminalPayload(data)
 	for _, prefix := range openAICacheSimUsagePrefixes {
 		usage := gjson.GetBytes(updated, prefix)
 		if !usage.IsObject() {
 			continue
 		}
-		updated = r.applyUsageAt(updated, prefix, usage, anthropicShape)
+		updated = r.applyUsageAt(updated, prefix, usage, anthropicShape, fillMissing)
 	}
 	return updated
 }
 
-func (r *openAICacheSimRequest) applyUsageAt(data []byte, prefix string, usage gjson.Result, anthropicShape bool) []byte {
+// openAICacheSimTerminalPayload reports whether a payload carries the final
+// usage of a response: a terminal Responses event, a complete non-streaming
+// Responses or Chat body, the usage chunk that ends a Chat stream, or a
+// complete or closing Anthropic message.
+func openAICacheSimTerminalPayload(data []byte) bool {
+	root := gjson.ParseBytes(data)
+	switch root.Get("type").String() {
+	case "response.completed", "response.incomplete", "response.failed", "response.done", "message", "message_delta":
+		return true
+	case "":
+		switch root.Get("object").String() {
+		case "response", "chat.completion":
+			return true
+		case "chat.completion.chunk":
+			return root.Get("usage").IsObject()
+		}
+	}
+	return false
+}
+
+func (r *openAICacheSimRequest) applyUsageAt(data []byte, prefix string, usage gjson.Result, anthropicShape, fillMissing bool) []byte {
 	setInt := func(doc []byte, path string, v int) []byte {
 		if next, err := sjson.SetBytes(doc, path, v); err == nil {
 			return next
@@ -197,7 +239,7 @@ func (r *openAICacheSimRequest) applyUsageAt(data []byte, prefix string, usage g
 	if anthropicShape {
 		input := usage.Get("input_tokens")
 		cacheRead := usage.Get("cache_read_input_tokens")
-		if !input.Exists() || !cacheRead.Exists() {
+		if !input.Exists() || (!cacheRead.Exists() && !fillMissing) {
 			return data
 		}
 		creation := int(usage.Get("cache_creation_input_tokens").Int())
@@ -237,7 +279,15 @@ func (r *openAICacheSimRequest) applyUsageAt(data []byte, prefix string, usage g
 		}
 	}
 	if cachedField == "" {
-		return data
+		if !fillMissing {
+			return data
+		}
+		// The cached count lives under the total's details object.
+		if totalField == "prompt_tokens" {
+			cachedField = "prompt_tokens_details.cached_tokens"
+		} else {
+			cachedField = "input_tokens_details.cached_tokens"
+		}
 	}
 	cached := int(usage.Get(cachedField).Int())
 	sim, changed := r.apply(total, cached, openAICacheCreationTokensFromUsage(usage))
@@ -248,32 +298,50 @@ func (r *openAICacheSimRequest) applyUsageAt(data []byte, prefix string, usage g
 }
 
 // applyResponsesUsage 改写 typed Responses usage（复制后修改，不动计费快照）。
-func (r *openAICacheSimRequest) applyResponsesUsage(usage *apicompat.ResponsesUsage) *apicompat.ResponsesUsage {
-	if r == nil || usage == nil || usage.InputTokensDetails == nil {
+// terminal reports the usage is a response's final one; only then may
+// smoothing decide on a usage without details (see applyJSON).
+func (r *openAICacheSimRequest) applyResponsesUsage(usage *apicompat.ResponsesUsage, terminal bool) *apicompat.ResponsesUsage {
+	if r == nil || usage == nil || (usage.InputTokensDetails == nil && (r.smooth == nil || !terminal)) {
 		return usage
 	}
-	sim, changed := r.apply(usage.InputTokens, usage.InputTokensDetails.CachedTokens, usage.CacheCreationInputTokens)
+	cached := 0
+	if usage.InputTokensDetails != nil {
+		cached = usage.InputTokensDetails.CachedTokens
+	}
+	sim, changed := r.apply(usage.InputTokens, cached, usage.CacheCreationInputTokens)
 	if !changed {
 		return usage
 	}
 	result := *usage
-	details := *usage.InputTokensDetails
+	var details apicompat.ResponsesInputTokensDetails
+	if usage.InputTokensDetails != nil {
+		details = *usage.InputTokensDetails
+	}
 	details.CachedTokens = sim
 	result.InputTokensDetails = &details
 	return &result
 }
 
 // applyChatUsage 改写 typed Chat Completions usage。
+// A Chat usage only ever comes final (the complete body or the stream's last
+// chunk), so smoothing may decide on one without details.
 func (r *openAICacheSimRequest) applyChatUsage(usage *apicompat.ChatUsage) *apicompat.ChatUsage {
-	if r == nil || usage == nil || usage.PromptTokensDetails == nil {
+	if r == nil || usage == nil || (usage.PromptTokensDetails == nil && r.smooth == nil) {
 		return usage
 	}
-	sim, changed := r.apply(usage.PromptTokens, usage.PromptTokensDetails.CachedTokens, max(usage.PromptTokensDetails.CacheCreationTokens, usage.PromptTokensDetails.CacheWriteTokens))
+	cached, creation := 0, 0
+	if d := usage.PromptTokensDetails; d != nil {
+		cached, creation = d.CachedTokens, max(d.CacheCreationTokens, d.CacheWriteTokens)
+	}
+	sim, changed := r.apply(usage.PromptTokens, cached, creation)
 	if !changed {
 		return usage
 	}
 	result := *usage
-	details := *usage.PromptTokensDetails
+	var details apicompat.ChatTokenDetails
+	if usage.PromptTokensDetails != nil {
+		details = *usage.PromptTokensDetails
+	}
 	details.CachedTokens = sim
 	result.PromptTokensDetails = &details
 	return &result
@@ -297,10 +365,21 @@ func (rec openAICacheSimRecord) Changed() bool {
 // openAICacheSimEligibleResult 判断这笔用量是否属于「文本对话」：生图、视频、音频、
 // 搜索、embeddings 一律不参与模拟，也不计入窗口。
 func openAICacheSimEligibleResult(result *OpenAIForwardResult, inboundEndpoint string) bool {
+	return openAICacheSimEligibleResultWith(result, inboundEndpoint, false)
+}
+
+// openAICacheSimEligibleResultWith is openAICacheSimEligibleResult; allowSearch
+// keeps search requests in, as the response rewrite does
+// (openAICacheSimExcludedOutput only excludes image generation). Cache
+// smoothing uses it so the client's and the billed numbers agree.
+func openAICacheSimEligibleResultWith(result *OpenAIForwardResult, inboundEndpoint string, allowSearch bool) bool {
 	if result == nil {
 		return false
 	}
-	if result.ImageCount > 0 || result.VideoCount > 0 || result.AudioUsage != nil || result.SearchCount > 0 || result.WebSearchCalls > 0 {
+	if result.ImageCount > 0 || result.VideoCount > 0 || result.AudioUsage != nil {
+		return false
+	}
+	if !allowSearch && (result.SearchCount > 0 || result.WebSearchCalls > 0) {
 		return false
 	}
 	// WS 一条连接多轮对话，共用一个 request context，与「每请求一次决策」的模型不匹配；
@@ -356,7 +435,8 @@ func (s *OpenAIGatewayService) resolveOpenAICacheSimForRecord(ctx context.Contex
 	total := result.Usage.InputTokens
 	cached := result.Usage.CacheReadInputTokens
 	rec.RawTotal, rec.RawCached, rec.SimCached = total, cached, cached
-	if !cfg.Enabled || !openAICacheSimEligibleResult(result, inboundEndpoint) {
+	smoothing := IntentCacheSmoothPlanFromContext(ctx) != nil
+	if (!cfg.Enabled && !smoothing) || !openAICacheSimEligibleResultWith(result, inboundEndpoint, smoothing) {
 		return rec
 	}
 	state := cachesim.FromContext(ctx)
@@ -394,7 +474,9 @@ func (s *OpenAIGatewayService) resolveOpenAICacheSimForRecord(ctx context.Contex
 		}
 		rec.SimCached = simCached
 	}
-	if store != nil {
+	// Only an account with its own simulation keeps a window; it counts the
+	// final (also smoothed) number the client saw.
+	if store != nil && cfg.Enabled {
 		addCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 500*time.Millisecond)
 		defer cancel()
 		if err := store.Add(addCtx, account.ID, rec.RawTotal, rec.SimCached, cfg.HalfLife()); err != nil {

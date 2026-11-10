@@ -66,6 +66,8 @@ export default {
     keywordMaxChars: 'Keyword max characters',
     keywordMaxCharsHint: 'Longer messages are not keyword-matched and go to Jev. Long messages are mostly coding context, where keywords misfire.',
     unavailableStatus: 'Status when target accounts are unavailable',
+    cacheSmooth: 'Smooth cache across switches',
+    cacheSmoothHint: 'When intent routing moves a turn to another account (or back), report and bill the cache hit the conversation would have had without the switch, from its previous turn. Admins still see the real numbers.',
     unavailableStatusHint: 'Sent when a rule matched but none of its targets can serve; the group never takes over. 503: a downstream sub2api fails over. 429: it cools your key down.',
     classifier: {
       title: 'Classifier model',

@@ -179,6 +179,7 @@ const blankForm = (): FormState => ({
   max_input_chars: 2000,
   keyword_max_chars: 0,
   unavailable_status: 503,
+  cache_smooth_enabled: false,
   rules: [],
   jev_api_key: '',
   jev: blankJev(),
@@ -227,6 +228,7 @@ function toInput(): IntentRouterInput {
     max_input_chars: Number(form.max_input_chars) || 0,
     keyword_max_chars: Math.max(0, Math.trunc(Number(form.keyword_max_chars) || 0)),
     unavailable_status: Number(form.unavailable_status) || 503,
+    cache_smooth_enabled: Boolean(form.cache_smooth_enabled),
     rules: form.rules.map(({ name, description, keywordsText, originalKeywords, target, account_ids, api_key_id, enabled }) => ({
       name, description, keywords: restoreOriginalControls(parseKeywords(keywordsText), originalKeywords),
       ...(target === 'key' ? { account_ids: [], api_key_id } : { account_ids: [...account_ids] }),
@@ -263,6 +265,7 @@ function fillForm(router: IntentRouter | null) {
     form.max_input_chars = router.max_input_chars
     form.keyword_max_chars = router.keyword_max_chars ?? 0
     form.unavailable_status = router.unavailable_status || 503
+    form.cache_smooth_enabled = router.cache_smooth_enabled ?? false
     form.excludedModelsText = (router.excluded_models ?? []).join('\n')
     form.jev = { ...blankJev(), ...(router.jev ?? {}) }
     const userLabels = new Map((router.jev_scope?.users ?? []).map((u) => [u.id, u.email]))

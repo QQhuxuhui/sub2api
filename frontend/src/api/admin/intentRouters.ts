@@ -121,6 +121,8 @@ export interface IntentRouter {
   keyword_max_chars: number
   /** HTTP status sent when a matched rule's accounts are all unavailable: 429, 502 or 503. */
   unavailable_status: number
+  /** Report, on turns intent routing moved to another account, the cache hit the conversation would have had without the switch. */
+  cache_smooth_enabled: boolean
   rules: IntentRule[]
   /** Requests for these models skip intent routing entirely; a trailing * matches a prefix. */
   excluded_models: string[]
@@ -146,6 +148,7 @@ export interface IntentRouterInput {
   max_input_chars: number
   keyword_max_chars: number
   unavailable_status: number
+  cache_smooth_enabled: boolean
   rules: IntentRule[]
   excluded_models: string[]
   /** Leave empty to keep the stored key. */

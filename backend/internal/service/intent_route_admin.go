@@ -100,6 +100,7 @@ type IntentRouterView struct {
 	MaxInputChars              int                 `json:"max_input_chars"`
 	KeywordMaxChars            int                 `json:"keyword_max_chars"`
 	UnavailableStatus          int                 `json:"unavailable_status"`
+	CacheSmoothEnabled         bool                `json:"cache_smooth_enabled"`
 	Rules                      []domain.IntentRule `json:"rules"`
 	// ExcludedModels skip intent routing entirely; a trailing * matches a prefix.
 	ExcludedModels      []string `json:"excluded_models"`
@@ -129,18 +130,21 @@ type IntentRuleKeyLabel struct {
 // IntentRouterInput is a full router document. An empty ClassifierAPIKey keeps
 // the stored one, so the UI can save without ever holding the secret.
 type IntentRouterInput struct {
-	Enabled             bool                `json:"enabled"`
-	ClassifierBaseURL   string              `json:"classifier_base_url"`
-	ClassifierAPIKey    string              `json:"classifier_api_key"`
-	ClassifierProtocol  string              `json:"classifier_protocol"`
-	ClassifierModel     string              `json:"classifier_model"`
-	ClassifierTimeoutMS int                 `json:"classifier_timeout_ms"`
-	CacheTTLSeconds     int                 `json:"cache_ttl_seconds"`
-	MaxInputChars       int                 `json:"max_input_chars"`
-	KeywordMaxChars     int                 `json:"keyword_max_chars"`  // 0 = keywords match messages of any length
-	UnavailableStatus   int                 `json:"unavailable_status"` // 429, 502 or 503; 0 means 503
-	Rules               []domain.IntentRule `json:"rules"`
-	ExcludedModels      []string            `json:"excluded_models"`
+	Enabled             bool   `json:"enabled"`
+	ClassifierBaseURL   string `json:"classifier_base_url"`
+	ClassifierAPIKey    string `json:"classifier_api_key"`
+	ClassifierProtocol  string `json:"classifier_protocol"`
+	ClassifierModel     string `json:"classifier_model"`
+	ClassifierTimeoutMS int    `json:"classifier_timeout_ms"`
+	CacheTTLSeconds     int    `json:"cache_ttl_seconds"`
+	MaxInputChars       int    `json:"max_input_chars"`
+	KeywordMaxChars     int    `json:"keyword_max_chars"`  // 0 = keywords match messages of any length
+	UnavailableStatus   int    `json:"unavailable_status"` // 429, 502 or 503; 0 means 503
+	// CacheSmoothEnabled reports, to the client, the cache hit a turn moved
+	// by intent routing would have had without the switch.
+	CacheSmoothEnabled bool                `json:"cache_smooth_enabled"`
+	Rules              []domain.IntentRule `json:"rules"`
+	ExcludedModels     []string            `json:"excluded_models"`
 	// JevAPIKey, like ClassifierAPIKey, keeps the stored key when empty.
 	JevAPIKey string                 `json:"jev_api_key"`
 	Jev       domain.IntentJevConfig `json:"jev"`
@@ -204,6 +208,7 @@ func intentRouterViewFromEnt(row *dbent.IntentRouter) *IntentRouterView {
 		MaxInputChars:              row.MaxInputChars,
 		KeywordMaxChars:            row.KeywordMaxChars,
 		UnavailableStatus:          row.UnavailableStatus,
+		CacheSmoothEnabled:         row.CacheSmoothEnabled,
 		Rules:                      rules,
 		ExcludedModels:             excludedModelsOrEmpty(row.ExcludedModels),
 		JevAPIKeyConfigured:        strings.TrimSpace(row.JevAPIKey) != "",
@@ -369,7 +374,7 @@ func (s *IntentRouterService) SaveRouter(ctx context.Context, groupID int64, in 
 			SetClassifierBaseURL(in.ClassifierBaseURL).SetClassifierAPIKey(in.ClassifierAPIKey).
 			SetClassifierProtocol(in.ClassifierProtocol).SetClassifierModel(in.ClassifierModel).
 			SetClassifierTimeoutMs(in.ClassifierTimeoutMS).SetCacheTTLSeconds(in.CacheTTLSeconds).
-			SetMaxInputChars(in.MaxInputChars).SetKeywordMaxChars(in.KeywordMaxChars).SetUnavailableStatus(in.UnavailableStatus).SetRules(in.Rules).
+			SetMaxInputChars(in.MaxInputChars).SetKeywordMaxChars(in.KeywordMaxChars).SetUnavailableStatus(in.UnavailableStatus).SetCacheSmoothEnabled(in.CacheSmoothEnabled).SetRules(in.Rules).
 			SetJevAPIKey(in.JevAPIKey).SetJev(in.Jev).SetExcludedModels(in.ExcludedModels).Save(ctx)
 	} else {
 		saved, err = s.entClient.IntentRouter.UpdateOneID(existing.ID).
@@ -377,7 +382,7 @@ func (s *IntentRouterService) SaveRouter(ctx context.Context, groupID int64, in 
 			SetClassifierBaseURL(in.ClassifierBaseURL).SetClassifierAPIKey(in.ClassifierAPIKey).
 			SetClassifierProtocol(in.ClassifierProtocol).SetClassifierModel(in.ClassifierModel).
 			SetClassifierTimeoutMs(in.ClassifierTimeoutMS).SetCacheTTLSeconds(in.CacheTTLSeconds).
-			SetMaxInputChars(in.MaxInputChars).SetKeywordMaxChars(in.KeywordMaxChars).SetUnavailableStatus(in.UnavailableStatus).SetRules(in.Rules).
+			SetMaxInputChars(in.MaxInputChars).SetKeywordMaxChars(in.KeywordMaxChars).SetUnavailableStatus(in.UnavailableStatus).SetCacheSmoothEnabled(in.CacheSmoothEnabled).SetRules(in.Rules).
 			SetJevAPIKey(in.JevAPIKey).SetJev(in.Jev).SetExcludedModels(in.ExcludedModels).Save(ctx)
 	}
 	if err != nil {

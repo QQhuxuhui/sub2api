@@ -232,6 +232,20 @@ func (_u *IntentRouterUpdate) AddUnavailableStatus(v int) *IntentRouterUpdate {
 	return _u
 }
 
+// SetCacheSmoothEnabled sets the "cache_smooth_enabled" field.
+func (_u *IntentRouterUpdate) SetCacheSmoothEnabled(v bool) *IntentRouterUpdate {
+	_u.mutation.SetCacheSmoothEnabled(v)
+	return _u
+}
+
+// SetNillableCacheSmoothEnabled sets the "cache_smooth_enabled" field if the given value is not nil.
+func (_u *IntentRouterUpdate) SetNillableCacheSmoothEnabled(v *bool) *IntentRouterUpdate {
+	if v != nil {
+		_u.SetCacheSmoothEnabled(*v)
+	}
+	return _u
+}
+
 // SetRules sets the "rules" field.
 func (_u *IntentRouterUpdate) SetRules(v []domain.IntentRule) *IntentRouterUpdate {
 	_u.mutation.SetRules(v)
@@ -438,6 +452,9 @@ func (_u *IntentRouterUpdate) sqlSave(ctx context.Context) (_node int, err error
 	}
 	if value, ok := _u.mutation.AddedUnavailableStatus(); ok {
 		_spec.AddField(intentrouter.FieldUnavailableStatus, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.CacheSmoothEnabled(); ok {
+		_spec.SetField(intentrouter.FieldCacheSmoothEnabled, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.Rules(); ok {
 		_spec.SetField(intentrouter.FieldRules, field.TypeJSON, value)
@@ -692,6 +709,20 @@ func (_u *IntentRouterUpdateOne) AddUnavailableStatus(v int) *IntentRouterUpdate
 	return _u
 }
 
+// SetCacheSmoothEnabled sets the "cache_smooth_enabled" field.
+func (_u *IntentRouterUpdateOne) SetCacheSmoothEnabled(v bool) *IntentRouterUpdateOne {
+	_u.mutation.SetCacheSmoothEnabled(v)
+	return _u
+}
+
+// SetNillableCacheSmoothEnabled sets the "cache_smooth_enabled" field if the given value is not nil.
+func (_u *IntentRouterUpdateOne) SetNillableCacheSmoothEnabled(v *bool) *IntentRouterUpdateOne {
+	if v != nil {
+		_u.SetCacheSmoothEnabled(*v)
+	}
+	return _u
+}
+
 // SetRules sets the "rules" field.
 func (_u *IntentRouterUpdateOne) SetRules(v []domain.IntentRule) *IntentRouterUpdateOne {
 	_u.mutation.SetRules(v)
@@ -928,6 +959,9 @@ func (_u *IntentRouterUpdateOne) sqlSave(ctx context.Context) (_node *IntentRout
 	}
 	if value, ok := _u.mutation.AddedUnavailableStatus(); ok {
 		_spec.AddField(intentrouter.FieldUnavailableStatus, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.CacheSmoothEnabled(); ok {
+		_spec.SetField(intentrouter.FieldCacheSmoothEnabled, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.Rules(); ok {
 		_spec.SetField(intentrouter.FieldRules, field.TypeJSON, value)

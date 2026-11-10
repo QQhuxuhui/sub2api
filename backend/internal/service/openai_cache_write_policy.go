@@ -29,6 +29,13 @@ func anthropicUsageResponseRewrite(c *gin.Context, account *Account) openAIRespo
 // upstream usage snapshot retained for accounting. Anthropic conversion must
 // see zero creation tokens before splitting the total input into exclusive bins.
 func (r openAIResponseModelRewrite) applyResponsesUsage(usage *apicompat.ResponsesUsage) *apicompat.ResponsesUsage {
+	// Callers pass a complete response's usage.
+	return r.applyResponsesUsageFinal(usage, true)
+}
+
+// terminal reports the usage is the response's final one (see
+// openAICacheSimRequest.applyResponsesUsage).
+func (r openAIResponseModelRewrite) applyResponsesUsageFinal(usage *apicompat.ResponsesUsage, terminal bool) *apicompat.ResponsesUsage {
 	if usage == nil || (!r.stripCacheWrite && r.cacheSim == nil) {
 		return usage
 	}
@@ -45,7 +52,7 @@ func (r openAIResponseModelRewrite) applyResponsesUsage(usage *apicompat.Respons
 		out = &result
 	}
 	if r.cacheSim != nil {
-		out = r.cacheSim.applyResponsesUsage(out)
+		out = r.cacheSim.applyResponsesUsage(out, terminal)
 	}
 	return out
 }
@@ -54,20 +61,26 @@ func (r openAIResponseModelRewrite) applyResponsesEventUsage(event *apicompat.Re
 	if event == nil || (!r.stripCacheWrite && r.cacheSim == nil) {
 		return
 	}
-	event.Usage = r.applyResponsesUsage(event.Usage)
+	terminal := openAIResponsesTerminalEventType(event.Type)
+	event.Usage = r.applyResponsesUsageFinal(event.Usage, terminal)
 	if event.Response != nil {
 		response := *event.Response
-		response.Usage = r.applyResponsesUsage(response.Usage)
+		response.Usage = r.applyResponsesUsageFinal(response.Usage, terminal)
 		event.Response = &response
 	}
 }
 
 func (r openAIResponseModelRewrite) applyChatUsage(usage *apicompat.ChatUsage) *apicompat.ChatUsage {
-	if usage == nil || usage.PromptTokensDetails == nil || (!r.stripCacheWrite && r.cacheSim == nil) {
+	if usage == nil || (!r.stripCacheWrite && r.cacheSim == nil) {
+		return usage
+	}
+	// Without details there is nothing to strip, and only cache smoothing
+	// may still fill them in.
+	if usage.PromptTokensDetails == nil && (r.cacheSim == nil || r.cacheSim.smooth == nil) {
 		return usage
 	}
 	out := usage
-	if r.stripCacheWrite {
+	if r.stripCacheWrite && usage.PromptTokensDetails != nil {
 		result := *usage
 		details := *usage.PromptTokensDetails
 		details.CacheCreationTokens = 0
@@ -103,4 +116,14 @@ func (r openAIResponseModelRewrite) writeJSON(c *gin.Context, status int, value 
 	}
 	c.Data(status, "application/json; charset=utf-8", r.applyJSON(body))
 	return nil
+}
+
+// openAIResponsesTerminalEventType reports a Responses stream event that
+// carries the response's final usage.
+func openAIResponsesTerminalEventType(eventType string) bool {
+	switch eventType {
+	case "response.completed", "response.incomplete", "response.failed", "response.done":
+		return true
+	}
+	return false
 }

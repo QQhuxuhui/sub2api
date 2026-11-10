@@ -46,6 +46,9 @@ func (IntentRouter) Fields() []ent.Field {
 		// HTTP status reported when a matched rule's accounts are all
 		// unavailable: 429, 502 or 503.
 		field.Int("unavailable_status").Default(503),
+		// Smooth the cache numbers of turns intent routing moved to another
+		// account (intent_route_cache_smooth.go). Off by default.
+		field.Bool("cache_smooth_enabled").Default(false),
 		field.JSON("rules", []domain.IntentRule{}).Optional().
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 		// Requests for these models skip intent routing entirely.
