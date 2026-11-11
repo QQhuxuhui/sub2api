@@ -127,11 +127,22 @@ func RegisterAdminRoutes(
 		// 独立提示词输入审计
 		registerPromptAuditRoutes(admin, h)
 
+		// Anthropic 换号规则表
+		registerAnthropicFailoverRoutes(admin, h)
+
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerAnthropicFailoverRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	anthropicFailover := admin.Group("/anthropic-failover")
+	{
+		anthropicFailover.GET("", h.Admin.AnthropicFailover.Overview)
+		anthropicFailover.PUT("", h.Admin.AnthropicFailover.UpdateConfig)
 	}
 }
 

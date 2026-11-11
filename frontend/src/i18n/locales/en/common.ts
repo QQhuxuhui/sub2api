@@ -214,6 +214,7 @@ export default {
     securityAudit: 'Security Audit',
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',
+    anthropicFailover: 'Anthropic Failover',
     auditLogs: 'Audit Logs',
   },
 

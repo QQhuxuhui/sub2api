@@ -636,6 +636,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/anthropic-failover',
+    name: 'AdminAnthropicFailover',
+    component: () => import('@/views/admin/AnthropicFailoverView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Anthropic Failover Rules',
+      titleKey: 'admin.anthropicFailover.title',
+      descriptionKey: 'admin.anthropicFailover.description'
+    }
+  },
+  {
     path: '/admin/usage',
     name: 'AdminUsage',
     component: () => import('@/views/admin/UsageView.vue'),

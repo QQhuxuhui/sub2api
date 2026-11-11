@@ -22,6 +22,7 @@ import cnProvidersAPI from './cnProviders'
 import userAttributesAPI from './userAttributes'
 import opsAPI from './ops'
 import errorPassthroughAPI from './errorPassthrough'
+import anthropicFailoverAPI from './anthropicFailover'
 import dataManagementAPI from './dataManagement'
 import apiKeysAPI from './apiKeys'
 import scheduledTestsAPI from './scheduledTests'
@@ -60,6 +61,7 @@ export const adminAPI = {
   userAttributes: userAttributesAPI,
   ops: opsAPI,
   errorPassthrough: errorPassthroughAPI,
+  anthropicFailover: anthropicFailoverAPI,
   dataManagement: dataManagementAPI,
   apiKeys: apiKeysAPI,
   scheduledTests: scheduledTestsAPI,
@@ -96,6 +98,7 @@ export {
   userAttributesAPI,
   opsAPI,
   errorPassthroughAPI,
+  anthropicFailoverAPI,
   dataManagementAPI,
   apiKeysAPI,
   scheduledTestsAPI,

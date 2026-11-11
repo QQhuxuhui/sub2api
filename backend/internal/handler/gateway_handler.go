@@ -54,12 +54,14 @@ type GatewayHandler struct {
 	securityAuditCoordinator  *securityaudit.Coordinator
 	// geminiCachedContentService 管理 Gemini 显式缓存；为 nil 时相关接口不可用。
 	geminiCachedContentService *service.GeminiCachedContentService
-	concurrencyHelper          *ConcurrencyHelper
-	userMsgQueueHelper         *UserMsgQueueHelper
-	maxAccountSwitches         int
-	maxAccountSwitchesGemini   int
-	cfg                        *config.Config
-	settingService             *service.SettingService
+	// anthropicFailoverPolicyService 提供分组的换号规则表与换号统计；为 nil 时等同全部分组未启用。
+	anthropicFailoverPolicyService *service.AnthropicFailoverPolicyService
+	concurrencyHelper              *ConcurrencyHelper
+	userMsgQueueHelper             *UserMsgQueueHelper
+	maxAccountSwitches             int
+	maxAccountSwitchesGemini       int
+	cfg                            *config.Config
+	settingService                 *service.SettingService
 }
 
 // NewGatewayHandler creates a new GatewayHandler
@@ -661,14 +663,22 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		}
 	}()
 
+	// 换号规则的预算与统计按请求计，兜底分组切换不重置。
+	ruleSwitchCount := 0
+	failoverTracker := newAnthropicFailoverTracker(h.anthropicFailoverPolicyService, subject.UserID, apiKey.ID)
+	defer failoverTracker.finish(c)
+
 	for {
 		fs := NewFailoverState(h.maxAccountSwitches, hasBoundSession)
 		retryWithFallback := false
+		// 策略跟随实际调度的分组；未启用的分组写入 nil 以覆盖上一分组的策略。
+		c.Request = c.Request.WithContext(service.WithAnthropicFailoverPolicy(c.Request.Context(),
+			h.anthropicFailoverPolicyService.PolicyForGroup(c.Request.Context(), currentAPIKey.GroupID)))
 
 		for {
 			attemptParsedReq, err := parsedReq.CloneForBody(body)
 			if err != nil {
-				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+				h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body", streamStarted)
 				return
 			}
 
@@ -893,13 +903,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if channelMapping.Mapped {
 				attemptParsedReq.Model = channelMapping.MappedModel
 				if err := attemptParsedReq.ReplaceBody(h.gatewayService.ReplaceModelInBody(attemptParsedReq.Body.Bytes(), channelMapping.MappedModel)); err != nil {
-					h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+					h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body", streamStarted)
 					return
 				}
 			}
 			// Bedrock CC 兼容：清理 body 专有字段 + 过滤 anthropic-beta header，适用于所有转发路径
 			if err := attemptParsedReq.ReplaceBody(h.gatewayService.ApplyBedrockCCCompat(c, attemptParsedReq.Body.Bytes(), attemptParsedReq.Model, account, apiKey.GroupID)); err != nil {
-				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+				h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body", streamStarted)
 				return
 			}
 			attemptBody := attemptParsedReq.Body.Bytes()
@@ -1000,7 +1010,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				var betaBlockedErr *service.BetaBlockedError
 				if errors.As(err, &betaBlockedErr) {
 					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
-					h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", betaBlockedErr.Message)
+					h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", betaBlockedErr.Message, streamStarted)
 					return
 				}
 
@@ -1057,14 +1067,29 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
-					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
+					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化。
+					// 例外：上游只发过心跳就报错（SafeToFailoverAfterWrite），客户端还没收到
+					// 任何真实内容，新账号的事件可以接在心跳后面。
 					if c.Writer.Size() != writerSizeBeforeForward {
-						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
+						if !failoverErr.SafeToFailoverAfterWrite {
+							h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
+							return
+						}
+						streamStarted = true
+					}
+					failoverTracker.note(failoverErr, account.ID, currentAPIKey.GroupID)
+					ruleSwitch := failoverErr.FailoverRuleID != ""
+					if ruleSwitch && ruleSwitchCount >= service.AnthropicFailoverPolicyFromContext(c.Request.Context()).MaxRuleSwitches() {
+						h.handleFailoverExhausted(c, failoverErr, account.Platform, streamStarted)
 						return
 					}
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 					switch action {
 					case FailoverContinue:
+						if ruleSwitch {
+							ruleSwitchCount++
+						}
+						failoverTracker.switched()
 						// 本次尝试已确定性失败，立即释放该账号的会话注册
 						h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
 						delete(sessionSlotAccounts, account.ID)
@@ -1135,6 +1160,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			submitForwardUsage(result)
 			// 转发成功，会话槽保持既有空闲超时语义
 			upstreamServedSession = true
+			failoverTracker.succeeded(result)
 			return
 		}
 		if !retryWithFallback {
@@ -1919,6 +1945,11 @@ func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotT
 }
 
 func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, platform string, streamStarted bool) {
+	// 换号规则触发的换号全部失败：按没有规则表时的样子把最后的错误回给客户。
+	if failoverErr != nil && failoverErr.FailoverRuleID != "" {
+		h.gatewayService.WriteRuleFailoverExhausted(c, platform, failoverErr)
+		return
+	}
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
 	if service.IsOpenAISilentRefusalErrorBody(responseBody) {

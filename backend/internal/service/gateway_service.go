@@ -742,6 +742,8 @@ type UpstreamFailoverError struct {
 	NextAccountAction        NextAccountAction
 	ClientStatusCode         int
 	ClientMessage            string
+	FailoverRuleID           string // 由 Anthropic 换号规则表触发：只换号，不惩罚账号，不做同号重试
+	RuleRetryExhausted       bool   // 规则命中的错误原本会走重试耗尽分支（决定全部失败后的错误呈现）
 }
 
 func (e *UpstreamFailoverError) Error() string {
@@ -776,6 +778,8 @@ func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
 // 提取 RawData 并构造 UpstreamFailoverError.ResponseBody。
 type sseStreamErrorEventError struct {
 	RawData string
+	// BeforeSemanticOutput 为 true 表示报错时上游还没有发出任何非心跳事件。
+	BeforeSemanticOutput bool
 }
 
 func (e *sseStreamErrorEventError) Error() string { return "have error in stream" }

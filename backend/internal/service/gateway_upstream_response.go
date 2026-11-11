@@ -454,24 +454,8 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		)
 	}
 
-	// 非 failover 错误也支持错误透传规则匹配。
-	if status, errType, errMsg, matched := applyErrorPassthroughRule(
-		c,
-		account.Platform,
-		resp.StatusCode,
-		body,
-		http.StatusBadGateway,
-		"upstream_error",
-		"Upstream request failed",
-	); matched {
-		c.JSON(status, gin.H{
-			"type": "error",
-			"error": gin.H{
-				"type":    errType,
-				"message": errMsg,
-			},
-		})
-
+	matched, errMsg := presentUpstreamHTTPError(c, account.Platform, resp.StatusCode, body, false)
+	if matched {
 		summary := upstreamMsg
 		if summary == "" {
 			summary = errMsg
@@ -481,14 +465,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		}
 		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, summary)
 	}
-
-	// 根据状态码返回适当的自定义错误响应（不透传上游详细信息）
-	var errType, errMsg string
-	var statusCode int
-
-	switch resp.StatusCode {
-	case 400:
-		c.Data(http.StatusBadRequest, "application/json", body)
+	if resp.StatusCode == http.StatusBadRequest {
 		summary := upstreamMsg
 		if summary == "" {
 			summary = truncateForLog(body, 512)
@@ -497,6 +474,47 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 			return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
 		}
 		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, summary)
+	}
+
+	if upstreamMsg == "" {
+		return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
+	}
+	return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
+}
+
+// presentUpstreamHTTPError 写出「不换号的上游 HTTP 错误」的客户端响应：错误透传规则优先；
+// 否则重试耗尽分支回统一的 502，普通分支按状态码映射（400 原样回上游响应体）。
+// 只负责呈现，不含任何账号副作用，供原错误路径与换号规则耗尽后共用。
+func presentUpstreamHTTPError(c *gin.Context, platform string, upstreamStatus int, body []byte, retryExhausted bool) (matched bool, errMsg string) {
+	defaultMsg := "Upstream request failed"
+	if retryExhausted {
+		defaultMsg = "Upstream request failed after retries"
+	}
+	if status, errType, msg, ok := applyErrorPassthroughRule(
+		c,
+		platform,
+		upstreamStatus,
+		body,
+		http.StatusBadGateway,
+		"upstream_error",
+		defaultMsg,
+	); ok {
+		writeUpstreamErrorResponse(c, status, errType, msg)
+		return true, msg
+	}
+	if retryExhausted {
+		writeUpstreamErrorResponse(c, http.StatusBadGateway, "upstream_error", defaultMsg)
+		return false, defaultMsg
+	}
+
+	// 根据状态码返回适当的自定义错误响应（不透传上游详细信息）
+	var errType string
+	var statusCode int
+
+	switch upstreamStatus {
+	case 400:
+		writeUpstreamErrorBody(c, http.StatusBadRequest, body)
+		return false, ""
 	case 401:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
@@ -520,22 +538,64 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 	default:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
-		errMsg = "Upstream request failed"
+		errMsg = defaultMsg
 	}
+	writeUpstreamErrorResponse(c, statusCode, errType, errMsg)
+	return false, errMsg
+}
 
-	// 返回自定义错误响应
-	c.JSON(statusCode, gin.H{
+// gatewaySSEResponseStarted 报告客户端响应是否已作为 SSE 流开始（等槽位或上游心跳已写出）。
+func gatewaySSEResponseStarted(c *gin.Context) bool {
+	if c == nil || c.Writer == nil || !c.Writer.Written() {
+		return false
+	}
+	return strings.Contains(strings.ToLower(c.Writer.Header().Get("Content-Type")), "text/event-stream")
+}
+
+// writeUpstreamErrorResponse 写出 Anthropic 格式的错误。响应尚未开始时就是普通 JSON；
+// 已作为 SSE 流开始时改写成一帧 error 事件，避免把裸 JSON 追加进流里。
+func writeUpstreamErrorResponse(c *gin.Context, status int, errType, message string) {
+	payload := gin.H{
 		"type": "error",
 		"error": gin.H{
 			"type":    errType,
-			"message": errMsg,
+			"message": message,
 		},
-	})
-
-	if upstreamMsg == "" {
-		return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
 	}
-	return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
+	if !gatewaySSEResponseStarted(c) {
+		c.JSON(status, payload)
+		return
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		data = []byte(`{"type":"error","error":{"type":"upstream_error","message":"Upstream request failed"}}`)
+	}
+	writeGatewaySSEErrorFrame(c, data, errType, message, status)
+}
+
+// writeUpstreamErrorBody 原样回上游错误体；SSE 流已开始时把它压成单行放进一帧 error 事件。
+func writeUpstreamErrorBody(c *gin.Context, status int, body []byte) {
+	if !gatewaySSEResponseStarted(c) {
+		c.Data(status, "application/json", body)
+		return
+	}
+	var compact bytes.Buffer
+	if !json.Valid(body) || json.Compact(&compact, body) != nil {
+		writeUpstreamErrorResponse(c, status, "upstream_error", "Upstream request failed")
+		return
+	}
+	errType := gjson.GetBytes(body, "error.type").String()
+	if errType == "" {
+		errType = "upstream_error"
+	}
+	writeGatewaySSEErrorFrame(c, compact.Bytes(), errType, extractUpstreamErrorMessage(body), status)
+}
+
+func writeGatewaySSEErrorFrame(c *gin.Context, data []byte, errType, message string, intendedStatus int) {
+	MarkOpsStreamError(c, errType, message, intendedStatus)
+	MarkResponseCommitted(c)
+	_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", data)
+	c.Writer.Flush()
 }
 
 // handleRetryExhaustedSideEffects 在重试耗尽后标记账号状态；requestedModel 是实际发往上游的模型，
@@ -626,23 +686,7 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 		)
 	}
 
-	if status, errType, errMsg, matched := applyErrorPassthroughRule(
-		c,
-		account.Platform,
-		resp.StatusCode,
-		respBody,
-		http.StatusBadGateway,
-		"upstream_error",
-		"Upstream request failed after retries",
-	); matched {
-		c.JSON(status, gin.H{
-			"type": "error",
-			"error": gin.H{
-				"type":    errType,
-				"message": errMsg,
-			},
-		})
-
+	if matched, errMsg := presentUpstreamHTTPError(c, account.Platform, resp.StatusCode, respBody, true); matched {
 		summary := upstreamMsg
 		if summary == "" {
 			summary = errMsg
@@ -652,15 +696,6 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 		}
 		return nil, fmt.Errorf("upstream error: %d (retries exhausted, passthrough rule matched) message=%s", resp.StatusCode, summary)
 	}
-
-	// 返回统一的重试耗尽错误响应
-	c.JSON(http.StatusBadGateway, gin.H{
-		"type": "error",
-		"error": gin.H{
-			"type":    "upstream_error",
-			"message": "Upstream request failed after retries",
-		},
-	})
 
 	if upstreamMsg == "" {
 		return nil, fmt.Errorf("upstream error: %d (retries exhausted)", resp.StatusCode)
@@ -877,15 +912,25 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 	pendingEventLines := make([]string, 0, 4)
 
+	// semanticCommitted 在第一个非心跳的上游事件交给客户端后为 true。此前上游只发过
+	// ping/注释，流内报错仍可换号；此后一切保持原有行为。
+	semanticCommitted := false
+	lastEventHeartbeat := false
+
 	processSSEEvent := func(lines []string) ([]string, string, *sseUsagePatch, error) {
+		lastEventHeartbeat = false
 		if len(lines) == 0 {
 			return nil, "", nil, nil
 		}
 
 		eventName := ""
 		dataLine := ""
+		commentOnly := true
 		for _, line := range lines {
 			trimmed := strings.TrimSpace(line)
+			if !strings.HasPrefix(trimmed, ":") {
+				commentOnly = false
+			}
 			if strings.HasPrefix(trimmed, "event:") {
 				eventName = strings.TrimSpace(strings.TrimPrefix(trimmed, "event:"))
 				continue
@@ -896,10 +941,13 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 
 		if eventName == "error" {
-			return nil, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
+			return nil, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine, BeforeSemanticOutput: !semanticCommitted}
 		}
+		namedEvent := eventName != ""
+		lastEventHeartbeat = eventName == "ping"
 
 		if dataLine == "" {
+			lastEventHeartbeat = lastEventHeartbeat || commentOnly
 			return []string{strings.Join(lines, "\n") + "\n\n"}, "", nil, nil
 		}
 
@@ -925,6 +973,12 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 
 		eventType, _ := event["type"].(string)
+		// 中转站常用不带 event 行的 data-only 错误帧；真实内容开始前把它当作流内报错，
+		// 不转发给客户端。真实内容开始后保持原样转发。
+		if !semanticCommitted && !namedEvent && eventType == "error" {
+			return nil, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine, BeforeSemanticOutput: true}
+		}
+		lastEventHeartbeat = lastEventHeartbeat || eventType == "ping"
 		observer.ObserveAnthropic([]byte(dataLine))
 		if eventName == "" {
 			eventName = eventType
@@ -1127,6 +1181,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 						return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
 					}
 					return nil, err
+				}
+				if !lastEventHeartbeat {
+					semanticCommitted = true
 				}
 
 				for _, block := range outputBlocks {

@@ -34,6 +34,8 @@ func TestScopedAdminFullPolicyStillDeniesDevOnlyRoutes(t *testing.T) {
 		"PUT /api/v1/admin/ops/notify-channels/config",
 		"POST /api/v1/admin/ops/notify-channels/test",
 		"POST /api/v1/admin/payment/orders/:id/settle-by-tx",
+		"GET /api/v1/admin/anthropic-failover",
+		"PUT /api/v1/admin/anthropic-failover",
 	}
 	for _, route := range devRoutes {
 		method, path, _ := cut(route)

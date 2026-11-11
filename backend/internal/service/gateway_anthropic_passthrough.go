@@ -179,6 +179,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	if failoverErr := s.tryFailoverOn400(ctx, c, resp, account, input.RequestModel, true); failoverErr != nil {
 		return nil, failoverErr
 	}
+	if failoverErr := s.tryFailoverByRule(ctx, c, resp, account, s.shouldRetryUpstreamError(account, resp.StatusCode), true); failoverErr != nil {
+		return nil, failoverErr
+	}
 
 	if resp.StatusCode >= 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
 		if s.shouldFailoverUpstreamError(resp.StatusCode) {
