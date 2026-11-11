@@ -394,3 +394,38 @@ func TestHandleFailoverExhausted_RuleErrorKeepsOriginalPresentation(t *testing.T
 	require.Equal(t, http.StatusBadRequest, rec.Code, "without the rule table a 400 reaches the customer as is")
 	require.Equal(t, upstream, rec.Body.String())
 }
+
+// The first account fails in-stream before writing anything, so the response
+// has not started: whatever ends the request must be a JSON response, not JSON
+// under the SSE content type the first attempt had set.
+func TestMessages_StreamErrorBeforeAnyByte_FinalErrorIsJSON(t *testing.T) {
+	for name, second := range map[string]e2eUpstreamReply{
+		"next account 400":             {status: 400, body: `{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: too large"}}`},
+		"next account fails in-stream": {status: 200, body: e2eDataOnlyError, sse: true},
+		"next account 422":             {status: 422, body: e2eNoChannel422},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newE2EHarness(t, []*service.Account{e2eAccount(1, 1), e2eAccount(2, 2)}, map[int64]e2eUpstreamReply{
+				1: {status: 200, body: e2eDataOnlyError, sse: true},
+				2: second,
+			})
+			rec := h.messages(t, e2eStreamRequest)
+			require.Equal(t, []int64{1, 2}, h.upstream.calls)
+			require.GreaterOrEqual(t, rec.Code, 400)
+			require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+			require.True(t, strings.HasPrefix(rec.Body.String(), "{"), "body: %q", rec.Body.String())
+			require.Contains(t, rec.Body.String(), `"type":"error"`)
+		})
+	}
+}
+
+func TestMessages_StreamErrorBeforeAnyByte_NextAccountStreamIsSSE(t *testing.T) {
+	h := newE2EHarness(t, []*service.Account{e2eAccount(1, 1), e2eAccount(2, 2)}, map[int64]e2eUpstreamReply{
+		1: {status: 200, body: e2eDataOnlyError, sse: true},
+		2: {status: 200, body: e2eSuccessStream, sse: true},
+	})
+	rec := h.messages(t, e2eStreamRequest)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
+	require.Equal(t, e2eSuccessStream, rec.Body.String())
+}

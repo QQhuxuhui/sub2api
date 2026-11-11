@@ -2158,6 +2158,7 @@ func (h *GatewayHandler) errorResponseWithCode(c *gin.Context, status int, errTy
 	if code != "" {
 		errorObject["code"] = code
 	}
+	service.ResetStaleSSEContentType(c)
 	c.JSON(status, gin.H{
 		"type":  "error",
 		"error": errorObject,

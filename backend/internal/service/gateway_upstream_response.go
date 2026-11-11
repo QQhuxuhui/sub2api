@@ -552,6 +552,18 @@ func gatewaySSEResponseStarted(c *gin.Context) bool {
 	return strings.Contains(strings.ToLower(c.Writer.Header().Get("Content-Type")), "text/event-stream")
 }
 
+// ResetStaleSSEContentType 清掉上一次尝试留下、但从未写出的 SSE 响应头：换号前的流式
+// 尝试会先设置 Content-Type: text/event-stream，若它一个字节都没写就失败，后面的 JSON
+// 错误体不能顶着 SSE 类型发出去。响应已经开始时不做任何事。
+func ResetStaleSSEContentType(c *gin.Context) {
+	if c == nil || c.Writer == nil || c.Writer.Written() {
+		return
+	}
+	if strings.Contains(strings.ToLower(c.Writer.Header().Get("Content-Type")), "text/event-stream") {
+		c.Writer.Header().Del("Content-Type")
+	}
+}
+
 // writeUpstreamErrorResponse 写出 Anthropic 格式的错误。响应尚未开始时就是普通 JSON；
 // 已作为 SSE 流开始时改写成一帧 error 事件，避免把裸 JSON 追加进流里。
 func writeUpstreamErrorResponse(c *gin.Context, status int, errType, message string) {
@@ -563,6 +575,7 @@ func writeUpstreamErrorResponse(c *gin.Context, status int, errType, message str
 		},
 	}
 	if !gatewaySSEResponseStarted(c) {
+		ResetStaleSSEContentType(c)
 		c.JSON(status, payload)
 		return
 	}
@@ -576,6 +589,7 @@ func writeUpstreamErrorResponse(c *gin.Context, status int, errType, message str
 // writeUpstreamErrorBody 原样回上游错误体；SSE 流已开始时把它压成单行放进一帧 error 事件。
 func writeUpstreamErrorBody(c *gin.Context, status int, body []byte) {
 	if !gatewaySSEResponseStarted(c) {
+		ResetStaleSSEContentType(c)
 		c.Data(status, "application/json", body)
 		return
 	}
