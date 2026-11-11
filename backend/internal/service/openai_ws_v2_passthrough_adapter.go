@@ -141,6 +141,9 @@ type openAIWSPassthroughUsageMeta struct {
 	requestedReasoningEffort atomic.Pointer[string]
 	requestModel             atomic.Pointer[string]
 	upstreamModel            atomic.Pointer[string]
+	// clientTools 是本轮客户端 response.create 帧原样的 tools（未传为 []），
+	// 响应强制覆盖据此替换上游回显的 tools；nil 表示未知。
+	clientTools atomic.Pointer[[]byte]
 
 	// 仅在 client->upstream filter goroutine 中读写；Load 侧通过上方原子指针同步。
 	sessionRequestModel string
@@ -215,6 +218,28 @@ func (m *openAIWSPassthroughUsageMeta) storeTurnModels(requestModel string, upst
 	}
 	m.requestModel.Store(openAIWSTrimmedStringPtr(requestModel))
 	m.upstreamModel.Store(openAIWSTrimmedStringPtr(upstreamModel))
+}
+
+// storeClientTools 记录本轮客户端原样的 tools（frame 为改写前的客户端帧）。
+func (m *openAIWSPassthroughUsageMeta) storeClientTools(raw []byte) {
+	if m == nil {
+		return
+	}
+	if raw == nil {
+		m.clientTools.Store(nil)
+		return
+	}
+	m.clientTools.Store(&raw)
+}
+
+func (m *openAIWSPassthroughUsageMeta) turnClientTools() []byte {
+	if m == nil {
+		return nil
+	}
+	if p := m.clientTools.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 func (m *openAIWSPassthroughUsageMeta) turnModels(fallback string) (string, string) {
@@ -694,6 +719,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
+	// 改写前记录客户端首帧原样的 tools。
+	var firstClientTools []byte
+	if openAIWSPassthroughFrameIsResponseCreate(firstClientMessage) {
+		firstClientTools = openAIWSClientFrameTools(firstClientMessage)
+	}
 	if isOpenAIResponsesLiteWebSocketPayload(firstClientMessage) {
 		liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(firstClientMessage, account)
 		if liteErr != nil {
@@ -776,6 +806,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
 	usageMeta.identitySnapshot = s.ErrorIdentitySnapshot
+	usageMeta.storeClientTools(firstClientTools)
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
 		return fmt.Errorf("apply openai fast policy on first ws frame: %w", policyErr)
@@ -970,7 +1001,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if account.Platform == PlatformOpenAI {
 				payload = usageMeta.identity.Load().JSON(payload, requestModel, false)
 			}
-			modelRewrite := newOpenAIResponseModelRewrite(nil, account, requestModel, upstreamModel)
+			modelRewrite := newOpenAIResponseModelRewrite(nil, account, requestModel, upstreamModel).withClientTools(usageMeta.turnClientTools())
 			if !modelRewrite.mayApplyBytes(payload) {
 				return payload
 			}
@@ -1009,6 +1040,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						turnLifecycle.cancelResponseCreate()
 					}
 				}()
+			}
+			var frameClientTools []byte
+			if isResponseCreate {
+				// 改写前记录本帧客户端原样的 tools，本轮成功提交时生效。
+				frameClientTools = openAIWSClientFrameTools(payload)
 			}
 			responsesLite := isResponseCreate && isOpenAIResponsesLiteWebSocketPayload(payload)
 			if isResponseCreate {
@@ -1126,6 +1162,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil && isResponseCreate {
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
+				usageMeta.storeClientTools(frameClientTools)
 				_, actualModel := usageMeta.turnModels(requestModelForThisFrame)
 				SetOpsUpstreamModel(c, actualModel)
 				responseCreateAtCopy := responseCreateAt
@@ -1599,4 +1636,13 @@ func logOpenAIWSV2Passthrough(format string, args ...any) {
 		"[OpenAI WS v2 passthrough] %s "+format,
 		append([]any{openaiWSV2PassthroughModeFields}, args...)...,
 	)
+}
+
+// openAIWSPassthroughFrameIsResponseCreate 判断客户端帧是否为 response.create（缺省 type 也按它处理）。
+func openAIWSPassthroughFrameIsResponseCreate(frame []byte) bool {
+	switch strings.TrimSpace(gjson.GetBytes(frame, "type").String()) {
+	case "", "response.create":
+		return true
+	}
+	return false
 }

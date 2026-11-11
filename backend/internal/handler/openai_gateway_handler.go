@@ -485,6 +485,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	reqModel := modelResult.String()
+	// 在任何请求体改写之前记录客户端原样的 tools：上游回显的 response.tools 会被换回它，
+	// 不把上游自己注入的工具（及其中的模型清单）透给客户端。
+	c.Request = c.Request.WithContext(service.WithOpenAIClientResponsesTools(c.Request.Context(), body))
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !openAICompatibleTextTargetAllowed(c, apiKey, reqModel) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")

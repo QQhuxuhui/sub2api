@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -22,6 +23,61 @@ var openAIForcedResponseModelHeaderPaths = []string{"response.headers", "headers
 
 func isOpenAIModelHeaderName(name string) bool {
 	return strings.EqualFold(name, "openai-model") || strings.EqualFold(name, "x-openai-model")
+}
+
+// isOpenAIAuxModelHeaderName 判断内嵌头是否为其他「...-model」键（例如
+// x-codex-safety-buffering-faster-model）：它们描述上游内部模型，强制覆盖时整键删除。
+func isOpenAIAuxModelHeaderName(name string) bool {
+	const suffix = "-model"
+	return len(name) > len(suffix) &&
+		strings.EqualFold(name[len(name)-len(suffix):], suffix) &&
+		!isOpenAIModelHeaderName(name)
+}
+
+// openAIClientResponsesToolsRaw 取客户端 Responses 请求体里的 tools：数组原样拷贝，
+// 不存在或为 null 时为 []；其他类型返回 false（不处理回显的 tools）。
+func openAIClientResponsesToolsRaw(body []byte) ([]byte, bool) {
+	tools := gjson.GetBytes(body, "tools")
+	switch {
+	case !tools.Exists() || tools.Type == gjson.Null:
+		return []byte("[]"), true
+	case tools.IsArray():
+		return []byte(tools.Raw), true
+	}
+	return nil, false
+}
+
+// WithOpenAIClientResponsesTools 把客户端请求原样的 tools 记录到 ctx（body 为客户端请求体）。
+func WithOpenAIClientResponsesTools(ctx context.Context, body []byte) context.Context {
+	raw, ok := openAIClientResponsesToolsRaw(body)
+	if !ok || ctx == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxkey.OpenAIClientResponsesTools, raw)
+}
+
+// openAIWSClientFrameTools 取 WS 客户端帧原样的 tools；非数组返回 nil（不处理）。
+func openAIWSClientFrameTools(frame []byte) []byte {
+	raw, ok := openAIClientResponsesToolsRaw(frame)
+	if !ok {
+		return nil
+	}
+	return raw
+}
+
+func withOpenAIClientResponsesToolsRaw(ctx context.Context, raw []byte) context.Context {
+	if ctx == nil || raw == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxkey.OpenAIClientResponsesTools, raw)
+}
+
+func openAIClientResponsesToolsFromContext(ctx context.Context) []byte {
+	if ctx == nil {
+		return nil
+	}
+	raw, _ := ctx.Value(ctxkey.OpenAIClientResponsesTools).([]byte)
+	return raw
 }
 
 // containsModelHeaderKeyHint 判断是否可能含 "...-model" 形式的 JSON 键（大小写不敏感），
@@ -74,6 +130,10 @@ type openAIResponseModelRewrite struct {
 	// anthropicShape 为 true 时载荷里的 usage 是 Anthropic 口径（/v1/messages 转换输出），
 	// input_tokens 与 cache_read_input_tokens 互斥。
 	anthropicShape bool
+	// clientTools 是客户端本次请求原样的 tools JSON 数组（未传为 []）；nil 表示未知，
+	// 不处理回显的 tools。仅强制覆盖模式使用：上游回显的 tools 会夹带其自身注入的
+	// 工具与模型清单。
+	clientTools []byte
 }
 
 // openAICacheWriteUsagePaths 是上游 usage 里可能出现的缓存写入字段，与
@@ -155,7 +215,11 @@ func newOpenAIResponseModelRewrite(c *gin.Context, account *Account, originalMod
 		strip := account.StripsOpenAICacheCreation()
 		sim := openAICacheSimForRequest(c, account)
 		if clientModel := openAIClientVisibleModel(c, account, originalModel); clientModel != "" {
-			return openAIResponseModelRewrite{to: clientModel, force: true, stripCacheWrite: strip, cacheSim: sim}
+			var tools []byte
+			if c != nil && c.Request != nil {
+				tools = openAIClientResponsesToolsFromContext(c.Request.Context())
+			}
+			return openAIResponseModelRewrite{to: clientModel, force: true, stripCacheWrite: strip, cacheSim: sim, clientTools: tools}
 		}
 		return openAIResponseModelRewrite{stripCacheWrite: strip, cacheSim: sim}
 	}
@@ -172,6 +236,19 @@ func (r openAIResponseModelRewrite) forcedOnly() openAIResponseModelRewrite {
 		return r
 	}
 	return openAIResponseModelRewrite{stripCacheWrite: r.stripCacheWrite, cacheSim: r.cacheSim, anthropicShape: r.anthropicShape}
+}
+
+// withClientTools 设定客户端本轮原样的 tools（WS 按轮）；raw 为 nil 时保持原值。
+func (r openAIResponseModelRewrite) withClientTools(raw []byte) openAIResponseModelRewrite {
+	if r.force && raw != nil {
+		r.clientTools = raw
+	}
+	return r
+}
+
+// replacesTools 报告是否要把回显的 tools 换成客户端原值。
+func (r openAIResponseModelRewrite) replacesTools() bool {
+	return r.force && r.clientTools != nil
 }
 
 // withoutCacheSim 丢弃缓存模拟：生图、embeddings 等非文本路径不参与模拟，
@@ -207,7 +284,8 @@ func (r openAIResponseModelRewrite) mayApply(data string) bool {
 		return false
 	}
 	if r.force {
-		return strings.Contains(data, `"model"`) || containsModelHeaderKeyHint(data)
+		return strings.Contains(data, `"model"`) || containsModelHeaderKeyHint(data) ||
+			(r.replacesTools() && strings.Contains(data, `"tools"`))
 	}
 	return strings.Contains(data, `"model"`)
 }
@@ -223,7 +301,8 @@ func (r openAIResponseModelRewrite) mayApplyBytes(data []byte) bool {
 		return false
 	}
 	if r.force {
-		return bytes.Contains(data, []byte(`"model"`)) || containsModelHeaderKeyHint(data)
+		return bytes.Contains(data, []byte(`"model"`)) || containsModelHeaderKeyHint(data) ||
+			(r.replacesTools() && bytes.Contains(data, []byte(`"tools"`)))
 	}
 	return bytes.Contains(data, []byte(`"model"`))
 }
@@ -270,6 +349,9 @@ func (r openAIResponseModelRewrite) applyJSON(data []byte) []byte {
 		for _, headersPath := range openAIForcedResponseModelHeaderPaths {
 			updated = r.rewriteEmbeddedModelHeaders(updated, headersPath)
 		}
+		if r.replacesTools() {
+			updated = r.restoreClientTools(updated)
+		}
 	}
 	if r.stripCacheWrite {
 		updated = stripOpenAICacheWriteUsage(updated)
@@ -288,7 +370,12 @@ func (r openAIResponseModelRewrite) rewriteEmbeddedModelHeaders(data []byte, hea
 		return data
 	}
 	updated := data
+	var auxKeys []string
 	headers.ForEach(func(key, value gjson.Result) bool {
+		if isOpenAIAuxModelHeaderName(key.Str) {
+			auxKeys = append(auxKeys, key.Str)
+			return true
+		}
 		if !isOpenAIModelHeaderName(key.Str) {
 			return true
 		}
@@ -313,6 +400,47 @@ func (r openAIResponseModelRewrite) rewriteEmbeddedModelHeaders(data []byte, hea
 		}
 		return true
 	})
+	for _, key := range auxKeys {
+		if next, err := sjson.DeleteBytes(updated, headersPath+"."+escapeOpenAIJSONPathKey(key)); err == nil {
+			updated = next
+		}
+	}
+	return updated
+}
+
+// escapeOpenAIJSONPathKey 转义 gjson/sjson 路径里有特殊含义的字符。
+func escapeOpenAIJSONPathKey(key string) string {
+	if !strings.ContainsAny(key, ".*?|#@\\!=<>%") {
+		return key
+	}
+	var b strings.Builder
+	for _, ch := range key {
+		if strings.ContainsRune(".*?|#@\\!=<>%", ch) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(ch)
+	}
+	return b.String()
+}
+
+// restoreClientTools 把上游回显的 tools 换成客户端原样的 tools：Responses 流事件的
+// response.tools，以及非流式 Responses 体（object == "response"）的顶层 tools。
+// 字段不存在、不是数组或与客户端原值相同时不动。
+func (r openAIResponseModelRewrite) restoreClientTools(data []byte) []byte {
+	updated := data
+	paths := []string{"response.tools"}
+	if gjson.GetBytes(updated, "object").Str == "response" {
+		paths = append(paths, "tools")
+	}
+	for _, path := range paths {
+		tools := gjson.GetBytes(updated, path)
+		if !tools.IsArray() || tools.Raw == string(r.clientTools) {
+			continue
+		}
+		if next, err := sjson.SetRawBytes(updated, path, r.clientTools); err == nil {
+			updated = next
+		}
+	}
 	return updated
 }
 

@@ -81,4 +81,8 @@ const (
 
 	// ClaudeCodeVersion stores the extracted Claude Code version from User-Agent (e.g. "2.1.22")
 	ClaudeCodeVersion Key = "ctx_claude_code_version"
+
+	// OpenAIClientResponsesTools 是客户端 /v1/responses 请求体里原样的 tools JSON 数组
+	// （未传为 []），在任何请求改写之前记录；响应强制覆盖据此替换上游回显的 tools。
+	OpenAIClientResponsesTools Key = "ctx_openai_client_responses_tools"
 )

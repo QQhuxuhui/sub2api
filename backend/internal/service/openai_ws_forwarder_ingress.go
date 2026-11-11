@@ -199,6 +199,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		imageInputSize           string
 		payloadBytes             int
 		requestedReasoningEffort *string
+		// clientTools 是客户端本轮帧原样的 tools（未传为 []，非数组为 nil），
+		// 响应强制覆盖据此替换上游回显的 tools。
+		clientTools []byte
 	}
 	ingressSessionOriginalModel := ""
 
@@ -480,6 +483,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			imageInputSize:           imageInputSize,
 			payloadBytes:             len(normalized),
 			requestedReasoningEffort: requestedReasoningEffort,
+			clientTools:              openAIWSClientFrameTools(trimmed),
 		}, nil
 	}
 
@@ -677,7 +681,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 			result, bridgeErr := s.proxyOpenAIWSHTTPBridgeTurn(
-				ctx,
+				withOpenAIClientResponsesToolsRaw(ctx, currentBridgePayload.clientTools),
 				c,
 				account,
 				token,
@@ -956,7 +960,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	var rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
-	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (*OpenAIForwardResult, error) {
+	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string, clientTools []byte) (*OpenAIForwardResult, error) {
 		scrubError := s.newErrorIdentityTurn(account, originalModel)
 		responseModelObserver := &upstreamResponseModelObserver{}
 		if lease == nil {
@@ -1006,7 +1010,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				mappedModel = normalizeOpenAIModelForUpstream(account, account.GetMappedModel(originalModel))
 			}
 			// originalModel 已是本轮客户端请求的模型（渠道映射前），不读会话级上下文。
-			modelRewrite = newOpenAIResponseModelRewrite(nil, account, originalModel, mappedModel)
+			modelRewrite = newOpenAIResponseModelRewrite(nil, account, originalModel, mappedModel).withClientTools(clientTools)
 		}
 		for {
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
@@ -1278,6 +1282,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	currentImageInputSize := firstPayload.imageInputSize
 	currentPayloadBytes := firstPayload.payloadBytes
 	currentRequestedReasoningEffort := firstPayload.requestedReasoningEffort
+	currentClientTools := firstPayload.clientTools
 	isStrictAffinityTurn := func(payload []byte) bool {
 		if !storeDisabled {
 			return false
@@ -1806,7 +1811,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 		}
 
-		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, currentRequestedReasoningEffort)
+		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, currentRequestedReasoningEffort, currentClientTools)
 		if relayErr != nil {
 			lastTurnClean = false
 			if isOpenAIWSSessionPreempted(ctx) {
@@ -1977,6 +1982,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		currentImageInputSize = nextPayload.imageInputSize
 		currentPayloadBytes = nextPayload.payloadBytes
 		currentRequestedReasoningEffort = nextPayload.requestedReasoningEffort
+		currentClientTools = nextPayload.clientTools
 		rejectedFieldRetryState = newOpenAIResponsesRejectedFieldRetryState(currentPayload)
 		storeDisabled = s.isOpenAIWSStoreDisabledInRequestRaw(currentPayload, account)
 		if !storeDisabled {

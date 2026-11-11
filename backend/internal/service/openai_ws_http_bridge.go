@@ -660,7 +660,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	mappedModel := actualModel
 	var modelRewrite openAIResponseModelRewrite
 	if originalModel != "" {
-		modelRewrite = newOpenAIResponseModelRewrite(c, account, originalModel, mappedModel).withoutCacheSim()
+		// 入站 WS 的握手 context 不带本轮 tools，由调用方经 ctx 传入。
+		modelRewrite = newOpenAIResponseModelRewrite(c, account, originalModel, mappedModel).withoutCacheSim().withClientTools(openAIClientResponsesToolsFromContext(ctx))
 	}
 
 	resultWithUsage := func() *OpenAIForwardResult {
