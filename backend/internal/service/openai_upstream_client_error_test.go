@@ -97,6 +97,7 @@ func TestFailoverOpenAIUpstreamHTTPError_ModelNotFoundIsNextAccountEligible(t *t
 
 	failoverErr := svc.failoverOpenAIUpstreamHTTPError(
 		context.Background(), c, account, resp, body, "model not found", "missing-model",
+		nil,
 	)
 
 	require.NotNil(t, failoverErr)

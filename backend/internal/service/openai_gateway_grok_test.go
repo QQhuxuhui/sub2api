@@ -3639,6 +3639,7 @@ func TestFailoverOpenAIUpstreamHTTPErrorUsesOnlyGrokRateLimitPolicy(t *testing.T
 	failoverErr := svc.failoverOpenAIUpstreamHTTPError(
 		context.Background(), c, account, resp,
 		[]byte(`{"error":{"message":"rate limited"}}`), "rate limited", "grok-4.3",
+		nil,
 	)
 
 	require.NotNil(t, failoverErr)

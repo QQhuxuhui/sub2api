@@ -134,11 +134,16 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
-		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
+		// 非换号回错：正常路径与换号规则全部失败后的重放共用，保证客户看到的一致。
+		presentErr := func(ctx context.Context, c *gin.Context, resp *http.Response) (*OpenAIForwardResult, error) {
+			writeResponsesError(c, mapUpstreamStatusCode(resp.StatusCode), "server_error", upstreamMsg)
+			return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
+		}
+		replay := func(c *gin.Context, r *http.Response) { _, _ = presentErr(withOpenAIRuleReplay(ctx), c, r) }
+		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel, replay); foErr != nil {
 			return nil, foErr
 		}
-		writeResponsesError(c, mapUpstreamStatusCode(resp.StatusCode), "server_error", upstreamMsg)
-		return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
+		return presentErr(ctx, c, resp)
 	}
 
 	if clientStream {

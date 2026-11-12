@@ -1,13 +1,19 @@
 export default {
   anthropicFailover: {
-    title: 'Anthropic 换号规则',
+    title: '换号规则',
     description: '上游报错时按规则切换账号，不惩罚账号。',
     saved: '已保存',
     failed: '操作失败',
     statsWindow: '最近 {days} 天',
+    platforms: {
+      aria: '平台',
+      anthropic: 'Anthropic',
+      openai: 'OpenAI'
+    },
     groups: {
       title: '启用分组',
-      empty: '没有 Anthropic 分组'
+      empty: '没有 Anthropic 分组',
+      emptyOpenai: '没有 OpenAI 分组'
     },
     limits: {
       maxRuleSwitches: '单请求最多换号',
@@ -26,6 +32,7 @@ export default {
       keywords: '关键字',
       keywordsPlaceholder: '每行一个，如：暂无可用渠道',
       keywordRequired: '每条规则至少要有一个关键字',
+      statusOrKeywordRequired: '每条规则要有状态码或至少一个关键字',
       action: '动作',
       actionHint: '「直接返回」只停止本表匹配，错误按原样处理',
       actionFailover: '换号',

@@ -45,6 +45,7 @@ type AdminHandlers struct {
 	Compliance             *admin.ComplianceHandler
 	AuditLog               *admin.AuditLogHandler
 	AnthropicFailover      *admin.AnthropicFailoverHandler
+	OpenAIFailover         *admin.OpenAIFailoverHandler
 }
 
 // Handlers contains all HTTP handlers

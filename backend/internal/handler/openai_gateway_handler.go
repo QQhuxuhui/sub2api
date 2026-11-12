@@ -49,6 +49,8 @@ type OpenAIGatewayHandler struct {
 	imageLimiter               *imageConcurrencyLimiter
 	maxAccountSwitches         int
 	cfg                        *config.Config
+	// openAIFailoverPolicyService 提供 OpenAI 分组的换号规则表与统计；为 nil 时等同全部分组未启用。
+	openAIFailoverPolicyService *service.OpenAIFailoverPolicyService
 }
 
 type openAIWSTurnChannelMappingSnapshot struct {
@@ -663,6 +665,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// token 计费部分仍受利润门保护，独立图片/视频端点才在门外。
 	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
 	c.Request = c.Request.WithContext(pricingCtx)
+	ruleTrack := h.beginOpenAIFailoverRules(c, apiKey, subject.UserID)
+	defer ruleTrack.finish(c)
 
 	for {
 		// Streaming Forward intentionally detaches the upstream request so usage can
@@ -891,8 +895,16 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						)
 						return
 					}
+					// 分组换号规则命中：只换号，不处置账号、不上报调度失败、不同号重试。
+					ruleSwitch := failoverErr.FailoverRuleID != ""
+					if ruleSwitch && ruleTrack.hit(failoverErr, account.ID) {
+						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						return
+					}
 					if !openAIForwardMayFailover(c, writerSizeBeforeForward, failoverErr) {
-						h.gatewayService.ObserveOpenAIAccountHealthFailure(c.Request.Context(), account, err)
+						if !ruleSwitch {
+							h.gatewayService.ObserveOpenAIAccountHealthFailure(c.Request.Context(), account, err)
+						}
 						h.handleFailoverExhausted(c, failoverErr, true)
 						return
 					}
@@ -901,7 +913,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					if c.Writer.Written() {
 						streamStarted = true
 					}
-					if failoverErr.ShouldReportAccountScheduleFailure() {
+					if !ruleSwitch && failoverErr.ShouldReportAccountScheduleFailure() {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, nil), false, nil, err)
 					}
 					if !failoverErr.ShouldRetryNextAccount() {
@@ -945,6 +957,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
+					ruleTrack.switched(failoverErr)
 					failoverSwitchFields := []zap.Field{
 						zap.Int64("account_id", account.ID),
 						zap.Int("upstream_status", failoverErr.StatusCode),
@@ -1296,6 +1309,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	// 分组利润控制：Messages 文本入口同样请求级装门并固定 pricingAt。
 	msgPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
 	c.Request = c.Request.WithContext(msgPricingCtx)
+	ruleTrack := h.beginOpenAIFailoverRules(c, apiKey, subject.UserID)
+	defer ruleTrack.finish(c)
 
 	for {
 		if failoverClientGone(c) {
@@ -1468,12 +1483,20 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						)
 						return
 					}
+					// 分组换号规则命中：只换号，不处置账号、不上报调度失败、不同号重试。
+					ruleSwitch := failoverErr.FailoverRuleID != ""
+					if ruleSwitch && ruleTrack.hit(failoverErr, account.ID) {
+						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
+						return
+					}
 					if c.Writer.Size() != writerSizeBeforeForward {
-						h.gatewayService.ObserveOpenAIAccountHealthFailure(c.Request.Context(), account, err)
+						if !ruleSwitch {
+							h.gatewayService.ObserveOpenAIAccountHealthFailure(c.Request.Context(), account, err)
+						}
 						h.handleAnthropicFailoverExhausted(c, failoverErr, true)
 						return
 					}
-					if failoverErr.ShouldReportAccountScheduleFailure() {
+					if !ruleSwitch && failoverErr.ShouldReportAccountScheduleFailure() {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, nil), false, nil, err)
 					}
 					if !failoverErr.ShouldRetryNextAccount() {
@@ -1513,6 +1536,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
+					ruleTrack.switched(failoverErr)
 					reqLog.Warn("openai_messages.upstream_failover_switching",
 						zap.Int64("account_id", account.ID),
 						zap.Int("upstream_status", failoverErr.StatusCode),
@@ -1616,6 +1640,11 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
 	if failoverErr != nil {
 		copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
+	}
+	// 换号规则触发的换号全部失败：按没有规则表时的样子把最后的错误回给客户。
+	if failoverErr != nil && failoverErr.FailoverRuleID != "" {
+		h.writeOpenAIRuleFailoverExhausted(c, failoverErr, streamStarted, true)
+		return
 	}
 	if failoverErr != nil && failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)
@@ -3537,6 +3566,11 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		return
 	}
 	copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
+	// 换号规则触发的换号全部失败：按没有规则表时的样子把最后的错误回给客户。
+	if failoverErr.FailoverRuleID != "" {
+		h.writeOpenAIRuleFailoverExhausted(c, failoverErr, streamStarted, false)
+		return
+	}
 	if failoverErr.IsOpenAIRequestBodyTooLarge() {
 		service.SetOpsUpstreamError(c, http.StatusRequestEntityTooLarge, service.OpenAIRequestBodyTooLargeClientMessage, "")
 		h.handleStreamingAwareError(

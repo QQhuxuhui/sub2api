@@ -1198,6 +1198,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
 				)
 			}
+			errorBody, errorModel := body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel)
+			if !IsResponseCommitted(c) {
+				if ruleErr := tryOpenAIFailoverByRule(c, account, resp, respBody, upstreamMsg, false, func(c *gin.Context, r *http.Response) {
+					_, _ = s.handleErrorResponse(withOpenAIRuleReplay(ctx), r, c, account, errorBody, errorModel)
+				}); ruleErr != nil {
+					return nil, ruleErr
+				}
+			}
 			return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 		}
 		defer func() { _ = resp.Body.Close() }()

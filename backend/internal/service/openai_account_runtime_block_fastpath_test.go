@@ -496,6 +496,7 @@ func TestOpenAIPoolModeTempRule_StopsSameAccountRetryAndIsolatesBlockToModel(t *
 		body,
 		"Service temporarily unavailable",
 		"gpt-5.4",
+		nil,
 	)
 
 	require.NotNil(t, failoverErr)

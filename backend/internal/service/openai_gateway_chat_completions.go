@@ -408,10 +408,15 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			)
 			return s.forwardAsRawChatCompletionsWithStartTime(ctx, c, account, body, defaultMappedModel, startTime)
 		}
-		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
+		// 非换号回错：正常路径与换号规则全部失败后的重放共用，保证客户看到的一致。
+		presentErr := func(ctx context.Context, c *gin.Context, resp *http.Response) (*OpenAIForwardResult, error) {
+			return s.handleChatCompletionsErrorResponse(resp, c, account, billingModel)
+		}
+		replay := func(c *gin.Context, r *http.Response) { _, _ = presentErr(withOpenAIRuleReplay(ctx), c, r) }
+		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel, replay); foErr != nil {
 			return nil, foErr
 		}
-		return s.handleChatCompletionsErrorResponse(resp, c, account, billingModel)
+		return presentErr(ctx, c, resp)
 	}
 
 	// 9. Handle normal response

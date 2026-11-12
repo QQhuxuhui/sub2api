@@ -100,8 +100,15 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	respBody []byte,
 	upstreamMsg string,
 	upstreamModel string,
+	replay openAIRuleReplayFunc,
 ) *UpstreamFailoverError {
 	shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
+	// 分组换号规则：只补充现有判定，先于账号错误策略，命中即只换号不处置账号。
+	if !shouldFailover && c != nil && account != nil && account.Platform != PlatformGrok && !IsResponseCommitted(c) {
+		if ruleErr := tryOpenAIFailoverByRule(c, account, resp, respBody, upstreamMsg, false, replay); ruleErr != nil {
+			return ruleErr
+		}
+	}
 	tempUnscheduled := false
 	if c != nil && account != nil && account.Platform != PlatformGrok && !shouldFailover && !IsResponseCommitted(c) && s.rateLimitService != nil {
 		tempUnscheduled = s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, upstreamModel) == ErrorPolicyTempUnscheduled

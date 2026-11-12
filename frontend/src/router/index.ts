@@ -642,7 +642,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      title: 'Anthropic Failover Rules',
+      title: 'Failover Rules',
       titleKey: 'admin.anthropicFailover.title',
       descriptionKey: 'admin.anthropicFailover.description'
     }

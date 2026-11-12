@@ -2,9 +2,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AnthropicFailoverView from '../AnthropicFailoverView.vue'
 
-const { getOverview, updateConfig, getAll, showSuccess, showError } = vi.hoisted(() => ({
+const { getOverview, updateConfig, openaiGetOverview, openaiUpdateConfig, getAll, showSuccess, showError } = vi.hoisted(() => ({
   getOverview: vi.fn(),
   updateConfig: vi.fn(),
+  openaiGetOverview: vi.fn(),
+  openaiUpdateConfig: vi.fn(),
   getAll: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn()
@@ -13,6 +15,7 @@ const { getOverview, updateConfig, getAll, showSuccess, showError } = vi.hoisted
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     anthropicFailover: { getOverview, updateConfig },
+    openAIFailover: { getOverview: openaiGetOverview, updateConfig: openaiUpdateConfig },
     groups: { getAll }
   }
 }))
@@ -54,6 +57,16 @@ describe('AnthropicFailoverView', () => {
     getOverview.mockResolvedValue(overview())
     getAll.mockResolvedValue([{ id: 10, name: 'G10' }, { id: 18, name: 'G18' }])
     updateConfig.mockImplementation(async (saved) => saved)
+    openaiGetOverview.mockResolvedValue({
+      config: {
+        enabled_group_ids: [45],
+        max_rule_switches: 3,
+        rules: [{ id: 'passback', name: 'Reasoning pass-back', enabled: true, status_code: 400, keywords: ['must be passed back to the API'], action: 'failover' }]
+      },
+      stats: { rules: [{ rule_id: 'passback', hits: 10, recovered: 9 }], window_days: 7 },
+      recent: [{ time: '2026-11-12T09:00:00Z', group_id: 45, user_id: 148, api_key_id: 394, reason: 'passback', status_code: 400, switches: 1, accounts: [1184, 1165], recovered: true, canceled: false }]
+    })
+    openaiUpdateConfig.mockImplementation(async (saved) => saved)
   })
 
   it('lists only anthropic groups and shows rule and stream statistics', async () => {
@@ -115,5 +128,54 @@ describe('AnthropicFailoverView', () => {
     await wrapper.find('[data-test="failover-save"]').trigger('click')
     await flushPromises()
     expect(showError).toHaveBeenCalledWith('rule "x": status 429 already switches accounts')
+  })
+
+  it('switches to the OpenAI table with OpenAI groups and no stream statistics', async () => {
+    getAll.mockImplementation(async (platform: string) =>
+      platform === 'openai' ? [{ id: 45, name: '国模' }] : [{ id: 18, name: 'G18' }]
+    )
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('[data-test="failover-platform-openai"]').trigger('click')
+    await flushPromises()
+
+    expect(getAll).toHaveBeenLastCalledWith('openai')
+    expect(openaiGetOverview).toHaveBeenCalled()
+    expect(wrapper.find('[data-test="failover-stream-stats"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="failover-group-45"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('90.0%')
+    expect(wrapper.find('[data-test="failover-recent"]').text()).toContain('1184 → 1165')
+  })
+
+  it('saves an OpenAI status-only rule to the OpenAI API', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.find('[data-test="failover-platform-openai"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('[data-test="failover-add-rule"]').trigger('click')
+    const rows = wrapper.findAll('[data-test="failover-rule"]')
+    await rows[1].find('input[type="number"]').setValue(408)
+    await wrapper.find('[data-test="failover-save"]').trigger('click')
+    await flushPromises()
+
+    expect(updateConfig).not.toHaveBeenCalled()
+    const saved = openaiUpdateConfig.mock.calls[0][0]
+    expect(saved.rules[1]).toMatchObject({ status_code: 408, keywords: [], action: 'failover' })
+  })
+
+  it('refuses an OpenAI rule without status code and keyword', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.find('[data-test="failover-platform-openai"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('[data-test="failover-add-rule"]').trigger('click')
+    await wrapper.find('[data-test="failover-save"]').trigger('click')
+    await flushPromises()
+
+    expect(openaiUpdateConfig).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.anthropicFailover.rules.statusOrKeywordRequired')
   })
 })

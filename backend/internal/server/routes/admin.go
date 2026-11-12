@@ -129,12 +129,21 @@ func RegisterAdminRoutes(
 
 		// Anthropic 换号规则表
 		registerAnthropicFailoverRoutes(admin, h)
+		registerOpenAIFailoverRoutes(admin, h)
 
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerOpenAIFailoverRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	openAIFailover := admin.Group("/openai-failover")
+	{
+		openAIFailover.GET("", h.Admin.OpenAIFailover.Overview)
+		openAIFailover.PUT("", h.Admin.OpenAIFailover.UpdateConfig)
 	}
 }
 

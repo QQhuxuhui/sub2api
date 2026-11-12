@@ -49,6 +49,7 @@ func ProvideAdminHandlers(
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
 	anthropicFailoverHandler *admin.AnthropicFailoverHandler,
+	openAIFailoverHandler *admin.OpenAIFailoverHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	opencodeGoUsage *service.OpenCodeGoUsageService,
@@ -96,6 +97,7 @@ func ProvideAdminHandlers(
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
 		AnthropicFailover:      anthropicFailoverHandler,
+		OpenAIFailover:         openAIFailoverHandler,
 	}
 }
 
@@ -142,6 +144,7 @@ func ProvideOpenAIGatewayHandler(
 	cfg *config.Config,
 	coordinator *securityaudit.Coordinator,
 	compositeResolver *service.CompositeRouteResolver,
+	openAIFailoverPolicyService *service.OpenAIFailoverPolicyService,
 ) *OpenAIGatewayHandler {
 	gatewayService.SetPluginManager(pluginManager)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, apiKeyService,
@@ -149,6 +152,7 @@ func ProvideOpenAIGatewayHandler(
 	h.compositeResolver = compositeResolver
 	h.securityAuditCoordinator = coordinator
 	h.grokMediaEligibilityProber = grokQuotaService
+	h.openAIFailoverPolicyService = openAIFailoverPolicyService
 	return h
 }
 
@@ -288,6 +292,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewUserAttributeHandler,
 	admin.NewErrorPassthroughHandler,
 	admin.NewAnthropicFailoverHandler,
+	admin.NewOpenAIFailoverHandler,
 	admin.NewTLSFingerprintProfileHandler,
 	admin.NewPluginHandler,
 	admin.NewAdminAPIKeyHandler,

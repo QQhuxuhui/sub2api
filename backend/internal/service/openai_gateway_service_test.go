@@ -217,6 +217,7 @@ func TestFailoverOpenAIUpstreamHTTPError_NilContextSkipsTempUnschedulablePolicy(
 	got := svc.failoverOpenAIUpstreamHTTPError(
 		context.Background(), nil, account, resp, body,
 		"Custom temporary outage.", "gpt-5.4",
+		nil,
 	)
 
 	require.Nil(t, got)

@@ -1,13 +1,19 @@
 export default {
   anthropicFailover: {
-    title: 'Anthropic Failover Rules',
+    title: 'Failover Rules',
     description: 'Switch accounts by rule when an upstream fails, without penalising the account.',
     saved: 'Saved',
     failed: 'Operation failed',
     statsWindow: 'Last {days} days',
+    platforms: {
+      aria: 'Platform',
+      anthropic: 'Anthropic',
+      openai: 'OpenAI'
+    },
     groups: {
       title: 'Enabled groups',
-      empty: 'No Anthropic groups'
+      empty: 'No Anthropic groups',
+      emptyOpenai: 'No OpenAI groups'
     },
     limits: {
       maxRuleSwitches: 'Max switches per request',
@@ -26,6 +32,7 @@ export default {
       keywords: 'Keywords',
       keywordsPlaceholder: 'One per line, e.g. no available channel',
       keywordRequired: 'Every rule needs at least one keyword',
+      statusOrKeywordRequired: 'Each rule needs a status code or at least one keyword',
       action: 'Action',
       actionHint: '"Return" only stops matching in this table; the error is handled as before',
       actionFailover: 'Switch account',

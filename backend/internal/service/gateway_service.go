@@ -26,6 +26,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
+	"github.com/gin-gonic/gin"
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -744,6 +745,9 @@ type UpstreamFailoverError struct {
 	ClientMessage            string
 	FailoverRuleID           string // 由 Anthropic 换号规则表触发：只换号，不惩罚账号，不做同号重试
 	RuleRetryExhausted       bool   // 规则命中的错误原本会走重试耗尽分支（决定全部失败后的错误呈现）
+	// RuleReplay 由 OpenAI 换号规则表设置：全部换号失败时按命中出口原本的方式
+	// 把这个上游错误回给客户，期间不处置账号。
+	RuleReplay func(c *gin.Context)
 }
 
 func (e *UpstreamFailoverError) Error() string {

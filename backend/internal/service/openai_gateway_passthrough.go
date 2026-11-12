@@ -430,6 +430,15 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			if shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, probeBody) {
 				return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
 			}
+			if !IsResponseCommitted(c) {
+				requestBody, errorBody := body, probeBody
+				probeMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(probeBody)))
+				if ruleErr := tryOpenAIFailoverByRule(c, account, resp, probeBody, probeMsg, true, func(c *gin.Context, r *http.Response) {
+					_ = s.handleErrorResponsePassthrough(withOpenAIRuleReplay(ctx), r, c, account, requestBody, errorBody)
+				}); ruleErr != nil {
+					return nil, ruleErr
+				}
+			}
 			return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
 		}
 

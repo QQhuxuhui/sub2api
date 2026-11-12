@@ -108,12 +108,17 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
-		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
+		// 非换号回错：正常路径与换号规则全部失败后的重放共用，保证客户看到的一致。
+		presentErr := func(ctx context.Context, c *gin.Context, resp *http.Response) (*OpenAIForwardResult, error) {
+			// 非 failover 错误：经共享 compat handler 以 Anthropic 格式回写
+			// （透传规则、ops 记录、cyber_policy 与 CC 回退路径一致）。
+			return s.handleAnthropicErrorResponse(resp, c, account, billingModel)
+		}
+		replay := func(c *gin.Context, r *http.Response) { _, _ = presentErr(withOpenAIRuleReplay(ctx), c, r) }
+		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel, replay); foErr != nil {
 			return nil, foErr
 		}
-		// 非 failover 错误：经共享 compat handler 以 Anthropic 格式回写
-		// （透传规则、ops 记录、cyber_policy 与 CC 回退路径一致）。
-		return s.handleAnthropicErrorResponse(resp, c, account, billingModel)
+		return presentErr(ctx, c, resp)
 	}
 
 	if clientStream {

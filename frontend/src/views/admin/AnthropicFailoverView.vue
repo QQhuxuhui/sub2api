@@ -1,6 +1,21 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
+      <div class="tabs inline-flex w-full max-w-xs sm:w-auto" role="tablist" :aria-label="t('admin.anthropicFailover.platforms.aria')">
+        <button
+          v-for="option in platforms"
+          :key="option"
+          type="button"
+          role="tab"
+          class="tab flex-1 sm:flex-none"
+          :class="platform === option ? 'tab-active' : ''"
+          :aria-selected="platform === option"
+          :data-test="`failover-platform-${option}`"
+          @click="selectPlatform(option)"
+        >
+          {{ t(`admin.anthropicFailover.platforms.${option}`) }}
+        </button>
+      </div>
       <div v-if="!form" class="card p-6 text-sm text-gray-500">{{ loading ? t('common.loading') : loadError }}</div>
       <template v-else>
         <!-- 启用分组 + 上限 -->
@@ -24,7 +39,7 @@
               <input v-model="form.enabled_group_ids" type="checkbox" :value="group.id" :data-test="`failover-group-${group.id}`" />
               <span>{{ group.name }}</span>
             </label>
-            <span v-if="groups.length === 0" class="text-sm text-gray-500">{{ t('admin.anthropicFailover.groups.empty') }}</span>
+            <span v-if="groups.length === 0" class="text-sm text-gray-500">{{ platform === 'openai' ? t('admin.anthropicFailover.groups.emptyOpenai') : t('admin.anthropicFailover.groups.empty') }}</span>
           </div>
         </section>
 
@@ -97,7 +112,7 @@
         </section>
 
         <!-- 流内报错换号统计 -->
-        <section class="card flex flex-wrap items-center justify-between gap-4 p-5" :title="t('admin.anthropicFailover.stream.hint')" data-test="failover-stream-stats">
+        <section v-if="platform === 'anthropic'" class="card flex flex-wrap items-center justify-between gap-4 p-5" :title="t('admin.anthropicFailover.stream.hint')" data-test="failover-stream-stats">
           <div>
             <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.anthropicFailover.stream.title') }}</h2>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ statsWindowText }}</p>
@@ -167,7 +182,10 @@ import {
   type AnthropicFailoverRuleStats,
   type AnthropicFailoverStats
 } from '@/api/admin/anthropicFailover'
+import type { OpenAIFailoverOverview } from '@/api/admin/openaiFailover'
 import { useAppStore } from '@/stores/app'
+
+type Platform = 'anthropic' | 'openai'
 
 interface RuleRow {
   key: number
@@ -186,6 +204,8 @@ interface FormState extends Omit<AnthropicFailoverConfig, 'rules'> {
 const { t } = useI18n()
 const appStore = useAppStore()
 
+const platforms: Platform[] = ['anthropic', 'openai']
+const platform = ref<Platform>('anthropic')
 const loading = ref(true)
 const loadError = ref('')
 const saving = ref(false)
@@ -194,6 +214,8 @@ const groups = ref<{ id: number; name: string }[]>([])
 const stats = ref<AnthropicFailoverStats>({ rules: [], stream_hits: 0, stream_recovered: 0, window_days: 7 })
 const recent = ref<AnthropicFailoverEvent[]>([])
 let nextRuleKey = 1
+// Drops a slower answer for the tab the admin already left.
+let loadSeq = 0
 
 const statsWindowText = computed(() => t('admin.anthropicFailover.statsWindow', { days: stats.value.window_days || 7 }))
 const streamStats = computed<AnthropicFailoverRuleStats>(() => ({
@@ -238,35 +260,58 @@ function toConfig(state: FormState): AnthropicFailoverConfig {
   }
 }
 
+function platformAPI(target: Platform) {
+  return target === 'openai' ? adminAPI.openAIFailover : adminAPI.anthropicFailover
+}
+
 async function load() {
+  const seq = ++loadSeq
+  const target = platform.value
   loading.value = true
   try {
-    const [overview, anthropicGroups] = await Promise.all([
-      adminAPI.anthropicFailover.getOverview(),
-      adminAPI.groups.getAll('anthropic')
+    const [overview, platformGroups] = await Promise.all([
+      platformAPI(target).getOverview() as Promise<OpenAIFailoverOverview & { stats: Partial<AnthropicFailoverStats> }>,
+      adminAPI.groups.getAll(target)
     ])
+    if (seq !== loadSeq) return
     form.value = toForm(overview.config)
-    stats.value = overview.stats
+    stats.value = { stream_hits: 0, stream_recovered: 0, ...overview.stats }
     recent.value = overview.recent || []
-    groups.value = anthropicGroups.map((group) => ({ id: group.id, name: group.name }))
+    groups.value = platformGroups.map((group) => ({ id: group.id, name: group.name }))
   } catch (err) {
+    if (seq !== loadSeq) return
     loadError.value = errorText(err)
     appStore.showError(loadError.value)
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
+}
+
+function selectPlatform(target: Platform) {
+  if (platform.value === target) return
+  platform.value = target
+  form.value = null
+  loadError.value = ''
+  stats.value = { rules: [], stream_hits: 0, stream_recovered: 0, window_days: 7 }
+  recent.value = []
+  groups.value = []
+  load()
 }
 
 async function save() {
   if (!form.value) return
+  const target = platform.value
   const config = toConfig(form.value)
-  if (config.rules.some((rule) => rule.keywords.length === 0)) {
-    appStore.showError(t('admin.anthropicFailover.rules.keywordRequired'))
+  // OpenAI rules may match on the status code alone.
+  if (target === 'openai' ? config.rules.some((rule) => rule.keywords.length === 0 && !rule.status_code) : config.rules.some((rule) => rule.keywords.length === 0)) {
+    appStore.showError(t(target === 'openai' ? 'admin.anthropicFailover.rules.statusOrKeywordRequired' : 'admin.anthropicFailover.rules.keywordRequired'))
     return
   }
   saving.value = true
   try {
-    form.value = toForm(await adminAPI.anthropicFailover.updateConfig(config))
+    const saved = await platformAPI(target).updateConfig(config)
+    if (platform.value !== target) return
+    form.value = toForm(saved)
     appStore.showSuccess(t('admin.anthropicFailover.saved'))
   } catch (err) {
     appStore.showError(errorText(err))

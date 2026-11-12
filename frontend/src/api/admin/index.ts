@@ -23,6 +23,7 @@ import userAttributesAPI from './userAttributes'
 import opsAPI from './ops'
 import errorPassthroughAPI from './errorPassthrough'
 import anthropicFailoverAPI from './anthropicFailover'
+import openAIFailoverAPI from './openaiFailover'
 import dataManagementAPI from './dataManagement'
 import apiKeysAPI from './apiKeys'
 import scheduledTestsAPI from './scheduledTests'
@@ -62,6 +63,7 @@ export const adminAPI = {
   ops: opsAPI,
   errorPassthrough: errorPassthroughAPI,
   anthropicFailover: anthropicFailoverAPI,
+  openAIFailover: openAIFailoverAPI,
   dataManagement: dataManagementAPI,
   apiKeys: apiKeysAPI,
   scheduledTests: scheduledTestsAPI,
@@ -99,6 +101,7 @@ export {
   opsAPI,
   errorPassthroughAPI,
   anthropicFailoverAPI,
+  openAIFailoverAPI,
   dataManagementAPI,
   apiKeysAPI,
   scheduledTestsAPI,

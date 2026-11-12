@@ -132,12 +132,17 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	// 4. Handle error responses
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
-		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
+		// 非换号回错：正常路径与换号规则全部失败后的重放共用，保证客户看到的一致。
+		presentErr := func(ctx context.Context, c *gin.Context, resp *http.Response) (*OpenAIForwardResult, error) {
+			// Non-failover error: return Anthropic-formatted error to client via the
+			// shared compat handler (passthrough rules, ops recording, cyber_policy).
+			return s.handleAnthropicErrorResponse(resp, c, account, billingModel)
+		}
+		replay := func(c *gin.Context, r *http.Response) { _, _ = presentErr(withOpenAIRuleReplay(ctx), c, r) }
+		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel, replay); foErr != nil {
 			return nil, foErr
 		}
-		// Non-failover error: return Anthropic-formatted error to client via the
-		// shared compat handler (passthrough rules, ops recording, cyber_policy).
-		return s.handleAnthropicErrorResponse(resp, c, account, billingModel)
+		return presentErr(ctx, c, resp)
 	}
 
 	// 5. Convert response

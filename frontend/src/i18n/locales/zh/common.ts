@@ -214,7 +214,7 @@ export default {
     securityAudit: '安全审计',
     contentModeration: '内容审计',
     promptAudit: '提示词审计',
-    anthropicFailover: 'Anthropic 换号规则',
+    anthropicFailover: '换号规则',
     auditLogs: '操作日志',
   },
 
