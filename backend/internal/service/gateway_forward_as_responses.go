@@ -88,6 +88,7 @@ func (s *GatewayService) ForwardAsResponses(
 		}
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
 	}
+	apicompat.UseAdaptiveThinkingWhereBudgetRemoved(anthropicReq)
 
 	// 3. Force upstream streaming (Anthropic works best with streaming)
 	anthropicReq.Stream = true

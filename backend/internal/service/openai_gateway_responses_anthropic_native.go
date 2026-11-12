@@ -77,6 +77,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 		writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
 	}
+	apicompat.UseAdaptiveThinkingWhereBudgetRemoved(anthropicReq)
 
 	// 5. Force upstream streaming（客户端原始终决定响应格式；
 	// 上游恒为流式，非流式由缓冲路径组装）。

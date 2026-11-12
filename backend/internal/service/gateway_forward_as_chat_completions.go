@@ -77,6 +77,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		}
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
 	}
+	apicompat.UseAdaptiveThinkingWhereBudgetRemoved(anthropicReq)
 
 	// 3. Force upstream streaming
 	anthropicReq.Stream = true
