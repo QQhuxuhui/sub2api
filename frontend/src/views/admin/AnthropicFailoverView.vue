@@ -43,6 +43,37 @@
           </div>
         </section>
 
+        <!-- 流内失败重试错误码（OpenAI，对全部分组生效） -->
+        <section v-if="platform === 'openai' && form.streamRetryCodes" class="card space-y-3 p-5" data-test="failover-stream-retry">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="text-base font-semibold text-gray-900 dark:text-white" :title="t('admin.anthropicFailover.streamRetry.hint')">
+              {{ t('admin.anthropicFailover.streamRetry.title') }}
+            </h2>
+            <span v-if="form.streamRetryCodes.length === 0" class="badge badge-gray" data-test="failover-stream-retry-off">{{ t('admin.anthropicFailover.streamRetry.off') }}</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span
+              v-for="(code, index) in form.streamRetryCodes"
+              :key="code"
+              class="inline-flex items-center gap-1 rounded-lg border border-gray-200 py-1 pl-3 pr-1 font-mono text-xs text-gray-800 dark:border-dark-700 dark:text-gray-200"
+              data-test="failover-stream-retry-code"
+            >
+              {{ code }}
+              <button type="button" class="rounded p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400" :title="t('common.delete')" :aria-label="`${t('common.delete')} ${code}`" @click="form.streamRetryCodes.splice(index, 1)">
+                <Icon name="x" size="xs" />
+              </button>
+            </span>
+            <input
+              v-model="streamRetryDraft"
+              class="input w-56 font-mono text-xs"
+              :placeholder="t('admin.anthropicFailover.streamRetry.placeholder')"
+              :aria-label="t('admin.anthropicFailover.streamRetry.placeholder')"
+              data-test="failover-stream-retry-input"
+              @keydown.enter.prevent="addStreamRetryCode"
+            />
+          </div>
+        </section>
+
         <!-- 规则表 -->
         <section class="card space-y-4 p-5">
           <div class="flex flex-wrap items-center justify-between gap-3">
@@ -182,7 +213,7 @@ import {
   type AnthropicFailoverRuleStats,
   type AnthropicFailoverStats
 } from '@/api/admin/anthropicFailover'
-import type { OpenAIFailoverOverview } from '@/api/admin/openaiFailover'
+import type { OpenAIFailoverConfig, OpenAIFailoverOverview } from '@/api/admin/openaiFailover'
 import { useAppStore } from '@/stores/app'
 
 type Platform = 'anthropic' | 'openai'
@@ -199,6 +230,8 @@ interface RuleRow {
 
 interface FormState extends Omit<AnthropicFailoverConfig, 'rules'> {
   rules: RuleRow[]
+  // null when the backend did not send the list; it is then left out of a save.
+  streamRetryCodes: string[] | null
 }
 
 const { t } = useI18n()
@@ -213,6 +246,7 @@ const form = ref<FormState | null>(null)
 const groups = ref<{ id: number; name: string }[]>([])
 const stats = ref<AnthropicFailoverStats>({ rules: [], stream_hits: 0, stream_recovered: 0, window_days: 7 })
 const recent = ref<AnthropicFailoverEvent[]>([])
+const streamRetryDraft = ref('')
 let nextRuleKey = 1
 // Drops a slower answer for the tab the admin already left.
 let loadSeq = 0
@@ -229,8 +263,9 @@ function errorText(err: unknown): string {
   return failure.response?.data?.message || failure.message || t('admin.anthropicFailover.failed')
 }
 
-function toForm(config: AnthropicFailoverConfig): FormState {
+function toForm(config: OpenAIFailoverConfig): FormState {
   return {
+    streamRetryCodes: Array.isArray(config.stream_failed_retry_codes) ? [...config.stream_failed_retry_codes] : null,
     enabled_group_ids: config.enabled_group_ids || [],
     max_rule_switches: config.max_rule_switches,
     rules: (config.rules || []).map((rule) => ({
@@ -245,8 +280,9 @@ function toForm(config: AnthropicFailoverConfig): FormState {
   }
 }
 
-function toConfig(state: FormState): AnthropicFailoverConfig {
+function toConfig(state: FormState, target: Platform): OpenAIFailoverConfig {
   return {
+    ...(target === 'openai' && state.streamRetryCodes ? { stream_failed_retry_codes: state.streamRetryCodes } : {}),
     enabled_group_ids: state.enabled_group_ids,
     max_rule_switches: state.max_rule_switches,
     rules: state.rules.map((rule) => ({
@@ -295,13 +331,16 @@ function selectPlatform(target: Platform) {
   stats.value = { rules: [], stream_hits: 0, stream_recovered: 0, window_days: 7 }
   recent.value = []
   groups.value = []
+  streamRetryDraft.value = ''
   load()
 }
 
 async function save() {
   if (!form.value) return
   const target = platform.value
-  const config = toConfig(form.value)
+  // A code still in the input box is part of what the admin means to save.
+  if (target === 'openai' && !addStreamRetryCode()) return
+  const config = toConfig(form.value, target)
   // OpenAI rules may match on the status code alone.
   if (target === 'openai' ? config.rules.some((rule) => rule.keywords.length === 0 && !rule.status_code) : config.rules.some((rule) => rule.keywords.length === 0)) {
     appStore.showError(t(target === 'openai' ? 'admin.anthropicFailover.rules.statusOrKeywordRequired' : 'admin.anthropicFailover.rules.keywordRequired'))
@@ -312,12 +351,28 @@ async function save() {
     const saved = await platformAPI(target).updateConfig(config)
     if (platform.value !== target) return
     form.value = toForm(saved)
+    streamRetryDraft.value = ''
     appStore.showSuccess(t('admin.anthropicFailover.saved'))
   } catch (err) {
     appStore.showError(errorText(err))
   } finally {
     saving.value = false
   }
+}
+
+// Codes are matched exactly against the upstream's structured error code.
+// Returns false when the input holds something that is not a valid code.
+function addStreamRetryCode(): boolean {
+  const codes = form.value?.streamRetryCodes
+  const code = streamRetryDraft.value.trim().toLowerCase()
+  if (!codes || !code) return true
+  if (!/^[a-z0-9_.-]{1,64}$/.test(code)) {
+    appStore.showError(t('admin.anthropicFailover.streamRetry.invalid'))
+    return false
+  }
+  if (!codes.includes(code)) codes.push(code)
+  streamRetryDraft.value = ''
+  return true
 }
 
 function addRule() {

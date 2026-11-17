@@ -61,7 +61,8 @@ describe('AnthropicFailoverView', () => {
       config: {
         enabled_group_ids: [45],
         max_rule_switches: 3,
-        rules: [{ id: 'passback', name: 'Reasoning pass-back', enabled: true, status_code: 400, keywords: ['must be passed back to the API'], action: 'failover' }]
+        rules: [{ id: 'passback', name: 'Reasoning pass-back', enabled: true, status_code: 400, keywords: ['must be passed back to the API'], action: 'failover' }],
+        stream_failed_retry_codes: ['model_not_found']
       },
       stats: { rules: [{ rule_id: 'passback', hits: 10, recovered: 9 }], window_days: 7 },
       recent: [{ time: '2026-11-12T09:00:00Z', group_id: 45, user_id: 148, api_key_id: 394, reason: 'passback', status_code: 400, switches: 1, accounts: [1184, 1165], recovered: true, canceled: false }]
@@ -177,5 +178,89 @@ describe('AnthropicFailoverView', () => {
 
     expect(openaiUpdateConfig).not.toHaveBeenCalled()
     expect(showError).toHaveBeenCalledWith('admin.anthropicFailover.rules.statusOrKeywordRequired')
+  })
+
+  async function mountOpenAI() {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.find('[data-test="failover-platform-openai"]').trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('shows the in-stream retry codes only on the OpenAI tab', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.find('[data-test="failover-stream-retry"]').exists()).toBe(false)
+
+    await wrapper.find('[data-test="failover-platform-openai"]').trigger('click')
+    await flushPromises()
+    const codes = wrapper.findAll('[data-test="failover-stream-retry-code"]')
+    expect(codes.map((code) => code.text())).toEqual(['model_not_found'])
+    expect(wrapper.find('[data-test="failover-stream-retry-off"]').exists()).toBe(false)
+
+    await wrapper.find('[data-test="failover-save"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-test="failover-platform-anthropic"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-test="failover-save"]').trigger('click')
+    await flushPromises()
+    expect(updateConfig.mock.calls[0][0]).not.toHaveProperty('stream_failed_retry_codes')
+  })
+
+  it('adds, deduplicates and removes in-stream retry codes and saves them', async () => {
+    const wrapper = await mountOpenAI()
+    const input = wrapper.find('[data-test="failover-stream-retry-input"]')
+
+    await input.setValue('  Deployment_Not_Ready ')
+    await input.trigger('keydown.enter')
+    await input.setValue('model_not_found')
+    await input.trigger('keydown.enter')
+    expect(wrapper.findAll('[data-test="failover-stream-retry-code"]').map((code) => code.text())).toEqual(['model_not_found', 'deployment_not_ready'])
+
+    await wrapper.findAll('[data-test="failover-stream-retry-code"]')[0].find('button').trigger('click')
+    // A code still in the input box is saved too.
+    await input.setValue('pool_empty')
+    await wrapper.find('[data-test="failover-save"]').trigger('click')
+    await flushPromises()
+
+    expect(openaiUpdateConfig.mock.calls[0][0].stream_failed_retry_codes).toEqual(['deployment_not_ready', 'pool_empty'])
+  })
+
+  it('marks the in-stream retry as off when the list is emptied and saves the empty list', async () => {
+    const wrapper = await mountOpenAI()
+
+    await wrapper.find('[data-test="failover-stream-retry-code"] button').trigger('click')
+    expect(wrapper.find('[data-test="failover-stream-retry-off"]').exists()).toBe(true)
+    await wrapper.find('[data-test="failover-save"]').trigger('click')
+    await flushPromises()
+
+    expect(openaiUpdateConfig.mock.calls[0][0].stream_failed_retry_codes).toEqual([])
+  })
+
+  it('refuses an invalid in-stream retry code', async () => {
+    const wrapper = await mountOpenAI()
+    const input = wrapper.find('[data-test="failover-stream-retry-input"]')
+
+    await input.setValue('not a code')
+    await input.trigger('keydown.enter')
+    expect(showError).toHaveBeenCalledWith('admin.anthropicFailover.streamRetry.invalid')
+    expect(wrapper.findAll('[data-test="failover-stream-retry-code"]')).toHaveLength(1)
+
+    await wrapper.find('[data-test="failover-save"]').trigger('click')
+    await flushPromises()
+    expect(openaiUpdateConfig).not.toHaveBeenCalled()
+  })
+
+  it('leaves the list out of a save when the backend did not send one', async () => {
+    const answer = await openaiGetOverview()
+    delete answer.config.stream_failed_retry_codes
+    openaiGetOverview.mockResolvedValue(answer)
+    const wrapper = await mountOpenAI()
+
+    expect(wrapper.find('[data-test="failover-stream-retry"]').exists()).toBe(false)
+    await wrapper.find('[data-test="failover-save"]').trigger('click')
+    await flushPromises()
+    expect(openaiUpdateConfig.mock.calls[0][0]).not.toHaveProperty('stream_failed_retry_codes')
   })
 })

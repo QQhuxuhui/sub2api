@@ -42,6 +42,13 @@ export default {
       moveUp: 'Move up',
       moveDown: 'Move down'
     },
+    streamRetry: {
+      title: 'In-stream failure retry',
+      hint: 'When an upstream answers 200 and then fails before any output with one of these error codes, the request is retried: pool-mode accounts on the same account first, then on another account. The account is not penalised. Applies to every group. Empty turns it off.',
+      off: 'Off',
+      placeholder: 'Error code, Enter to add',
+      invalid: 'Error codes may only contain a-z, 0-9, _ . - (up to 64 characters)'
+    },
     stream: {
       title: 'In-stream error switches',
       hint: 'When an upstream fails in-stream after sending only heartbeats, the account is switched automatically, without the rule table'

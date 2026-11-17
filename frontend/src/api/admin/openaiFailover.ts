@@ -11,7 +11,14 @@ import type {
   AnthropicFailoverRuleStats
 } from './anthropicFailover'
 
-export type OpenAIFailoverConfig = AnthropicFailoverConfig
+export interface OpenAIFailoverConfig extends AnthropicFailoverConfig {
+  /**
+   * Error codes of a pre-output in-stream response.failed that are retried,
+   * for every group. An empty list turns the retry off; leaving the field out
+   * of a save keeps the stored list.
+   */
+  stream_failed_retry_codes?: string[]
+}
 
 export interface OpenAIFailoverOverview {
   config: OpenAIFailoverConfig
