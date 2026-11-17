@@ -24,6 +24,11 @@ type openAIFailoverRuleTrack struct {
 // that did not opt in gets a nil policy, which leaves every path as before.
 func (h *OpenAIGatewayHandler) beginOpenAIFailoverRules(c *gin.Context, apiKey *service.APIKey, userID int64) *openAIFailoverRuleTrack {
 	track := &openAIFailoverRuleTrack{service: h.openAIFailoverPolicyService}
+	// The in-stream retry-code list applies to every group, opted in or not.
+	if h.openAIFailoverPolicyService != nil && c != nil && c.Request != nil {
+		codes := h.openAIFailoverPolicyService.StreamFailedRetryCodes(c.Request.Context())
+		c.Request = c.Request.WithContext(service.WithOpenAIStreamFailedRetryCodes(c.Request.Context(), codes))
+	}
 	if apiKey == nil {
 		return track
 	}

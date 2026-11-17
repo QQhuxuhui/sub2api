@@ -772,6 +772,10 @@ func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
 	if e == nil {
 		return false
 	}
+	// 后台「流内失败重试」清单触发的重试与账号健康无关，不上报调度失败。
+	if e.Reason == OpenAIStreamConfiguredRetryReason {
+		return false
+	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount
 }
 

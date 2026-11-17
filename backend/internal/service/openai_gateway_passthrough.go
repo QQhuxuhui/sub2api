@@ -1862,6 +1862,11 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	if account == nil || IsResponseCommitted(c) {
 		return nil
 	}
+	if resp != nil {
+		if configuredRetryErr := s.openAIStreamConfiguredRetryError(c, account, passthrough, terminalType, payload, message, resp.Header.Get("x-request-id"), resp.Header); configuredRetryErr != nil {
+			return configuredRetryErr
+		}
+	}
 	shouldFailover := openAIStreamFailedEventShouldFailover(payload, message)
 	if terminalType == "error" {
 		shouldFailover = openAIStreamErrorEventShouldFailover(payload, message)
@@ -2152,6 +2157,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 						} else {
 							shouldFailover = openAIStreamFailedEventShouldFailover(dataBytes, failedMessage)
 						}
+					}
+					if configuredRetryErr := s.openAIStreamConfiguredRetryError(c, account, true, eventType, dataBytes, failedMessage, upstreamRequestID, resp.Header); configuredRetryErr != nil {
+						return resultWithUsage(), configuredRetryErr
 					}
 					if shouldFailover {
 						return resultWithUsage(),

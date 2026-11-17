@@ -583,6 +583,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 							shouldFailover = openAIStreamFailedEventShouldFailover(dataBytes, failedMessage)
 						}
 					}
+					if configuredRetryErr := s.openAIStreamConfiguredRetryError(c, account, false, eventType, dataBytes, failedMessage, upstreamRequestID, resp.Header); configuredRetryErr != nil {
+						sawFailedEvent = true
+						streamEarlyErr = configuredRetryErr
+						return
+					}
 					if shouldFailover {
 						sawFailedEvent = true
 						streamEarlyErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header)

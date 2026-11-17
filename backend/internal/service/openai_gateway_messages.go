@@ -1139,6 +1139,12 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				if isBareErrorEvent {
 					shouldFailover = openAIStreamErrorEventShouldFailover(payloadBytes, message)
 				}
+				if !clientOutputStarted {
+					if configuredRetryErr := s.openAIStreamConfiguredRetryError(c, account, false, eventType, payloadBytes, message, requestID, resp.Header); configuredRetryErr != nil {
+						streamFailoverErr = configuredRetryErr
+						return true
+					}
+				}
 				if !clientOutputStarted && shouldFailover {
 					streamFailoverErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payloadBytes, message, upstreamModel, resp.Header)
 					return true

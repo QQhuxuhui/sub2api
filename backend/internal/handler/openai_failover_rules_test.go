@@ -30,6 +30,8 @@ type openAIRuleUpstream struct {
 	mu     sync.Mutex
 	reject map[int64]bool
 	hits   []int64
+	// respond, when set and returning a response, answers instead.
+	respond func(accountID int64) *http.Response
 }
 
 func (u *openAIRuleUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
@@ -39,7 +41,13 @@ func (u *openAIRuleUpstream) Do(req *http.Request, _ string, accountID int64, _ 
 	u.mu.Lock()
 	u.hits = append(u.hits, accountID)
 	reject := u.reject[accountID]
+	respond := u.respond
 	u.mu.Unlock()
+	if respond != nil {
+		if resp := respond(accountID); resp != nil {
+			return resp, nil
+		}
+	}
 	if reject {
 		return &http.Response{
 			StatusCode: http.StatusBadRequest,

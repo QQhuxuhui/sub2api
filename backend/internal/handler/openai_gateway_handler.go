@@ -1646,6 +1646,9 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		h.writeOpenAIRuleFailoverExhausted(c, failoverErr, streamStarted, true)
 		return
 	}
+	if h.writeOpenAIStreamConfiguredRetryExhausted(c, failoverErr, streamStarted, true) {
+		return
+	}
 	if failoverErr != nil && failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)
 		h.anthropicStreamingAwareError(c, status, "api_error", message, streamStarted)
@@ -3569,6 +3572,9 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	// 换号规则触发的换号全部失败：按没有规则表时的样子把最后的错误回给客户。
 	if failoverErr.FailoverRuleID != "" {
 		h.writeOpenAIRuleFailoverExhausted(c, failoverErr, streamStarted, false)
+		return
+	}
+	if h.writeOpenAIStreamConfiguredRetryExhausted(c, failoverErr, streamStarted, false) {
 		return
 	}
 	if failoverErr.IsOpenAIRequestBodyTooLarge() {

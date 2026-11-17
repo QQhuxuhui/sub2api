@@ -79,6 +79,10 @@ type OpenAIFailoverConfig struct {
 	EnabledGroupIDs []int64              `json:"enabled_group_ids"`
 	MaxRuleSwitches int                  `json:"max_rule_switches"`
 	Rules           []OpenAIFailoverRule `json:"rules"`
+	// StreamFailedRetryCodes lists the error codes of a pre-output in-stream
+	// response.failed that are retried, for every group. nil means "not set"
+	// (the default applies); an empty list turns the retry off.
+	StreamFailedRetryCodes []string `json:"stream_failed_retry_codes"`
 }
 
 func defaultOpenAIFailoverConfig() OpenAIFailoverConfig {
@@ -86,6 +90,8 @@ func defaultOpenAIFailoverConfig() OpenAIFailoverConfig {
 		EnabledGroupIDs: []int64{},
 		MaxRuleSwitches: openAIFailoverDefaultMaxRuleSwitches,
 		Rules:           []OpenAIFailoverRule{},
+
+		StreamFailedRetryCodes: defaultOpenAIStreamFailedRetryCodes(),
 	}
 }
 
@@ -179,6 +185,12 @@ func normalizeOpenAIFailoverConfig(cfg OpenAIFailoverConfig, mode openAIFailover
 		rules = append(rules, rule)
 	}
 	cfg.Rules = rules
+
+	codes, err := normalizeOpenAIStreamFailedRetryCodes(cfg.StreamFailedRetryCodes, mode.lenient)
+	if err != nil {
+		return invalid("stream_failed_retry_codes: %s", err.Error())
+	}
+	cfg.StreamFailedRetryCodes = codes
 	return cfg, nil
 }
 
@@ -443,6 +455,8 @@ type openAIFailoverSnapshot struct {
 	groups   map[int64]struct{}
 	policy   *OpenAIFailoverPolicy
 	loadedAt time.Time
+	// streamRetryCodes is shared by every request and never modified.
+	streamRetryCodes map[string]struct{}
 }
 
 // OpenAIFailoverPolicyService owns the setting and its statistics. A save
@@ -483,6 +497,20 @@ func (s *OpenAIFailoverPolicyService) PolicyForGroup(ctx context.Context, groupI
 		return nil
 	}
 	return snapshot.policy
+}
+
+// StreamFailedRetryCodes returns the error codes of a pre-output in-stream
+// response.failed that are retried. The set applies to every group and must
+// not be modified.
+func (s *OpenAIFailoverPolicyService) StreamFailedRetryCodes(ctx context.Context) map[string]struct{} {
+	if s == nil || s.settings == nil {
+		return nil
+	}
+	snapshot := s.currentSnapshot(ctx)
+	if snapshot == nil {
+		return nil
+	}
+	return snapshot.streamRetryCodes
 }
 
 func (s *OpenAIFailoverPolicyService) currentSnapshot(ctx context.Context) *openAIFailoverSnapshot {
@@ -538,6 +566,8 @@ func (s *OpenAIFailoverPolicyService) storeLocked(cfg OpenAIFailoverConfig) *ope
 		groups:   make(map[int64]struct{}, len(cfg.EnabledGroupIDs)),
 		policy:   newOpenAIFailoverPolicy(cfg),
 		loadedAt: time.Now(),
+
+		streamRetryCodes: compileOpenAIStreamFailedRetryCodes(cfg.StreamFailedRetryCodes),
 	}
 	for _, id := range cfg.EnabledGroupIDs {
 		snapshot.groups[id] = struct{}{}
@@ -599,6 +629,11 @@ func (s *OpenAIFailoverPolicyService) UpdateConfig(ctx context.Context, cfg Open
 		for _, rule := range existing.Rules {
 			stored[rule.ID] = rule
 		}
+		// A client that does not know the field (an older page, a script)
+		// must not reset the list by leaving it out.
+		if cfg.StreamFailedRetryCodes == nil {
+			cfg.StreamFailedRetryCodes = existing.StreamFailedRetryCodes
+		}
 	}
 	cfg, err = normalizeOpenAIFailoverConfig(cfg, openAIFailoverNormalizeMode{
 		unchanged: func(rule OpenAIFailoverRule) bool {
@@ -657,6 +692,9 @@ func mergeOpenAIFailoverConfigJSON(raw string, cfg OpenAIFailoverConfig) (string
 		return "", err
 	}
 	if err := set(top, "max_rule_switches", cfg.MaxRuleSwitches); err != nil {
+		return "", err
+	}
+	if err := set(top, "stream_failed_retry_codes", cfg.StreamFailedRetryCodes); err != nil {
 		return "", err
 	}
 	if _, ok := top["slot_wait_ms"]; !ok {
