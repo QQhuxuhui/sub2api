@@ -71,6 +71,8 @@ type ModelPlazaService struct {
 	pricingService *PricingService
 	billingService *BillingService
 	resolver       *ModelPricingResolver
+	// ext 承载广场扩展（见 model_plaza_listing.go / model_plaza_health.go）。
+	ext *modelPlazaExt
 }
 
 // NewModelPlazaService 创建模型广场服务。
@@ -196,6 +198,8 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 			}
 		}
 	}
+
+	s.appendListingModels(ctx, groups, byGroup)
 
 	officialMemo := make(map[string]*PlazaOfficialPricing)
 	out := make([]PlazaGroup, 0, len(order))

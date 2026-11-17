@@ -13,6 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import { plazaMonitorRedirect } from '@/features/model-plaza-board/monitorRedirect'
 
 /**
  * Route definitions with lazy loading
@@ -506,6 +507,7 @@ const routes: RouteRecordRaw[] = [
     path: '/monitor',
     name: 'ChannelStatus',
     component: () => import('@/views/user/ChannelStatusView.vue'),
+    beforeEnter: plazaMonitorRedirect,
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
