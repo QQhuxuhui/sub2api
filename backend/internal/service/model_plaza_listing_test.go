@@ -120,3 +120,49 @@ func TestPlazaListingFallbackDiffersFromAllowlistDefaults(t *testing.T) {
 	require.Equal(t, plazaClaudeDefaultModelIDs(), plazaListingFallbackModelIDs(PlatformAntigravity))
 	require.NotEqual(t, plazaListingFallbackModelIDs(PlatformAntigravity), plazaDefaultModelIDsForPlatform(PlatformAntigravity))
 }
+
+func TestListGroups_HideExclusiveDropsExclusiveGroups(t *testing.T) {
+	channels := []Channel{
+		plazaPricedChannel(1, "ch-public", []int64{10}, PlatformAnthropic, "claude-sonnet"),
+		plazaPricedChannel(2, "ch-exclusive", []int64{20}, PlatformAnthropic, "claude-opus"),
+	}
+	groups := []Group{
+		{ID: 10, Name: "public", Platform: PlatformAnthropic, RateMultiplier: 1},
+		{ID: 20, Name: "exclusive-with-channel", Platform: PlatformAnthropic, RateMultiplier: 2, IsExclusive: true},
+		{ID: 30, Name: "exclusive-listing-only", Platform: PlatformOpenAI, RateMultiplier: 3, IsExclusive: true},
+	}
+	lister := &plazaListerStub{byGroup: map[int64][]string{10: {"claude-haiku"}, 30: {"gpt-a"}}}
+
+	svc := newPlazaService(channels, groups, nil)
+	svc.SetModelLister(lister)
+	svc.SetHideExclusiveGroups(true)
+	require.True(t, svc.HidesExclusiveGroups())
+
+	out, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1, "专属分组不进广场，无论模型来自渠道还是同源枚举")
+	require.Equal(t, int64(10), out[0].ID)
+	require.Len(t, out[0].Models, 2)
+	require.Equal(t, []int64{10}, lister.calls, "专属分组不做模型枚举")
+
+	// 关闭时保持上游行为：专属分组照常返回，由 handler 按授权裁剪。
+	svc.SetHideExclusiveGroups(false)
+	out, err = svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 3)
+
+	// 只开隐藏、未注入枚举来源时也生效。
+	bare := newPlazaService(channels, groups, nil)
+	bare.SetHideExclusiveGroups(true)
+	out, err = bare.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+
+	// 未接入扩展（上游原始构造）时不隐藏。
+	require.False(t, newPlazaService(channels, groups, nil).HidesExclusiveGroups())
+}
+
+func TestProvideModelPlazaService_HidesExclusiveGroups(t *testing.T) {
+	svc := ProvideModelPlazaService(nil, nil, nil, nil, nil, nil, nil)
+	require.True(t, svc.HidesExclusiveGroups(), "装配出的广场服务只展示公开分组")
+}

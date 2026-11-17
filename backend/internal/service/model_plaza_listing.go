@@ -26,6 +26,9 @@ type PlazaModelLister interface {
 // modelPlazaExt 承载广场扩展的全部状态，避免往上游结构体里加多个字段。
 type modelPlazaExt struct {
 	lister PlazaModelLister
+	// hideExclusive 为 true 时广场只展示公开分组：专属分组即使对已授权用户也不出现，
+	// 运营方通过「是否专属」这一个开关控制分组是否进广场。
+	hideExclusive bool
 
 	healthSource PlazaHealthSource
 	healthMu     sync.Mutex
@@ -51,7 +54,20 @@ func (s *ModelPlazaService) SetModelLister(l PlazaModelLister) {
 	s.plazaExt().lister = l
 }
 
-// ProvideModelPlazaService 在上游构造函数之上接入广场扩展（模型枚举 + 健康数据）。
+// SetHideExclusiveGroups 设置广场是否隐藏专属分组。仅在装配阶段调用。
+func (s *ModelPlazaService) SetHideExclusiveGroups(hide bool) {
+	if s == nil {
+		return
+	}
+	s.plazaExt().hideExclusive = hide
+}
+
+// HidesExclusiveGroups 报告广场是否隐藏专属分组（健康接口据此裁剪数据范围）。
+func (s *ModelPlazaService) HidesExclusiveGroups() bool {
+	return s != nil && s.ext != nil && s.ext.hideExclusive
+}
+
+// ProvideModelPlazaService 在上游构造函数之上接入广场扩展（模型枚举 + 健康数据 + 只展示公开分组）。
 func ProvideModelPlazaService(
 	channelRepo ChannelRepository,
 	groupRepo GroupRepository,
@@ -62,6 +78,7 @@ func ProvideModelPlazaService(
 	monitorV2 *ChannelMonitorV2Service,
 ) *ModelPlazaService {
 	svc := NewModelPlazaService(channelRepo, groupRepo, pricingService, billingService, resolver)
+	svc.SetHideExclusiveGroups(true)
 	if gatewayService != nil {
 		svc.SetModelLister(gatewayService)
 	}
@@ -71,19 +88,26 @@ func ProvideModelPlazaService(
 	return svc
 }
 
-// appendListingModels 把各分组经 /v1/models 同源枚举得到、但渠道没有声明的模型追加进广场分组。
-// 渠道已声明的条目（含其定价）保持不动；composite 分组不处理。
+// appendListingModels 是 ListGroups 里的扩展挂点，做两件事：
+//   - 开启「只展示公开分组」时，把专属分组从广场里去掉（含渠道已声明模型的专属分组）；
+//   - 把各分组经 /v1/models 同源枚举得到、但渠道没有声明的模型追加进广场分组，
+//     渠道已声明的条目（含其定价）保持不动；composite 分组不追加。
 func (s *ModelPlazaService) appendListingModels(ctx context.Context, groups []Group, byGroup map[int64]*PlazaGroup) {
-	if s == nil || s.ext == nil || s.ext.lister == nil {
+	if s == nil || s.ext == nil {
 		return
 	}
 	for i := range groups {
 		g := &groups[i]
-		if g.Platform == PlatformComposite {
-			continue
-		}
 		pg, ok := byGroup[g.ID]
 		if !ok {
+			continue
+		}
+		if s.ext.hideExclusive && g.IsExclusive {
+			// 清空模型即可让 ListGroups 丢弃该分组（它只返回 Models 非空的分组）。
+			pg.Models = nil
+			continue
+		}
+		if s.ext.lister == nil || g.Platform == PlatformComposite {
 			continue
 		}
 		ids := s.ext.lister.ListingModelIDsForGroup(ctx, g)
