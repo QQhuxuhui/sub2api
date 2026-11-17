@@ -532,3 +532,45 @@ func TestGeminiMonitorBodyIncludesExplicitUserRole(t *testing.T) {
 		t.Fatalf("contents[0].role = %q, want user", payload.Contents[0].Role)
 	}
 }
+
+func TestExtractGeminiMonitorText(t *testing.T) {
+	adapter := providerAdapters[MonitorProviderGemini]
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "plain answer in first part",
+			body: `{"candidates":[{"content":{"parts":[{"text":"28"}]}}]}`,
+			want: "28",
+		},
+		{
+			name: "empty thought part precedes the answer",
+			body: `{"candidates":[{"content":{"parts":[{"thought":true,"text":""},{"thoughtSignature":"sig","text":"28"}]}}]}`,
+			want: "28",
+		},
+		{
+			name: "thought text is not treated as the answer",
+			body: `{"candidates":[{"content":{"parts":[{"thought":true,"text":"17 plus 11 is 99"},{"text":"28"}]}}]}`,
+			want: "28",
+		},
+		{
+			name: "only thought parts yields empty",
+			body: `{"candidates":[{"content":{"parts":[{"thought":true,"text":"28"}]}}]}`,
+			want: "",
+		},
+		{
+			name: "no candidates yields empty",
+			body: `{"error":{"code":502}}`,
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractMonitorResponseText(adapter, []byte(tc.body)); got != tc.want {
+				t.Fatalf("extractMonitorResponseText() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

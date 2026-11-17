@@ -208,7 +208,9 @@ var providerAdapters = map[string]providerAdapter{
 		buildHeaders: func(apiKey string) map[string]string {
 			return map[string]string{"x-goog-api-key": apiKey}
 		},
-		textPath: "candidates.0.content.parts.0.text",
+		// parts 顺序由上游决定：思考模型会把 thought part（可能是空串）排在答案前面，
+		// 不能只读 parts.0。
+		extractText: extractGeminiMonitorText,
 	},
 }
 
@@ -324,6 +326,29 @@ func extractAnthropicMonitorText(respBytes []byte) string {
 	parts := make([]string, 0, 1)
 	content.ForEach(func(_, item gjson.Result) bool {
 		if item.Get("type").String() != "text" {
+			return true
+		}
+		text := strings.TrimSpace(item.Get("text").String())
+		if text != "" {
+			parts = append(parts, text)
+		}
+		return true
+	})
+	return strings.Join(parts, "\n")
+}
+
+// extractGeminiMonitorText 聚合第一个 candidate 里的非思考文本。
+// 部分上游（如反重力中转）会在答案前放一个 thought:true 的 part，文本可能为空；
+// 只读 parts.0.text 会把正常响应误判为空回答。
+func extractGeminiMonitorText(respBytes []byte) string {
+	candidateParts := gjson.GetBytes(respBytes, "candidates.0.content.parts")
+	if !candidateParts.IsArray() {
+		return ""
+	}
+
+	parts := make([]string, 0, 1)
+	candidateParts.ForEach(func(_, item gjson.Result) bool {
+		if item.Get("thought").Bool() {
 			return true
 		}
 		text := strings.TrimSpace(item.Get("text").String())
