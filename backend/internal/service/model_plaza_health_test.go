@@ -20,11 +20,17 @@ type plazaHealthSourceStub struct {
 	filter  ChannelMonitorV2Filter
 	groupBy ChannelMonitorV2GroupBy
 	admin   bool
+	// keepCoverage 为 true 时不自动补 Coverage，用于测试过期与无数据场景。
+	keepCoverage bool
 }
 
 func (s *plazaHealthSourceStub) Matrix(_ context.Context, filter ChannelMonitorV2Filter, groupBy ChannelMonitorV2GroupBy, admin bool) (*ChannelMonitorV2Matrix, error) {
 	s.calls++
 	s.filter, s.groupBy, s.admin = filter, groupBy, admin
+	if s.matrix != nil && s.matrix.Coverage.DataThrough.IsZero() && !s.keepCoverage {
+		// 默认模拟聚合正常：数据截止到当前桶之前一分钟。
+		s.matrix.Coverage.DataThrough = filter.End.Add(-plazaHealthBucket).Add(-time.Minute)
+	}
 	return s.matrix, s.err
 }
 
@@ -170,4 +176,43 @@ func TestPlazaHealth_UnavailableAndErrorPaths(t *testing.T) {
 	_, err = failingSvc.Health(context.Background(), []int64{1})
 	require.ErrorIs(t, err, boom)
 	require.Equal(t, 2, failing.calls, "失败结果不缓存")
+}
+
+func TestPlazaHealth_HidesStaleAggregation(t *testing.T) {
+	now := time.Date(2026, 11, 17, 5, 7, 0, 0, time.UTC)
+	healthyRow := plazaHealthRow("openai", 3, "gpt-x", 500, 0, "healthy")
+
+	// 聚合停在 3 小时前：旧行仍是 healthy，但不能当作当前状态展示。
+	stale := &plazaHealthSourceStub{keepCoverage: true, matrix: &ChannelMonitorV2Matrix{
+		Coverage: ChannelMonitorV2Coverage{DataThrough: now.Add(-3 * time.Hour)},
+		Items:    []ChannelMonitorV2MatrixRow{healthyRow},
+	}}
+	staleSvc := newPlazaHealthService(stale, now)
+	got, err := staleSvc.Health(context.Background(), []int64{3})
+	require.NoError(t, err)
+	require.False(t, got.Available, "聚合数据过期时不展示健康")
+	require.Empty(t, got.Lines)
+
+	// 聚合恢复后立即恢复展示（过期结果不进缓存）。
+	stale.matrix.Coverage.DataThrough = now.Add(-2 * time.Minute)
+	got, err = staleSvc.Health(context.Background(), []int64{3})
+	require.NoError(t, err)
+	require.True(t, got.Available)
+	require.Len(t, got.Lines, 1)
+	require.Equal(t, 2, stale.calls)
+
+	// 刚好在容忍范围内仍然展示。
+	edge := &plazaHealthSourceStub{keepCoverage: true, matrix: &ChannelMonitorV2Matrix{
+		Coverage: ChannelMonitorV2Coverage{DataThrough: now.Add(-plazaHealthMaxLag)},
+		Items:    []ChannelMonitorV2MatrixRow{healthyRow},
+	}}
+	got, err = newPlazaHealthService(edge, now).Health(context.Background(), []int64{3})
+	require.NoError(t, err)
+	require.True(t, got.Available)
+
+	// 还没有任何聚合数据（Coverage 为零值）。
+	never := &plazaHealthSourceStub{keepCoverage: true, matrix: &ChannelMonitorV2Matrix{Items: []ChannelMonitorV2MatrixRow{healthyRow}}}
+	got, err = newPlazaHealthService(never, now).Health(context.Background(), []int64{3})
+	require.NoError(t, err)
+	require.False(t, got.Available)
 }

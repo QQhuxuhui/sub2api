@@ -19,6 +19,9 @@ const (
 	plazaHealthCacheTTL    = 30 * time.Second
 	plazaHealthRange       = "24h_20m"
 	plazaHealthUnknown     = "unknown"
+	// plazaHealthMaxLag 是聚合数据允许落后的最长时间。超过后宁可不展示健康，
+	// 也不把过期的「正常」当作当前状态（聚合任务停滞时旧数据仍可查询）。
+	plazaHealthMaxLag = 15 * time.Minute
 )
 
 // PlazaHealthSource 是广场读取健康数据的来源，由 *ChannelMonitorV2Service 满足。
@@ -110,6 +113,10 @@ func (s *ModelPlazaService) Health(ctx context.Context, allowedGroupIDs []int64)
 			}
 			return nil, err
 		}
+		if plazaHealthStale(matrix, now) {
+			// 不缓存：聚合恢复后下一次请求即可恢复展示。
+			return &PlazaHealth{Available: false, Lines: []PlazaHealthLine{}}, nil
+		}
 		result := &PlazaHealth{Available: true, Window: window, Lines: buildPlazaHealthLines(matrix, start)}
 		ext.storeHealth(key, result, now)
 		return result, nil
@@ -118,6 +125,19 @@ func (s *ModelPlazaService) Health(ctx context.Context, allowedGroupIDs []int64)
 		return nil, err
 	}
 	return v.(*PlazaHealth), nil
+}
+
+// plazaHealthStale 判断矩阵背后的聚合数据是否已过期：没有覆盖信息、尚无聚合数据，
+// 或数据截止时间落后当前时间超过 plazaHealthMaxLag。
+func plazaHealthStale(matrix *ChannelMonitorV2Matrix, now time.Time) bool {
+	if matrix == nil {
+		return true
+	}
+	through := matrix.Coverage.DataThrough
+	if through.IsZero() {
+		return true
+	}
+	return now.UTC().Sub(through.UTC()) > plazaHealthMaxLag
 }
 
 func plazaHealthCacheKey(sortedIDs []int64, end time.Time) string {
