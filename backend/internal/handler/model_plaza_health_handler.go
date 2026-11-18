@@ -39,13 +39,9 @@ func (h *ModelPlazaHandler) Health(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	// 广场只展示公开分组时，健康数据（含热度名次的统计范围）同样不包含专属分组。
-	hideExclusive := h.plazaService.HidesExclusiveGroups()
+	// 范围与主清单一致：登录账号可用的全部分组（含已授权的专属分组）。
 	ids := make([]int64, 0, len(groups))
 	for i := range groups {
-		if hideExclusive && groups[i].IsExclusive {
-			continue
-		}
 		ids = append(ids, groups[i].ID)
 	}
 	health, err := h.plazaService.Health(c.Request.Context(), ids)

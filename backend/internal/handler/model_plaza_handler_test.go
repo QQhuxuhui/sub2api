@@ -302,6 +302,7 @@ func TestModelPlazaHandler_VaryKeepsCORSOrigin(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		require.Equal(t, origin, w.Header().Get("Access-Control-Allow-Origin"))
 		// 共享缓存需同时按来源与语言区分，否则 A 来源的响应可能被复用给 B。
-		require.Equal(t, []string{"Origin", "Accept-Language"}, w.Header().Values("Vary"))
+		require.ElementsMatch(t, []string{"Origin", "Accept-Language", "Authorization"}, w.Header().Values("Vary"))
+		require.Empty(t, w.Header().Get("Cache-Control"), "匿名响应不加 no-store")
 	}
 }

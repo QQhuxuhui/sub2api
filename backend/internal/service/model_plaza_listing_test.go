@@ -121,7 +121,7 @@ func TestPlazaListingFallbackDiffersFromAllowlistDefaults(t *testing.T) {
 	require.NotEqual(t, plazaListingFallbackModelIDs(PlatformAntigravity), plazaDefaultModelIDsForPlatform(PlatformAntigravity))
 }
 
-func TestListGroups_HideExclusiveDropsExclusiveGroups(t *testing.T) {
+func TestListGroups_ExclusiveGroupsAreListedLikePublicOnes(t *testing.T) {
 	channels := []Channel{
 		plazaPricedChannel(1, "ch-public", []int64{10}, PlatformAnthropic, "claude-sonnet"),
 		plazaPricedChannel(2, "ch-exclusive", []int64{20}, PlatformAnthropic, "claude-opus"),
@@ -135,36 +135,45 @@ func TestListGroups_HideExclusiveDropsExclusiveGroups(t *testing.T) {
 
 	svc := newPlazaService(channels, groups, nil)
 	svc.SetModelLister(lister)
-	svc.SetHideExclusiveGroups(true)
-	require.True(t, svc.HidesExclusiveGroups())
 
 	out, err := svc.ListGroups(context.Background())
 	require.NoError(t, err)
-	require.Len(t, out, 1, "专属分组不进广场，无论模型来自渠道还是同源枚举")
-	require.Equal(t, int64(10), out[0].ID)
-	require.Len(t, out[0].Models, 2)
-	require.Equal(t, []int64{10}, lister.calls, "专属分组不做模型枚举")
-
-	// 关闭时保持上游行为：专属分组照常返回，由 handler 按授权裁剪。
-	svc.SetHideExclusiveGroups(false)
-	out, err = svc.ListGroups(context.Background())
-	require.NoError(t, err)
-	require.Len(t, out, 3)
-
-	// 只开隐藏、未注入枚举来源时也生效。
-	bare := newPlazaService(channels, groups, nil)
-	bare.SetHideExclusiveGroups(true)
-	out, err = bare.ListGroups(context.Background())
-	require.NoError(t, err)
-	require.Len(t, out, 1)
-
-	// 未接入扩展（上游原始构造）时不隐藏。
-	require.False(t, newPlazaService(channels, groups, nil).HidesExclusiveGroups())
+	require.Len(t, out, 3, "专属分组照常返回，由 handler 按账号权限裁剪")
+	ids := make([]int64, 0, len(out))
+	for _, g := range out {
+		ids = append(ids, g.ID)
+		require.NotEmpty(t, g.Models)
+	}
+	require.Equal(t, []int64{10, 20, 30}, ids)
+	require.True(t, out[1].IsExclusive)
+	require.Equal(t, "gpt-a", out[2].Models[0].Name)
+	require.ElementsMatch(t, []int64{10, 20, 30}, lister.calls, "专属分组同样做模型枚举")
 }
 
-func TestProvideModelPlazaService_HidesExclusiveGroups(t *testing.T) {
-	svc := ProvideModelPlazaService(nil, nil, nil, nil, nil, nil, nil)
-	require.True(t, svc.HidesExclusiveGroups(), "装配出的广场服务只展示公开分组")
+type plazaProvideGroupRepo struct {
+	GroupRepository
+	groups []Group
+}
+
+func (r plazaProvideGroupRepo) ListActive(context.Context) ([]Group, error) { return r.groups, nil }
+
+type plazaProvideChannelRepo struct {
+	ChannelRepository
+	channels []Channel
+}
+
+func (r plazaProvideChannelRepo) ListAll(context.Context) ([]Channel, error) { return r.channels, nil }
+
+func TestProvideModelPlazaService_KeepsExclusiveGroups(t *testing.T) {
+	svc := ProvideModelPlazaService(
+		plazaProvideChannelRepo{channels: []Channel{plazaPricedChannel(1, "ch", []int64{20}, PlatformAnthropic, "claude-opus")}},
+		plazaProvideGroupRepo{groups: []Group{{ID: 20, Name: "exclusive", Platform: PlatformAnthropic, RateMultiplier: 1, IsExclusive: true}}},
+		nil, nil, nil, nil, nil,
+	)
+	out, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1, "装配出的广场服务不再丢弃专属分组")
+	require.Equal(t, int64(20), out[0].ID)
 }
 
 func TestListGroups_ListingDropsChannelModelsNotInListing(t *testing.T) {
@@ -246,7 +255,6 @@ func TestListGroups_ListingKeepsBehaviourWhereModelsAreNotEnumerated(t *testing.
 
 	// 未注入枚举来源：只有渠道声明的模型（上游原行为）。
 	bare := newPlazaService(channels, groups, nil)
-	bare.SetHideExclusiveGroups(false)
 	out, err = bare.ListGroups(context.Background())
 	require.NoError(t, err)
 	require.Len(t, out, 2)

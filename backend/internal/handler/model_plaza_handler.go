@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"log/slog"
-
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -13,10 +11,9 @@ import (
 // ModelPlazaHandler 处理「模型广场」查询。
 //
 // 广场路由挂 OptionalJWT 中间件：匿名可访问（除非 require_auth 开启），带 token 则
-// 识别用户。可见性规则（橱窗语义，与「可用渠道」的可绑定语义不同）：
+// 识别用户。可见性规则（见 model_plaza_visibility.go）：
 //   - 匿名：仅非专属分组（订阅型照常展示）；
-//   - 登录：非专属分组 + user_allowed_groups 授权或持有有效订阅的专属分组；
-//     若该用户开启了公开分组限制，则公开分组同样需要落在授权集合内。
+//   - 登录：该账号可用的分组，与创建令牌时可选的分组同一口径（含已授权的专属分组）。
 type ModelPlazaHandler struct {
 	plazaService   *service.ModelPlazaService
 	apiKeyService  *service.APIKeyService
@@ -130,26 +127,12 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 		return
 	}
 
-	// allowedGroups == nil 表示匿名；登录用户恒为非 nil（可能为空集合）。
-	var allowedGroups map[int64]struct{}
-	var restrictPublicGroups bool
-	var userRates map[int64]float64
-	if authed {
-		allowedGroups, restrictPublicGroups, err = h.apiKeyService.GetUserGroupVisibility(c.Request.Context(), subject.UserID)
-		if err != nil {
-			// 可见性数据拿不到时不能静默降级成匿名视图（会错漏专属分组），直接报错。
-			response.ErrorFrom(c, err)
-			return
-		}
-		userRates, err = h.apiKeyService.GetUserGroupRates(c.Request.Context(), subject.UserID)
-		if err != nil {
-			// 专属倍率仅是展示增强，失败降级为分组默认倍率。
-			slog.Warn("model_plaza_user_rates_failed", "error", err, "user_id", subject.UserID)
-			userRates = nil
-		}
+	// 按身份裁剪分组并取个人倍率（fork 挂点，见 model_plaza_visibility.go）。
+	visible, userRates, err := h.plazaViewFor(c, groups, authed, subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
-
-	visible := filterPlazaVisibleGroups(groups, allowedGroups, restrictPublicGroups)
 
 	// 广场可匿名访问，分组文案随请求语言变化，提示中间缓存按语言区分。
 	// 追加而非覆盖：CORS 中间件已为具体来源写入 Vary: Origin。
