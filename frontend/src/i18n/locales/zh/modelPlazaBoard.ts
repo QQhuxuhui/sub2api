@@ -6,6 +6,7 @@ export default {
     summary: { label: '按状态筛选', all: '全部模型' },
     state: { healthy: '正常', warning: '波动', critical: '异常', unknown: '暂无数据' },
     filters: {
+      group: '分组',
       vendor: '厂商',
       billing: '计费方式',
       all: '全部',

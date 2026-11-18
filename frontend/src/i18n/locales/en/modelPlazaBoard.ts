@@ -6,6 +6,7 @@ export default {
     summary: { label: 'Filter by status', all: 'All models' },
     state: { healthy: 'Healthy', warning: 'Unstable', critical: 'Down', unknown: 'No data' },
     filters: {
+      group: 'Group',
       vendor: 'Vendor',
       billing: 'Billing',
       all: 'All',

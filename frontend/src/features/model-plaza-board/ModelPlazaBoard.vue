@@ -28,7 +28,7 @@
       {{ t('modelPlaza.loadFailed') }}
     </div>
     <div
-      v-else-if="allModels.length === 0"
+      v-else-if="!hasAnyModel"
       class="rounded-2xl border border-dashed border-gray-300 px-5 py-12 text-center text-sm text-gray-500 dark:border-dark-600 dark:text-dark-400"
     >
       {{ t('modelPlaza.empty') }}
@@ -93,6 +93,24 @@
       <div class="grid items-start gap-4 lg:grid-cols-[190px_minmax(0,1fr)] lg:gap-6">
         <!-- 筛选栏:窄屏时横向滚动的一排按钮 -->
         <aside class="flex gap-4 overflow-x-auto pb-1 lg:flex-col lg:gap-5 lg:overflow-visible lg:pb-0">
+          <section class="flex-none">
+            <h2 class="mb-2 hidden text-xs font-semibold tracking-wide text-gray-400 dark:text-dark-500 lg:block">{{ t('plazaBoard.filters.group') }}</h2>
+            <div class="flex gap-1 lg:flex-col lg:gap-0.5" role="group" :aria-label="t('plazaBoard.filters.group')">
+              <button
+                v-for="group in groupOptions"
+                :key="group.key"
+                type="button"
+                :class="[railClass(filter.group === group.key), 'max-w-[14rem] lg:max-w-none']"
+                :aria-pressed="filter.group === group.key"
+                :title="group.label"
+                :data-testid="`plaza-group-${group.key}`"
+                @click="filter.group = group.key"
+              >
+                <span class="truncate lg:whitespace-normal lg:break-words">{{ group.label }}</span>
+                <span class="ml-auto hidden text-xs tabular-nums text-gray-400 dark:text-dark-500 lg:inline">{{ group.count }}</span>
+              </button>
+            </div>
+          </section>
           <section class="flex-none">
             <h2 class="mb-2 hidden text-xs font-semibold tracking-wide text-gray-400 dark:text-dark-500 lg:block">{{ t('plazaBoard.filters.vendor') }}</h2>
             <div class="flex gap-1 lg:flex-col lg:gap-0.5">
@@ -189,6 +207,7 @@ import {
   filterAndSortModels,
   hasHealthData,
   hasRank,
+  scopeGroups,
   type BoardFilter,
   type BoardSort
 } from './plazaBoard'
@@ -219,12 +238,29 @@ const descriptionHtml = computed(() => {
   return DOMPurify.sanitize(marked.parse(md) as string)
 })
 
-const allModels = computed(() => buildBoardModels(props.response?.groups, health.value))
+const filter = reactive<BoardFilter>({ query: '', group: 'all', vendor: 'all', billing: 'all', state: 'all', sort: 'name' })
+
+/** 广场是否有任何模型（不受分组筛选影响，决定是否进入整体空态）。 */
+const hasAnyModel = computed(() => (props.response?.groups ?? []).some((g) => (g.models ?? []).length > 0))
+
+const groupOptions = computed<Array<{ key: BoardFilter['group']; label: string; count: number }>>(() => {
+  const groups = (props.response?.groups ?? []).filter((g) => (g.models ?? []).length > 0)
+  const total = new Set(groups.flatMap((g) => g.models.map((m) => m.name))).size
+  return [
+    { key: 'all', label: t('plazaBoard.filters.all'), count: total },
+    ...groups.map((g) => ({ key: g.id, label: g.name, count: new Set(g.models.map((m) => m.name)).size }))
+  ]
+})
+// 选中的分组在刷新后不存在时回到全部。
+watch(groupOptions, (options) => {
+  if (!options.some((o) => o.key === filter.group)) filter.group = 'all'
+})
+
+/** 当前分组范围内的模型；选中分组后线路、价格、状态与各项统计都只来自该分组。 */
+const allModels = computed(() => buildBoardModels(scopeGroups(props.response?.groups, filter.group), health.value))
 const showHealth = computed(() => hasHealthData(allModels.value))
 const rankAvailable = computed(() => hasRank(allModels.value))
 const healthWindow = computed(() => health.value?.window ?? null)
-
-const filter = reactive<BoardFilter>({ query: '', vendor: 'all', billing: 'all', state: 'all', sort: 'name' })
 
 const sortOptions = computed<BoardSort[]>(() => {
   const options: BoardSort[] = ['name', 'price']

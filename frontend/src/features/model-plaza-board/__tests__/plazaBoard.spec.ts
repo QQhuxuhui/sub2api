@@ -9,11 +9,12 @@ import {
   lineBadges,
   summarizePrice,
   vendorOf,
+  scopeGroups,
   type BoardFilter
 } from '../plazaBoard'
 import { group, health, healthLine, requestModel, tokenModel } from './fixtures'
 
-const baseFilter: BoardFilter = { query: '', vendor: 'all', billing: 'all', state: 'all', sort: 'name' }
+const baseFilter: BoardFilter = { query: '', group: 'all', vendor: 'all', billing: 'all', state: 'all', sort: 'name' }
 
 describe('summarizePrice', () => {
   it('token 计费：基础价乘生效倍率，换算为每百万 token', () => {
@@ -238,5 +239,32 @@ describe('展示格式', () => {
     expect(vendorOf('gemini-3-flash').key).toBe('google')
     expect(vendorOf('MiniMax-M3').key).toBe('minimax')
     expect(vendorOf('step-5-preview').key).toBe('other')
+  })
+})
+
+describe('scopeGroups', () => {
+  const groups = [
+    group(3, 'A', 'openai', [tokenModel('gpt-a', 'openai')], { rate_multiplier: 0.25 }),
+    group(16, 'B', 'openai', [tokenModel('gpt-a', 'openai'), tokenModel('gpt-b', 'openai')], { rate_multiplier: 0.5 })
+  ]
+
+  it('全部分组时原样返回，空输入得空数组', () => {
+    expect(scopeGroups(groups, 'all')).toBe(groups)
+    expect(scopeGroups(null, 'all')).toEqual([])
+  })
+
+  it('选中分组后只留该分组，模型的线路与推荐价都来自它', () => {
+    const scoped = scopeGroups(groups, 16)
+    expect(scoped.map((g) => g.id)).toEqual([16])
+    const models = buildBoardModels(scoped, null)
+    expect(models.map((m) => m.name).sort()).toEqual(['gpt-a', 'gpt-b'])
+    const a = models.find((m) => m.name === 'gpt-a')!
+    expect(a.lines).toHaveLength(1)
+    expect(a.recommended.group.id).toBe(16)
+    expect(a.recommended.price.input).toBe('$1.50') // 3e-6 × 0.5 × 1M，而不是全部分组时更便宜的 0.75
+  })
+
+  it('分组不存在时得空数组', () => {
+    expect(scopeGroups(groups, 999)).toEqual([])
   })
 })

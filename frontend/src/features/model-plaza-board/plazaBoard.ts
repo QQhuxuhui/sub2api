@@ -68,6 +68,8 @@ export type BoardSort = 'rank' | 'name' | 'price' | 'stable' | 'fast'
 
 export interface BoardFilter {
   query: string
+  /** 分组 ID；'all' 为全部分组。分组裁剪发生在建模之前（scopeGroups），不在 filterAndSortModels 里。 */
+  group: 'all' | number
   vendor: string
   billing: 'all' | 'token' | 'request'
   state: 'all' | Exclude<PlazaHealthState, 'unknown'>
@@ -227,6 +229,15 @@ export function pickRecommendedLine(lines: BoardLine[]): BoardLine {
   return [...lines].sort(
     (a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || comparePrice(a.price, b.price)
   )[0]
+}
+
+/** 按分组筛选裁剪广场数据：选中某个分组后，看板的线路、价格、状态与统计都只来自它。 */
+export function scopeGroups(
+  groups: ModelPlazaGroup[] | null | undefined,
+  group: BoardFilter['group']
+): ModelPlazaGroup[] {
+  const list = groups ?? []
+  return group === 'all' ? list : list.filter((g) => g.id === group)
 }
 
 /** 把广场分组数据转成以模型为中心的看板数据。 */

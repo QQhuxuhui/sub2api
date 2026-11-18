@@ -90,8 +90,11 @@ func ProvideModelPlazaService(
 
 // appendListingModels 是 ListGroups 里的扩展挂点，做两件事：
 //   - 开启「只展示公开分组」时，把专属分组从广场里去掉（含渠道已声明模型的专属分组）；
-//   - 把各分组经 /v1/models 同源枚举得到、但渠道没有声明的模型追加进广场分组，
-//     渠道已声明的条目（含其定价）保持不动；composite 分组不追加。
+//   - 让分组的模型清单与下游 GET /v1/models 拉到的一致：以同源枚举为准重建，
+//     渠道声明但下游拉不到的模型不展示，下游拉得到而渠道没声明的模型补上。
+//
+// 两类分组的 /v1/models 不走同源枚举，保持原行为：composite 分组只有渠道声明的模型；
+// 固定清单的 OpenAI 分组（清单向上游实时获取）是渠道声明加枚举的并集。
 func (s *ModelPlazaService) appendListingModels(ctx context.Context, groups []Group, byGroup map[int64]*PlazaGroup) {
 	if s == nil || s.ext == nil {
 		return
@@ -111,13 +114,17 @@ func (s *ModelPlazaService) appendListingModels(ctx context.Context, groups []Gr
 			continue
 		}
 		ids := s.ext.lister.ListingModelIDsForGroup(ctx, g)
-		if len(ids) == 0 {
-			continue
-		}
-		seen := make(map[string]struct{}, len(pg.Models)+len(ids))
+		pinned := g.Platform == PlatformOpenAI && g.CodexModelsManifestConfig.Enabled
+
+		declared := make(map[string]int, len(pg.Models))
 		for j := range pg.Models {
-			seen[pg.Models[j].Platform+"\x00"+pg.Models[j].Name] = struct{}{}
+			declared[pg.Models[j].Platform+"\x00"+pg.Models[j].Name] = j
 		}
+		models := make([]PlazaModel, 0, len(pg.Models)+len(ids))
+		if pinned {
+			models = append(models, pg.Models...)
+		}
+		seen := make(map[string]struct{}, len(ids))
 		for _, id := range ids {
 			name := strings.TrimSpace(id)
 			if name == "" {
@@ -128,12 +135,21 @@ func (s *ModelPlazaService) appendListingModels(ctx context.Context, groups []Gr
 				continue
 			}
 			seen[key] = struct{}{}
-			pg.Models = append(pg.Models, PlazaModel{
+			if at, ok := declared[key]; ok {
+				if !pinned {
+					// 渠道声明的条目（含其定价）原样保留。
+					models = append(models, pg.Models[at])
+				}
+				continue
+			}
+			models = append(models, PlazaModel{
 				Name:     name,
 				Platform: g.Platform,
 				Pricing:  s.listingModelSeedPricing(ctx, g, name),
 			})
 		}
+		// 枚举为空时清单也为空，分组随之不进广场：此时下游拉到的同样是空清单。
+		pg.Models = models
 	}
 }
 

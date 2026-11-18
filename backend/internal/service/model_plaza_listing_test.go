@@ -131,7 +131,7 @@ func TestListGroups_HideExclusiveDropsExclusiveGroups(t *testing.T) {
 		{ID: 20, Name: "exclusive-with-channel", Platform: PlatformAnthropic, RateMultiplier: 2, IsExclusive: true},
 		{ID: 30, Name: "exclusive-listing-only", Platform: PlatformOpenAI, RateMultiplier: 3, IsExclusive: true},
 	}
-	lister := &plazaListerStub{byGroup: map[int64][]string{10: {"claude-haiku"}, 30: {"gpt-a"}}}
+	lister := &plazaListerStub{byGroup: map[int64][]string{10: {"claude-haiku", "claude-sonnet"}, 20: {"claude-opus"}, 30: {"gpt-a"}}}
 
 	svc := newPlazaService(channels, groups, nil)
 	svc.SetModelLister(lister)
@@ -165,4 +165,90 @@ func TestListGroups_HideExclusiveDropsExclusiveGroups(t *testing.T) {
 func TestProvideModelPlazaService_HidesExclusiveGroups(t *testing.T) {
 	svc := ProvideModelPlazaService(nil, nil, nil, nil, nil, nil, nil)
 	require.True(t, svc.HidesExclusiveGroups(), "装配出的广场服务只展示公开分组")
+}
+
+func TestListGroups_ListingDropsChannelModelsNotInListing(t *testing.T) {
+	channels := []Channel{
+		plazaPricedChannel(1, "ch-a", []int64{10}, PlatformGemini, "gemini-a"),
+		plazaPricedChannel(2, "ch-b", []int64{10}, PlatformGemini, "gemini-b"),
+	}
+	groups := []Group{{ID: 10, Name: "g", Platform: PlatformGemini, RateMultiplier: 1}}
+	svc := newPlazaService(channels, groups, nil)
+	svc.SetModelLister(&plazaListerStub{byGroup: map[int64][]string{10: {"gemini-c", "gemini-b"}}})
+
+	out, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	models := plazaModelsByName(out[0].Models)
+	require.Len(t, out[0].Models, 2, "广场清单与 /v1/models 一致")
+	require.NotContains(t, models, "gemini-a", "渠道声明但下游拉不到的模型不展示")
+	require.Contains(t, models, "gemini-c")
+	require.NotNil(t, models["gemini-b"].Pricing, "仍在清单里的渠道模型保留定价")
+	require.InDelta(t, 3e-6, *models["gemini-b"].Pricing.InputPrice, 1e-15)
+}
+
+func TestListGroups_ListingUsesListedNameWithChannelPricingAcrossCase(t *testing.T) {
+	channels := []Channel{plazaPricedChannel(1, "ch", []int64{10}, PlatformGemini, "Gemini-A")}
+	groups := []Group{{ID: 10, Name: "g", Platform: PlatformGemini, RateMultiplier: 1}}
+	svc := newPlazaServiceWithBilling(channels, groups, map[int64]string{10: PlatformGemini}, nil)
+	svc.SetModelLister(&plazaListerStub{byGroup: map[int64][]string{10: {"gemini-a"}}})
+
+	out, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Models, 1)
+	require.Equal(t, "gemini-a", out[0].Models[0].Name, "展示下游拉到的名称")
+	require.NotNil(t, out[0].Models[0].Pricing, "大小写不同的渠道定价仍然生效")
+	require.NotNil(t, out[0].Models[0].Pricing.InputPrice)
+	require.InDelta(t, 3e-6, *out[0].Models[0].Pricing.InputPrice, 1e-15)
+}
+
+func TestListGroups_EmptyListingDropsGroup(t *testing.T) {
+	channels := []Channel{
+		plazaPricedChannel(1, "ch-g", []int64{10}, PlatformGemini, "gemini-a"),
+		plazaPricedChannel(2, "ch-o", []int64{20}, PlatformOpenAI, "gpt-a"),
+	}
+	groups := []Group{
+		// 白名单与来源模型没有交集：/v1/models 为空，枚举同样为空。
+		{ID: 10, Name: "gemini-allowlist-empty", Platform: PlatformGemini, RateMultiplier: 1,
+			ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"nothing-*"}}},
+		{ID: 20, Name: "openai-empty", Platform: PlatformOpenAI, RateMultiplier: 2},
+	}
+	svc := newPlazaService(channels, groups, nil)
+	svc.SetModelLister(&plazaListerStub{byGroup: map[int64][]string{10: {}, 20: nil}})
+
+	out, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, out, "下游拉不到任何模型的分组不进广场，渠道声明的模型也一并移除")
+}
+
+func TestListGroups_ListingKeepsBehaviourWhereModelsAreNotEnumerated(t *testing.T) {
+	channels := []Channel{
+		plazaPricedChannel(1, "ch-pinned", []int64{10}, PlatformOpenAI, "gpt-declared"),
+		plazaPricedChannel(2, "ch-plain", []int64{20}, PlatformOpenAI, "gpt-declared"),
+	}
+	groups := []Group{
+		{ID: 10, Name: "pinned", Platform: PlatformOpenAI, RateMultiplier: 1,
+			CodexModelsManifestConfig: GroupCodexModelsManifestConfig{Enabled: true}},
+		{ID: 20, Name: "plain", Platform: PlatformOpenAI, RateMultiplier: 2},
+	}
+
+	// 固定清单的 OpenAI 分组：渠道声明与枚举的并集（原行为）。
+	svc := newPlazaService(channels, groups, nil)
+	svc.SetModelLister(&plazaListerStub{byGroup: map[int64][]string{10: {"gpt-listed", "gpt-declared"}, 20: {"gpt-listed"}}})
+	out, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 2)
+	require.Equal(t, []string{"gpt-declared", "gpt-listed"}, []string{out[0].Models[0].Name, out[0].Models[1].Name})
+	require.NotNil(t, out[0].Models[0].Pricing)
+	require.Len(t, out[1].Models, 1, "普通分组严格按枚举")
+	require.Equal(t, "gpt-listed", out[1].Models[0].Name)
+
+	// 未注入枚举来源：只有渠道声明的模型（上游原行为）。
+	bare := newPlazaService(channels, groups, nil)
+	bare.SetHideExclusiveGroups(false)
+	out, err = bare.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 2)
+	require.Equal(t, "gpt-declared", out[1].Models[0].Name)
 }

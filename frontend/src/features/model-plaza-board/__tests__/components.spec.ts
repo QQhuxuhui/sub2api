@@ -198,4 +198,49 @@ describe('ModelPlazaBoard', () => {
     await wrapper.find('#plaza-board-search').setValue('no-such-model')
     expect(wrapper.text()).toContain('plazaBoard.emptyFiltered')
   })
+
+  it('分组筛选：选中后只看该分组的模型与线路，价格与统计随之变化', async () => {
+    const wrapper = await mountBoard()
+    const options = wrapper.findAll('[data-testid^="plaza-group-"]')
+    expect(options.map((o) => o.attributes('data-testid'))).toEqual([
+      'plaza-group-all',
+      'plaza-group-3',
+      'plaza-group-16',
+      'plaza-group-18'
+    ])
+    expect(options[0].text()).toContain('3')
+    expect(options[1].text()).toContain('ChatGPT')
+    expect(options[1].text()).toContain('2')
+    expect(options[1].attributes('title')).toBe('ChatGPT')
+
+    await wrapper.find('[data-testid="plaza-group-3"]').trigger('click')
+    expect(wrapper.find('[data-testid="plaza-group-3"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.findAll('article h3').map((h) => h.text()).sort()).toEqual(['gpt-a', 'gpt-image'])
+    const card = wrapper.findAll('article').find((a) => a.find('h3').text() === 'gpt-a')!
+    expect(card.text()).toContain('$0.75') // 组 3 的线路价，而不是全部分组时推荐的组 16（$1.50）
+    expect(card.text()).not.toContain('+1')
+    expect(card.text()).toContain('plazaBoard.state.critical')
+    expect(wrapper.find('[data-testid="plaza-state-all"]').text()).toContain('2')
+    expect(wrapper.find('[data-testid="plaza-state-healthy"]').text()).toContain('0')
+    expect(wrapper.text()).toContain('plazaBoard.count|{"models":2,"lines":2}')
+
+    await wrapper.find('[data-testid="plaza-group-all"]').trigger('click')
+    expect(wrapper.findAll('article')).toHaveLength(3)
+    expect(wrapper.text()).toContain('plazaBoard.count|{"models":3,"lines":4}')
+  })
+
+  it('分组筛选：选中的分组在刷新后消失时回到全部；选中分组不会误入整体空态', async () => {
+    const wrapper = await mountBoard()
+    await wrapper.find('[data-testid="plaza-group-18"]').trigger('click')
+    await wrapper.find('#plaza-board-search').setValue('gpt')
+    expect(wrapper.text()).toContain('plazaBoard.emptyFiltered')
+    expect(wrapper.text()).not.toContain('modelPlaza.empty')
+    await wrapper.find('#plaza-board-search').setValue('')
+
+    await wrapper.setProps({ response: { ...response, groups: response.groups.filter((g) => g.id !== 18) } })
+    await nextTick()
+    expect(wrapper.find('[data-testid="plaza-group-18"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plaza-group-all"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.findAll('article h3').map((h) => h.text()).sort()).toEqual(['gpt-a', 'gpt-image'])
+  })
 })
