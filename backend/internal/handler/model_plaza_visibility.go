@@ -47,16 +47,22 @@ func (h *ModelPlazaHandler) plazaViewFor(
 }
 
 // intersectPlazaGroups 保留 groups 中落在 available 里的分组，顺序不变。
+//
+// 清单与权限是先后两次读取。若分组的权限属性（是否专属、订阅类型）在两次读取之间被改过，
+// 清单里还是改之前的内容（描述、倍率），而权限已按改之后判定；这种分组本次不返回，
+// 下一次请求自然读到一致的新内容。
 func intersectPlazaGroups(groups []service.PlazaGroup, available []service.Group) []service.PlazaGroup {
-	allowed := make(map[int64]struct{}, len(available))
+	allowed := make(map[int64]*service.Group, len(available))
 	for i := range available {
-		allowed[available[i].ID] = struct{}{}
+		allowed[available[i].ID] = &available[i]
 	}
 	visible := make([]service.PlazaGroup, 0, len(groups))
 	for _, g := range groups {
-		if _, ok := allowed[g.ID]; ok {
-			visible = append(visible, g)
+		a, ok := allowed[g.ID]
+		if !ok || a.IsExclusive != g.IsExclusive || a.SubscriptionType != g.SubscriptionType {
+			continue
 		}
+		visible = append(visible, g)
 	}
 	return visible
 }

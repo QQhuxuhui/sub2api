@@ -146,6 +146,22 @@ func TestIntersectPlazaGroups(t *testing.T) {
 	require.Empty(t, intersectPlazaGroups(groups, nil))
 }
 
+func TestIntersectPlazaGroups_SkipsGroupsWhosePermissionChangedBetweenReads(t *testing.T) {
+	// 清单快照里分组 2 还是专属、分组 3 还是标准类型；权限读取时 2 已公开、3 已改订阅型。
+	groups := []service.PlazaGroup{
+		{ID: 1},
+		{ID: 2, IsExclusive: true, Description: "old-private-description"},
+		{ID: 3, SubscriptionType: service.SubscriptionTypeStandard},
+	}
+	out := intersectPlazaGroups(groups, []service.Group{
+		{ID: 1},
+		{ID: 2, IsExclusive: false},
+		{ID: 3, SubscriptionType: service.SubscriptionTypeSubscription},
+	})
+	require.Len(t, out, 1, "权限属性前后不一致的分组本次不返回，避免用新权限放行旧内容")
+	require.Equal(t, int64(1), out[0].ID)
+}
+
 func TestModelPlazaGet_GroupsFollowAccountPermission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
