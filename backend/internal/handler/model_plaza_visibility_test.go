@@ -63,14 +63,14 @@ func (r plazaViewChannelRepo) ListAll(context.Context) ([]service.Channel, error
 }
 
 type plazaViewHealthSource struct {
-	calls  int
-	filter service.ChannelMonitorV2Filter
+	calls    int
+	groupIDs []int64
 }
 
-func (s *plazaViewHealthSource) Matrix(_ context.Context, filter service.ChannelMonitorV2Filter, _ service.ChannelMonitorV2GroupBy, _ bool) (*service.ChannelMonitorV2Matrix, error) {
+func (s *plazaViewHealthSource) PlazaHourlyHealth(_ context.Context, groupIDs []int64, _, _ time.Time) (*service.PlazaHourlyHealth, error) {
 	s.calls++
-	s.filter = filter
-	return &service.ChannelMonitorV2Matrix{}, nil
+	s.groupIDs = groupIDs
+	return &service.PlazaHourlyHealth{DataThrough: time.Now()}, nil
 }
 
 // 分组：1 公开、2/3 专属、4 公开订阅型、5 专属订阅型。每个分组绑定一个有定价的渠道模型。
@@ -100,7 +100,7 @@ func newPlazaViewHandler(user *service.User, userErr error, subscribed []int64, 
 	groupRepo := plazaViewGroupRepo{groups: groups}
 	plaza := service.NewModelPlazaService(plazaViewChannelRepo{channels: channels}, groupRepo, nil, nil, nil)
 	if health != nil {
-		plaza.SetHealthSource(health)
+		plaza.SetHealthStore(health)
 	}
 	settings := service.NewSettingService(&settingHandlerPublicRepoStub{values: map[string]string{
 		service.SettingKeyModelPlazaEnabled:     "true",
@@ -221,9 +221,8 @@ func TestModelPlazaHealth_ScopeIsExactlyTheAccountsGroups(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, 1, src.calls)
-	got := append([]int64(nil), src.filter.AllowedGroupIDs...)
+	got := append([]int64(nil), src.groupIDs...)
 	sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
 	require.Equal(t, []int64{1, 2}, got, "公开分组 + 已授权专属分组，不含未授权专属分组")
-	require.True(t, src.filter.RestrictGroups)
 	require.Equal(t, "private, no-store", rec.Header().Get("Cache-Control"))
 }

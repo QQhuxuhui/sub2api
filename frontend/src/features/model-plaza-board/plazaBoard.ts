@@ -298,9 +298,9 @@ function nullsLast(a: number | null, b: number | null): number {
   return a - b
 }
 
-/** 可比较的错误率：状态未知（样本不足）或没有健康数据时不参与比较。 */
+/** 可比较的错误率：没有健康数据（近期无调用）的线路不参与比较。 */
 function comparableErrorRate(line: BoardLine): number | null {
-  return line.state === 'unknown' ? null : (line.health?.error_rate ?? null)
+  return line.health?.error_rate ?? null
 }
 
 export function filterAndSortModels(models: BoardModel[], filter: BoardFilter): BoardModel[] {
@@ -320,7 +320,7 @@ export function filterAndSortModels(models: BoardModel[], filter: BoardFilter): 
     stable: (a, b) =>
       nullsLast(comparableErrorRate(a.recommended), comparableErrorRate(b.recommended)) || byName(a, b),
     fast: (a, b) =>
-      nullsLast(a.recommended.health?.ttft_p50_ms ?? null, b.recommended.health?.ttft_p50_ms ?? null) ||
+      nullsLast(a.recommended.health?.ttft_ms ?? null, b.recommended.health?.ttft_ms ?? null) ||
       byName(a, b)
   }
   return list.sort(comparators[filter.sort])
@@ -332,7 +332,7 @@ export interface LineBadges {
   fastest: boolean
 }
 
-/** 抽屉里的线路标签。只有多条线路时才颁发；「最稳」「最快」只在状态已知的线路中评选。 */
+/** 抽屉里的线路标签。只有多条线路时才颁发；「最稳」「最快」只在有健康数据的线路中评选。 */
 export function lineBadges(lines: BoardLine[]): Map<string, LineBadges> {
   const badges = new Map<string, LineBadges>()
   for (const line of lines) badges.set(line.key, { cheapest: false, steadiest: false, fastest: false })
@@ -343,25 +343,29 @@ export function lineBadges(lines: BoardLine[]): Map<string, LineBadges> {
     const cheapest = [...priced].sort((a, b) => comparePrice(a.price, b.price))[0]
     badges.get(cheapest.key)!.cheapest = true
   }
-  const known = lines.filter((l) => l.state !== 'unknown' && l.health?.error_rate != null)
+  const known = lines.filter((l) => l.health != null)
   if (known.length) {
-    const steadiest = [...known].sort((a, b) => a.health!.error_rate! - b.health!.error_rate!)[0]
+    const steadiest = [...known].sort((a, b) => a.health!.error_rate - b.health!.error_rate)[0]
     badges.get(steadiest.key)!.steadiest = true
   }
-  const timed = known.filter((l) => l.health?.ttft_p50_ms != null)
+  const timed = known.filter((l) => l.health?.ttft_ms != null)
   if (timed.length) {
-    const fastest = [...timed].sort((a, b) => a.health!.ttft_p50_ms! - b.health!.ttft_p50_ms!)[0]
+    const fastest = [...timed].sort((a, b) => a.health!.ttft_ms! - b.health!.ttft_ms!)[0]
     badges.get(fastest.key)!.fastest = true
   }
   return badges
 }
 
-/** 可用率文本：1 - 错误率，保留一位小数；状态未知为「—」。 */
+/** 成功率文本：全部成功为 100%，否则保留两位小数且不进位成 100；null 为「—」。 */
+export function formatSuccessRate(errorRate: number | null | undefined): string {
+  if (errorRate == null) return '—'
+  if (errorRate <= 0) return '100%'
+  return `${Math.min(99.99, Math.max(0, (1 - errorRate) * 100)).toFixed(2)}%`
+}
+
+/** 线路的可用率文本；没有健康数据（近期无调用）为「—」。 */
 export function formatAvailability(line: BoardLine | null | undefined): string {
-  const rate = line && line.state !== 'unknown' ? line.health?.error_rate : null
-  if (rate == null) return '—'
-  const pct = (1 - rate) * 100
-  return `${pct >= 99.95 ? '100' : pct.toFixed(1)}%`
+  return formatSuccessRate(line?.health?.error_rate)
 }
 
 /** 首字耗时文本：毫秒换算为秒，一位小数；无数据为「—」。 */
@@ -369,7 +373,62 @@ export function formatTtft(ms: number | null | undefined): string {
   return ms == null ? '—' : `${(ms / 1000).toFixed(1)}s`
 }
 
-/** 错误率百分比文本（状态条悬停提示用）。 */
-export function formatErrorRate(rate: number | null | undefined): string {
-  return rate == null ? '—' : `${(rate * 100).toFixed(1)}%`
+export type SampleLevel = 'excellent' | 'good' | 'warning' | 'critical'
+
+/** 一个采样的成功率档位：100% / ≥90% / ≥70% / 其余。 */
+export function sampleLevel(errorRate: number): SampleLevel {
+  if (errorRate <= 0) return 'excellent'
+  if (errorRate <= 0.1) return 'good'
+  if (errorRate <= 0.3) return 'warning'
+  return 'critical'
+}
+
+const pad2 = (value: number) => String(value).padStart(2, '0')
+
+/** 采样的小时文本（本地时区）：当天只写「HH:00」，其它日期带「M/D」。 */
+export function formatSampleHour(unixSeconds: number, now: number = Date.now()): string {
+  const at = new Date(unixSeconds * 1000)
+  const today = new Date(now)
+  const sameDay =
+    at.getFullYear() === today.getFullYear() && at.getMonth() === today.getMonth() && at.getDate() === today.getDate()
+  const hour = `${pad2(at.getHours())}:00`
+  return sameDay ? hour : `${at.getMonth() + 1}/${at.getDate()} ${hour}`
+}
+
+const HOUR_MS = 3_600_000
+
+/** 距最近一次有调用的小时结束已过去多少整小时；该小时仍在进行或刚结束为 0，没有采样为 null。 */
+export function hoursSinceLastSample(health: PlazaHealthLine | null | undefined, now: number = Date.now()): number | null {
+  const last = health?.samples?.[health.samples.length - 1]
+  if (!last) return null
+  return Math.max(0, Math.floor((now - (last.t * 1000 + HOUR_MS)) / HOUR_MS))
+}
+
+/**
+ * 各分组的整体状态（分组栏的指示灯）：有健康数据的线路全部正常为 healthy，
+ * 半数及以上异常为 critical，其余为 warning；没有任何健康数据为 unknown。
+ */
+export function groupStates(
+  groups: ModelPlazaGroup[] | null | undefined,
+  health: PlazaHealthResponse | null | undefined
+): Map<number, PlazaHealthState> {
+  const index = buildHealthIndex(health)
+  const states = new Map<number, PlazaHealthState>()
+  for (const group of groups ?? []) {
+    let known = 0
+    let healthy = 0
+    let critical = 0
+    for (const model of group.models ?? []) {
+      const line = index.get(healthKey(model.platform, group.id, model.name))
+      if (!line) continue
+      known += 1
+      if (line.state === 'healthy') healthy += 1
+      else if (line.state === 'critical') critical += 1
+    }
+    states.set(
+      group.id,
+      known === 0 ? 'unknown' : healthy === known ? 'healthy' : critical * 2 >= known ? 'critical' : 'warning'
+    )
+  }
+  return states
 }

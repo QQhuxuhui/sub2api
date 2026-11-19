@@ -61,15 +61,10 @@
 
             <div v-if="showHealth" class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-gray-500 dark:text-dark-400">
               <BoardStateTag :state="line.state" />
-              <BoardHealthStrip v-if="line.health" class="min-w-[140px] flex-1" size="sm" :buckets="line.health.buckets" :window="window" />
-              <span v-else class="flex-1"></span>
-              <span class="whitespace-nowrap">
-                {{ t('plazaBoard.availability') }}
-                <b class="font-semibold tabular-nums text-gray-900 dark:text-white">{{ formatAvailability(line) }}</b>
-              </span>
-              <span class="whitespace-nowrap">
+              <BoardLineHealth class="min-w-[160px] flex-1" size="sm" :health="line.health" />
+              <span v-if="line.health" class="whitespace-nowrap">
                 {{ t('plazaBoard.ttft') }}
-                <b class="font-semibold tabular-nums text-gray-900 dark:text-white">{{ formatTtft(line.health?.ttft_p50_ms) }}</b>
+                <b class="font-semibold tabular-nums text-gray-900 dark:text-white">{{ formatTtft(line.health?.ttft_ms) }}</b>
               </span>
             </div>
 
@@ -96,24 +91,21 @@ import ModelIcon from '@/components/common/ModelIcon.vue'
 import PlazaGroupSection from '@/components/modelPlaza/PlazaGroupSection.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { BILLING_MODE_IMAGE } from '@/constants/channel'
-import BoardHealthStrip from './BoardHealthStrip.vue'
+import BoardLineHealth from './BoardLineHealth.vue'
 import BoardStateTag from './BoardStateTag.vue'
 import {
   OTHER_VENDOR_KEY,
-  formatAvailability,
   formatTtft,
   lineBadges,
   officialPriceText,
   type BoardLine,
   type BoardModel
 } from './plazaBoard'
-import type { PlazaHealthWindow } from './types'
 
 const props = defineProps<{
   /** 为 null 时抽屉关闭。 */
   model: BoardModel | null
   showHealth: boolean
-  window?: PlazaHealthWindow | null
 }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 

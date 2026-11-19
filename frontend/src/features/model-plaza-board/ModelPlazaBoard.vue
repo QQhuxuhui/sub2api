@@ -90,61 +90,39 @@
         </button>
       </div>
 
-      <div class="grid items-start gap-4 lg:grid-cols-[190px_minmax(0,1fr)] lg:gap-6">
-        <!-- 筛选栏:窄屏时横向滚动的一排按钮 -->
-        <aside class="flex gap-4 overflow-x-auto pb-1 lg:flex-col lg:gap-5 lg:overflow-visible lg:pb-0">
-          <section class="flex-none">
-            <h2 class="mb-2 hidden text-xs font-semibold tracking-wide text-gray-400 dark:text-dark-500 lg:block">{{ t('plazaBoard.filters.group') }}</h2>
-            <div class="flex gap-1 lg:flex-col lg:gap-0.5" role="group" :aria-label="t('plazaBoard.filters.group')">
-              <button
-                v-for="group in groupOptions"
-                :key="group.key"
-                type="button"
-                :class="[railClass(filter.group === group.key), 'max-w-[14rem] lg:max-w-none']"
-                :aria-pressed="filter.group === group.key"
-                :title="group.label"
-                :data-testid="`plaza-group-${group.key}`"
-                @click="filter.group = group.key"
-              >
-                <span class="truncate lg:whitespace-normal lg:break-words">{{ group.label }}</span>
-                <span class="ml-auto hidden text-xs tabular-nums text-gray-400 dark:text-dark-500 lg:inline">{{ group.count }}</span>
-              </button>
-            </div>
-          </section>
-          <section class="flex-none">
-            <h2 class="mb-2 hidden text-xs font-semibold tracking-wide text-gray-400 dark:text-dark-500 lg:block">{{ t('plazaBoard.filters.vendor') }}</h2>
-            <div class="flex gap-1 lg:flex-col lg:gap-0.5">
+      <div class="grid items-start gap-4 lg:grid-cols-[288px_minmax(0,1fr)] lg:gap-6">
+        <BoardGroupRail v-model="filter.group" :items="groupItems" :total="totalModels" :show-health="healthAvailable" />
+
+        <main class="min-w-0">
+          <div class="mb-3 flex flex-wrap items-center gap-2">
+            <div class="flex min-w-0 flex-1 flex-wrap gap-1.5" role="group" :aria-label="t('plazaBoard.filters.vendor')">
               <button
                 v-for="vendor in vendorOptions"
                 :key="vendor.key"
                 type="button"
-                :class="railClass(filter.vendor === vendor.key)"
+                :class="chipClass(filter.vendor === vendor.key)"
                 :aria-pressed="filter.vendor === vendor.key"
+                :data-testid="`plaza-vendor-${vendor.key}`"
                 @click="filter.vendor = vendor.key"
               >
-                <span class="truncate">{{ vendor.label }}</span>
-                <span class="ml-auto hidden text-xs tabular-nums text-gray-400 dark:text-dark-500 lg:inline">{{ vendor.count }}</span>
+                {{ vendor.label }}
+                <span class="ml-1 text-xs font-normal tabular-nums text-gray-400 dark:text-dark-500">{{ vendor.count }}</span>
               </button>
             </div>
-          </section>
-          <section class="flex-none">
-            <h2 class="mb-2 hidden text-xs font-semibold tracking-wide text-gray-400 dark:text-dark-500 lg:block">{{ t('plazaBoard.filters.billing') }}</h2>
-            <div class="flex gap-1 lg:flex-col lg:gap-0.5">
+            <div class="inline-flex flex-none rounded-lg border border-gray-200 bg-gray-100 p-0.5 dark:border-dark-700 dark:bg-dark-800" role="group" :aria-label="t('plazaBoard.filters.billing')">
               <button
                 v-for="option in BILLINGS"
                 :key="option"
                 type="button"
-                :class="railClass(filter.billing === option)"
+                :class="segClass(filter.billing === option)"
                 :aria-pressed="filter.billing === option"
+                :data-testid="`plaza-billing-${option}`"
                 @click="filter.billing = option"
               >
                 {{ t(`plazaBoard.filters.${option}`) }}
               </button>
             </div>
-          </section>
-        </aside>
-
-        <main class="min-w-0">
+          </div>
           <div class="mb-3 flex flex-wrap items-center gap-3 text-[13px] text-gray-500 dark:text-dark-400">
             <span class="tabular-nums">{{ t('plazaBoard.count', { models: visibleModels.length, lines: visibleLineCount }) }}</span>
             <span class="flex-1"></span>
@@ -168,7 +146,6 @@
             v-else-if="view === 'list'"
             :models="visibleModels"
             :show-health="showHealth"
-            :window="healthWindow"
             @open="openModel"
           />
           <div v-else class="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(min(100%,290px),1fr))]">
@@ -177,15 +154,14 @@
               :key="model.name"
               :model="model"
               :show-health="showHealth"
-              :window="healthWindow"
-              @open="openModel"
+                @open="openModel"
             />
           </div>
         </main>
       </div>
     </template>
 
-    <BoardLineDrawer :model="openedModel" :show-health="showHealth" :window="healthWindow" @close="openedName = null" />
+    <BoardLineDrawer :model="openedModel" :show-health="showHealth" @close="openedName = null" />
   </div>
 </template>
 
@@ -198,13 +174,16 @@ import DOMPurify from 'dompurify'
 import Icon from '@/components/icons/Icon.vue'
 import type { ModelPlazaResponse } from '@/api/modelPlaza'
 import { useAuthStore } from '@/stores/auth'
+import BoardGroupRail, { type GroupRailItem } from './BoardGroupRail.vue'
 import BoardLineDrawer from './BoardLineDrawer.vue'
 import BoardModelCard from './BoardModelCard.vue'
 import BoardModelList from './BoardModelList.vue'
 import {
   OTHER_VENDOR_KEY,
   buildBoardModels,
+  effectiveRate,
   filterAndSortModels,
+  groupStates,
   hasHealthData,
   hasRank,
   scopeGroups,
@@ -243,24 +222,28 @@ const filter = reactive<BoardFilter>({ query: '', group: 'all', vendor: 'all', b
 /** 广场是否有任何模型（不受分组筛选影响，决定是否进入整体空态）。 */
 const hasAnyModel = computed(() => (props.response?.groups ?? []).some((g) => (g.models ?? []).length > 0))
 
-const groupOptions = computed<Array<{ key: BoardFilter['group']; label: string; count: number }>>(() => {
-  const groups = (props.response?.groups ?? []).filter((g) => (g.models ?? []).length > 0)
-  const total = new Set(groups.flatMap((g) => g.models.map((m) => m.name))).size
-  return [
-    { key: 'all', label: t('plazaBoard.filters.all'), count: total },
-    ...groups.map((g) => ({ key: g.id, label: g.name, count: new Set(g.models.map((m) => m.name)).size }))
-  ]
+/** 有模型的分组；零模型分组不进分组栏。 */
+const listedGroups = computed(() => (props.response?.groups ?? []).filter((g) => (g.models ?? []).length > 0))
+const totalModels = computed(() => new Set(listedGroups.value.flatMap((g) => g.models.map((m) => m.name))).size)
+const healthAvailable = computed(() => health.value?.available === true)
+const groupItems = computed<GroupRailItem[]>(() => {
+  const states = groupStates(listedGroups.value, health.value)
+  return listedGroups.value.map((group) => ({
+    group,
+    count: new Set(group.models.map((m) => m.name)).size,
+    rate: String(Math.round(effectiveRate(group) * 1000) / 1000),
+    state: states.get(group.id) ?? 'unknown'
+  }))
 })
 // 选中的分组在刷新后不存在时回到全部。
-watch(groupOptions, (options) => {
-  if (!options.some((o) => o.key === filter.group)) filter.group = 'all'
+watch(groupItems, (items) => {
+  if (filter.group !== 'all' && !items.some((item) => item.group.id === filter.group)) filter.group = 'all'
 })
 
 /** 当前分组范围内的模型；选中分组后线路、价格、状态与各项统计都只来自该分组。 */
 const allModels = computed(() => buildBoardModels(scopeGroups(props.response?.groups, filter.group), health.value))
 const showHealth = computed(() => hasHealthData(allModels.value))
 const rankAvailable = computed(() => hasRank(allModels.value))
-const healthWindow = computed(() => health.value?.window ?? null)
 
 const sortOptions = computed<BoardSort[]>(() => {
   const options: BoardSort[] = ['name', 'price']
@@ -355,13 +338,12 @@ function segClass(active: boolean): string {
   ].join(' ')
 }
 
-function railClass(active: boolean): string {
+function chipClass(active: boolean): string {
   return [
-    'flex min-w-0 flex-none items-center gap-2 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-left text-sm',
-    'focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500 lg:w-full lg:border-transparent',
+    'rounded-full border px-3 py-1 text-[13px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500',
     active
-      ? 'border-primary-200 bg-primary-50 font-semibold text-primary-700 dark:border-primary-800 dark:bg-primary-900/30 dark:text-primary-300'
-      : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-300 dark:hover:bg-dark-700 lg:bg-transparent lg:dark:bg-transparent'
+      ? 'border-primary-500 bg-primary-50 font-semibold text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-400 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-300 dark:hover:border-dark-500'
   ].join(' ')
 }
 </script>

@@ -27,7 +27,7 @@ type PlazaModelLister interface {
 type modelPlazaExt struct {
 	lister PlazaModelLister
 
-	healthSource PlazaHealthSource
+	healthStore  PlazaHealthStore
 	healthMu     sync.Mutex
 	healthCache  map[string]plazaHealthCacheEntry
 	healthFlight singleflight.Group
@@ -60,14 +60,14 @@ func ProvideModelPlazaService(
 	billingService *BillingService,
 	resolver *ModelPricingResolver,
 	gatewayService *GatewayService,
-	monitorV2 *ChannelMonitorV2Service,
+	healthStore PlazaHealthStore,
 ) *ModelPlazaService {
 	svc := NewModelPlazaService(channelRepo, groupRepo, pricingService, billingService, resolver)
 	if gatewayService != nil {
 		svc.SetModelLister(gatewayService)
 	}
-	if monitorV2 != nil {
-		svc.SetHealthSource(monitorV2)
+	if healthStore != nil {
+		svc.SetHealthStore(healthStore)
 	}
 	return svc
 }

@@ -8,7 +8,6 @@
           <th class="whitespace-nowrap px-4 py-2.5 text-right">{{ t('plazaBoard.price.input') }}</th>
           <th class="whitespace-nowrap px-4 py-2.5 text-right">{{ t('plazaBoard.price.output') }}</th>
           <template v-if="showHealth">
-            <th class="whitespace-nowrap px-4 py-2.5 text-right">{{ t('plazaBoard.availability') }}</th>
             <th class="whitespace-nowrap px-4 py-2.5 text-right">{{ t('plazaBoard.ttft') }}</th>
             <th class="whitespace-nowrap px-4 py-2.5">{{ t('plazaBoard.list.strip') }}</th>
           </template>
@@ -33,17 +32,9 @@
           <td class="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums text-gray-900 dark:text-white">{{ primaryPrice(model) }}</td>
           <td class="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums text-gray-900 dark:text-white">{{ model.recommended.price.output ?? '—' }}</td>
           <template v-if="showHealth">
-            <td class="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-gray-900 dark:text-white">{{ formatAvailability(model.recommended) }}</td>
-            <td class="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-gray-900 dark:text-white">{{ formatTtft(model.recommended.health?.ttft_p50_ms) }}</td>
+            <td class="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-gray-900 dark:text-white">{{ formatTtft(model.recommended.health?.ttft_ms) }}</td>
             <td class="px-4 py-2.5">
-              <BoardHealthStrip
-                v-if="model.recommended.health"
-                class="min-w-[180px]"
-                size="sm"
-                :buckets="model.recommended.health.buckets"
-                :window="window"
-              />
-              <span v-else class="text-gray-400 dark:text-dark-500">—</span>
+              <BoardLineHealth class="min-w-[200px]" size="sm" :health="model.recommended.health" />
             </td>
           </template>
         </tr>
@@ -56,15 +47,13 @@
 import { useI18n } from 'vue-i18n'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import { BILLING_MODE_IMAGE } from '@/constants/channel'
-import BoardHealthStrip from './BoardHealthStrip.vue'
+import BoardLineHealth from './BoardLineHealth.vue'
 import BoardStateTag from './BoardStateTag.vue'
-import { formatAvailability, formatTtft, type BoardModel } from './plazaBoard'
-import type { PlazaHealthWindow } from './types'
+import { formatTtft, type BoardModel } from './plazaBoard'
 
 defineProps<{
   models: BoardModel[]
   showHealth: boolean
-  window?: PlazaHealthWindow | null
 }>()
 const emit = defineEmits<{ (e: 'open', name: string): void }>()
 const { t } = useI18n()

@@ -2,34 +2,31 @@
 
 export type PlazaHealthState = 'healthy' | 'warning' | 'critical' | 'unknown'
 
-/** 一个 20 分钟统计格：s = 状态（只按错误率判定），e = 错误率（状态未知时为 null）。 */
-export interface PlazaHealthBucket {
-  s: PlazaHealthState
-  e: number | null
+/** 一个有调用的小时：t = 小时起点（Unix 秒），e = 该小时失败占比（0~1）。没调用的小时不出现。 */
+export interface PlazaHealthSample {
+  t: number
+  e: number
 }
 
-/** 一条线路（平台 + 分组 + 模型）近 24 小时的健康摘要。 */
+/** 一条线路（平台 + 分组 + 模型）最近若干个有调用小时的健康摘要。 */
 export interface PlazaHealthLine {
   platform: string
   group_id: number
   model: string
-  state: PlazaHealthState
-  error_rate: number | null
-  ttft_p50_ms: number | null
-  /** 热度名次（1 起）；无流量为 null。只有名次，没有数量。 */
+  /** 按 samples 合计的成功率判定：≥90% healthy，≥70% warning，其余 critical。 */
+  state: Exclude<PlazaHealthState, 'unknown'>
+  /** samples 合计的失败占比（0~1）。 */
+  error_rate: number
+  /** samples 内的平均首字耗时；没有首字样本为 null。 */
+  ttft_ms: number | null
+  /** 近 24 小时热度名次（1 起）；近 24 小时无调用为 null。只有名次，没有数量。 */
   rank: number | null
-  buckets: PlazaHealthBucket[]
-}
-
-export interface PlazaHealthWindow {
-  start: string
-  end: string
-  bucket_seconds: number
+  /** 最多 24 个，按时间升序；最远回看 7 天。 */
+  samples: PlazaHealthSample[]
 }
 
 export interface PlazaHealthResponse {
   /** false：监控未启用或不是被动聚合模式，页面只展示价格。 */
   available: boolean
-  window?: PlazaHealthWindow
   lines: PlazaHealthLine[]
 }

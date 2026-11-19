@@ -40,18 +40,14 @@
       <span v-if="model.lines.length > 1" class="flex-none text-gray-500 dark:text-dark-400">+{{ model.lines.length - 1 }}</span>
     </dl>
 
-    <BoardHealthStrip v-if="showHealth && line.health" :buckets="line.health.buckets" :window="window" />
+    <BoardLineHealth v-if="showHealth" :health="line.health" />
 
     <footer class="mt-auto flex items-center gap-3 border-t border-gray-100 pt-2 text-xs text-gray-500 dark:border-dark-700 dark:text-dark-400">
       <template v-if="showHealth">
         <BoardStateTag :state="line.state" />
-        <span class="whitespace-nowrap">
-          {{ t('plazaBoard.availability') }}
-          <b class="font-semibold tabular-nums text-gray-900 dark:text-white">{{ formatAvailability(line) }}</b>
-        </span>
-        <span class="whitespace-nowrap">
+        <span v-if="line.health" class="whitespace-nowrap">
           {{ t('plazaBoard.ttft') }}
-          <b class="font-semibold tabular-nums text-gray-900 dark:text-white">{{ formatTtft(line.health?.ttft_p50_ms) }}</b>
+          <b class="font-semibold tabular-nums text-gray-900 dark:text-white">{{ formatTtft(line.health?.ttft_ms) }}</b>
         </span>
       </template>
       <span class="flex-1"></span>
@@ -74,17 +70,15 @@ import Icon from '@/components/icons/Icon.vue'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { BILLING_MODE_IMAGE, BILLING_MODE_VIDEO } from '@/constants/channel'
-import BoardHealthStrip from './BoardHealthStrip.vue'
+import BoardLineHealth from './BoardLineHealth.vue'
 import BoardPriceCells from './BoardPriceCells.vue'
 import BoardStateTag from './BoardStateTag.vue'
-import { OTHER_VENDOR_KEY, formatAvailability, formatTtft, type BoardModel } from './plazaBoard'
-import type { PlazaHealthWindow } from './types'
+import { OTHER_VENDOR_KEY, formatTtft, type BoardModel } from './plazaBoard'
 
 const props = defineProps<{
   model: BoardModel
   /** 是否展示健康相关内容（未登录、监控未启用时为 false）。 */
   showHealth: boolean
-  window?: PlazaHealthWindow | null
 }>()
 const emit = defineEmits<{ (e: 'open', name: string): void }>()
 

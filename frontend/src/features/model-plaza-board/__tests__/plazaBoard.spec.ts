@@ -152,10 +152,9 @@ describe('filterAndSortModels', () => {
     ])
   ]
   const h = health([
-    healthLine('openai', 1, 'gpt-busy', 'healthy', { rank: 1, error_rate: 0.02, ttft_p50_ms: 900 }),
-    healthLine('openai', 1, 'claude-flaky', 'critical', { rank: 2, error_rate: 0.4, ttft_p50_ms: 300 }),
-    // 样本不足：接口给的 error_rate 为 null，状态 unknown
-    healthLine('openai', 1, 'gpt-quiet', 'unknown', { rank: null, ttft_p50_ms: null })
+    healthLine('openai', 1, 'gpt-busy', 'healthy', { rank: 1, error_rate: 0.02, ttft_ms: 900 }),
+    healthLine('openai', 1, 'claude-flaky', 'critical', { rank: 2, error_rate: 0.4, ttft_ms: 300 })
+    // gpt-quiet 近期无调用：接口不返回这条线路
   ])
   const models = buildBoardModels(groups, h)
   const names = (filter: Partial<BoardFilter>) => filterAndSortModels(models, { ...baseFilter, ...filter }).map((m) => m.name)
@@ -195,8 +194,8 @@ describe('lineBadges', () => {
 
   it('最便宜、最稳、最快分别颁给对应线路', () => {
     const h = health([
-      healthLine('openai', 1, 'm', 'warning', { error_rate: 0.08, ttft_p50_ms: 500 }),
-      healthLine('openai', 2, 'm', 'healthy', { error_rate: 0.01, ttft_p50_ms: 3000 })
+      healthLine('openai', 1, 'm', 'warning', { error_rate: 0.08, ttft_ms: 500 }),
+      healthLine('openai', 2, 'm', 'healthy', { error_rate: 0.01, ttft_ms: 3000 })
     ])
     const model = buildBoardModels(groups, h)[0]
     const badges = lineBadges(model.lines)
@@ -206,8 +205,8 @@ describe('lineBadges', () => {
     expect(of(3)).toEqual({ cheapest: false, steadiest: false, fastest: false })
   })
 
-  it('全部状态未知时不颁发最稳和最快', () => {
-    const model = buildBoardModels(groups, health([healthLine('openai', 1, 'm', 'unknown')]))[0]
+  it('都没有健康数据时不颁发最稳和最快', () => {
+    const model = buildBoardModels(groups, health([]))[0]
     const all = [...lineBadges(model.lines).values()]
     expect(all.some((b) => b.steadiest || b.fastest)).toBe(false)
     expect(all.filter((b) => b.cheapest)).toHaveLength(1)
@@ -223,12 +222,11 @@ describe('展示格式', () => {
   it('可用率与首字', () => {
     const groups = [group(1, 'g', 'openai', [tokenModel('a', 'openai'), tokenModel('b', 'openai')])]
     const h = health([
-      healthLine('openai', 1, 'a', 'healthy', { error_rate: 0.0123, ttft_p50_ms: 8817 }),
-      healthLine('openai', 1, 'b', 'unknown')
+      healthLine('openai', 1, 'a', 'healthy', { error_rate: 0.0123, ttft_ms: 8817 })
     ])
     const [a, b] = buildBoardModels(groups, h)
-    expect(formatAvailability(a.recommended)).toBe('98.8%')
-    expect(formatTtft(a.recommended.health?.ttft_p50_ms)).toBe('8.8s')
+    expect(formatAvailability(a.recommended)).toBe('98.77%')
+    expect(formatTtft(a.recommended.health?.ttft_ms)).toBe('8.8s')
     expect(formatAvailability(b.recommended)).toBe('—')
     expect(formatTtft(null)).toBe('—')
   })

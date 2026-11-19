@@ -1,5 +1,5 @@
 import type { ModelPlazaGroup, PlazaModel } from '@/api/modelPlaza'
-import type { PlazaHealthBucket, PlazaHealthLine, PlazaHealthResponse, PlazaHealthState } from '../types'
+import type { PlazaHealthLine, PlazaHealthResponse, PlazaHealthSample } from '../types'
 
 export function tokenModel(name: string, platform: string, overrides: Partial<PlazaModel> = {}): PlazaModel {
   return {
@@ -83,18 +83,19 @@ export function group(id: number, name: string, platform: string, models: PlazaM
   }
 }
 
-export function buckets(states: PlazaHealthState[] = []): PlazaHealthBucket[] {
-  return Array.from({ length: 72 }, (_, idx) => {
-    const s = states[idx] ?? 'unknown'
-    return { s, e: s === 'unknown' ? null : s === 'healthy' ? 0 : 0.5 }
-  })
+/** 第一个采样的小时起点（2026-11-17 00:00 UTC），之后每个采样往后一小时。 */
+export const SAMPLE_START = 1794873600
+
+/** 按给定的失败占比生成连续小时的采样。 */
+export function samples(errorRates: number[] = [0]): PlazaHealthSample[] {
+  return errorRates.map((e, idx) => ({ t: SAMPLE_START + idx * 3600, e }))
 }
 
 export function healthLine(
   platform: string,
   groupId: number,
   model: string,
-  state: PlazaHealthState,
+  state: PlazaHealthLine['state'],
   overrides: Partial<PlazaHealthLine> = {}
 ): PlazaHealthLine {
   return {
@@ -102,18 +103,14 @@ export function healthLine(
     group_id: groupId,
     model,
     state,
-    error_rate: state === 'unknown' ? null : state === 'healthy' ? 0.01 : state === 'warning' ? 0.08 : 0.4,
-    ttft_p50_ms: 2000,
+    error_rate: state === 'healthy' ? 0.01 : state === 'warning' ? 0.08 : 0.4,
+    ttft_ms: 2000,
     rank: null,
-    buckets: buckets(),
+    samples: samples(),
     ...overrides
   }
 }
 
 export function health(lines: PlazaHealthLine[]): PlazaHealthResponse {
-  return {
-    available: true,
-    window: { start: '2026-11-16T05:00:00Z', end: '2026-11-17T05:00:00Z', bucket_seconds: 1200 },
-    lines
-  }
+  return { available: true, lines }
 }

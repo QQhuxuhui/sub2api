@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Health 返回模型广场各线路的健康摘要（近 24 小时、每 20 分钟一格）与热度名次。
+// Health 返回模型广场各线路的健康摘要（最近 24 个有调用的小时）与热度名次。
 // GET /api/v1/model-plaza/health
 //
 // 广场扩展接口，独立于渠道监控 V2 的用户接口：

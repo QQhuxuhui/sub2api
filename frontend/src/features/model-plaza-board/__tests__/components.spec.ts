@@ -1,13 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import type { ModelPlazaResponse } from '@/api/modelPlaza'
 import BoardHealthStrip from '../BoardHealthStrip.vue'
+import BoardLineHealth from '../BoardLineHealth.vue'
 import BoardModelCard from '../BoardModelCard.vue'
 import ModelPlazaBoard from '../ModelPlazaBoard.vue'
 import { buildBoardModels } from '../plazaBoard'
 import type { PlazaHealthResponse } from '../types'
-import { buckets, group, health, healthLine, requestModel, tokenModel } from './fixtures'
+import { SAMPLE_START, group, health, healthLine, requestModel, samples, tokenModel } from './fixtures'
 
 const state = vi.hoisted(() => ({
   authenticated: true,
@@ -53,7 +54,7 @@ const response: ModelPlazaResponse = {
 
 const healthData: PlazaHealthResponse = health([
   healthLine('openai', 3, 'gpt-a', 'critical', { rank: 1 }),
-  healthLine('openai', 16, 'gpt-a', 'healthy', { rank: 1, buckets: buckets(['healthy', 'critical']) }),
+  healthLine('openai', 16, 'gpt-a', 'healthy', { rank: 1, samples: samples([0, 0.5]) }),
   healthLine('anthropic', 18, 'claude-b', 'warning', { rank: 2 })
 ])
 
@@ -77,18 +78,46 @@ beforeEach(() => {
 })
 
 describe('BoardHealthStrip', () => {
-  it('渲染全部统计格，悬停提示不含请求数', () => {
-    const wrapper = mount(BoardHealthStrip, {
-      props: { buckets: buckets(['healthy', 'critical']), window: healthData.window }
-    })
+  it('只画有调用的小时，按成功率分四档，悬停提示不含请求数', () => {
+    const wrapper = mount(BoardHealthStrip, { props: { samples: samples([0, 0.05, 0.25, 0.5]) } })
     const cells = wrapper.findAll('i')
-    expect(cells).toHaveLength(72)
+    expect(cells).toHaveLength(4)
     expect(cells[0].classes()).toContain('bg-emerald-500')
-    expect(cells[1].classes()).toContain('bg-red-500')
-    expect(cells[1].attributes('title')).toContain('plazaBoard.bucketTitle|')
-    expect(cells[1].attributes('title')).toContain('50.0%')
-    expect(cells[2].attributes('title')).toContain('plazaBoard.bucketTitleUnknown')
-    expect(wrapper.html()).not.toMatch(/request|count/i)
+    expect(cells[1].classes()).toContain('bg-emerald-300')
+    expect(cells[2].classes()).toContain('bg-amber-500')
+    expect(cells[3].classes()).toContain('bg-red-500')
+    expect(cells[3].attributes('title')).toContain('plazaBoard.sampleTitle|')
+    expect(cells[3].attributes('title')).toContain('50.00%')
+    expect(wrapper.html()).not.toMatch(/request|count|bg-gray/i)
+  })
+})
+
+describe('BoardLineHealth', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('近期无调用时给占位文案，不画状态条', () => {
+    const wrapper = mount(BoardLineHealth, { props: { health: null } })
+    expect(wrapper.find('[data-testid="plaza-idle"]').text()).toContain('plazaBoard.idle')
+    expect(wrapper.find('.plaza-strip').exists()).toBe(false)
+  })
+
+  it('展示成功率；最近一次调用较早时标出多久以前', () => {
+    vi.useFakeTimers()
+    const line = healthLine('openai', 16, 'gpt-a', 'healthy', { samples: samples([0, 0.5]) })
+    const lastEnd = (SAMPLE_START + 2 * 3600) * 1000
+
+    vi.setSystemTime(lastEnd + 30 * 60_000)
+    let wrapper = mount(BoardLineHealth, { props: { health: line } })
+    expect(wrapper.find('[data-testid="plaza-success-rate"]').text()).toBe('99.00%')
+    expect(wrapper.find('[data-testid="plaza-last-call"]').exists()).toBe(false)
+
+    vi.setSystemTime(lastEnd + 5 * 3_600_000)
+    wrapper = mount(BoardLineHealth, { props: { health: line } })
+    expect(wrapper.find('[data-testid="plaza-last-call"]').text()).toContain('plazaBoard.hoursAgo')
+
+    vi.setSystemTime(lastEnd + 3 * 24 * 3_600_000)
+    wrapper = mount(BoardLineHealth, { props: { health: line } })
+    expect(wrapper.find('[data-testid="plaza-last-call"]').text()).toContain('plazaBoard.daysAgo')
   })
 })
 
@@ -96,15 +125,15 @@ describe('BoardModelCard', () => {
   const model = buildBoardModels(response.groups, healthData).find((m) => m.name === 'gpt-a')!
 
   it('展示推荐线路的价格、分组、状态与指标', () => {
-    const wrapper = mount(BoardModelCard, { props: { model, showHealth: true, window: healthData.window } })
+    const wrapper = mount(BoardModelCard, { props: { model, showHealth: true } })
     const text = wrapper.text()
     expect(text).toContain('gpt-a')
     expect(text).toContain('ChatGPT-Pro') // 状态正常的线路里最便宜的一条
     expect(text).toContain('+1')
     expect(text).toContain('$1.50') // 3e-6 × 0.5 × 1M
     expect(text).toContain('plazaBoard.state.healthy')
-    expect(text).toContain('99.0%')
-    expect(wrapper.findAll('.plaza-strip i')).toHaveLength(72)
+    expect(text).toContain('99.00%')
+    expect(wrapper.findAll('.plaza-strip i')).toHaveLength(2)
   })
 
   it('没有健康数据时只留价格和详情', () => {
@@ -204,14 +233,16 @@ describe('ModelPlazaBoard', () => {
     const options = wrapper.findAll('[data-testid^="plaza-group-"]')
     expect(options.map((o) => o.attributes('data-testid'))).toEqual([
       'plaza-group-all',
+      'plaza-group-18', // 按平台归类：Claude 在前，同平台内保持原顺序
       'plaza-group-3',
-      'plaza-group-16',
-      'plaza-group-18'
+      'plaza-group-16'
     ])
-    expect(options[0].text()).toContain('3')
-    expect(options[1].text()).toContain('ChatGPT')
-    expect(options[1].text()).toContain('2')
-    expect(options[1].attributes('title')).toBe('ChatGPT')
+    expect(options[0].text()).toContain('"count":3')
+    expect(options[2].text()).toContain('ChatGPT')
+    expect(options[2].text()).toContain('"count":2')
+    expect(options[2].text()).toContain('×0.25')
+    // 分组名原样显示，不拆分不改写
+    expect(wrapper.findAll('[data-testid="plaza-rail-name"]').map((n) => n.text())).toEqual(['Claude', 'ChatGPT', 'ChatGPT-Pro'])
 
     await wrapper.find('[data-testid="plaza-group-3"]').trigger('click')
     expect(wrapper.find('[data-testid="plaza-group-3"]').attributes('aria-pressed')).toBe('true')
