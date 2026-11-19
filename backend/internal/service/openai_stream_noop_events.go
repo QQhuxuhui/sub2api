@@ -23,6 +23,16 @@ import (
 // failed attempt. Only a JSON object payload qualifies, so [DONE] and plain text
 // sent under one of these event names keep their old handling.
 func openAIStreamEventCarriesNoOutput(data, eventType string) bool {
+	// Filter by type first: every stream frame passes through here several
+	// times, and large output frames must not pay for a JSON validation.
+	switch eventType {
+	case "response.audio.done",
+		"codex.rate_limits", "codex.client.keepalive", "proxy.upstream_error", "sub2api.gateway_ready",
+		"response.reasoning_summary_part.added", "response.reasoning_summary_part.done",
+		"response.output_item.added":
+	default:
+		return false
+	}
 	trimmed := strings.TrimSpace(data)
 	if !strings.HasPrefix(trimmed, "{") || !gjson.Valid(trimmed) {
 		return false
