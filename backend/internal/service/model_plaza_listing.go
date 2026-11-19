@@ -27,7 +27,9 @@ type PlazaModelLister interface {
 type modelPlazaExt struct {
 	lister PlazaModelLister
 
-	healthStore  PlazaHealthStore
+	healthStore PlazaHealthStore
+	// listedLines 覆盖健康数据使用的广场清单来源；nil 时取 ListGroups。仅测试注入。
+	listedLines  func(ctx context.Context) (map[plazaHealthLineKey]struct{}, error)
 	healthMu     sync.Mutex
 	healthCache  map[string]plazaHealthCacheEntry
 	healthFlight singleflight.Group

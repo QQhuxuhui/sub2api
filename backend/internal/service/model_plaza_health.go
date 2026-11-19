@@ -136,7 +136,11 @@ func (s *ModelPlazaService) Health(ctx context.Context, allowedGroupIDs []int64)
 			// 不缓存：聚合恢复后下一次请求即可恢复展示。
 			return &PlazaHealth{Available: false, Lines: []PlazaHealthLine{}}, nil
 		}
-		lines, ranks := buildPlazaHealthLines(data.Rows, end.Add(-plazaHealthRankWindow))
+		listed, err := s.plazaListedLines(ctx)
+		if err != nil {
+			return nil, err
+		}
+		lines, ranks := buildPlazaHealthLines(plazaHealthListedRows(data.Rows, listed), end.Add(-plazaHealthRankWindow))
 		result := &PlazaHealth{Available: true, Lines: lines, Ranks: ranks}
 		ext.storeHealth(key, result, now)
 		return result, nil
@@ -197,6 +201,38 @@ type plazaHealthLineKey struct {
 	platform string
 	groupID  int64
 	model    string
+}
+
+// plazaListedLines 返回广场清单里的全部线路（平台 + 分组 + 模型）。
+// 聚合表的模型名取自客户端提交的 requested_model，可能是任何字符串（误填的名字、未上架的
+// 内部部署名）；健康接口只允许返回清单内的线路，其余一律不出现在线路和名次里。
+func (s *ModelPlazaService) plazaListedLines(ctx context.Context) (map[plazaHealthLineKey]struct{}, error) {
+	if s.ext != nil && s.ext.listedLines != nil {
+		return s.ext.listedLines(ctx)
+	}
+	groups, err := s.ListGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	listed := make(map[plazaHealthLineKey]struct{})
+	for i := range groups {
+		for j := range groups[i].Models {
+			m := &groups[i].Models[j]
+			listed[plazaHealthLineKey{m.Platform, groups[i].ID, m.Name}] = struct{}{}
+		}
+	}
+	return listed, nil
+}
+
+// plazaHealthListedRows 只保留广场清单内线路的行。
+func plazaHealthListedRows(rows []PlazaHourlyRow, listed map[plazaHealthLineKey]struct{}) []PlazaHourlyRow {
+	out := make([]PlazaHourlyRow, 0, len(rows))
+	for i := range rows {
+		if _, ok := listed[plazaHealthLineKey{rows[i].Platform, rows[i].GroupID, rows[i].Model}]; ok {
+			out = append(out, rows[i])
+		}
+	}
+	return out
 }
 
 // buildPlazaHealthLines 把小时计数转成广场的白名单线路列表和按模型名的热度名次。

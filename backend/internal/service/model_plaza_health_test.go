@@ -43,6 +43,16 @@ func newPlazaHealthService(store PlazaHealthStore, now time.Time) *ModelPlazaSer
 	svc := NewModelPlazaService(nil, nil, nil, nil, nil)
 	svc.SetHealthStore(store)
 	svc.ext.now = func() time.Time { return now }
+	// 默认把桩里的每一行都当作广场清单内的线路；需要验证清单过滤的用例自行覆盖 listedLines。
+	svc.ext.listedLines = func(context.Context) (map[plazaHealthLineKey]struct{}, error) {
+		listed := map[plazaHealthLineKey]struct{}{}
+		if stub, ok := store.(*plazaHealthStoreStub); ok {
+			for _, r := range stub.rows {
+				listed[plazaHealthLineKey{r.Platform, r.GroupID, r.Model}] = struct{}{}
+			}
+		}
+		return listed, nil
+	}
 	return svc
 }
 
@@ -156,6 +166,55 @@ func TestPlazaHealth_ModelWithOnlyIgnoredCallsKeepsItsRank(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(body), "500")
 	require.NotContains(t, string(body), "100")
+}
+
+func TestPlazaHealth_OnlyReturnsLinesListedInThePlaza(t *testing.T) {
+	now := time.Date(2026, 11, 17, 5, 7, 0, 0, time.UTC)
+	current := time.Date(2026, 11, 17, 5, 0, 0, 0, time.UTC)
+	rows := []PlazaHourlyRow{
+		// 已上架但调用全被忽略：没有状态条，仍有名次。
+		{Platform: "openai", GroupID: 3, Model: "listed-ignored", Hour: current, Ignored: 50},
+		plazaHourRow("openai", 3, "listed", current, 10, 0),
+		// 客户端误填的名字 / 未上架的内部部署名：无论是否有可计调用都不能出现。
+		{Platform: "openai", GroupID: 3, Model: "secret-internal-deployment", Hour: current, Ignored: 9000},
+		plazaHourRow("openai", 3, "typo-model", current, 0, 800),
+		// 模型名在清单里，但属于另一个分组、另一个平台的线路。
+		plazaHourRow("openai", 4, "listed", current, 700, 0),
+		plazaHourRow("gemini", 3, "listed", current, 700, 0),
+	}
+	svc := newPlazaHealthService(&plazaHealthStoreStub{rows: rows}, now)
+	svc.ext.listedLines = func(context.Context) (map[plazaHealthLineKey]struct{}, error) {
+		return map[plazaHealthLineKey]struct{}{
+			{"openai", 3, "listed"}:         {},
+			{"openai", 3, "listed-ignored"}: {},
+		}, nil
+	}
+	got, err := svc.Health(context.Background(), []int64{3, 4})
+	require.NoError(t, err)
+	require.Len(t, got.Lines, 1)
+	require.Equal(t, "listed", got.Lines[0].Model)
+	require.Equal(t, int64(3), got.Lines[0].GroupID)
+	require.Equal(t, map[string]int{"listed-ignored": 1, "listed": 2}, got.Ranks, "名次只统计清单内的线路")
+
+	body, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.NotContains(t, string(body), "secret-internal-deployment")
+	require.NotContains(t, string(body), "typo-model")
+
+	boom := errors.New("listing down")
+	svc.ext.listedLines = func(context.Context) (map[plazaHealthLineKey]struct{}, error) { return nil, boom }
+	svc.ext.now = func() time.Time { return now.Add(time.Minute) }
+	_, err = svc.Health(context.Background(), []int64{3, 4})
+	require.ErrorIs(t, err, boom, "拿不到清单时报错，不退化成不过滤")
+}
+
+func TestPlazaHealth_ListedLinesComeFromThePlazaListing(t *testing.T) {
+	svc := newPlazaService(
+		[]Channel{plazaPricedChannel(1, "ch", []int64{10}, PlatformGemini, "gemini-a")},
+		[]Group{{ID: 10, Name: "g", Platform: PlatformGemini, RateMultiplier: 1}}, nil)
+	listed, err := svc.plazaListedLines(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, map[plazaHealthLineKey]struct{}{{PlatformGemini, 10, "gemini-a"}: {}}, listed)
 }
 
 func TestPlazaHealth_KeepsLatestSamplesOnly(t *testing.T) {
