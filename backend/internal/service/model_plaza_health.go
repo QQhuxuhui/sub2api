@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"math"
+	"hash/fnv"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +23,9 @@ const (
 	plazaHealthLookback    = 7 * 24 * time.Hour
 	plazaHealthRankWindow  = 24 * time.Hour
 	plazaHealthCacheTTL    = 30 * time.Second
+	// plazaListedLinesTTL 是广场清单（上架线路集合）在健康接口里的复用时间：
+	// 模型下架后最多这么久，健康接口就不再返回它。
+	plazaListedLinesTTL = 5 * time.Second
 	// plazaHealthMaxLag 是聚合数据允许落后的最长时间。超过后宁可不展示健康，
 	// 也不把过期的「正常」当作当前状态（聚合任务停滞时旧数据仍可查询）。
 	plazaHealthMaxLag = 15 * time.Minute
@@ -123,7 +126,12 @@ func (s *ModelPlazaService) Health(ctx context.Context, allowedGroupIDs []int64)
 	if len(ids) == 0 {
 		return &PlazaHealth{Available: true, Lines: []PlazaHealthLine{}, Ranks: map[string]int{}}, nil
 	}
-	key := plazaHealthCacheKey(ids, end)
+	// 先取上架线路：结果缓存按它的指纹区分，清单一变（模型下架等）旧结果立即失效。
+	listed, err := s.plazaListedLines(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	key := plazaHealthCacheKey(ids, end, listed)
 	if cached := ext.cachedHealth(key, now); cached != nil {
 		return cached, nil
 	}
@@ -135,10 +143,6 @@ func (s *ModelPlazaService) Health(ctx context.Context, allowedGroupIDs []int64)
 		if plazaHealthStale(data, now) {
 			// 不缓存：聚合恢复后下一次请求即可恢复展示。
 			return &PlazaHealth{Available: false, Lines: []PlazaHealthLine{}}, nil
-		}
-		listed, err := s.plazaListedLines(ctx)
-		if err != nil {
-			return nil, err
 		}
 		lines, ranks := buildPlazaHealthLines(plazaHealthListedRows(data.Rows, listed), end.Add(-plazaHealthRankWindow))
 		result := &PlazaHealth{Available: true, Lines: lines, Ranks: ranks}
@@ -159,13 +163,30 @@ func plazaHealthStale(data *PlazaHourlyHealth, now time.Time) bool {
 	return now.UTC().Sub(data.DataThrough.UTC()) > plazaHealthMaxLag
 }
 
-func plazaHealthCacheKey(sortedIDs []int64, end time.Time) string {
+// plazaHealthCacheKey 由小时边界、分组集合和这些分组内上架线路的指纹组成。
+func plazaHealthCacheKey(sortedIDs []int64, end time.Time, listed map[plazaHealthLineKey]struct{}) string {
 	var b strings.Builder
 	b.WriteString(strconv.FormatInt(end.Unix(), 10))
+	scope := make(map[int64]struct{}, len(sortedIDs))
 	for _, id := range sortedIDs {
 		b.WriteByte(',')
 		b.WriteString(strconv.FormatInt(id, 10))
+		scope[id] = struct{}{}
 	}
+	lines := make([]string, 0, len(listed))
+	for key := range listed {
+		if _, ok := scope[key.groupID]; ok {
+			lines = append(lines, key.platform+"\x00"+strconv.FormatInt(key.groupID, 10)+"\x00"+key.model)
+		}
+	}
+	sort.Strings(lines)
+	h := fnv.New64a()
+	for _, line := range lines {
+		_, _ = h.Write([]byte(line))
+		_, _ = h.Write([]byte{0xff})
+	}
+	b.WriteByte('#')
+	b.WriteString(strconv.FormatUint(h.Sum64(), 16))
 	return b.String()
 }
 
@@ -206,7 +227,27 @@ type plazaHealthLineKey struct {
 // plazaListedLines 返回广场清单里的全部线路（平台 + 分组 + 模型）。
 // 聚合表的模型名取自客户端提交的 requested_model，可能是任何字符串（误填的名字、未上架的
 // 内部部署名）；健康接口只允许返回清单内的线路，其余一律不出现在线路和名次里。
-func (s *ModelPlazaService) plazaListedLines(ctx context.Context) (map[plazaHealthLineKey]struct{}, error) {
+func (s *ModelPlazaService) plazaListedLines(ctx context.Context, now time.Time) (map[plazaHealthLineKey]struct{}, error) {
+	ext := s.plazaExt()
+	ext.listedMu.Lock()
+	if ext.listedCache != nil && now.Before(ext.listedUntil) {
+		cached := ext.listedCache
+		ext.listedMu.Unlock()
+		return cached, nil
+	}
+	ext.listedMu.Unlock()
+
+	listed, err := s.loadPlazaListedLines(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ext.listedMu.Lock()
+	ext.listedCache, ext.listedUntil = listed, now.Add(plazaListedLinesTTL)
+	ext.listedMu.Unlock()
+	return listed, nil
+}
+
+func (s *ModelPlazaService) loadPlazaListedLines(ctx context.Context) (map[plazaHealthLineKey]struct{}, error) {
 	if s.ext != nil && s.ext.listedLines != nil {
 		return s.ext.listedLines(ctx)
 	}
@@ -320,12 +361,17 @@ func plazaHealthRowUsable(row *PlazaHourlyRow) bool {
 	return row.Model != "" && row.Model != "unknown" && row.Model != ChannelMonitorV2OtherModel
 }
 
-// plazaHealthRatio 返回 part/total，保留四位小数。
+// plazaHealthRatio 返回 part/total，保留四位小数并向上取整（整数运算）。
+// 向上取整保证对外的失败占比不会低于真实值：89.997% 的成功率不会显示成 90.00%，
+// 前端按这个值分档时也不会把未达阈值的小时画成更好的一档。
 func plazaHealthRatio(part, total int64) float64 {
 	if total <= 0 || part <= 0 {
 		return 0
 	}
-	return math.Round(float64(part)/float64(total)*10000) / 10000
+	if part >= total {
+		return 1
+	}
+	return float64((part*10000+total-1)/total) / 10000
 }
 
 // plazaHealthState 按成功率分档，用整数比较避免浮点边界误差。

@@ -9,7 +9,9 @@
       @change="pick(($event.target as HTMLSelectElement).value)"
     >
       <option value="all">{{ t('plazaBoard.filters.allGroups') }}</option>
-      <option v-for="item in items" :key="item.group.id" :value="String(item.group.id)">{{ item.group.name }} ×{{ item.rate }}</option>
+      <optgroup v-for="family in allFamilies" :key="family.key" :label="family.label">
+        <option v-for="item in family.items" :key="item.group.id" :value="String(item.group.id)">{{ item.group.name }} ×{{ item.rate }}</option>
+      </optgroup>
     </select>
 
     <!-- 宽屏：按平台归类的分组栏。分组名原样显示，不拆分不改写。 -->
@@ -81,6 +83,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { ModelPlazaGroup } from '@/api/modelPlaza'
+import { GROUP_PLATFORM_OPTIONS } from '@/constants/platforms'
 import type { BoardFilter } from './plazaBoard'
 import type { PlazaHealthState } from './types'
 
@@ -105,8 +108,6 @@ const { t } = useI18n()
 
 /** 分组多于这个数才显示「找分组」。 */
 const SEARCH_MIN = 8
-const FAMILY_LABELS: Record<string, string> = { anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini' }
-const FAMILY_ORDER = ['anthropic', 'openai', 'gemini', 'other']
 const DOT_CLASS: Record<PlazaHealthState, string> = {
   healthy: 'bg-emerald-500',
   warning: 'bg-amber-500',
@@ -116,22 +117,32 @@ const DOT_CLASS: Record<PlazaHealthState, string> = {
 
 const query = ref('')
 
-/** 归类只决定排列位置，组内保持后端给出的顺序。 */
+/**
+ * 按分组所属平台归类，平台的名称与先后取自平台注册表；注册表里没有的平台用平台标识本身、排在最后。
+ * 归类只决定排列位置，组内保持后端给出的顺序。
+ */
+function familiesOf(items: GroupRailItem[]) {
+  const buckets = new Map<string, GroupRailItem[]>()
+  for (const item of items) {
+    const list = buckets.get(item.group.platform)
+    if (list) list.push(item)
+    else buckets.set(item.group.platform, [item])
+  }
+  const known = GROUP_PLATFORM_OPTIONS.map((option) => String(option.value))
+  const labels = new Map(GROUP_PLATFORM_OPTIONS.map((option) => [String(option.value), option.label]))
+  const position = (key: string) => (known.includes(key) ? known.indexOf(key) : known.length)
+  return [...buckets.keys()]
+    .map((key, seen) => ({ key, seen }))
+    .sort((a, b) => position(a.key) - position(b.key) || a.seen - b.seen)
+    .map(({ key }) => ({ key, label: labels.get(key) ?? key, items: buckets.get(key)! }))
+}
+
+/** 窄屏下拉框：全部分组。 */
+const allFamilies = computed(() => familiesOf(props.items))
+/** 宽屏分组栏：受「找分组」过滤。 */
 const families = computed(() => {
   const needle = query.value.trim().toLowerCase()
-  const buckets = new Map<string, GroupRailItem[]>()
-  for (const item of props.items) {
-    if (needle && !item.group.name.toLowerCase().includes(needle)) continue
-    const key = item.group.platform in FAMILY_LABELS ? item.group.platform : 'other'
-    const list = buckets.get(key)
-    if (list) list.push(item)
-    else buckets.set(key, [item])
-  }
-  return FAMILY_ORDER.filter((key) => buckets.has(key)).map((key) => ({
-    key,
-    label: FAMILY_LABELS[key] ?? t('plazaBoard.filters.otherVendor'),
-    items: buckets.get(key)!
-  }))
+  return familiesOf(needle ? props.items.filter((item) => item.group.name.toLowerCase().includes(needle)) : props.items)
 })
 
 function pick(value: string) {

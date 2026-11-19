@@ -183,6 +183,7 @@ import {
   buildBoardModels,
   effectiveRate,
   filterAndSortModels,
+  formatRate,
   groupStates,
   hasHealthData,
   hasRank,
@@ -231,7 +232,7 @@ const groupItems = computed<GroupRailItem[]>(() => {
   return listedGroups.value.map((group) => ({
     group,
     count: new Set(group.models.map((m) => m.name)).size,
-    rate: String(Math.round(effectiveRate(group) * 1000) / 1000),
+    rate: formatRate(effectiveRate(group)),
     state: states.get(group.id) ?? 'unknown'
   }))
 })

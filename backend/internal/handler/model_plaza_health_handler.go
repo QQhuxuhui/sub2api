@@ -8,6 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// plazaHealthFormatVersion 是健康接口当前的响应格式版本（小时采样）。
+const plazaHealthFormatVersion = "2"
+
 // Health 返回模型广场各线路的健康摘要（最近 24 个有调用的小时）与热度名次。
 // GET /api/v1/model-plaza/health
 //
@@ -26,6 +29,12 @@ func (h *ModelPlazaHandler) Health(c *gin.Context) {
 		return
 	}
 	unavailable := service.PlazaHealth{Available: false, Lines: []service.PlazaHealthLine{}}
+	// 响应格式版本：小时采样格式要求显式带 v=2。发版前已打开的旧页面不带版本参数，
+	// 它们读不了新格式，统一回 available=false（旧页面据此只展示价格，刷新后即为新页面）。
+	if c.Query("v") != plazaHealthFormatVersion {
+		response.Success(c, unavailable)
+		return
+	}
 	if !h.settingService.GetChannelMonitorRuntime(c.Request.Context()).PassiveAggregationAllowed() {
 		response.Success(c, unavailable)
 		return

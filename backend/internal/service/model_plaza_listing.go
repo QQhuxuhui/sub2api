@@ -29,7 +29,12 @@ type modelPlazaExt struct {
 
 	healthStore PlazaHealthStore
 	// listedLines 覆盖健康数据使用的广场清单来源；nil 时取 ListGroups。仅测试注入。
-	listedLines  func(ctx context.Context) (map[plazaHealthLineKey]struct{}, error)
+	listedLines func(ctx context.Context) (map[plazaHealthLineKey]struct{}, error)
+	// 上架线路集合的短时复用，见 plazaListedLinesTTL。
+	listedMu    sync.Mutex
+	listedCache map[plazaHealthLineKey]struct{}
+	listedUntil time.Time
+
 	healthMu     sync.Mutex
 	healthCache  map[string]plazaHealthCacheEntry
 	healthFlight singleflight.Group

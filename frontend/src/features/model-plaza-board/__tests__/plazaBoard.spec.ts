@@ -10,7 +10,10 @@ import {
   summarizePrice,
   vendorOf,
   scopeGroups,
-  type BoardFilter
+  type BoardFilter,
+  formatRate,
+  sampleLevel,
+  formatSuccessRate
 } from '../plazaBoard'
 import { group, health, healthLine, requestModel, tokenModel } from './fixtures'
 
@@ -182,6 +185,26 @@ describe('filterAndSortModels', () => {
 
   it('响应最快：没有首字数据的排在后面', () => {
     expect(names({ sort: 'fast' }).slice(0, 2)).toEqual(['claude-flaky', 'gpt-busy'])
+  })
+})
+
+describe('倍率文本', () => {
+  it('保留四位小数，不把很小的倍率显示成 0', () => {
+    expect(formatRate(0.0004)).toBe('0.0004')
+    expect(formatRate(0.25)).toBe('0.25')
+    expect(formatRate(1)).toBe('1')
+    expect(formatRate(1.50004)).toBe('1.5')
+  })
+})
+
+describe('采样分档与成功率文本', () => {
+  it('略低于阈值的小时不会被画成更好的一档', () => {
+    // 后端向上取整后的失败占比：2699/2999 成功 → 0.1001；6299/8999 成功 → 0.3001
+    expect(sampleLevel(0.1)).toBe('good')
+    expect(sampleLevel(0.1001)).toBe('warning')
+    expect(sampleLevel(0.3)).toBe('warning')
+    expect(sampleLevel(0.3001)).toBe('critical')
+    expect(formatSuccessRate(0.1001)).toBe('89.99%')
   })
 })
 

@@ -370,6 +370,11 @@ export function formatAvailability(line: BoardLine | null | undefined): string {
   return formatSuccessRate(line?.health?.error_rate)
 }
 
+/** 倍率文本：保留存储支持的四位小数，去掉末尾多余的零（0.0004 不会显示成 0）。 */
+export function formatRate(rate: number): string {
+  return String(Math.round(rate * 10000) / 10000)
+}
+
 /** 首字耗时文本：毫秒换算为秒，一位小数；无数据为「—」。 */
 export function formatTtft(ms: number | null | undefined): string {
   return ms == null ? '—' : `${(ms / 1000).toFixed(1)}s`

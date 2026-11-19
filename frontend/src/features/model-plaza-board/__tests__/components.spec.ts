@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import type { ModelPlazaResponse } from '@/api/modelPlaza'
+import BoardGroupRail from '../BoardGroupRail.vue'
 import BoardHealthStrip from '../BoardHealthStrip.vue'
 import BoardLineHealth from '../BoardLineHealth.vue'
 import BoardModelCard from '../BoardModelCard.vue'
@@ -89,6 +90,37 @@ describe('BoardHealthStrip', () => {
     expect(cells[3].attributes('title')).toContain('plazaBoard.sampleTitle|')
     expect(cells[3].attributes('title')).toContain('50.00%')
     expect(wrapper.html()).not.toMatch(/request|count|bg-gray/i)
+  })
+})
+
+describe('BoardGroupRail', () => {
+  const item = (id: number, name: string, platform: string, rate = '1') => ({
+    group: group(id, name, platform, [tokenModel('m', platform)]),
+    count: 1,
+    rate,
+    state: 'unknown' as const
+  })
+
+  it('每个平台单独归类，不合并成「其他」；窄屏下拉框用同一份归类', () => {
+    const wrapper = mount(BoardGroupRail, {
+      props: {
+        modelValue: 'all',
+        total: 4,
+        showHealth: false,
+        items: [item(1, 'DeepSeek 组', 'deepseek'), item(2, '自建平台组', 'my-platform'), item(3, 'Grok 组', 'grok'), item(4, 'DeepSeek 二组', 'deepseek', '0.0004')]
+      }
+    })
+    // 名称与先后取自平台注册表；注册表里没有的平台用标识本身、排在最后
+    const headings = wrapper.findAll('nav h3').map((h) => h.text())
+    expect([...headings].sort()).toEqual(['DeepSeek', 'Grok', 'my-platform'])
+    expect(headings.at(-1)).toBe('my-platform')
+    expect(wrapper.findAll('optgroup').map((g) => g.attributes('label'))).toEqual(headings)
+    const deepseek = wrapper.findAll('optgroup').find((g) => g.attributes('label') === 'DeepSeek')!
+    expect(deepseek.findAll('option').map((o) => o.text())).toEqual([
+      'DeepSeek 组 ×1',
+      'DeepSeek 二组 ×0.0004'
+    ])
+    expect(wrapper.find('[data-testid="plaza-group-4"]').text()).toContain('×0.0004')
   })
 })
 
@@ -233,7 +265,7 @@ describe('ModelPlazaBoard', () => {
     const options = wrapper.findAll('[data-testid^="plaza-group-"]')
     expect(options.map((o) => o.attributes('data-testid'))).toEqual([
       'plaza-group-all',
-      'plaza-group-18', // 按平台归类：Claude 在前，同平台内保持原顺序
+      'plaza-group-18', // 按平台归类（注册表顺序），同平台内保持原顺序
       'plaza-group-3',
       'plaza-group-16'
     ])

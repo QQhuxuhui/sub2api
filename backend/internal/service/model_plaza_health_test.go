@@ -212,7 +212,7 @@ func TestPlazaHealth_ListedLinesComeFromThePlazaListing(t *testing.T) {
 	svc := newPlazaService(
 		[]Channel{plazaPricedChannel(1, "ch", []int64{10}, PlatformGemini, "gemini-a")},
 		[]Group{{ID: 10, Name: "g", Platform: PlatformGemini, RateMultiplier: 1}}, nil)
-	listed, err := svc.plazaListedLines(context.Background())
+	listed, err := svc.plazaListedLines(context.Background(), time.Now())
 	require.NoError(t, err)
 	require.Equal(t, map[plazaHealthLineKey]struct{}{{PlatformGemini, 10, "gemini-a"}: {}}, listed)
 }
@@ -240,6 +240,46 @@ func TestPlazaHealth_KeepsLatestSamplesOnly(t *testing.T) {
 	require.Equal(t, current.Unix(), line.Samples[23].T)
 	require.Zero(t, line.ErrorRate, "摘要只统计保留下来的采样")
 	require.Equal(t, "healthy", line.State)
+}
+
+func TestPlazaHealth_DelistedModelDisappearsWithinTheResultCachePeriod(t *testing.T) {
+	now := time.Date(2026, 11, 17, 5, 7, 0, 0, time.UTC)
+	current := time.Date(2026, 11, 17, 5, 0, 0, 0, time.UTC)
+	store := &plazaHealthStoreStub{rows: []PlazaHourlyRow{
+		plazaHourRow("openai", 3, "keep", current, 10, 0),
+		plazaHourRow("openai", 3, "delisted", current, 90, 0),
+	}}
+	svc := newPlazaHealthService(store, now)
+	listed := map[plazaHealthLineKey]struct{}{{"openai", 3, "keep"}: {}, {"openai", 3, "delisted"}: {}}
+	svc.ext.listedLines = func(context.Context) (map[plazaHealthLineKey]struct{}, error) { return listed, nil }
+
+	got, err := svc.Health(context.Background(), []int64{3})
+	require.NoError(t, err)
+	require.Len(t, got.Lines, 2)
+
+	// 下架一个模型；清单复用期过后、结果缓存期（30 秒）内再查。
+	listed = map[plazaHealthLineKey]struct{}{{"openai", 3, "keep"}: {}}
+	svc.ext.now = func() time.Time { return now.Add(plazaListedLinesTTL + time.Second) }
+	got, err = svc.Health(context.Background(), []int64{3})
+	require.NoError(t, err)
+	require.Len(t, got.Lines, 1)
+	require.Equal(t, "keep", got.Lines[0].Model)
+	require.Equal(t, map[string]int{"keep": 1}, got.Ranks)
+}
+
+func TestPlazaHealthRatio_NeverOverstatesSuccess(t *testing.T) {
+	cases := []struct {
+		failed, total int64
+		want          float64
+	}{
+		{0, 100, 0}, {1000, 10000, 0.1}, {3000, 10000, 0.3}, {100, 100, 1},
+		{300, 2999, 0.1001}, // 成功率 89.9967%：不能舍成 0.1（会被画成绿色并显示 90.00%）
+		{2700, 8999, 0.3001},
+		{1, 1000000, 0.0001}, // 有失败就不为 0
+	}
+	for _, c := range cases {
+		require.Equal(t, c.want, plazaHealthRatio(c.failed, c.total), "%d/%d", c.failed, c.total)
+	}
 }
 
 func TestPlazaHealthState_Thresholds(t *testing.T) {

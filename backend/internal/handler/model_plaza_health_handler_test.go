@@ -23,7 +23,7 @@ func newPlazaHealthHandlerForTest(values map[string]string) *ModelPlazaHandler {
 func callPlazaHealth(h *ModelPlazaHandler, userID int64) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/model-plaza/health", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/model-plaza/health?v=2", nil)
 	if userID > 0 {
 		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: userID})
 	}
@@ -80,4 +80,19 @@ func TestModelPlazaHealth_UnavailableWhenMonitorNotPassive(t *testing.T) {
 			require.Empty(t, body.Data.Lines)
 		})
 	}
+}
+
+func TestModelPlazaHealth_UnversionedRequestGetsUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	src := &plazaViewHealthSource{}
+	h := newPlazaViewHandler(&service.User{ID: 7, Role: service.RoleUser}, nil, nil, src)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	// 发版前已打开的旧页面：不带格式版本参数。
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/model-plaza/health", nil)
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 7})
+	h.Health(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"available":false`)
+	require.Zero(t, src.calls, "旧格式请求不查询健康数据")
 }

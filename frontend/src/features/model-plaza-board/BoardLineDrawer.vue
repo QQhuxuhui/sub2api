@@ -95,6 +95,7 @@ import BoardLineHealth from './BoardLineHealth.vue'
 import BoardStateTag from './BoardStateTag.vue'
 import {
   OTHER_VENDOR_KEY,
+  formatRate,
   formatTtft,
   lineBadges,
   officialPriceText,
@@ -137,10 +138,6 @@ watch(
     }
   }
 )
-
-function formatRate(rate: number): string {
-  return String(Math.round(rate * 1000) / 1000)
-}
 
 function priceText(line: BoardLine): string {
   const price = line.price
