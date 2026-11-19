@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -107,4 +108,20 @@ func TestOpenAIGatewayService_APIKeyRetriesWithoutRejectedEnableThinking(t *test
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "enable_thinking").Exists())
 	require.Equal(t, "hello", gjson.GetBytes(upstream.bodies[1], "input.0.content").String())
 	require.Equal(t, gjson.GetBytes(upstream.bodies[0], "model").String(), gjson.GetBytes(upstream.bodies[1], "model").String())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyDeepWrappedMessage(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","enable_thinking":true}`)
+	for _, open := range []string{"[", "{\\\"a\\\":"} {
+		closeTok := "]"
+		if open != "[" {
+			closeTok = "}"
+		}
+		inner := strings.Repeat(open, 200000) + "1" + strings.Repeat(closeTok, 200000)
+		response := []byte(`{"error":{"message":"` + inner + `"}}`)
+		retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, response)
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Nil(t, retryBody)
+	}
 }

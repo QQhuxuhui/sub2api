@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -69,10 +70,10 @@ func openAIResponsesRejectedExtraFieldError(responseBody []byte) (string, []stri
 		return "", params
 	}
 	trimmed := strings.TrimSpace(message)
-	if strings.HasPrefix(trimmed, "[") && gjson.Valid(trimmed) {
+	if strings.HasPrefix(trimmed, "[") && openAIResponsesRejectedExtraFieldJSONValid(trimmed) {
 		return "", params
 	}
-	if !strings.HasPrefix(trimmed, "{") || !gjson.Valid(trimmed) {
+	if !strings.HasPrefix(trimmed, "{") || !openAIResponsesRejectedExtraFieldJSONValid(trimmed) {
 		return message, params
 	}
 	inner := gjson.Parse(trimmed)
@@ -82,7 +83,7 @@ func openAIResponsesRejectedExtraFieldError(responseBody []byte) (string, []stri
 		return "", params
 	}
 	innerTrimmed := strings.TrimSpace(innerMessage)
-	if (strings.HasPrefix(innerTrimmed, "[") || strings.HasPrefix(innerTrimmed, "{")) && gjson.Valid(innerTrimmed) {
+	if (strings.HasPrefix(innerTrimmed, "[") || strings.HasPrefix(innerTrimmed, "{")) && openAIResponsesRejectedExtraFieldJSONValid(innerTrimmed) {
 		return "", params
 	}
 	return innerMessage, params
@@ -156,4 +157,11 @@ func isOpenAIResponsesRejectedExtraField(name string) bool {
 		}
 	}
 	return false
+}
+
+// openAIResponsesRejectedExtraFieldJSONValid checks JSON text embedded in an
+// error message. encoding/json enforces a nesting limit; gjson.Valid recurses
+// without one, so a deeply nested message could exhaust the goroutine stack.
+func openAIResponsesRejectedExtraFieldJSONValid(text string) bool {
+	return json.Valid([]byte(text))
 }

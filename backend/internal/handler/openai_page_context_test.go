@@ -142,7 +142,8 @@ func TestMayContainCodexPageContextCandidate(t *testing.T) {
 }
 
 func TestNormalizeCodexPageContextEscapedToolName(t *testing.T) {
-	body := []byte(`{"model":"gpt-5","input":[{"type":"function_call_output","namespace":"agent","name":"codex_apps_open_page","output":"{\"page_id\":null}"}]}`)
+	body := []byte(`{"model":"gpt-5","input":[{"type":"function_call_output","namespace":"agent","name":"codex\u005fapps_open_page","output":"{\"page_id\":null}"}]}`)
+	require.NotContains(t, string(body), "codex_apps_open_page", "the tool name must reach the prefilter only in escaped form")
 	got, changed := normalizeCodexPageContext(body)
 	require.True(t, changed)
 	require.Equal(t, "message", gjson.GetBytes(got, "input.0.type").String())
