@@ -116,6 +116,28 @@ func TestPlazaHealth_BuildsWhitelistedLinesFromHoursWithCalls(t *testing.T) {
 	}
 }
 
+func TestPlazaHealth_IgnoredErrorsCountForRankButNotForSamples(t *testing.T) {
+	now := time.Date(2026, 11, 17, 5, 7, 0, 0, time.UTC)
+	current := time.Date(2026, 11, 17, 5, 0, 0, 0, time.UTC)
+	limited := plazaHourRow("openai", 3, "limited", current, 10, 0)
+	limited.Ignored = 500 // 大量被限流：仍是用得最多的模型
+	onlyIgnored := PlazaHourlyRow{Platform: "openai", GroupID: 3, Model: "limited", Hour: current.Add(-time.Hour), Ignored: 40}
+	ghost := PlazaHourlyRow{Platform: "openai", GroupID: 3, Model: "ghost", Hour: current, Ignored: 7}
+	rows := []PlazaHourlyRow{onlyIgnored, limited, plazaHourRow("openai", 3, "steady", current, 100, 0), ghost}
+
+	got, err := newPlazaHealthService(&plazaHealthStoreStub{rows: rows}, now).Health(context.Background(), []int64{3})
+	require.NoError(t, err)
+	lines := map[string]PlazaHealthLine{}
+	for _, l := range got.Lines {
+		lines[l.Model] = l
+	}
+	require.Len(t, got.Lines, 2, "只有被忽略类错误的线路没有采样，不出线路")
+	require.Equal(t, 1, *lines["limited"].Rank, "名次按原始调用数：550 > 100")
+	require.Equal(t, 2, *lines["steady"].Rank)
+	require.Len(t, lines["limited"].Samples, 1, "只有被忽略类错误的小时不产生采样")
+	require.Zero(t, lines["limited"].ErrorRate, "被忽略类错误不计入失败")
+}
+
 func TestPlazaHealth_KeepsLatestSamplesOnly(t *testing.T) {
 	now := time.Date(2026, 11, 17, 5, 7, 0, 0, time.UTC)
 	current := time.Date(2026, 11, 17, 5, 0, 0, 0, time.UTC)

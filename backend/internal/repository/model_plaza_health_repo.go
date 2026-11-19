@@ -33,17 +33,18 @@ WITH ignored AS (
   GROUP BY 1, 2, 3, 4
 )
 SELECT m.platform, m.group_id, m.model, m.bucket_start, m.success_requests,
-       GREATEST(m.error_requests - COALESCE(i.n, 0), 0), m.ttft_sum_ms, m.ttft_count
+       GREATEST(m.error_requests - COALESCE(i.n, 0), 0),
+       LEAST(COALESCE(i.n, 0), m.error_requests), m.ttft_sum_ms, m.ttft_count
 FROM channel_monitor_v2_metrics_rollup m
 LEFT JOIN ignored i
   ON i.bucket_start = m.bucket_start AND i.platform = m.platform
  AND i.group_id = m.group_id AND i.model = m.model
 WHERE m.bucket_seconds = 3600 AND m.bucket_start >= $1 AND m.bucket_start < $2
   AND m.group_id = ANY($3)
-  AND m.success_requests + GREATEST(m.error_requests - COALESCE(i.n, 0), 0) > 0
+  AND m.success_requests + m.error_requests > 0
 ORDER BY m.platform, m.group_id, m.model, m.bucket_start`
 
-// PlazaHourlyHealth 返回 [start, end) 内各线路「有调用的小时」，按线路、时间升序。
+// PlazaHourlyHealth 返回 [start, end) 内各线路有调用的小时（含只有被忽略类错误的小时），按线路、时间升序。
 func (r *modelPlazaHealthRepository) PlazaHourlyHealth(ctx context.Context, groupIDs []int64, start, end time.Time) (*service.PlazaHourlyHealth, error) {
 	out := &service.PlazaHourlyHealth{Rows: []service.PlazaHourlyRow{}}
 	var through sql.NullTime
@@ -64,7 +65,7 @@ func (r *modelPlazaHealthRepository) PlazaHourlyHealth(ctx context.Context, grou
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var row service.PlazaHourlyRow
-		if err := rows.Scan(&row.Platform, &row.GroupID, &row.Model, &row.Hour, &row.Success, &row.Failed, &row.TTFTSumMs, &row.TTFTCount); err != nil {
+		if err := rows.Scan(&row.Platform, &row.GroupID, &row.Model, &row.Hour, &row.Success, &row.Failed, &row.Ignored, &row.TTFTSumMs, &row.TTFTCount); err != nil {
 			return nil, err
 		}
 		out.Rows = append(out.Rows, row)

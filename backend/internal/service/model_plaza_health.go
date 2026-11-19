@@ -41,11 +41,12 @@ type PlazaHealthStore interface {
 type PlazaHourlyHealth struct {
 	// DataThrough 是聚合数据的截止时间；零值表示尚无聚合数据。
 	DataThrough time.Time
-	// Rows 按（平台、分组、模型、小时）升序，且每行 Success+Failed > 0。
+	// Rows 按（平台、分组、模型、小时）升序，且每行 Success+Failed+Ignored > 0。
 	Rows []PlazaHourlyRow
 }
 
-// PlazaHourlyRow 是一条线路在一个小时内的计数。Failed 已扣除被忽略的错误类别。
+// PlazaHourlyRow 是一条线路在一个小时内的计数。Failed 已扣除被忽略的错误类别，
+// Ignored 是被扣除的那部分：不计入成功率，只参与热度名次。
 type PlazaHourlyRow struct {
 	Platform  string
 	GroupID   int64
@@ -53,6 +54,7 @@ type PlazaHourlyRow struct {
 	Hour      time.Time
 	Success   int64
 	Failed    int64
+	Ignored   int64
 	TTFTSumMs int64
 	TTFTCount int64
 }
@@ -205,13 +207,18 @@ func buildPlazaHealthLines(rows []PlazaHourlyRow, rankSince time.Time) []PlazaHe
 			continue
 		}
 		key := plazaHealthLineKey{row.Platform, row.GroupID, row.Model}
+		// 名次按原始调用数排（含被忽略类错误），与「最多人用」的含义一致。
+		if !row.Hour.Before(rankSince) {
+			recent[row.Model] += row.Success + row.Failed + row.Ignored
+		}
+		// 采样只收有可计调用的小时：只有被忽略类错误的小时没有可定义的成功率。
+		if row.Success+row.Failed <= 0 {
+			continue
+		}
 		if _, ok := grouped[key]; !ok {
 			order = append(order, key)
 		}
 		grouped[key] = append(grouped[key], row)
-		if !row.Hour.Before(rankSince) {
-			recent[row.Model] += row.Success + row.Failed
-		}
 	}
 	ranked := make([]string, 0, len(recent))
 	for model := range recent {
@@ -267,7 +274,7 @@ func buildPlazaHealthLines(rows []PlazaHourlyRow, rankSince time.Time) []PlazaHe
 }
 
 func plazaHealthRowUsable(row *PlazaHourlyRow) bool {
-	if row == nil || row.GroupID <= 0 || row.Success < 0 || row.Failed < 0 || row.Success+row.Failed <= 0 {
+	if row == nil || row.GroupID <= 0 || row.Success < 0 || row.Failed < 0 || row.Ignored < 0 || row.Success+row.Failed+row.Ignored <= 0 {
 		return false
 	}
 	return row.Model != "" && row.Model != "unknown" && row.Model != ChannelMonitorV2OtherModel
