@@ -551,6 +551,7 @@ func normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(payload []byte) (
 	if generate, ok := decoded["generate"].(bool); ok && !generate {
 		delete(decoded, "generate")
 	}
+	deleteOpenAIResponsesRejectedExtraFields(decoded)
 	return json.Marshal(decoded)
 }
 

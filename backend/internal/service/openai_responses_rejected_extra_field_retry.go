@@ -165,3 +165,14 @@ func isOpenAIResponsesRejectedExtraField(name string) bool {
 func openAIResponsesRejectedExtraFieldJSONValid(text string) bool {
 	return json.Valid([]byte(text))
 }
+
+// deleteOpenAIResponsesRejectedExtraFields removes the listed fields from a
+// decoded payload before WebSocket turns are compared for previous_response_id
+// continuation. The gateway may itself strip them from one turn after an
+// upstream rejection, so their presence must not count as a parameter change
+// that breaks the chain.
+func deleteOpenAIResponsesRejectedExtraFields(decoded map[string]any) {
+	for _, field := range openAIResponsesRejectedExtraFields {
+		delete(decoded, field)
+	}
+}

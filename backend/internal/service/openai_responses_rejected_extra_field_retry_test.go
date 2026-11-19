@@ -125,3 +125,27 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyDeepWrappedMessage(t *tes
 		require.Nil(t, retryBody)
 	}
 }
+
+func TestOpenAIWSStrictStateIgnoresStrippedEnableThinking(t *testing.T) {
+	withField := []byte(`{"type":"response.create","model":"gpt-5.5","store":false,"enable_thinking":true,"previous_response_id":"resp_1","input":[{"type":"message","role":"user","content":"next"}]}`)
+	stripped := []byte(`{"type":"response.create","model":"gpt-5.5","store":false,"previous_response_id":"resp_1","input":[{"type":"message","role":"user","content":"next"}]}`)
+	for name, pair := range map[string][2][]byte{
+		"previous turn stripped, current carries field": {stripped, withField},
+		"previous turn carried field, retry stripped":   {withField, stripped},
+	} {
+		t.Run(name, func(t *testing.T) {
+			state, err := buildOpenAIWSIngressPreviousTurnStrictState(pair[0])
+			require.NoError(t, err)
+			keep, reason, err := shouldKeepIngressPreviousResponseIDWithStrictState(state, pair[1], "resp_1", false)
+			require.NoError(t, err)
+			require.True(t, keep, reason)
+		})
+	}
+
+	changed := []byte(`{"type":"response.create","model":"gpt-5.5","store":false,"temperature":0.2,"previous_response_id":"resp_1","input":[]}`)
+	state, err := buildOpenAIWSIngressPreviousTurnStrictState(stripped)
+	require.NoError(t, err)
+	keep, _, err := shouldKeepIngressPreviousResponseIDWithStrictState(state, changed, "resp_1", false)
+	require.NoError(t, err)
+	require.False(t, keep, "a real parameter change must still break the chain")
+}
