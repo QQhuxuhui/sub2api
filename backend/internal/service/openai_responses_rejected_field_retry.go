@@ -115,6 +115,9 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 	if statusCode != http.StatusBadRequest || len(body) == 0 || len(responseBody) == 0 {
 		return nil, "", false, nil
 	}
+	if retryBody, reason, decided, err := normalizeOpenAIResponsesRejectedExtraFieldRetryBody(body, responseBody); decided {
+		return retryBody, reason, retryBody != nil, err
+	}
 
 	code := strings.ToLower(strings.TrimSpace(extractUpstreamErrorCode(responseBody)))
 	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))
