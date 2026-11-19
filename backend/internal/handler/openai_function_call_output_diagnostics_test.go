@@ -99,3 +99,15 @@ func TestFunctionCallOutputInputShapeTruncatesAndHandlesNonArray(t *testing.T) {
 		require.NotContains(t, shape, "first_missing")
 	}
 }
+
+func TestFunctionCallOutputInputShapeDropsNUL(t *testing.T) {
+	body := `{"input":[{"type":"function_call_output","namespace":"a\u0000gent","name":"read\u0000_file"}]}`
+	encoded, shape := encodeInputShape(t, body)
+	require.NotContains(t, encoded, `\u0000`)
+	missing := shapeFirstMissing(t, shape)
+	require.Equal(t, "agent", missing["namespace"])
+	require.Equal(t, "read_file", missing["name"])
+	item, ok := shapeItems(t, shape)[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "agent", item["namespace"])
+}

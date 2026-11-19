@@ -61,6 +61,9 @@ func functionCallOutputItemShape(item gjson.Result) map[string]any {
 		text := value.Str
 		// Clone so the queued log event holds only these bytes, not the
 		// whole input copy the substring would otherwise keep alive.
+		// Drop NUL first: ops_system_logs.extra is jsonb, which rejects
+		// \u0000 and would fail the whole log batch.
+		text = strings.ReplaceAll(text, "\x00", "")
 		shape[key] = strings.Clone(functionCallOutputShapeTruncate(text))
 	}
 	shape["has_call_id"] = !service.CodexToolCallOutputCallIDMissing(item)
