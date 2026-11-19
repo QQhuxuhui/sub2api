@@ -28,7 +28,6 @@ func normalizeCodexPageContext(body []byte) ([]byte, bool) {
 		return body, false
 	}
 	changed := false
-	result := body
 	for i, raw := range input {
 		var item map[string]json.RawMessage
 		if json.Unmarshal(raw, &item) != nil {
@@ -64,17 +63,32 @@ func normalizeCodexPageContext(body []byte) ([]byte, bool) {
 		if err != nil {
 			return body, false
 		}
-		// Replace only this item; the rest of the body keeps its exact bytes,
-		// so untouched history is not re-encoded or grown by HTML escaping.
-		// Members are unique (checked above), so the path is unambiguous.
-		updated, err := sjson.SetRawBytes(result, "input."+strconv.Itoa(i), encoded)
-		if err != nil {
-			return body, false
-		}
-		result = updated
+		input[i] = encoded
 		changed = true
 	}
 	if !changed {
+		return body, false
+	}
+	// Rebuild the input array once from each item's original bytes (a
+	// json.RawMessage keeps them verbatim) and swap it in with a single
+	// replacement, so untouched history is neither re-encoded nor copied once
+	// per matched item. Members are unique (checked above), so the path is
+	// unambiguous.
+	size := 2 + len(input)
+	for _, raw := range input {
+		size += len(raw)
+	}
+	encodedInput := make([]byte, 0, size)
+	encodedInput = append(encodedInput, '[')
+	for i, raw := range input {
+		if i > 0 {
+			encodedInput = append(encodedInput, ',')
+		}
+		encodedInput = append(encodedInput, raw...)
+	}
+	encodedInput = append(encodedInput, ']')
+	result, err := sjson.SetRawBytes(body, "input", encodedInput)
+	if err != nil {
 		return body, false
 	}
 	return result, true

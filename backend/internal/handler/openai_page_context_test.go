@@ -195,3 +195,26 @@ func TestNormalizeCodexPageContextKeepsUntouchedBytes(t *testing.T) {
 	require.True(t, json.Valid(got))
 	require.LessOrEqual(t, len(got), len(body)+200)
 }
+
+func TestNormalizeCodexPageContextManyItemsKeepsHistoryBytes(t *testing.T) {
+	history := `{"role":"user","content":"<p>` + strings.Repeat("x", 1<<20) + `</p>"}`
+	items := []string{history}
+	for i := 0; i < 64; i++ {
+		items = append(items, `{"type":"function_call_output","namespace":"agent","name":"codex_apps_open_page","output":"{\"page_id\":null}"}`)
+	}
+	body := []byte(`{"model":"gpt-5","input":[` + strings.Join(items, ",") + `]}`)
+	got, changed := normalizeCodexPageContext(body)
+	require.True(t, changed)
+	require.True(t, strings.HasPrefix(string(got), `{"model":"gpt-5","input":[`+history+`,`))
+	require.Len(t, gjson.GetBytes(got, "input").Array(), 65)
+	require.Equal(t, "message", gjson.GetBytes(got, "input.64.type").String())
+	// 64 matched items over a 1 MiB history: copying the body once per item
+	// would allocate about 64 MiB per call; one rebuild stays a few MiB.
+	result := testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _ = normalizeCodexPageContext(body)
+		}
+	})
+	require.Less(t, result.AllocedBytesPerOp(), int64(16<<20), "rewriting must not scale with matched items times body size")
+}
