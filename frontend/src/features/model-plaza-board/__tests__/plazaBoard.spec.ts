@@ -185,6 +185,20 @@ describe('filterAndSortModels', () => {
   })
 })
 
+describe('热度名次', () => {
+  it('没有状态条的模型也按名次表排序', () => {
+    const groups = [group(1, 'g', 'openai', [tokenModel('a', 'openai'), tokenModel('b', 'openai')])]
+    // a 的调用全部落在被忽略的错误类别：没有线路，但名次第一
+    const h = { ...health([healthLine('openai', 1, 'b', 'healthy', { rank: 2 })]), ranks: { a: 1, b: 2 } }
+    const models = buildBoardModels(groups, h)
+    const sorted = filterAndSortModels(models, {
+      query: '', group: 'all', vendor: 'all', billing: 'all', state: 'all', sort: 'rank'
+    })
+    expect(sorted.map((m) => [m.name, m.rank])).toEqual([['a', 1], ['b', 2]])
+    expect(sorted[0].recommended.health).toBeNull()
+  })
+})
+
 describe('lineBadges', () => {
   const groups = [
     group(1, 'cheap', 'openai', [tokenModel('m', 'openai')], { rate_multiplier: 0.1 }),

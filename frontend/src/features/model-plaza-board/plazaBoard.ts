@@ -267,7 +267,9 @@ export function buildBoardModels(
   const models: BoardModel[] = []
   for (const [name, lines] of byName) {
     const recommended = pickRecommendedLine(lines)
-    const ranks = lines.map((l) => l.health?.rank).filter((r): r is number => r != null)
+    // 名次优先取按模型名给出的表（没有状态条的模型也有名次），旧响应回落到线路上的名次。
+    const modelRank = health?.available ? health.ranks?.[name] : undefined
+    const ranks = modelRank != null ? [modelRank] : lines.map((l) => l.health?.rank).filter((r): r is number => r != null)
     models.push({
       name,
       vendor: vendorOf(name),

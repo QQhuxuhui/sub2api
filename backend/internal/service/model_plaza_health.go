@@ -64,6 +64,9 @@ type PlazaHourlyRow struct {
 type PlazaHealth struct {
 	Available bool              `json:"available"`
 	Lines     []PlazaHealthLine `json:"lines"`
+	// Ranks 是模型名 → 近 24 小时热度名次（1 起）。独立于 Lines：一个模型即使没有可计采样
+	// （例如调用全部落在被忽略的错误类别里）也有名次。只有名次，没有数量。
+	Ranks map[string]int `json:"ranks"`
 }
 
 // PlazaHealthLine 是一条线路（平台 + 分组 + 模型）最近若干个有调用小时的健康摘要。
@@ -118,7 +121,7 @@ func (s *ModelPlazaService) Health(ctx context.Context, allowedGroupIDs []int64)
 
 	ids := normalizeInt64Set(allowedGroupIDs)
 	if len(ids) == 0 {
-		return &PlazaHealth{Available: true, Lines: []PlazaHealthLine{}}, nil
+		return &PlazaHealth{Available: true, Lines: []PlazaHealthLine{}, Ranks: map[string]int{}}, nil
 	}
 	key := plazaHealthCacheKey(ids, end)
 	if cached := ext.cachedHealth(key, now); cached != nil {
@@ -133,7 +136,8 @@ func (s *ModelPlazaService) Health(ctx context.Context, allowedGroupIDs []int64)
 			// 不缓存：聚合恢复后下一次请求即可恢复展示。
 			return &PlazaHealth{Available: false, Lines: []PlazaHealthLine{}}, nil
 		}
-		result := &PlazaHealth{Available: true, Lines: buildPlazaHealthLines(data.Rows, end.Add(-plazaHealthRankWindow))}
+		lines, ranks := buildPlazaHealthLines(data.Rows, end.Add(-plazaHealthRankWindow))
+		result := &PlazaHealth{Available: true, Lines: lines, Ranks: ranks}
 		ext.storeHealth(key, result, now)
 		return result, nil
 	})
@@ -195,9 +199,9 @@ type plazaHealthLineKey struct {
 	model    string
 }
 
-// buildPlazaHealthLines 把小时计数转成广场的白名单线路列表。
+// buildPlazaHealthLines 把小时计数转成广场的白名单线路列表和按模型名的热度名次。
 // 名次按精确模型名跨平台、跨分组汇总 rankSince 之后的请求数排出；请求数本身不外传。
-func buildPlazaHealthLines(rows []PlazaHourlyRow, rankSince time.Time) []PlazaHealthLine {
+func buildPlazaHealthLines(rows []PlazaHourlyRow, rankSince time.Time) ([]PlazaHealthLine, map[string]int) {
 	order := []plazaHealthLineKey{}
 	grouped := make(map[plazaHealthLineKey][]PlazaHourlyRow)
 	recent := make(map[string]int64)
@@ -270,7 +274,7 @@ func buildPlazaHealthLines(rows []PlazaHourlyRow, rankSince time.Time) []PlazaHe
 		}
 		lines = append(lines, line)
 	}
-	return lines
+	return lines, ranks
 }
 
 func plazaHealthRowUsable(row *PlazaHourlyRow) bool {

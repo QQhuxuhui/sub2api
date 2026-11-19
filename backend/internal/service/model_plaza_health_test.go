@@ -134,8 +134,28 @@ func TestPlazaHealth_IgnoredErrorsCountForRankButNotForSamples(t *testing.T) {
 	require.Len(t, got.Lines, 2, "只有被忽略类错误的线路没有采样，不出线路")
 	require.Equal(t, 1, *lines["limited"].Rank, "名次按原始调用数：550 > 100")
 	require.Equal(t, 2, *lines["steady"].Rank)
+	require.Equal(t, map[string]int{"limited": 1, "steady": 2, "ghost": 3}, got.Ranks, "没有线路的模型仍有名次")
 	require.Len(t, lines["limited"].Samples, 1, "只有被忽略类错误的小时不产生采样")
 	require.Zero(t, lines["limited"].ErrorRate, "被忽略类错误不计入失败")
+}
+
+func TestPlazaHealth_ModelWithOnlyIgnoredCallsKeepsItsRank(t *testing.T) {
+	now := time.Date(2026, 11, 17, 5, 7, 0, 0, time.UTC)
+	current := time.Date(2026, 11, 17, 5, 0, 0, 0, time.UTC)
+	rows := []PlazaHourlyRow{
+		{Platform: "openai", GroupID: 3, Model: "a", Hour: current, Ignored: 500},
+		plazaHourRow("openai", 3, "b", current, 100, 0),
+	}
+	got, err := newPlazaHealthService(&plazaHealthStoreStub{rows: rows}, now).Health(context.Background(), []int64{3})
+	require.NoError(t, err)
+	require.Len(t, got.Lines, 1, "a 没有可计采样，没有状态条")
+	require.Equal(t, "b", got.Lines[0].Model)
+	require.Equal(t, map[string]int{"a": 1, "b": 2}, got.Ranks, "调用量第一的 a 仍排第一")
+
+	body, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.NotContains(t, string(body), "500")
+	require.NotContains(t, string(body), "100")
 }
 
 func TestPlazaHealth_KeepsLatestSamplesOnly(t *testing.T) {

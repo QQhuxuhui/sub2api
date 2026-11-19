@@ -29,4 +29,6 @@ export interface PlazaHealthResponse {
   /** false：监控未启用或不是被动聚合模式，页面只展示价格。 */
   available: boolean
   lines: PlazaHealthLine[]
+  /** 模型名 → 近 24 小时热度名次（1 起）。独立于 lines：没有状态条的模型也可能有名次。 */
+  ranks?: Record<string, number>
 }
