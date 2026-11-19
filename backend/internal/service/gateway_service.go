@@ -719,6 +719,7 @@ type UpstreamFailoverError struct {
 	RequestScopedTransient   bool          // 故障因素与账号无关（如上游按客户端身份/模型容量降载）：可同账号重试，但不得据此对账号做临时封禁
 	SafeToFailoverAfterWrite bool          // 仅写出 SSE 注释等非语义字节时，仍可在同一客户端流中切换账号
 	FailoverRuleID           string        // 由换号规则表触发：不同号重试、不惩罚账号，耗尽时返回上游真实错误
+	OpenAIStreamDisconnect   bool          // 规则换号源自 apikey 账号的上游断流 error 事件：耗尽时按 502 server_error 回给客户
 	BoundUpstreamPassthrough bool          // 绑定显式缓存的请求在上游网关账号上收到的 429 / 5xx：反映持有缓存的上游账号状态，原样回写不走错误映射
 	Stage                    GatewayFailureStage
 	Scope                    GatewayFailureScope

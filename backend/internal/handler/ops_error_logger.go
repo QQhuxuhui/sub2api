@@ -1117,6 +1117,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				parsed = terminal
 			}
 		}
+		parsed = normalizeOpsUpstreamStreamDisconnect(parsed, status)
 		if status < 400 {
 			if parsed.StreamFailure {
 				status = inferStreamFailureStatus(c, parsed)

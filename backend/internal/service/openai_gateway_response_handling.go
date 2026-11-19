@@ -603,7 +603,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					if !cyberHit {
 						if ruleID := matchOpenAIFailoverRule(c, 0, failedMessage, dataBytes); ruleID != "" {
 							sawFailedEvent = true
-							streamEarlyErr = s.newOpenAIRuleStreamFailoverError(c, account, false, upstreamRequestID, ruleID, dataBytes, failedMessage, resp.Header)
+							streamEarlyErr = markOpenAIRuleStreamDisconnect(s.newOpenAIRuleStreamFailoverError(c, account, false, upstreamRequestID, ruleID, dataBytes, failedMessage, resp.Header), account, eventType, dataBytes)
 							return
 						}
 					}
@@ -629,6 +629,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				forceFlushFailedEvent = true
 				sawFailedEvent = true
 				terminalFailurePending = !codexFailureTerminal || eventType == "response.failed"
+			}
+			if rewritten, ok := rewriteOpenAIStreamDisconnectErrorType(dataBytes, eventType, account); ok {
+				dataBytes = rewritten
+				data = string(rewritten)
+				line = "data: " + data
 			}
 			if normalizedData, normalized := normalizeCompletedImageGenerationStatus(dataBytes); normalized {
 				dataBytes = normalizedData
@@ -1783,6 +1788,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			return nil, compactErr
 		}
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
+			failoverErr = markOpenAIRuleStreamDisconnect(failoverErr, account, terminalType, terminalPayload)
 			return nil, failoverErr
 		}
 		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)

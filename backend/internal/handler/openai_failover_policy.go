@@ -101,6 +101,10 @@ func openAISlotBusyErrorFrom(c *gin.Context) *openAISlotBusyError {
 // writeOpenAIRuleFailoverExhausted returns the last upstream's real error: the
 // rule moved the request, it did not change what the error means.
 func (h *OpenAIGatewayHandler) writeOpenAIRuleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
+	if failoverErr.OpenAIStreamDisconnect {
+		h.writeOpenAIRuleStreamDisconnectExhausted(c, failoverErr, streamStarted)
+		return
+	}
 	status := failoverErr.StatusCode
 	message := service.SanitizeUpstreamErrorMessage(service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody))
 	service.SetOpsUpstreamError(c, status, message, "")
