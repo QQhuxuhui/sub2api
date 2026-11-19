@@ -111,7 +111,7 @@ func (u *httpBridgeIsolationUpstream) Do(req *http.Request, _ string, _ int64, _
 	responseID := fmt.Sprintf("resp_%s_%d", id, turn)
 	prefix := fmt.Sprintf("data: {\"type\":\"response.created\",\"response\":{\"id\":%q,\"status\":\"in_progress\"}}\n\n", responseID)
 	if turn == 1 {
-		prefix += "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"rs_test\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque\"}}\n\n"
+		prefix += "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"rs_test\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"t\"}]}}\n\n"
 	}
 	output := "[]"
 	if turn == 1 {

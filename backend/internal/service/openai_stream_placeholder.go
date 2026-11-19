@@ -28,6 +28,9 @@ func openAIStreamEventIsPlaceholder(data, eventType string) bool {
 	if eventType == "" {
 		eventType = strings.TrimSpace(gjson.Get(data, "type").String())
 	}
+	if openAIStreamEventCarriesNoOutput(data, eventType) {
+		return true
+	}
 	switch eventType {
 	case "response.output_text.delta", "response.refusal.delta",
 		"response.reasoning_summary_text.delta", "response.reasoning_text.delta":
