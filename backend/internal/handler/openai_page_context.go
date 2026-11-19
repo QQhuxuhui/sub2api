@@ -104,11 +104,13 @@ func validCodexPageContext(name, output string) bool {
 }
 
 func validCodexPageSnapshot(text string) bool {
-	if !hasUniqueJSONMembers([]byte(text)) {
-		return false
-	}
+	// Unmarshal first: it enforces a nesting limit, while the duplicate-member
+	// scan recurses without one, so a deep snapshot must be rejected before it.
 	var snapshot map[string]json.RawMessage
 	if json.Unmarshal([]byte(text), &snapshot) != nil {
+		return false
+	}
+	if !hasUniqueJSONMembers([]byte(text)) {
 		return false
 	}
 	id, exists := snapshot["page_id"]

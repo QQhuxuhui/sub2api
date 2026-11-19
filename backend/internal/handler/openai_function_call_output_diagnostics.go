@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strings"
+
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
@@ -57,7 +59,9 @@ func functionCallOutputItemShape(item gjson.Result) map[string]any {
 			continue
 		}
 		text := value.Str
-		shape[key] = functionCallOutputShapeTruncate(text)
+		// Clone so the queued log event holds only these bytes, not the
+		// whole input copy the substring would otherwise keep alive.
+		shape[key] = strings.Clone(functionCallOutputShapeTruncate(text))
 	}
 	shape["has_call_id"] = !service.CodexToolCallOutputCallIDMissing(item)
 	return shape

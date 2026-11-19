@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -146,4 +147,13 @@ func TestNormalizeCodexPageContextEscapedToolName(t *testing.T) {
 	require.True(t, changed)
 	require.Equal(t, "message", gjson.GetBytes(got, "input.0.type").String())
 	require.Contains(t, gjson.GetBytes(got, "input.0.content.0.text").String(), `{"page_id":null}`)
+}
+
+func TestNormalizeCodexPageContextRejectsDeepSnapshot(t *testing.T) {
+	deep := `{"page_id":null,"x":` + strings.Repeat("[", 200000) + strings.Repeat("]", 200000) + `}`
+	require.False(t, validCodexPageSnapshot(deep))
+	body := pageContextRequest(t, pageContextItem("codex_apps_open_page", deep))
+	got, changed := normalizeCodexPageContext(body)
+	require.False(t, changed)
+	require.Equal(t, body, got)
 }
