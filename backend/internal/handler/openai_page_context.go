@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/tidwall/sjson"
 )
 
 var codexSelectedPageName = regexp.MustCompile(`^codex_apps_selected_page_part_([1-9][0-9]*)_of_([1-9][0-9]*)$`)
@@ -26,6 +28,7 @@ func normalizeCodexPageContext(body []byte) ([]byte, bool) {
 		return body, false
 	}
 	changed := false
+	result := body
 	for i, raw := range input {
 		var item map[string]json.RawMessage
 		if json.Unmarshal(raw, &item) != nil {
@@ -57,26 +60,36 @@ func normalizeCodexPageContext(body []byte) ([]byte, bool) {
 				"text": "<external_" + name + ">\n" + output + "\n</external_" + name + ">",
 			}},
 		}
-		encoded, err := json.Marshal(message)
+		encoded, err := marshalCodexPageContextJSON(message)
 		if err != nil {
 			return body, false
 		}
-		input[i] = encoded
+		// Replace only this item; the rest of the body keeps its exact bytes,
+		// so untouched history is not re-encoded or grown by HTML escaping.
+		// Members are unique (checked above), so the path is unambiguous.
+		updated, err := sjson.SetRawBytes(result, "input."+strconv.Itoa(i), encoded)
+		if err != nil {
+			return body, false
+		}
+		result = updated
 		changed = true
 	}
 	if !changed {
 		return body, false
 	}
-	encodedInput, err := json.Marshal(input)
-	if err != nil {
-		return body, false
+	return result, true
+}
+
+// marshalCodexPageContextJSON encodes without HTML escaping, so the page text
+// keeps its <, > and & as written instead of growing to \u003c and the like.
+func marshalCodexPageContextJSON(value any) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
 	}
-	request["input"] = encodedInput
-	encoded, err := json.Marshal(request)
-	if err != nil {
-		return body, false
-	}
-	return encoded, true
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
 func validCodexPageContext(name, output string) bool {
@@ -125,11 +138,11 @@ func validCodexPageSnapshot(text string) bool {
 }
 
 // mayContainCodexPageContextCandidate is a cheap pre-check that lets ordinary
-// requests skip the full decode. It only decides whether to decode: a literal
-// \u escape may spell the type or tool names, so it always defers to the full
-// path, which still applies every check above.
+// requests skip the full decode. It only decides whether to decode: an escape
+// that may spell the type or tool names defers to the full path, which still
+// applies every check above.
 func mayContainCodexPageContextCandidate(body []byte) bool {
-	if bytes.Contains(body, []byte(`\u`)) {
+	if codexJSONMayEscapePlainASCII(body) {
 		return true
 	}
 	if !bytes.Contains(body, []byte("function_call_output")) {
@@ -137,4 +150,49 @@ func mayContainCodexPageContextCandidate(body []byte) bool {
 	}
 	return bytes.Contains(body, []byte("codex_apps_open_page")) ||
 		bytes.Contains(body, []byte("codex_apps_selected_page_part_"))
+}
+
+// codexJSONMayEscapePlainASCII reports whether body has a \u escape that spells
+// a printable ASCII character no encoder needs to escape; only such an escape
+// can hide the tool names from a literal search. Escapes real clients emit
+// (non-ASCII runes such as \u4e2d, control characters, quote, backslash,
+// apostrophe and the HTML-safe <, >, &) are ignored, so ordinary escaped text
+// keeps the fast path. Escapes are consumed pairwise, so an escaped backslash
+// followed by a literal u is plain text. A malformed or truncated escape
+// counts as true. Mirrors service.JSONMayEscapePlainASCII in upstream
+// (json_escape_probe.go); switch to it once that file is merged.
+func codexJSONMayEscapePlainASCII(body []byte) bool {
+	for i := 0; ; {
+		j := bytes.IndexByte(body[i:], '\\')
+		if j < 0 {
+			return false
+		}
+		next := i + j + 1
+		if next >= len(body) {
+			return true
+		}
+		if body[next] != 'u' {
+			i = next + 1
+			continue
+		}
+		if next+5 > len(body) {
+			return true
+		}
+		r, err := strconv.ParseUint(string(body[next+1:next+5]), 16, 32)
+		if err != nil || codexJSONEscapeHidesPlainASCII(rune(r)) {
+			return true
+		}
+		i = next + 5
+	}
+}
+
+func codexJSONEscapeHidesPlainASCII(r rune) bool {
+	if r < 0x20 || r >= 0x7f {
+		return false
+	}
+	switch r {
+	case '"', '\\', '<', '>', '&', '\'':
+		return false
+	}
+	return true
 }

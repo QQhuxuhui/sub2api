@@ -158,3 +158,40 @@ func TestNormalizeCodexPageContextRejectsDeepSnapshot(t *testing.T) {
 	require.False(t, changed)
 	require.Equal(t, body, got)
 }
+
+func TestMayContainCodexPageContextCandidateIgnoresOrdinaryEscapes(t *testing.T) {
+	for name, body := range map[string]string{
+		"escaped chinese":           `{"model":"gpt-5","input":[{"role":"user","content":"\u4e2d\u6587"}]}`,
+		"html-safe escapes":         `{"model":"gpt-5","input":[{"role":"user","content":"\u003cdiv\u003e \u0026"}]}`,
+		"control and quote escapes": `{"model":"gpt-5","input":[{"role":"user","content":"\u001b[0m \u0022 \u005c \u0027"}]}`,
+		"escaped backslash then u":  `{"model":"gpt-5","input":[{"role":"user","content":"C:\\users\\u0041"}]}`,
+	} {
+		require.False(t, mayContainCodexPageContextCandidate([]byte(body)), name)
+	}
+	for name, body := range map[string]string{
+		"escaped letter":     `{"input":[{"name":"codex\u005fapps_open_page"}]}`,
+		"upper-case hex":     `{"input":[{"name":"\u0041"}]}`,
+		"truncated escape":   `{"input":"\u00`,
+		"malformed escape":   `{"input":"\uzzzz"}`,
+		"trailing backslash": `{"input":"x\`,
+	} {
+		require.True(t, mayContainCodexPageContextCandidate([]byte(body)), name)
+	}
+}
+
+func TestNormalizeCodexPageContextKeepsUntouchedBytes(t *testing.T) {
+	history := `{"role":"user","content":"<b>a & b</b> 中文 \u4e2d"}`
+	body := []byte(`{"model":"gpt-5","metadata":{"n":1.50},"input":[` + history + `,{"type":"function_call_output","namespace":"agent","name":"codex_apps_open_page","output":"{\"page_id\":null,\"title\":\"<a & b>\"}"}]}`)
+	got, changed := normalizeCodexPageContext(body)
+	require.True(t, changed)
+	// Everything before the replaced item is byte-identical, including HTML
+	// characters, raw UTF-8, original escapes and number formatting.
+	prefix := `{"model":"gpt-5","metadata":{"n":1.50},"input":[` + history + `,`
+	require.True(t, strings.HasPrefix(string(got), prefix), string(got))
+	require.NotContains(t, string(got), `\u003c`)
+	require.NotContains(t, string(got), `\u0026`)
+	require.Equal(t, "<external_codex_apps_open_page>\n{\"page_id\":null,\"title\":\"<a & b>\"}\n</external_codex_apps_open_page>",
+		gjson.GetBytes(got, "input.1.content.0.text").String())
+	require.True(t, json.Valid(got))
+	require.LessOrEqual(t, len(got), len(body)+200)
+}
