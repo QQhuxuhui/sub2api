@@ -98,7 +98,8 @@ func TestOpenAIResponsesWebSocket_DisabledAllowlistDoesNotInterfere(t *testing.T
 }
 
 // 首帧含重复 model 键（首个在白名单、末个不在）：passthrough 会原样转发两个字段，
-// 上游按末值绑定时得到禁用模型，必须在入口拒绝。
+// 上游按末值绑定时得到禁用模型，必须在入口拒绝。重复键守卫在读帧时就关闭连接，
+// 早于白名单校验。
 func TestOpenAIResponsesWebSocket_FirstFrameDuplicateModelKeysRejected(t *testing.T) {
 	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeDedicated} {
 		t.Run(mode, func(t *testing.T) {
@@ -107,6 +108,7 @@ func TestOpenAIResponsesWebSocket_FirstFrameDuplicateModelKeysRejected(t *testin
 				group:                   wsAllowlistGroup(true, "gpt-5.4"),
 				ingressMode:             mode,
 				firstFrameCloseExpected: true,
+				closeReason:             "duplicate JSON key in request",
 			})
 		})
 	}
@@ -121,6 +123,7 @@ func TestOpenAIResponsesWebSocket_FirstFrameCaseVariantModelKeyRejected(t *testi
 		group:                   wsAllowlistGroup(true, "gpt-5.4"),
 		ingressMode:             service.OpenAIWSIngressModePassthrough,
 		firstFrameCloseExpected: true,
+		closeReason:             "duplicate JSON key in request",
 	})
 }
 
@@ -134,21 +137,20 @@ func TestOpenAIResponsesWebSocket_SubsequentTurnDuplicateModelKeysRejected(t *te
 				group:                   wsAllowlistGroup(true, "gpt-5.4"),
 				ingressMode:             mode,
 				secondTurnCloseExpected: true,
+				closeReason:             "duplicate JSON key in request",
 			})
 		})
 	}
 }
 
-// 重复但同值的 model 键不误伤，连接正常完成两个 turn。
-func TestOpenAIResponsesWebSocket_DuplicateIdenticalModelKeysAllowed(t *testing.T) {
-	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:  `{"type":"response.create","model":"gpt-5.4","model":"gpt-5.4","stream":false}`,
-		secondPayload: `{"type":"response.create","model":"gpt-5.4","stream":false}`,
-		group:         wsAllowlistGroup(true, "gpt-5.4"),
+// 重复键一律拒绝，即使两个 model 同值：判重不看值，任何重复都是歧义请求。
+func TestOpenAIResponsesWebSocket_DuplicateIdenticalModelKeysRejected(t *testing.T) {
+	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload:            `{"type":"response.create","model":"gpt-5.4","model":"gpt-5.4","stream":false}`,
+		group:                   wsAllowlistGroup(false),
+		firstFrameCloseExpected: true,
+		closeReason:             "duplicate JSON key in request",
 	})
-	if len(got.clientEvents) != 2 {
-		t.Fatalf("expected two completed events, got %d", len(got.clientEvents))
-	}
 }
 
 // session.update 轮换绕过：首帧用白名单内模型建立会话，session.update 把会话

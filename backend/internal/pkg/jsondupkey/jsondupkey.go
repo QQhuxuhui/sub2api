@@ -1,0 +1,541 @@
+// Package jsondupkey finds duplicate member names in JSON request bodies.
+//
+// The gateway reads request fields with gjson, which picks the first of two
+// duplicate keys, while upstreams decoding with encoding/json or Python pick
+// the last one. A body such as {"model":"cheap",...,"model":"expensive"} is
+// then billed as one model and served as another. Find reports such bodies so
+// the gateway can reject them before routing, billing and forwarding.
+//
+// The scanner is a single non-recursive pass with a depth limit. It is lenient
+// where the gateway's lenient request path is lenient (raw control bytes in
+// strings, literal spelling) and strict about structure.
+package jsondupkey
+
+import (
+	"bytes"
+	"encoding/json"
+	"strconv"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
+
+// Result classifies a scanned body.
+type Result int
+
+const (
+	// ResultOK: no duplicate key, or the body does not start with an object or
+	// array and is not this package's concern.
+	ResultOK Result = iota
+	// ResultDuplicate: an object holds the same member name twice.
+	ResultDuplicate
+	// ResultTooDeep: nesting exceeds MaxDepth.
+	ResultTooDeep
+	// ResultInvalid: the body starts like JSON but is structurally malformed.
+	ResultInvalid
+)
+
+// MaxDepth matches the nesting limit of encoding/json.
+const MaxDepth = 10000
+
+// MaxPathBytes bounds the JSON Pointer returned for a duplicate key, so a
+// client-chosen key name cannot inflate error responses or log lines.
+const MaxPathBytes = 256
+
+// Options adjusts which subtrees are treated as user content.
+type Options struct {
+	// SkipRootContent also skips the root "content" member (Seedance task
+	// bodies carry user text and media there).
+	SkipRootContent bool
+}
+
+// rootSkipKeys hold user content at the root object: messages, Responses
+// input, Gemini contents and system prompts. Their subtrees are not checked.
+var rootSkipKeys = map[string]struct{}{
+	"messages":           {},
+	"input":              {},
+	"contents":           {},
+	"system":             {},
+	"systemInstruction":  {},
+	"system_instruction": {},
+	"instructions":       {},
+	"prompt":             {},
+}
+
+// generateContentRequestSkipKeys hold user content inside the root
+// generateContentRequest wrapper of Gemini countTokens.
+var generateContentRequestSkipKeys = map[string]struct{}{
+	"contents":           {},
+	"systemInstruction":  {},
+	"system_instruction": {},
+}
+
+// nestedSkipKeys hold caller-written schemas and examples below the root
+// object (tool parameters, structured-output schemas, tool input examples).
+var nestedSkipKeys = map[string]struct{}{
+	"parameters":           {},
+	"input_schema":         {},
+	"parametersJsonSchema": {},
+	"responseSchema":       {},
+	"responseJsonSchema":   {},
+	"response_schema":      {},
+	"response_json_schema": {},
+	"schema":               {},
+	"input_examples":       {},
+}
+
+// LeadingByte returns the first byte after a UTF-8 BOM and leading white
+// space, using the same notion of white space as bytes.TrimSpace (Unicode
+// spaces included). ok is false when nothing but white space is present.
+func LeadingByte(body []byte) (byte, bool) {
+	rest := trimLeft(body)
+	if len(rest) == 0 {
+		return 0, false
+	}
+	return rest[0], true
+}
+
+// IsLeadingSpacePrefix reports whether body holds only a BOM and white space
+// so far, possibly ending in an incomplete UTF-8 sequence that more input
+// could turn into white space. It lets a streaming reader know whether to read
+// on before deciding with LeadingByte.
+func IsLeadingSpacePrefix(body []byte) bool {
+	rest := trimLeft(body)
+	return len(rest) == 0 || (len(rest) < utf8.UTFMax && !utf8.FullRune(rest))
+}
+
+func trimLeft(body []byte) []byte {
+	body = bytes.TrimPrefix(body, []byte("\xef\xbb\xbf"))
+	return bytes.TrimLeftFunc(body, unicode.IsSpace)
+}
+
+// Find scans body with default options. See FindWithOptions.
+func Find(body []byte) (result Result, path string, truncated bool, complete bool) {
+	return FindWithOptions(body, Options{})
+}
+
+// FindWithOptions scans body for duplicate member names.
+//
+// path is the JSON Pointer of the first duplicate (at most MaxPathBytes, cut
+// on a rune boundary and marked with "…" when truncated). complete reports
+// whether the whole body is one structurally valid JSON value followed only
+// by white space. A duplicate wins over later structural errors; nesting
+// beyond MaxDepth stops the scan at once.
+func FindWithOptions(body []byte, opts Options) (result Result, path string, truncated bool, complete bool) {
+	data := trimLeft(body)
+	if len(data) == 0 || (data[0] != '{' && data[0] != '[') {
+		return ResultOK, "", false, false
+	}
+	s := scanner{data: data, opts: opts}
+	return s.run()
+}
+
+type frame struct {
+	object bool
+	skip   bool
+	// key is the member whose value is being scanned (objects); index is the
+	// element position (arrays).
+	key   string
+	index int
+	// keyInParent is the member name under which this container sits.
+	keyInParent string
+	keys        []string
+	exact       map[string]struct{}
+	folded      map[string]struct{}
+}
+
+type scanner struct {
+	data  []byte
+	pos   int
+	opts  Options
+	stack []frame
+
+	dupFound bool
+	dupPath  string
+	dupTrunc bool
+}
+
+type state int
+
+const (
+	stateValue state = iota
+	stateKeyOrEnd
+	stateKey
+	stateColon
+	stateAfterValue
+	stateValueOrEnd
+)
+
+func (s *scanner) run() (Result, string, bool, bool) {
+	st := stateValue
+	for {
+		s.skipWS()
+		switch st {
+		case stateValue, stateValueOrEnd:
+			if s.pos >= len(s.data) {
+				return s.invalid()
+			}
+			c := s.data[s.pos]
+			if st == stateValueOrEnd && c == ']' {
+				s.pos++
+				s.pop()
+				if len(s.stack) == 0 {
+					return s.finish()
+				}
+				st = stateAfterValue
+				continue
+			}
+			switch c {
+			case '{', '[':
+				if len(s.stack) >= MaxDepth {
+					return ResultTooDeep, "", false, false
+				}
+				s.push(c == '{')
+				s.pos++
+				if c == '{' {
+					st = stateKeyOrEnd
+				} else {
+					st = stateValueOrEnd
+				}
+				continue
+			case '"':
+				if _, ok := s.scanString(); !ok {
+					return s.invalid()
+				}
+			default:
+				if !s.scanLiteral() {
+					return s.invalid()
+				}
+			}
+			if len(s.stack) == 0 {
+				return s.finish()
+			}
+			st = stateAfterValue
+		case stateKeyOrEnd, stateKey:
+			if s.pos >= len(s.data) {
+				return s.invalid()
+			}
+			c := s.data[s.pos]
+			if st == stateKeyOrEnd && c == '}' {
+				s.pos++
+				s.pop()
+				if len(s.stack) == 0 {
+					return s.finish()
+				}
+				st = stateAfterValue
+				continue
+			}
+			if c != '"' {
+				return s.invalid()
+			}
+			raw, ok := s.scanString()
+			if !ok {
+				return s.invalid()
+			}
+			s.addKey(raw)
+			st = stateColon
+		case stateColon:
+			if s.pos >= len(s.data) || s.data[s.pos] != ':' {
+				return s.invalid()
+			}
+			s.pos++
+			st = stateValue
+		case stateAfterValue:
+			if s.pos >= len(s.data) {
+				return s.invalid()
+			}
+			top := &s.stack[len(s.stack)-1]
+			c := s.data[s.pos]
+			switch {
+			case c == ',':
+				s.pos++
+				if top.object {
+					st = stateKey
+				} else {
+					top.index++
+					st = stateValue
+				}
+			case c == '}' && top.object, c == ']' && !top.object:
+				s.pos++
+				s.pop()
+				if len(s.stack) == 0 {
+					return s.finish()
+				}
+				st = stateAfterValue
+			default:
+				return s.invalid()
+			}
+		}
+	}
+}
+
+func (s *scanner) skipWS() {
+	for s.pos < len(s.data) {
+		switch s.data[s.pos] {
+		case ' ', '\t', '\n', '\r':
+			s.pos++
+		default:
+			return
+		}
+	}
+}
+
+// finish runs after the root value closed: only white space may follow.
+func (s *scanner) finish() (Result, string, bool, bool) {
+	complete := len(bytes.TrimRightFunc(s.data[s.pos:], unicode.IsSpace)) == 0
+	if s.dupFound {
+		return ResultDuplicate, s.dupPath, s.dupTrunc, complete
+	}
+	if !complete {
+		return ResultInvalid, "", false, false
+	}
+	return ResultOK, "", false, true
+}
+
+func (s *scanner) invalid() (Result, string, bool, bool) {
+	if s.dupFound {
+		return ResultDuplicate, s.dupPath, s.dupTrunc, false
+	}
+	return ResultInvalid, "", false, false
+}
+
+// scanString scans a string starting at the opening quote and returns its raw
+// content without quotes. Raw control bytes are accepted.
+func (s *scanner) scanString() ([]byte, bool) {
+	start := s.pos + 1
+	i := start
+	for {
+		j := bytes.IndexByte(s.data[i:], '"')
+		if j < 0 {
+			return nil, false
+		}
+		end := i + j
+		backslashes := 0
+		for k := end - 1; k >= start && s.data[k] == '\\'; k-- {
+			backslashes++
+		}
+		if backslashes%2 == 0 {
+			s.pos = end + 1
+			return s.data[start:end], true
+		}
+		i = end + 1
+	}
+}
+
+func (s *scanner) scanLiteral() bool {
+	start := s.pos
+	for s.pos < len(s.data) {
+		c := s.data[s.pos]
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '+' || c == '-' || c == '.' {
+			s.pos++
+			continue
+		}
+		break
+	}
+	return s.pos > start
+}
+
+func (s *scanner) push(object bool) {
+	f := frame{object: object}
+	if n := len(s.stack); n > 0 {
+		parent := &s.stack[n-1]
+		f.skip = parent.skip
+		if parent.object {
+			f.keyInParent = parent.key
+			if !f.skip {
+				f.skip = s.skipChild(n-1, parent.key)
+			}
+		}
+	}
+	s.stack = append(s.stack, f)
+}
+
+// skipChild decides whether the value under key of the object at stack
+// position idx is user content or a caller-written schema.
+func (s *scanner) skipChild(idx int, key string) bool {
+	if idx == 0 {
+		if _, ok := rootSkipKeys[key]; ok {
+			return true
+		}
+		return s.opts.SkipRootContent && key == "content"
+	}
+	if idx == 1 && s.stack[0].object && s.stack[1].keyInParent == "generateContentRequest" {
+		if _, ok := generateContentRequestSkipKeys[key]; ok {
+			return true
+		}
+	}
+	_, ok := nestedSkipKeys[key]
+	return ok
+}
+
+func (s *scanner) pop() {
+	s.stack = s.stack[:len(s.stack)-1]
+}
+
+const linearKeyLimit = 16
+
+// addKey records a member name of the current object and checks it against
+// the names seen so far. Only the first duplicate is recorded.
+func (s *scanner) addKey(raw []byte) {
+	top := &s.stack[len(s.stack)-1]
+	if top.skip || s.dupFound {
+		// Skipped subtrees are scanned for structure only, and after the first
+		// duplicate no further names are compared.
+		top.key = ""
+		return
+	}
+	key := decodeKey(raw)
+	top.key = key
+	root := len(s.stack) == 1
+	if s.seen(top, key, root) {
+		s.recordDuplicate(key)
+		return
+	}
+	s.remember(top, key, root)
+}
+
+func (s *scanner) seen(top *frame, key string, root bool) bool {
+	if top.exact != nil {
+		if _, ok := top.exact[key]; ok {
+			return true
+		}
+		if root {
+			_, ok := top.folded[foldKey(key)]
+			return ok
+		}
+		return false
+	}
+	for _, k := range top.keys {
+		if k == key || (root && strings.EqualFold(k, key)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *scanner) remember(top *frame, key string, root bool) {
+	if top.exact == nil {
+		top.keys = append(top.keys, key)
+		if len(top.keys) <= linearKeyLimit {
+			return
+		}
+		top.exact = make(map[string]struct{}, len(top.keys)*2)
+		if root {
+			top.folded = make(map[string]struct{}, len(top.keys)*2)
+		}
+		for _, k := range top.keys {
+			top.exact[k] = struct{}{}
+			if root {
+				top.folded[foldKey(k)] = struct{}{}
+			}
+		}
+		top.keys = nil
+		return
+	}
+	top.exact[key] = struct{}{}
+	if root {
+		top.folded[foldKey(key)] = struct{}{}
+	}
+}
+
+// foldKey maps every rune to the smallest rune of its simple case-folding
+// orbit, so two strings are strings.EqualFold exactly when their fold keys
+// are equal.
+func foldKey(s string) string {
+	ascii := true
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			ascii = false
+			break
+		}
+	}
+	if ascii {
+		// The smallest rune in an ASCII letter's orbit is its upper case
+		// (K/k/U+212A and S/s/U+017F included).
+		return strings.ToUpper(s)
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		min := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			if f < min {
+				min = f
+			}
+		}
+		_, _ = b.WriteRune(min)
+	}
+	return b.String()
+}
+
+// decodeKey returns the member name as a decoder would see it. Raw control
+// bytes are first escaped the way httputil.NormalizeLenientJSONRequestBody
+// does, then JSON escapes are decoded.
+func decodeKey(raw []byte) string {
+	needsWork := false
+	for _, c := range raw {
+		if c == '\\' || c < 0x20 || c == 0x7f {
+			needsWork = true
+			break
+		}
+	}
+	if !needsWork {
+		return string(raw)
+	}
+	normalized := make([]byte, 0, len(raw)+8)
+	normalized = append(normalized, '"')
+	for _, c := range raw {
+		if c < 0x20 || c == 0x7f {
+			const hex = "0123456789abcdef"
+			normalized = append(normalized, '\\', 'u', '0', '0', hex[c>>4], hex[c&0x0f])
+			continue
+		}
+		normalized = append(normalized, c)
+	}
+	normalized = append(normalized, '"')
+	var decoded string
+	if err := json.Unmarshal(normalized, &decoded); err == nil {
+		return decoded
+	}
+	return string(normalized[1 : len(normalized)-1])
+}
+
+func (s *scanner) recordDuplicate(key string) {
+	var b strings.Builder
+	for i := range s.stack[:len(s.stack)-1] {
+		f := &s.stack[i]
+		_ = b.WriteByte('/')
+		if f.object {
+			_, _ = b.WriteString(escapePointer(f.key))
+		} else {
+			_, _ = b.WriteString(strconv.Itoa(f.index))
+		}
+		if b.Len() > MaxPathBytes {
+			break
+		}
+	}
+	_ = b.WriteByte('/')
+	_, _ = b.WriteString(escapePointer(key))
+	s.dupFound = true
+	s.dupPath, s.dupTrunc = truncatePath(b.String())
+}
+
+func escapePointer(segment string) string {
+	if !strings.ContainsAny(segment, "~/") {
+		return segment
+	}
+	segment = strings.ReplaceAll(segment, "~", "~0")
+	return strings.ReplaceAll(segment, "/", "~1")
+}
+
+func truncatePath(path string) (string, bool) {
+	if len(path) <= MaxPathBytes {
+		return path, false
+	}
+	const marker = "…"
+	cut := MaxPathBytes - len(marker)
+	for cut > 0 && !utf8.RuneStart(path[cut]) {
+		cut--
+	}
+	return path[:cut] + marker, true
+}

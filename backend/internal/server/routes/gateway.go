@@ -48,7 +48,14 @@ func RegisterGatewayRoutes(
 		"/realtime",
 	)
 	requestTimeoutUserOverride := middleware.RequestTimeoutUserOverride()
-	requestTimeoutFinalizer := middleware.RequestTimeoutFinalizer()
+	// 重复 JSON 键守卫并入 Finalizer：所有网关链都挂 Finalizer，且它在用户级超时
+	// 生效之后、handler 之前运行。表内路由的文本上限挂在路由级（晚于守卫），预读时先套上。
+	requestTimeoutFinalizer := middleware.WithDuplicateJSONKeyGuard(middleware.RequestTimeoutFinalizer(), map[string]int64{
+		"/v1/systemone":                   cfg.Gateway.TextMaxBodySize,
+		"/v1/alpha/search":                cfg.Gateway.TextMaxBodySize,
+		"/v1/embeddings":                  cfg.Gateway.TextMaxBodySize,
+		"/backend-api/codex/alpha/search": cfg.Gateway.TextMaxBodySize,
+	})
 	clientRequestID := middleware.ClientRequestID()
 	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
 	endpointNorm := handler.InboundEndpointMiddleware()

@@ -97,6 +97,14 @@ func readOpenAIWSClientMessageWithTimeoutStart(
 	for {
 		select {
 		case result := <-readDone:
+			if result.err == nil {
+				if reason := openAIWSClientFrameDuplicateKeyReason(controlCtx, result.messageType, result.payload); reason != "" {
+					// The reader goroutine has finished; close directly instead of
+					// closeAndJoin, which would wait on readDone again.
+					_ = conn.Close(coderws.StatusPolicyViolation, reason)
+					return 0, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, reason, nil)
+				}
+			}
 			return result.messageType, result.payload, result.err
 		case <-timeoutStart:
 			startTimeout()
