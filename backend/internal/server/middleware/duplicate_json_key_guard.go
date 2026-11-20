@@ -96,7 +96,8 @@ func duplicateJSONKeyGuardReadBody(c *gin.Context) ([]byte, bool) {
 		req.Body = errorReadCloser{err: err}
 		return nil, false
 	}
-	req.Body = io.NopCloser(bytes.NewReader(raw))
+	// Replay the transfer bytes; gateway readers decode them in place.
+	req.Body = httputil.NewTransferBytesBody(raw)
 
 	decoded, err := httputil.DecodeRequestBodyBytes(encoding, raw)
 	if err != nil {

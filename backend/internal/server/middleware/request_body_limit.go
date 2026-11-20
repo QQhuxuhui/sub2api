@@ -17,6 +17,10 @@ func RequestBodyLimit(maxBytes int64) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		if transfer, ok := c.Request.Body.(*httputil.TransferBytesBody); ok && int64(len(transfer.Bytes())) <= maxBytes {
+			c.Next()
+			return
+		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
 		c.Next()
 	}

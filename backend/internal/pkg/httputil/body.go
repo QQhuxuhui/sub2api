@@ -70,6 +70,9 @@ func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 	if preread, ok := req.Body.(*PrereadBody); ok {
 		return preread.Bytes(), nil
 	}
+	if transfer, ok := req.Body.(*TransferBytesBody); ok {
+		return decodeTransferBytes(req, transfer.Bytes())
+	}
 
 	capHint := requestBodyReadInitCap
 	if req.ContentLength > 0 {
@@ -168,7 +171,7 @@ func ReadLenientJSONRequestBodyWithPrealloc(req *http.Request, maxNormalizedByte
 func decompressRequestBody(encoding string, raw []byte) ([]byte, error) {
 	switch encoding {
 	case "zstd":
-		dec, err := zstd.NewReader(bytes.NewReader(raw))
+		dec, err := zstd.NewReader(bytes.NewReader(raw), zstdRequestDecoderOptions...)
 		if err != nil {
 			return nil, err
 		}
