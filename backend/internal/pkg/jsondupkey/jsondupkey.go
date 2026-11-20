@@ -33,7 +33,15 @@ const (
 	ResultTooDeep
 	// ResultInvalid: the body starts like JSON but is structurally malformed.
 	ResultInvalid
+	// ResultTooManyKeys: the objects open at one point of the scan hold more
+	// than MaxHeldKeys member names, which no real request needs.
+	ResultTooManyKeys
 )
+
+// MaxHeldKeys bounds the member names the scanner keeps at once (the names of
+// every object still open), and with it the memory a wide object can make the
+// scan hold.
+const MaxHeldKeys = 100000
 
 // MaxDepth matches the nesting limit of encoding/json.
 const MaxDepth = 10000
@@ -171,9 +179,12 @@ type frame struct {
 	index int
 	// keyInParent is the member name under which this container sits.
 	keyInParent string
-	keys        []string
-	exact       map[string]struct{}
-	folded      map[string]struct{}
+	// keys holds the names seen so far, as compared: folded at the root,
+	// as decoded elsewhere. table replaces keys once it grows past
+	// linearKeyLimit.
+	keys  []string
+	table map[string]struct{}
+	count int
 }
 
 type scanner struct {
@@ -182,6 +193,8 @@ type scanner struct {
 	opts  Options
 	stack []frame
 
+	held     int
+	tooMany  bool
 	dupFound bool
 	dupPath  string
 	dupTrunc bool
@@ -265,6 +278,9 @@ func (s *scanner) run() (Result, string, bool, bool) {
 				return s.invalid()
 			}
 			s.addKey(raw)
+			if s.tooMany {
+				return ResultTooManyKeys, "", false, false
+			}
 			st = stateColon
 		case stateColon:
 			if s.pos >= len(s.data) || s.data[s.pos] != ':' {
@@ -401,6 +417,7 @@ func (s *scanner) skipChild(idx int, key string) bool {
 }
 
 func (s *scanner) pop() {
+	s.held -= s.stack[len(s.stack)-1].count
 	s.stack = s.stack[:len(s.stack)-1]
 }
 
@@ -433,16 +450,16 @@ func (s *scanner) addKey(raw []byte) {
 	s.remember(top, key, root)
 }
 
+// seen reports whether key repeats a name of the object. At the root, names
+// equal under case folding count as repeats, since struct binding upstream
+// matches them; the root table therefore holds folded names only.
 func (s *scanner) seen(top *frame, key string, root bool) bool {
-	if top.exact != nil {
-		if _, ok := top.exact[key]; ok {
-			return true
-		}
+	if top.table != nil {
 		if root {
-			_, ok := top.folded[foldKey(key)]
-			return ok
+			key = foldKey(key)
 		}
-		return false
+		_, ok := top.table[key]
+		return ok
 	}
 	for _, k := range top.keys {
 		if k == key || (root && strings.EqualFold(k, key)) {
@@ -453,28 +470,31 @@ func (s *scanner) seen(top *frame, key string, root bool) bool {
 }
 
 func (s *scanner) remember(top *frame, key string, root bool) {
-	if top.exact == nil {
+	top.count++
+	s.held++
+	if s.held > MaxHeldKeys {
+		s.tooMany = true
+		return
+	}
+	if top.table == nil {
 		top.keys = append(top.keys, key)
 		if len(top.keys) <= linearKeyLimit {
 			return
 		}
-		top.exact = make(map[string]struct{}, len(top.keys)*2)
-		if root {
-			top.folded = make(map[string]struct{}, len(top.keys)*2)
-		}
+		top.table = make(map[string]struct{}, len(top.keys)*2)
 		for _, k := range top.keys {
-			top.exact[k] = struct{}{}
 			if root {
-				top.folded[foldKey(k)] = struct{}{}
+				k = foldKey(k)
 			}
+			top.table[k] = struct{}{}
 		}
 		top.keys = nil
 		return
 	}
-	top.exact[key] = struct{}{}
 	if root {
-		top.folded[foldKey(key)] = struct{}{}
+		key = foldKey(key)
 	}
+	top.table[key] = struct{}{}
 }
 
 // foldKey maps every rune to the smallest rune of its simple case-folding

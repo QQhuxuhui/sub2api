@@ -144,6 +144,39 @@ func TestFindLongKeysAreNotCompared(t *testing.T) {
 	require.True(t, strings.HasSuffix(path, "/x"))
 }
 
+// The names of open objects are bounded; names of closed objects are freed.
+func TestFindHeldKeyBudget(t *testing.T) {
+	wide := func(n int) string {
+		var b strings.Builder
+		b.WriteString("{")
+		for i := 0; i < n; i++ {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			b.WriteString(`"k` + strconv.Itoa(i) + `":1`)
+		}
+		b.WriteString("}")
+		return b.String()
+	}
+	result, _, _, _ := Find([]byte(wide(MaxHeldKeys)))
+	require.Equal(t, ResultOK, result)
+	result, _, _, _ = Find([]byte(wide(MaxHeldKeys + 1)))
+	require.Equal(t, ResultTooManyKeys, result)
+
+	// Many sibling objects, each closed before the next opens.
+	siblings := "[" + strings.TrimSuffix(strings.Repeat(wide(1000)+",", 200), ",") + "]"
+	result, _, _, _ = Find([]byte(siblings))
+	require.Equal(t, ResultOK, result)
+
+	// Wide root objects keep one table, folded, and still catch both kinds.
+	result, path, _, _ := Find([]byte(strings.TrimSuffix(wide(100), "}") + `,"K7":2}`))
+	require.Equal(t, ResultDuplicate, result)
+	require.Equal(t, "/K7", path)
+	result, path, _, _ = Find([]byte(strings.TrimSuffix(wide(100), "}") + `,"k7":2}`))
+	require.Equal(t, ResultDuplicate, result)
+	require.Equal(t, "/k7", path)
+}
+
 func TestFindTruncatesLongPath(t *testing.T) {
 	key := strings.Repeat("键", 200)
 	body := []byte(`{"` + key + `":1,"` + key + `":2}`)

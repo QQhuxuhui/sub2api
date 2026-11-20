@@ -172,8 +172,12 @@ func duplicateJSONKeyGuardRejects(c *gin.Context, body []byte) bool {
 	result, path, truncated, complete := jsondupkey.FindWithOptions(body, jsondupkey.Options{
 		SkipRootContent: duplicateJSONKeyGuardSeedanceRoutes[route],
 	})
-	if result == jsondupkey.ResultTooDeep {
+	switch result {
+	case jsondupkey.ResultTooDeep:
 		rejectDuplicateJSONKey(c, "too_deep", "", false)
+		return true
+	case jsondupkey.ResultTooManyKeys:
+		rejectDuplicateJSONKey(c, "too_many_keys", "", false)
 		return true
 	}
 	if !complete && duplicateJSONKeyGuardMultipartRoutes[route] && isMultipartFormRequest(c.Request) {
@@ -226,6 +230,8 @@ func rejectDuplicateJSONKey(c *gin.Context, reason, jsonPath string, truncated b
 		message, code = "Request body contains a duplicate JSON key: "+jsonPath, "duplicate_json_key"
 	case "too_deep":
 		message, code = "Request body JSON nesting is too deep", "json_nesting_too_deep"
+	case "too_many_keys":
+		message, code = "Request body has too many JSON keys", "json_too_many_keys"
 	default:
 		message, code = "Failed to parse request body", "invalid_json"
 	}

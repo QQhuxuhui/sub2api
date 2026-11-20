@@ -15,6 +15,7 @@ import (
 const (
 	openAIWSDuplicateJSONKeyCloseReason = "duplicate JSON key in request"
 	openAIWSJSONTooDeepCloseReason      = "JSON nesting too deep"
+	openAIWSJSONTooManyKeysCloseReason  = "too many JSON keys"
 )
 
 type openAIWSRequestIdentityKey struct{}
@@ -55,6 +56,8 @@ func openAIWSClientFrameDuplicateKeyReason(ctx context.Context, msgType coderws.
 		reason, closeReason = "duplicate", openAIWSDuplicateJSONKeyCloseReason
 	case jsondupkey.ResultTooDeep:
 		reason, closeReason = "too_deep", openAIWSJSONTooDeepCloseReason
+	case jsondupkey.ResultTooManyKeys:
+		reason, closeReason = "too_many_keys", openAIWSJSONTooManyKeysCloseReason
 	default:
 		return ""
 	}

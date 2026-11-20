@@ -9,11 +9,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/jsondupkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -271,6 +273,24 @@ func TestDuplicateJSONKeyGuard_LeadingSpaceProbeIsLinear(t *testing.T) {
 	rec = doGuard(r, http.MethodPost, "/v1/chat/completions", strings.NewReader(body), nil)
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.Equal(t, body, string(down.body))
+}
+
+func TestDuplicateJSONKeyGuard_RejectsTooManyKeys(t *testing.T) {
+	r, down, logs := newGuardRouter(t, nil)
+	var b strings.Builder
+	b.WriteString("{")
+	for i := 0; i <= jsondupkey.MaxHeldKeys; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`"k` + strconv.Itoa(i) + `":1`)
+	}
+	b.WriteString("}")
+	rec := doGuard(r, http.MethodPost, "/v1/images/edits", strings.NewReader(b.String()), map[string]string{"Content-Type": "multipart/form-data; boundary=x"})
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "json_too_many_keys", gjson.Get(rec.Body.String(), "error.code").String())
+	require.False(t, down.called)
+	require.Equal(t, "too_many_keys", logs.All()[0].ContextMap()["reason"])
 }
 
 type failingBody struct{ err error }
