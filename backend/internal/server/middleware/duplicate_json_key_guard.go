@@ -98,9 +98,7 @@ func duplicateJSONKeyGuardReadBody(c *gin.Context) ([]byte, bool) {
 	}
 	req.Body = io.NopCloser(bytes.NewReader(raw))
 
-	decodeReq := req.Clone(req.Context())
-	decodeReq.Body = io.NopCloser(bytes.NewReader(raw))
-	decoded, err := httputil.ReadRequestBodyWithPrealloc(decodeReq)
+	decoded, err := httputil.DecodeRequestBodyBytes(encoding, raw)
 	if err != nil {
 		// Endpoints that bind JSON without decoding read the raw bytes.
 		return raw, true
