@@ -3578,6 +3578,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("gateway.openai_ws.ingress_mode_default must be one of off|ctx_pool|passthrough|http_bridge")
 		}
 	}
+	warnOpenAIWSPassthroughBillingGap(c, nil)
 	if mode := strings.ToLower(strings.TrimSpace(c.Gateway.OpenAIWS.StoreDisabledConnMode)); mode != "" {
 		switch mode {
 		case "strict", "adaptive", "off":
