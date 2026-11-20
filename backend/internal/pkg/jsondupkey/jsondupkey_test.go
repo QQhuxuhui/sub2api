@@ -177,6 +177,40 @@ func TestFindHeldKeyBudget(t *testing.T) {
 	require.Equal(t, "/k7", path)
 }
 
+// Closed objects at decreasing depths must not stay reachable from the stack's
+// backing array.
+func TestFindPopClearsFrames(t *testing.T) {
+	s := scanner{data: []byte(`{"a":{"b":{"c":{"k1":1,"k2":2},"x":1},"y":1},"z":1}`)}
+	result, _, _, _ := s.run()
+	require.Equal(t, ResultOK, result)
+	full := s.stack[:cap(s.stack)]
+	for i := range full {
+		require.Nil(t, full[i].keys, "slot %d", i)
+		require.Nil(t, full[i].table, "slot %d", i)
+	}
+	require.Zero(t, s.held)
+	require.Zero(t, s.heldBytes)
+}
+
+// Undecodable keys keep their raw size, and the total bytes held is bounded.
+func TestFindHeldKeyBytesBudget(t *testing.T) {
+	require.Equal(t, "\x01\\q", decodeKey([]byte("\x01\\q")))
+
+	key := strings.Repeat("\x01", MaxComparedKeyBytes-16)
+	var b strings.Builder
+	b.WriteString("{")
+	n := MaxHeldKeyBytes/len(key) + 2
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`"` + key + strconv.Itoa(i) + `\q":1`)
+	}
+	b.WriteString("}")
+	result, _, _, _ := Find([]byte(b.String()))
+	require.Equal(t, ResultTooManyKeys, result)
+}
+
 func TestFindTruncatesLongPath(t *testing.T) {
 	key := strings.Repeat("键", 200)
 	body := []byte(`{"` + key + `":1,"` + key + `":2}`)

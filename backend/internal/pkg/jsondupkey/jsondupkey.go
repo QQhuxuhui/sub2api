@@ -43,6 +43,9 @@ const (
 // scan hold.
 const MaxHeldKeys = 100000
 
+// MaxHeldKeyBytes bounds the total size of those names.
+const MaxHeldKeyBytes = 16 << 20
+
 // MaxDepth matches the nesting limit of encoding/json.
 const MaxDepth = 10000
 
@@ -185,6 +188,7 @@ type frame struct {
 	keys  []string
 	table map[string]struct{}
 	count int
+	bytes int
 }
 
 type scanner struct {
@@ -193,11 +197,12 @@ type scanner struct {
 	opts  Options
 	stack []frame
 
-	held     int
-	tooMany  bool
-	dupFound bool
-	dupPath  string
-	dupTrunc bool
+	held      int
+	heldBytes int
+	tooMany   bool
+	dupFound  bool
+	dupPath   string
+	dupTrunc  bool
 }
 
 type state int
@@ -417,8 +422,13 @@ func (s *scanner) skipChild(idx int, key string) bool {
 }
 
 func (s *scanner) pop() {
-	s.held -= s.stack[len(s.stack)-1].count
-	s.stack = s.stack[:len(s.stack)-1]
+	n := len(s.stack) - 1
+	s.held -= s.stack[n].count
+	s.heldBytes -= s.stack[n].bytes
+	// Clear the slot so the backing array does not keep the closed object's
+	// names alive.
+	s.stack[n] = frame{}
+	s.stack = s.stack[:n]
 }
 
 const linearKeyLimit = 16
@@ -471,8 +481,10 @@ func (s *scanner) seen(top *frame, key string, root bool) bool {
 
 func (s *scanner) remember(top *frame, key string, root bool) {
 	top.count++
+	top.bytes += len(key)
 	s.held++
-	if s.held > MaxHeldKeys {
+	s.heldBytes += len(key)
+	if s.held > MaxHeldKeys || s.heldBytes > MaxHeldKeyBytes {
 		s.tooMany = true
 		return
 	}
@@ -556,7 +568,10 @@ func decodeKey(raw []byte) string {
 	if err := json.Unmarshal(normalized, &decoded); err == nil {
 		return decoded
 	}
-	return string(normalized[1 : len(normalized)-1])
+	// Not decodable even after normalization (a bad escape): the lenient
+	// request path rejects such a body anyway; keep the raw bytes, not the
+	// expanded form.
+	return string(raw)
 }
 
 func (s *scanner) recordDuplicate(key string) {
