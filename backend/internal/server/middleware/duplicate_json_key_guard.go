@@ -116,12 +116,15 @@ func duplicateJSONKeyGuardReadPlain(c *gin.Context) ([]byte, bool) {
 	original := req.Body
 	prefix := make([]byte, 0, 512)
 	chunk := make([]byte, 512)
+	scanned := 0
 	for {
 		n, err := original.Read(chunk)
 		prefix = append(prefix, chunk[:n]...)
-		if !jsondupkey.IsLeadingSpacePrefix(prefix) {
+		end, more := jsondupkey.LeadingSpaceEnd(prefix, scanned)
+		if !more {
 			break
 		}
+		scanned = end
 		if err == io.EOF {
 			req.Body = replayReadCloser(prefix, nil, original)
 			return prefix, true

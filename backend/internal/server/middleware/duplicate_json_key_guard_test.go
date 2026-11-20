@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -253,6 +254,23 @@ func TestDuplicateJSONKeyGuard_SkipsGETAndAttachesIdentity(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.True(t, down.called)
 	require.Equal(t, dupModel, string(down.body))
+}
+
+// Leading white space arrives in many small reads; the probe must not rescan
+// the whole prefix on every read (4 MiB would take minutes if it did).
+func TestDuplicateJSONKeyGuard_LeadingSpaceProbeIsLinear(t *testing.T) {
+	r, down, _ := newGuardRouter(t, nil)
+	body := strings.Repeat(" ", 4<<20) + dupModel
+	start := time.Now()
+	rec := doGuard(r, http.MethodPost, "/v1/chat/completions", strings.NewReader(body), nil)
+	require.Less(t, time.Since(start), 2*time.Second)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.False(t, down.called)
+
+	body = strings.Repeat("\u3000", 1<<20) + "--boundary"
+	rec = doGuard(r, http.MethodPost, "/v1/chat/completions", strings.NewReader(body), nil)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Equal(t, body, string(down.body))
 }
 
 type failingBody struct{ err error }

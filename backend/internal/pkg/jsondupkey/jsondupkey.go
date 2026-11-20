@@ -95,17 +95,40 @@ func LeadingByte(body []byte) (byte, bool) {
 	return rest[0], true
 }
 
-// IsLeadingSpacePrefix reports whether body holds only a BOM and white space
-// so far, possibly ending in an incomplete UTF-8 sequence that more input
-// could turn into white space. It lets a streaming reader know whether to read
-// on before deciding with LeadingByte.
-func IsLeadingSpacePrefix(body []byte) bool {
-	rest := trimLeft(body)
-	return len(rest) == 0 || (len(rest) < utf8.UTFMax && !utf8.FullRune(rest))
+// LeadingSpaceEnd scans body from offset from, which must be a value it
+// returned earlier (0 at first), over a leading UTF-8 BOM and white space as
+// LeadingByte counts them. It returns the offset where scanning stopped and
+// whether more input is needed to decide: true when everything so far is BOM
+// or white space (possibly ending in an incomplete rune), false when end is
+// the offset of the first significant byte. Feeding it a growing buffer with
+// the previous end keeps the total work linear.
+func LeadingSpaceEnd(body []byte, from int) (end int, more bool) {
+	i := from
+	if i == 0 {
+		switch {
+		case bytes.HasPrefix(body, utf8BOM):
+			i = len(utf8BOM)
+		case len(body) < len(utf8BOM) && bytes.HasPrefix(utf8BOM, body):
+			return 0, true
+		}
+	}
+	for i < len(body) {
+		r, size := utf8.DecodeRune(body[i:])
+		if r == utf8.RuneError && size <= 1 && !utf8.FullRune(body[i:]) {
+			return i, true
+		}
+		if !unicode.IsSpace(r) {
+			return i, false
+		}
+		i += size
+	}
+	return i, true
 }
 
+var utf8BOM = []byte("\xef\xbb\xbf")
+
 func trimLeft(body []byte) []byte {
-	body = bytes.TrimPrefix(body, []byte("\xef\xbb\xbf"))
+	body = bytes.TrimPrefix(body, utf8BOM)
 	return bytes.TrimLeftFunc(body, unicode.IsSpace)
 }
 

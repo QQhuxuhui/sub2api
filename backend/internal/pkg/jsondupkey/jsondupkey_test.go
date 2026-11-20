@@ -140,8 +140,17 @@ func TestLeadingByte(t *testing.T) {
 	require.Equal(t, byte('{'), b)
 	_, ok = LeadingByte([]byte(" \n\t"))
 	require.False(t, ok)
-	require.True(t, IsLeadingSpacePrefix([]byte(" \xe3\x80")), "incomplete U+3000")
-	require.False(t, IsLeadingSpacePrefix([]byte(" x")))
+	end, more := LeadingSpaceEnd([]byte(" \xe3\x80"), 0)
+	require.True(t, more, "incomplete U+3000")
+	require.Equal(t, 1, end)
+	end, more = LeadingSpaceEnd([]byte(" \xe3\x80\x80{"), end)
+	require.False(t, more)
+	require.Equal(t, 4, end)
+	_, more = LeadingSpaceEnd([]byte("\xef\xbb"), 0)
+	require.True(t, more, "incomplete BOM")
+	end, more = LeadingSpaceEnd([]byte("\xef\xbb\xbf x"), 0)
+	require.False(t, more)
+	require.Equal(t, 4, end)
 }
 
 func benchmarkBodies() map[string][]byte {
