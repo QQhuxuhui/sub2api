@@ -53,8 +53,19 @@ func (t *TransferBytesBody) Read(p []byte) (int, error) { return t.reader.Read(p
 // Close implements io.Closer.
 func (t *TransferBytesBody) Close() error { return nil }
 
-// Bytes returns the complete transfer bytes.
+// Bytes returns the complete transfer bytes (nil once a gateway reader has
+// taken them).
 func (t *TransferBytesBody) Bytes() []byte { return t.body }
+
+// take hands the unread bytes to ReadRequestBodyWithPrealloc and drops the
+// wrapper's references, so the transfer buffer is not kept alive for the rest
+// of the request and later reads see EOF as they would on the wire.
+func (t *TransferBytesBody) take() []byte {
+	rest := t.body[len(t.body)-t.reader.Len():]
+	t.body = nil
+	t.reader = bytes.NewReader(nil)
+	return rest
+}
 
 // decodeTransferBytes finishes ReadRequestBodyWithPrealloc for a body whose
 // transfer bytes are already in memory. It mirrors that function's decoding

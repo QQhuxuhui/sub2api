@@ -71,7 +71,7 @@ func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 		return preread.Bytes(), nil
 	}
 	if transfer, ok := req.Body.(*TransferBytesBody); ok {
-		return decodeTransferBytes(req, transfer.Bytes())
+		return decodeTransferBytes(req, transfer.take())
 	}
 
 	capHint := requestBodyReadInitCap

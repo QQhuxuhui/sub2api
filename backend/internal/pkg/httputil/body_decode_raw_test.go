@@ -93,6 +93,13 @@ func TestTransferBytesBodyMatchesStreamingRead(t *testing.T) {
 			require.Equal(t, streamReq.Header, transferReq.Header)
 			require.Equal(t, streamReq.ContentLength, transferReq.ContentLength)
 
+			// After the gateway read, the body is drained like a wire body and
+			// the wrapper no longer holds the transfer buffer.
+			wantRest, _ := io.ReadAll(streamReq.Body)
+			gotRest, _ := io.ReadAll(transferReq.Body)
+			require.Equal(t, wantRest, gotRest)
+			require.Nil(t, transfer.Bytes())
+
 			plain, err := io.ReadAll(NewTransferBytesBody(tc.body))
 			require.NoError(t, err)
 			require.Equal(t, tc.body, plain, "plain readers see the transfer bytes")
