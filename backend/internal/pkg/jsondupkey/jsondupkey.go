@@ -38,6 +38,15 @@ const (
 // MaxDepth matches the nesting limit of encoding/json.
 const MaxDepth = 10000
 
+// MaxComparedKeyBytes is the longest raw member name (as written, escapes
+// included) that is decoded and compared. Longer names cannot be any request
+// field the gateway reads, and decoding them would cost memory proportional
+// to client input.
+const MaxComparedKeyBytes = 4096
+
+// longKeyPathBytes is how much of an uncompared long name appears in a path.
+const longKeyPathBytes = 64
+
 // MaxPathBytes bounds the JSON Pointer returned for a duplicate key, so a
 // client-chosen key name cannot inflate error responses or log lines.
 const MaxPathBytes = 256
@@ -405,6 +414,13 @@ func (s *scanner) addKey(raw []byte) {
 		// Skipped subtrees are scanned for structure only, and after the first
 		// duplicate no further names are compared.
 		top.key = ""
+		return
+	}
+	if len(raw) > MaxComparedKeyBytes {
+		// No request field the gateway bills or routes on has a name this long
+		// (even fully \u-escaped), so such names are not compared. Skipping them
+		// also bounds the memory spent decoding client-chosen names.
+		top.key = string(raw[:longKeyPathBytes]) + "…"
 		return
 	}
 	key := decodeKey(raw)

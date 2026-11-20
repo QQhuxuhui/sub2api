@@ -117,6 +117,33 @@ func TestFindKeyWithControlByteAndEscape(t *testing.T) {
 	require.Equal(t, "/a\tbc", path)
 }
 
+// Long member names are neither decoded nor compared, so a name made of
+// control bytes cannot make the scanner allocate several times its size.
+func TestFindLongKeysAreNotCompared(t *testing.T) {
+	long := strings.Repeat("\x01", MaxComparedKeyBytes+1)
+	body := []byte(`{"` + long + `":1,"` + long + `":2,"model":"a","model":"b"}`)
+	result, path, _, complete := Find(body)
+	require.Equal(t, ResultDuplicate, result)
+	require.Equal(t, "/model", path)
+	require.True(t, complete)
+
+	huge := []byte(`{"` + strings.Repeat("\x01", 8<<20) + `":1}`)
+	allocs := testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			Find(huge)
+		}
+	})
+	require.Less(t, allocs.AllocedBytesPerOp(), int64(64<<10), "decoding cost must not grow with the key")
+
+	// A long parent name still yields a bounded path.
+	nested := []byte(`{"` + strings.Repeat("p", MaxComparedKeyBytes+1) + `":{"x":1,"x":2}}`)
+	result, path, _, _ = Find(nested)
+	require.Equal(t, ResultDuplicate, result)
+	require.LessOrEqual(t, len(path), MaxPathBytes)
+	require.True(t, strings.HasSuffix(path, "/x"))
+}
+
 func TestFindTruncatesLongPath(t *testing.T) {
 	key := strings.Repeat("键", 200)
 	body := []byte(`{"` + key + `":1,"` + key + `":2}`)
