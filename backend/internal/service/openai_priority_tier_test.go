@@ -746,3 +746,40 @@ func TestPriorityTier_QueueWalkRechecksEachCandidateOnce(t *testing.T) {
 	_, demoted := st.demoted[4]
 	require.True(t, demoted)
 }
+
+func TestPriorityTier_WeightedStickyFullQueueBecomesBackup(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(4)
+	a := priorityTierTestAccount(1, 1, groupID)
+	b := priorityTierTestAccount(2, 1, groupID)
+	cc := schedulerTestConcurrencyCache{acquireResults: map[int64]bool{1: false, 2: false}}
+	svc := newPriorityTierTestService([]Account{a, b}, cc, nil, priorityTierTestOptions{tierGroups: "[4]"})
+	svc.cfg.Gateway.Scheduling.StickySessionMaxWaiting = 3
+	svc.cfg.Gateway.Scheduling.FallbackMaxWaiting = 3
+	scheduler := &defaultOpenAIAccountScheduler{service: svc}
+	req := OpenAIAccountScheduleRequest{GroupID: &groupID, Platform: PlatformOpenAI, RequestedModel: "gpt-5.1", StickyWeighted: true, StickyAccountID: 1}
+	order := []openAIAccountCandidateScore{
+		{account: &a, loadKnown: true, loadInfo: &AccountLoadInfo{AccountID: 1, WaitingCount: 3}},
+		{account: &b, loadKnown: true, loadInfo: &AccountLoadInfo{AccountID: 2, WaitingCount: 0}},
+	}
+	selection, queueFull, err := scheduler.finishPriorityTierFallback(ctx, req, openAIAccountLoadSelectionAttempt{selectionOrder: order}, newOpenAISelectionProbeBudget(), openAISelectionFilterStats{}, 1, &openAIPriorityTierSelectionState{})
+	require.NoError(t, err)
+	require.False(t, queueFull)
+	require.Equal(t, int64(2), selection.WaitPlan.AccountID, "粘连号满队时应让同池可入队的候选先排")
+
+	// 粘连号队列未满：保持原逻辑，直接用粘连 WaitPlan。
+	order[0].loadInfo = &AccountLoadInfo{AccountID: 1, WaitingCount: 0}
+	selection, queueFull, err = scheduler.finishPriorityTierFallback(ctx, req, openAIAccountLoadSelectionAttempt{selectionOrder: order}, newOpenAISelectionProbeBudget(), openAISelectionFilterStats{}, 1, &openAIPriorityTierSelectionState{})
+	require.NoError(t, err)
+	require.False(t, queueFull)
+	require.Equal(t, int64(1), selection.WaitPlan.AccountID)
+	require.Equal(t, AccountWaitKindSticky, selection.WaitPlan.Kind)
+
+	// 全部满队：回到粘连备选。
+	order[0].loadInfo = &AccountLoadInfo{AccountID: 1, WaitingCount: 3}
+	order[1].loadInfo = &AccountLoadInfo{AccountID: 2, WaitingCount: 3}
+	selection, queueFull, err = scheduler.finishPriorityTierFallback(ctx, req, openAIAccountLoadSelectionAttempt{selectionOrder: order}, newOpenAISelectionProbeBudget(), openAISelectionFilterStats{}, 1, &openAIPriorityTierSelectionState{})
+	require.NoError(t, err)
+	require.True(t, queueFull)
+	require.Equal(t, int64(1), selection.WaitPlan.AccountID)
+}

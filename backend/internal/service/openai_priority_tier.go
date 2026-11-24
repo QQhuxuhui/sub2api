@@ -680,17 +680,22 @@ func (s *defaultOpenAIAccountScheduler) finishPriorityTierFallback(
 		return nil, false, noAvailableOpenAISelectionError(req.RequestedModel, attempt.compactBlocked, filterStats.summary("selection_order_empty"))
 	}
 
+	cfg := s.service.schedulingConfig()
+	compactBlocked := attempt.compactBlocked
+	var backup *AccountSelectionResult
+
 	if stickyFallback, stickyErr := s.tryFallbackToWeightedSticky(ctx, req); stickyErr != nil {
 		return nil, false, stickyErr
 	} else if stickyFallback != nil {
 		if st.acceptTierSelection(stickyFallback, tierPriority) {
-			return stickyFallback, false, nil
+			if stickyFallback.Acquired || !openAIPriorityTierWaitQueueKnownFull(stickyFallback, attempt.selectionOrder) {
+				return stickyFallback, false, nil
+			}
+			// 粘连号的等待队列已知满：留作备选，继续找能入队的候选。
+			backup = stickyFallback
 		}
 	}
 
-	cfg := s.service.schedulingConfig()
-	compactBlocked := attempt.compactBlocked
-	var backup *AccountSelectionResult
 	passes := 1
 	if budget != nil && budget.limited {
 		passes = 4
@@ -761,4 +766,19 @@ func (s *defaultOpenAIAccountScheduler) finishPriorityTierFallback(
 		return backup, true, nil
 	}
 	return nil, false, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked, filterStats.summary("selection_order_exhausted"))
+}
+
+// openAIPriorityTierWaitQueueKnownFull 依据候选里已有的负载数据判断 WaitPlan 对应账号的
+// 等待队列是否已满；负载未知时返回 false（按原逻辑直接使用该计划）。
+func openAIPriorityTierWaitQueueKnownFull(selection *AccountSelectionResult, order []openAIAccountCandidateScore) bool {
+	if selection == nil || selection.WaitPlan == nil || selection.WaitPlan.MaxWaiting <= 0 {
+		return false
+	}
+	for _, candidate := range order {
+		if candidate.account == nil || candidate.account.ID != selection.WaitPlan.AccountID {
+			continue
+		}
+		return candidate.loadKnown && candidate.loadInfo != nil && candidate.loadInfo.WaitingCount >= selection.WaitPlan.MaxWaiting
+	}
+	return false
 }
