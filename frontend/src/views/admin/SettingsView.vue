@@ -5163,6 +5163,8 @@
                 <Toggle v-model="form.openai_advanced_scheduler_subscription_priority_enabled" />
               </div>
 
+              <OpenAIPriorityTierGroups v-if="form.openai_advanced_scheduler_enabled" />
+
               <div
                 v-if="form.openai_advanced_scheduler_enabled"
                 class="flex flex-col items-stretch gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6 dark:border-dark-700"
@@ -9072,6 +9074,7 @@ import {
   stepUpBlockReason,
 } from "@/composables/useStepUp";
 import AdminAccessKeysSettings from "@/components/admin/settings/AdminAccessKeysSettings.vue";
+import OpenAIPriorityTierGroups from "@/components/admin/settings/OpenAIPriorityTierGroups.vue";
 import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
 import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSimpleUser } from "@/api/admin/affiliates";
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";

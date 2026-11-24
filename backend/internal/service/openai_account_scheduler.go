@@ -459,6 +459,16 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		if err != nil {
 			return nil, decision, err
 		}
+		// gptniubi 挂点：分组优先级严格分档（openai_priority_tier.go），关闭时不进入。
+		if replaced, better := s.applyOpenAIPriorityTierToSticky(ctx, req, selection); replaced {
+			if better != nil {
+				decision.Layer = openAIAccountScheduleLayerLoadBalance
+				decision.SelectedAccountID = better.Account.ID
+				decision.SelectedAccountType = better.Account.Type
+				return better, decision, nil
+			}
+			selection = nil
+		}
 		if selection != nil && selection.Account != nil {
 			decision.Layer = openAIAccountScheduleLayerSessionSticky
 			decision.StickySessionHit = true
@@ -1496,6 +1506,11 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		if batchLoad, loadErr := s.service.concurrencyService.GetAccountsLoadBatch(ctx, loadReq); loadErr == nil {
 			loadMap = batchLoad
 		}
+	}
+
+	// gptniubi 挂点：分组优先级严格分档（openai_priority_tier.go），关闭时不进入。
+	if s.service.openAIPriorityTierActive(ctx, req) {
+		return s.selectByPriorityTiers(ctx, req, filtered, loadMap, budget, filterStats)
 	}
 
 	if req.SubscriptionPriority {

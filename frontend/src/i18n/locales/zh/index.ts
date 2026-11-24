@@ -1,4 +1,5 @@
 import adminAccessKeys from './adminAccessKeys'
+import openaiPriorityTier from './openaiPriorityTier'
 import landing from './landing'
 import common from './common'
 import dashboard from './dashboard'
@@ -12,6 +13,7 @@ import misc from './misc'
 
 export default {
   adminAccessKeys,
+  openaiPriorityTier,
   ...landing,
   ...common,
   ...dashboard,
