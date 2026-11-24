@@ -468,7 +468,13 @@ func (s *defaultOpenAIAccountScheduler) acquireFromPriorityTierPool(
 	queue.result = nil
 	queue.err = nil
 	queue.compactBlocked = compactBlocked
-	queue.selectionOrder = mergeOpenAIPriorityTierQueueOrder(attempt.selectionOrder, retryOrder, st.demoted, req.RequireCompact, retryLoadFresh)
+	queueRetry := retryOrder
+	if !retryLoadFresh {
+		// 补试刷新失败：抢槽已按未知负载真实尝试过；排队判断等待队列时，
+		// 只出现在补试顺序里的账号回退到本次请求最初读到的负载，避免丢掉已知满队状态。
+		queueRetry = openAIPriorityTierWithInitialLoad(retryOrder, loadMap)
+	}
+	queue.selectionOrder = mergeOpenAIPriorityTierQueueOrder(attempt.selectionOrder, queueRetry, st.demoted, req.RequireCompact, retryLoadFresh)
 	return openAIPriorityTierPoolOutcome{queueAttempt: &queue}
 }
 
@@ -797,4 +803,21 @@ func openAIPriorityTierWaitQueueKnownFull(selection *AccountSelectionResult, ord
 		return candidate.loadKnown && candidate.loadInfo != nil && candidate.loadInfo.WaitingCount >= selection.WaitPlan.MaxWaiting
 	}
 	return false
+}
+
+// openAIPriorityTierWithInitialLoad 返回 order 的副本，候选负载换成 loadMap 里的初始观测值
+// （loadMap 没有的保持原样）。只用于排队阶段判断等待队列是否已满。
+func openAIPriorityTierWithInitialLoad(order []openAIAccountCandidateScore, loadMap map[int64]*AccountLoadInfo) []openAIAccountCandidateScore {
+	out := make([]openAIAccountCandidateScore, len(order))
+	copy(out, order)
+	for i := range out {
+		if out[i].account == nil {
+			continue
+		}
+		if load, ok := loadMap[out[i].account.ID]; ok && load != nil {
+			out[i].loadInfo = load
+			out[i].loadKnown = true
+		}
+	}
+	return out
 }

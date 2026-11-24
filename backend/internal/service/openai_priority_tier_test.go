@@ -840,3 +840,28 @@ func TestPriorityTier_CanceledContextStopsTierWalk(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.Zero(t, calls, "取消后不应再读负载")
 }
+
+// 代码审查第 5 轮 #0：top-K 外、只出现在补试顺序里的账号，补试刷新失败时仍保留初始满队状态。
+func TestPriorityTier_FailedRetryRefreshKeepsFullQueueBeyondTopK(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(4)
+	a := priorityTierTestAccount(1, 1, groupID)
+	b := priorityTierTestAccount(2, 1, groupID)
+	c := priorityTierTestAccount(3, 2, groupID)
+	cc := staleThenErrorConcurrencyCache{
+		schedulerTestConcurrencyCache: schedulerTestConcurrencyCache{acquireResults: map[int64]bool{1: false, 2: false, 3: false}},
+		mu:                            &sync.Mutex{},
+		calls:                         new(int),
+		first: map[int64]*AccountLoadInfo{
+			1: {AccountID: 1, CurrentConcurrency: 10, LoadRate: 100, WaitingCount: 5},
+			2: {AccountID: 2, CurrentConcurrency: 10, LoadRate: 100, WaitingCount: 5},
+			3: {AccountID: 3, CurrentConcurrency: 10, LoadRate: 100, WaitingCount: 0},
+		},
+	}
+	svc := newPriorityTierTestService([]Account{a, b, c}, cc, nil, priorityTierTestOptions{tierGroups: "[4]", topK: 1})
+	svc.cfg.Gateway.Scheduling.FallbackMaxWaiting = 5
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "tier_beyond_topk_full_queue", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, int64(3), selection.WaitPlan.AccountID)
+}
