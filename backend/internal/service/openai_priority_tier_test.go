@@ -352,13 +352,13 @@ func TestPriorityTier_MergeQueueOrderKeepsPrimaryOrder(t *testing.T) {
 		{account: c, loadKnown: true, loadInfo: &AccountLoadInfo{AccountID: 3}},
 		{account: b, loadKnown: true, loadInfo: &AccountLoadInfo{AccountID: 2, CurrentConcurrency: 5}},
 	}
-	merged := mergeOpenAIPriorityTierQueueOrder(primary, retry, map[int64]struct{}{})
+	merged := mergeOpenAIPriorityTierQueueOrder(primary, retry, map[int64]struct{}{}, false)
 	require.Len(t, merged, 3)
 	require.Equal(t, []int64{2, 1, 3}, []int64{merged[0].account.ID, merged[1].account.ID, merged[2].account.ID})
 	require.Equal(t, 5, merged[0].loadInfo.CurrentConcurrency, "负载数据应换成新鲜值")
 	require.True(t, merged[0].loadKnown)
 
-	withoutDemoted := mergeOpenAIPriorityTierQueueOrder(primary, retry, map[int64]struct{}{2: {}})
+	withoutDemoted := mergeOpenAIPriorityTierQueueOrder(primary, retry, map[int64]struct{}{2: {}}, false)
 	require.Equal(t, []int64{1, 3}, []int64{withoutDemoted[0].account.ID, withoutDemoted[1].account.ID})
 }
 
@@ -496,4 +496,127 @@ func TestPriorityTier_StaleRefreshDoesNotOverwriteSavedValue(t *testing.T) {
 	require.NotNil(t, cached)
 	_, ok := cached.groups[4]
 	require.True(t, ok, "旧刷新不应覆盖刚保存的值")
+}
+
+// ---------------------------------------------------------------------------
+// 快照与 DB 优先级不一致（代码审查第 1 轮）
+// ---------------------------------------------------------------------------
+
+type countingLoadConcurrencyCache struct {
+	schedulerTestConcurrencyCache
+	loadCalls *int
+	mu        *sync.Mutex
+}
+
+func (c countingLoadConcurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
+	c.mu.Lock()
+	*c.loadCalls++
+	c.mu.Unlock()
+	return c.schedulerTestConcurrencyCache.GetAccountsLoadBatch(ctx, accounts)
+}
+
+func newPriorityTierSnapshotService(snapshot []*Account, db []Account, cc ConcurrencyCache, tierGroups string) *OpenAIGatewayService {
+	svc := newPriorityTierTestService(db, cc, nil, priorityTierTestOptions{tierGroups: tierGroups})
+	byID := make(map[int64]*Account, len(snapshot))
+	for _, account := range snapshot {
+		byID[account.ID] = account
+	}
+	svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: db}
+	svc.cfg.RunMode = config.RunModeStandard
+	svc.schedulerSnapshot = &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{snapshotAccounts: snapshot, accountsByID: byID}}
+	return svc
+}
+
+func TestPriorityTier_QueueSkipsDemotedHeadAndKeepsPoolCandidates(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(4)
+	a := priorityTierTestAccount(1, 1, groupID)
+	b := priorityTierTestAccount(2, 1, groupID)
+	c := priorityTierTestAccount(3, 2, groupID)
+	// A 负载更低排在前面；DB 中 A 已被调到 9。
+	cc := schedulerTestConcurrencyCache{
+		acquireResults: map[int64]bool{1: false, 2: false, 3: false},
+		loadMap: map[int64]*AccountLoadInfo{
+			1: {AccountID: 1, LoadRate: 0},
+			2: {AccountID: 2, LoadRate: 50},
+			3: {AccountID: 3, LoadRate: 0},
+		},
+	}
+	dbA := a
+	dbA.Priority = 9
+	svc := newPriorityTierSnapshotService([]*Account{&a, &b, &c}, []Account{dbA, b, c}, cc, "[4]")
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "tier_demoted_queue", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, int64(2), selection.WaitPlan.AccountID, "队首被降档后应继续同池的 B，而不是去低档")
+}
+
+func TestPriorityTier_BulkDemotionDoesNotRefreshLoadPerCandidate(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(4)
+	snapshot := make([]*Account, 0, 8)
+	db := make([]Account, 0, 8)
+	for id := int64(1); id <= 7; id++ {
+		acc := priorityTierTestAccount(id, 1, groupID)
+		snapshot = append(snapshot, &acc)
+		dbAcc := acc
+		if id != 7 {
+			dbAcc.Priority = 9 // 只有 7 号仍在最优档
+		}
+		db = append(db, dbAcc)
+	}
+	low := priorityTierTestAccount(20, 5, groupID)
+	snapshot = append(snapshot, &low)
+	db = append(db, low)
+	calls := 0
+	var released []int64
+	cc := countingLoadConcurrencyCache{
+		schedulerTestConcurrencyCache: schedulerTestConcurrencyCache{releasedIDs: &released},
+		loadCalls:                     &calls,
+		mu:                            &sync.Mutex{},
+	}
+	svc := newPriorityTierSnapshotService(snapshot, db, cc, "[4]")
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "tier_bulk_demote", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.True(t, selection.Acquired)
+	require.Equal(t, int64(7), selection.Account.ID)
+	require.LessOrEqual(t, calls, 3, "负载读取次数应与池大小无关（初始 + 原函数刷新 + 补试刷新）")
+	require.NotEmpty(t, released, "被降档且已取得槽位的账号应释放")
+	releaseSelection(selection)
+}
+
+func TestPriorityTier_MergeQueueOrderCompactTiers(t *testing.T) {
+	supported := map[string]any{"openai_compact_supported": true}
+	a := &Account{ID: 1, Platform: PlatformOpenAI, Extra: supported}
+	u := &Account{ID: 2, Platform: PlatformOpenAI}
+	b := &Account{ID: 3, Platform: PlatformOpenAI, Extra: supported}
+	require.Equal(t, 2, openAICompactSupportTier(a))
+	primary := []openAIAccountCandidateScore{{account: a}, {account: u}}
+	retry := []openAIAccountCandidateScore{{account: a}, {account: b}, {account: u}}
+	merged := mergeOpenAIPriorityTierQueueOrder(primary, retry, nil, true)
+	require.Equal(t, []int64{1, 3, 2}, []int64{merged[0].account.ID, merged[1].account.ID, merged[2].account.ID})
+}
+
+func TestPriorityTier_ConcurrentSavesKeepDBAndCacheConsistent(t *testing.T) {
+	ctx := context.Background()
+	resetOpenAIPriorityTierCacheForTest()
+	repo := &priorityTierSettingRepo{}
+	settingSvc := NewSettingService(repo, &config.Config{})
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, _ = settingSvc.SetOpenAIPriorityTierGroupIDs(ctx, []int64{int64(i + 1)})
+		}(i)
+	}
+	wg.Wait()
+	ids, err := parseOpenAIPriorityTierGroupIDs(repo.values[SettingKeyOpenAIPriorityTierGroupIDs])
+	require.NoError(t, err)
+	cached := openAIPriorityTierCache.Load()
+	require.NotNil(t, cached)
+	require.Len(t, ids, 1)
+	_, ok := cached.groups[ids[0]]
+	require.True(t, ok)
+	require.Len(t, cached.groups, 1)
 }

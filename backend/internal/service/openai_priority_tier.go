@@ -47,6 +47,8 @@ var (
 	openAIPriorityTierGen     atomic.Uint64
 	openAIPriorityTierSF      singleflight.Group
 	openAIPriorityTierPublish sync.Mutex
+	// openAIPriorityTierSaveMu 串行化同进程的“写库 + 发布缓存”，保证两次保存按同一顺序落库与生效。
+	openAIPriorityTierSaveMu sync.Mutex
 )
 
 func resetOpenAIPriorityTierCacheForTest() {
@@ -147,6 +149,8 @@ func (s *SettingService) SetOpenAIPriorityTierGroupIDs(ctx context.Context, ids 
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai priority tier groups: %w", err)
 	}
+	openAIPriorityTierSaveMu.Lock()
+	defer openAIPriorityTierSaveMu.Unlock()
 	if err := s.settingRepo.Set(ctx, SettingKeyOpenAIPriorityTierGroupIDs, string(data)); err != nil {
 		return nil, err
 	}
@@ -329,6 +333,7 @@ func mergeOpenAIPriorityTierQueueOrder(
 	primary []openAIAccountCandidateScore,
 	retry []openAIAccountCandidateScore,
 	demoted map[int64]struct{},
+	requireCompact bool,
 ) []openAIAccountCandidateScore {
 	freshByID := make(map[int64]openAIAccountCandidateScore, len(retry))
 	for _, candidate := range retry {
@@ -365,6 +370,12 @@ func mergeOpenAIPriorityTierQueueOrder(
 	for _, candidate := range retry {
 		appendCandidate(candidate)
 	}
+	if requireCompact {
+		// compact 能力分层：明确支持 → 未知 → 其余（旧快照复核），层内保持上面的顺序。
+		sort.SliceStable(out, func(i, j int) bool {
+			return openAICompactSupportTier(out[i].account) > openAICompactSupportTier(out[j].account)
+		})
+	}
 	return out
 }
 
@@ -397,17 +408,11 @@ func (s *defaultOpenAIAccountScheduler) acquireFromPriorityTierPool(
 		return openAIPriorityTierPoolOutcome{result: attempt.result, attempt: &attempt}
 	}
 
-	// 2) 补试：每轮对剩余整池读一次新鲜负载；只有档位复核淘汰了账号才会再来一轮。
+	// 2) 补试：整池只读一次新鲜负载、生成一次顺序，然后逐个候选抢槽；
+	//    档位复核在候选循环内做，被降档的账号释放后继续下一个，不重刷负载。
 	var retryOrder []openAIAccountCandidateScore
 	compactBlocked := attempt.compactBlocked
-	for round := 0; round <= len(pool); round++ {
-		if budget.acquireExhausted() {
-			break
-		}
-		rest := openAIPriorityTierWithout(pool, st.demoted)
-		if len(rest) == 0 {
-			break
-		}
+	if rest := openAIPriorityTierWithout(pool, st.demoted); len(rest) > 0 && !budget.acquireExhausted() {
 		freshMap := map[int64]*AccountLoadInfo{}
 		if s.service.concurrencyService != nil {
 			if fresh, err := s.service.concurrencyService.GetAccountsLoadBatchFresh(ctx, buildOpenAIAccountLoadRequest(rest)); err == nil && fresh != nil {
@@ -420,19 +425,28 @@ func (s *defaultOpenAIAccountScheduler) acquireFromPriorityTierPool(
 			plan.selectionOrder = s.buildOpenAISelectionOrder(inner, plan)
 		}
 		retryOrder = plan.selectionOrder
-		if len(retryOrder) == 0 {
-			break
-		}
-		result, blocked, err := s.tryAcquireOpenAISelectionOrderWithBudget(ctx, inner, retryOrder, budget)
-		compactBlocked = compactBlocked || blocked
-		if err != nil {
-			return openAIPriorityTierPoolOutcome{err: err}
-		}
-		if result == nil {
-			break
-		}
-		if st.acceptTierSelection(result, tierPriority) {
-			return openAIPriorityTierPoolOutcome{result: result, attempt: &attempt}
+		for i := range retryOrder {
+			candidate := retryOrder[i]
+			if candidate.account == nil {
+				continue
+			}
+			if _, demoted := st.demoted[candidate.account.ID]; demoted {
+				continue
+			}
+			result, blocked, err := s.tryAcquireOpenAISelectionOrderWithBudget(ctx, inner, retryOrder[i:i+1], budget)
+			compactBlocked = compactBlocked || blocked
+			if err != nil {
+				return openAIPriorityTierPoolOutcome{err: err}
+			}
+			if result != nil {
+				if st.acceptTierSelection(result, tierPriority) {
+					return openAIPriorityTierPoolOutcome{result: result, attempt: &attempt}
+				}
+				continue
+			}
+			if budget.acquireExhausted() {
+				break
+			}
 		}
 	}
 
@@ -441,7 +455,7 @@ func (s *defaultOpenAIAccountScheduler) acquireFromPriorityTierPool(
 	queue.result = nil
 	queue.err = nil
 	queue.compactBlocked = compactBlocked
-	queue.selectionOrder = mergeOpenAIPriorityTierQueueOrder(attempt.selectionOrder, retryOrder, st.demoted)
+	queue.selectionOrder = mergeOpenAIPriorityTierQueueOrder(attempt.selectionOrder, retryOrder, st.demoted, req.RequireCompact)
 	return openAIPriorityTierPoolOutcome{queueAttempt: &queue}
 }
 
@@ -539,23 +553,31 @@ func (s *defaultOpenAIAccountScheduler) selectByPriorityTiers(
 		}
 		inner := openAIPriorityTierInnerRequest(req, pool)
 		attempt := *entry.attempt
-		attempt.selectionOrder = mergeOpenAIPriorityTierQueueOrder(attempt.selectionOrder, nil, st.demoted)
 		lastAttempt = entry.attempt
-		selection, _, _, _, err := s.finishLoadBalanceSelectionFallback(ctx, inner, attempt, budget, filterStats)
-		if err != nil {
-			if errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts) {
-				lastErr = err
-				continue
+		// 档位复核在本池候选内逐个推进：被降档的账号从顺序里去掉后继续本池，
+		// 不会连带跳过同池的其余候选。
+		order := mergeOpenAIPriorityTierQueueOrder(attempt.selectionOrder, nil, st.demoted, false)
+		for guard := len(order) + 1; len(order) > 0 && guard > 0; guard-- {
+			attempt.selectionOrder = order
+			selection, _, _, _, err := s.finishLoadBalanceSelectionFallback(ctx, inner, attempt, budget, filterStats)
+			if err != nil {
+				if errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts) {
+					lastErr = err
+					break
+				}
+				return nil, attempt.candidateCount, attempt.topK, attempt.loadSkew, err
 			}
-			return nil, attempt.candidateCount, attempt.topK, attempt.loadSkew, err
+			if selection == nil || selection.Account == nil {
+				break
+			}
+			if st.acceptTierSelection(selection, entry.tierPriority) {
+				return accept(selection, entry.attempt)
+			}
+			order = mergeOpenAIPriorityTierQueueOrder(order, nil, st.demoted, false)
+			// 加权粘连已试过，后续推进不再重复。
+			inner.StickyAccountID = 0
+			inner.StickyPreviousAccountID = 0
 		}
-		if selection == nil || selection.Account == nil {
-			continue
-		}
-		if !st.acceptTierSelection(selection, entry.tierPriority) {
-			continue
-		}
-		return accept(selection, entry.attempt)
 	}
 
 	// 6) 都没有。
