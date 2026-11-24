@@ -546,6 +546,8 @@ func (s *defaultOpenAIAccountScheduler) selectByPriorityTiers(
 	// 5) 排队阶段：按档从优到劣，取第一个能给出结果的 attempt。
 	var lastErr error
 	var lastAttempt *openAIAccountLoadSelectionAttempt
+	var queueFullBackup *AccountSelectionResult
+	var queueFullBackupAttempt *openAIAccountLoadSelectionAttempt
 	for _, entry := range queue {
 		pool := openAIPriorityTierWithout(entry.pool, st.demoted)
 		if len(pool) == 0 {
@@ -553,31 +555,30 @@ func (s *defaultOpenAIAccountScheduler) selectByPriorityTiers(
 		}
 		inner := openAIPriorityTierInnerRequest(req, pool)
 		attempt := *entry.attempt
+		attempt.selectionOrder = mergeOpenAIPriorityTierQueueOrder(attempt.selectionOrder, nil, st.demoted, false)
 		lastAttempt = entry.attempt
-		// 档位复核在本池候选内逐个推进：被降档的账号从顺序里去掉后继续本池，
-		// 不会连带跳过同池的其余候选。
-		order := mergeOpenAIPriorityTierQueueOrder(attempt.selectionOrder, nil, st.demoted, false)
-		for guard := len(order) + 1; len(order) > 0 && guard > 0; guard-- {
-			attempt.selectionOrder = order
-			selection, _, _, _, err := s.finishLoadBalanceSelectionFallback(ctx, inner, attempt, budget, filterStats)
-			if err != nil {
-				if errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts) {
-					lastErr = err
-					break
-				}
-				return nil, attempt.candidateCount, attempt.topK, attempt.loadSkew, err
+		selection, queueFull, err := s.finishPriorityTierFallback(ctx, inner, attempt, budget, filterStats, entry.tierPriority, st)
+		if err != nil {
+			if errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts) {
+				lastErr = err
+				continue
 			}
-			if selection == nil || selection.Account == nil {
-				break
-			}
-			if st.acceptTierSelection(selection, entry.tierPriority) {
-				return accept(selection, entry.attempt)
-			}
-			order = mergeOpenAIPriorityTierQueueOrder(order, nil, st.demoted, false)
-			// 加权粘连已试过，后续推进不再重复。
-			inner.StickyAccountID = 0
-			inner.StickyPreviousAccountID = 0
+			return nil, attempt.candidateCount, attempt.topK, attempt.loadSkew, err
 		}
+		if selection == nil || selection.Account == nil {
+			continue
+		}
+		if queueFull {
+			// 本档唯一能排队的号队列已满：先看低档有没有能入队的，没有再回来用它。
+			if queueFullBackup == nil {
+				queueFullBackup, queueFullBackupAttempt = selection, entry.attempt
+			}
+			continue
+		}
+		return accept(selection, entry.attempt)
+	}
+	if queueFullBackup != nil {
+		return accept(queueFullBackup, queueFullBackupAttempt)
 	}
 
 	// 6) 都没有。
@@ -659,4 +660,105 @@ func (s *defaultOpenAIAccountScheduler) applyOpenAIPriorityTierToSticky(
 		_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, better.Account.ID)
 	}
 	return true, better
+}
+
+// finishPriorityTierFallback 分档版排队计划：与原 finishLoadBalanceSelectionFallback
+// 逐行等价（加权粘连重抢、预算分轮、新鲜复核、DB 复核预算、compact 判定、WaitPlan 字段），
+// 只多两处：DB 复核后的账号优先级劣于本档 → 记为降档并继续下一个候选；负载已知
+// 等待队列已满 → 记为备选并继续，单次遍历结束仍无更好的才返回备选（queueFull=true）。
+// 一致性由 TestPriorityTier_FallbackMatchesOriginal 保证。
+func (s *defaultOpenAIAccountScheduler) finishPriorityTierFallback(
+	ctx context.Context,
+	req OpenAIAccountScheduleRequest,
+	attempt openAIAccountLoadSelectionAttempt,
+	budget *openAISelectionProbeBudget,
+	filterStats openAISelectionFilterStats,
+	tierPriority int,
+	st *openAIPriorityTierSelectionState,
+) (*AccountSelectionResult, bool, error) {
+	if len(attempt.selectionOrder) == 0 {
+		return nil, false, noAvailableOpenAISelectionError(req.RequestedModel, attempt.compactBlocked, filterStats.summary("selection_order_empty"))
+	}
+
+	if stickyFallback, stickyErr := s.tryFallbackToWeightedSticky(ctx, req); stickyErr != nil {
+		return nil, false, stickyErr
+	} else if stickyFallback != nil {
+		if st.acceptTierSelection(stickyFallback, tierPriority) {
+			return stickyFallback, false, nil
+		}
+	}
+
+	cfg := s.service.schedulingConfig()
+	compactBlocked := attempt.compactBlocked
+	var backup *AccountSelectionResult
+	passes := 1
+	if budget != nil && budget.limited {
+		passes = 4
+	}
+	for pass := 0; pass < passes; pass++ {
+		wantAttempted := pass == 1 || pass == 3
+		wantKnownFull := pass >= 2
+		for _, candidate := range attempt.selectionOrder {
+			if candidate.account == nil {
+				continue
+			}
+			if _, demoted := st.demoted[candidate.account.ID]; demoted {
+				continue
+			}
+			if budget != nil && budget.limited {
+				knownFull := candidate.loadKnown && candidate.account.Concurrency > 0 &&
+					candidate.loadInfo.CurrentConcurrency >= candidate.account.Concurrency
+				if budget.wasAttempted(candidate.account.ID) != wantAttempted || knownFull != wantKnownFull {
+					continue
+				}
+			}
+			fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
+			if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+				continue
+			}
+			if !s.consumeOpenAISelectionDBRecheck(budget) {
+				if backup != nil {
+					return backup, true, nil
+				}
+				return nil, false, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked, filterStats.summary("selection_order_exhausted"))
+			}
+			fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, false, req.RequiredCapability)
+			if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+				continue
+			}
+			if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
+				compactBlocked = true
+				continue
+			}
+			if openAIAccountSchedulingPriority(fresh) > tierPriority {
+				if st.demoted == nil {
+					st.demoted = make(map[int64]struct{})
+				}
+				st.demoted[fresh.ID] = struct{}{}
+				continue
+			}
+			plan := attachSelectionProfitGate(ctx, &AccountSelectionResult{
+				Account: fresh,
+				WaitPlan: &AccountWaitPlan{
+					AccountID:      fresh.ID,
+					MaxConcurrency: fresh.Concurrency,
+					Timeout:        cfg.FallbackWaitTimeout,
+					MaxWaiting:     cfg.FallbackMaxWaiting,
+					Kind:           AccountWaitKindFallback,
+				},
+			})
+			if cfg.FallbackMaxWaiting > 0 && candidate.loadKnown && candidate.loadInfo != nil &&
+				candidate.loadInfo.WaitingCount >= cfg.FallbackMaxWaiting {
+				if backup == nil {
+					backup = plan
+				}
+				continue
+			}
+			return plan, false, nil
+		}
+	}
+	if backup != nil {
+		return backup, true, nil
+	}
+	return nil, false, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked, filterStats.summary("selection_order_exhausted"))
 }

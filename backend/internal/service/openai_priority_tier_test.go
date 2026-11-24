@@ -620,3 +620,129 @@ func TestPriorityTier_ConcurrentSavesKeepDBAndCacheConsistent(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, cached.groups, 1)
 }
+
+// ---------------------------------------------------------------------------
+// 分档排队（代码审查第 2 轮）
+// ---------------------------------------------------------------------------
+
+type countingGetByIDRepo struct {
+	schedulerTestOpenAIAccountRepo
+	mu    *sync.Mutex
+	calls map[int64]int
+}
+
+func (r countingGetByIDRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	r.mu.Lock()
+	r.calls[id]++
+	r.mu.Unlock()
+	return r.schedulerTestOpenAIAccountRepo.GetByID(ctx, id)
+}
+
+func TestPriorityTier_FallbackMatchesOriginal(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(4)
+	accounts := []Account{
+		priorityTierTestAccount(1, 1, groupID),
+		priorityTierTestAccount(2, 1, groupID),
+		priorityTierTestAccount(3, 1, groupID),
+	}
+	accounts[1].Status = StatusDisabled
+	svc := newPriorityTierTestService(accounts, schedulerTestConcurrencyCache{}, nil, priorityTierTestOptions{tierGroups: "[4]"})
+	scheduler := &defaultOpenAIAccountScheduler{service: svc}
+	req := OpenAIAccountScheduleRequest{GroupID: &groupID, Platform: PlatformOpenAI, RequestedModel: "gpt-5.1"}
+	orders := [][]int{{0, 1, 2}, {1, 2, 0}, {2, 0, 1}, {1}}
+	for _, limited := range []bool{false, true} {
+		for _, idx := range orders {
+			order := make([]openAIAccountCandidateScore, 0, len(idx))
+			for _, i := range idx {
+				acc := accounts[i]
+				order = append(order, openAIAccountCandidateScore{account: &acc, loadKnown: true, loadInfo: &AccountLoadInfo{AccountID: acc.ID, CurrentConcurrency: acc.Concurrency}})
+			}
+			attempt := openAIAccountLoadSelectionAttempt{selectionOrder: order, candidateCount: len(order), topK: 1}
+			b1, b2 := newOpenAISelectionProbeBudget(), newOpenAISelectionProbeBudget()
+			if limited {
+				b1.enableLimit()
+				b2.enableLimit()
+			}
+			want, _, _, _, wantErr := scheduler.finishLoadBalanceSelectionFallback(ctx, req, attempt, b1, openAISelectionFilterStats{})
+			got, queueFull, gotErr := scheduler.finishPriorityTierFallback(ctx, req, attempt, b2, openAISelectionFilterStats{}, 1, &openAIPriorityTierSelectionState{})
+			require.False(t, queueFull)
+			require.Equal(t, wantErr == nil, gotErr == nil, "order %v limited %v", idx, limited)
+			if wantErr != nil {
+				require.Equal(t, wantErr.Error(), gotErr.Error())
+				continue
+			}
+			require.Equal(t, want.Account.ID, got.Account.ID, "order %v limited %v", idx, limited)
+			require.Equal(t, *want.WaitPlan, *got.WaitPlan)
+			require.Equal(t, b1.rechecks, b2.rechecks)
+		}
+	}
+}
+
+func TestPriorityTier_QueueFullTopTierLetsLowerTierQueue(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(4)
+	accounts := []Account{priorityTierTestAccount(1, 1, groupID), priorityTierTestAccount(2, 2, groupID)}
+	cc := schedulerTestConcurrencyCache{
+		acquireResults: map[int64]bool{1: false, 2: false},
+		loadMap: map[int64]*AccountLoadInfo{
+			1: {AccountID: 1, WaitingCount: 5},
+			2: {AccountID: 2, WaitingCount: 0},
+		},
+	}
+	svc := newPriorityTierTestService(accounts, cc, nil, priorityTierTestOptions{tierGroups: "[4]"})
+	svc.cfg.Gateway.Scheduling.FallbackMaxWaiting = 5
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "tier_queue_full", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, int64(2), selection.WaitPlan.AccountID, "最优档等待队列已满时应让低档排队")
+
+	// 两档都满队：仍回到最优档（与原行为一致）。
+	cc.loadMap[2] = &AccountLoadInfo{AccountID: 2, WaitingCount: 9}
+	svc = newPriorityTierTestService(accounts, cc, nil, priorityTierTestOptions{tierGroups: "[4]"})
+	svc.cfg.Gateway.Scheduling.FallbackMaxWaiting = 5
+	selection, _, err = svc.SelectAccountWithScheduler(ctx, &groupID, "", "tier_queue_full_all", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), selection.WaitPlan.AccountID)
+}
+
+func TestPriorityTier_QueueWalkRechecksEachCandidateOnce(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(4)
+	snapshot := make([]*Account, 0, 6)
+	db := make([]Account, 0, 6)
+	acquire := map[int64]bool{}
+	for id := int64(1); id <= 5; id++ {
+		acc := priorityTierTestAccount(id, 1, groupID)
+		snapshot = append(snapshot, &acc)
+		dbAcc := acc
+		switch {
+		case id <= 3:
+			dbAcc.Status = StatusDisabled // DB 中已停用
+		case id == 4:
+			dbAcc.Priority = 9 // DB 中已降档
+		}
+		db = append(db, dbAcc)
+		acquire[id] = false
+	}
+	cc := schedulerTestConcurrencyCache{acquireResults: acquire}
+	svc := newPriorityTierSnapshotService(snapshot, db, cc, "[4]")
+	repo := countingGetByIDRepo{schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: db}, mu: &sync.Mutex{}, calls: map[int64]int{}}
+	svc.accountRepo = repo
+	scheduler := &defaultOpenAIAccountScheduler{service: svc}
+	order := make([]openAIAccountCandidateScore, 0, len(snapshot))
+	for _, acc := range snapshot {
+		order = append(order, openAIAccountCandidateScore{account: acc, loadInfo: &AccountLoadInfo{AccountID: acc.ID}})
+	}
+	req := OpenAIAccountScheduleRequest{GroupID: &groupID, Platform: PlatformOpenAI, RequestedModel: "gpt-5.1"}
+	st := &openAIPriorityTierSelectionState{}
+	selection, queueFull, err := scheduler.finishPriorityTierFallback(ctx, req, openAIAccountLoadSelectionAttempt{selectionOrder: order}, newOpenAISelectionProbeBudget(), openAISelectionFilterStats{}, 1, st)
+	require.NoError(t, err)
+	require.False(t, queueFull)
+	require.Equal(t, int64(5), selection.WaitPlan.AccountID)
+	for id, n := range repo.calls {
+		require.LessOrEqual(t, n, 1, "账号 %d 被重复查库", id)
+	}
+	_, demoted := st.demoted[4]
+	require.True(t, demoted)
+}
