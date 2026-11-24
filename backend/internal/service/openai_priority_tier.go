@@ -334,11 +334,16 @@ func mergeOpenAIPriorityTierQueueOrder(
 	retry []openAIAccountCandidateScore,
 	demoted map[int64]struct{},
 	requireCompact bool,
+	retryLoadFresh bool,
 ) []openAIAccountCandidateScore {
+	// 只有补试那次负载读取成功时才用它覆盖首选阶段的观测值；读取失败时补试候选
+	// 的负载是“未知”，不能抹掉之前已知的等待数。
 	freshByID := make(map[int64]openAIAccountCandidateScore, len(retry))
-	for _, candidate := range retry {
-		if candidate.account != nil {
-			freshByID[candidate.account.ID] = candidate
+	if retryLoadFresh {
+		for _, candidate := range retry {
+			if candidate.account != nil {
+				freshByID[candidate.account.ID] = candidate
+			}
 		}
 	}
 	out := make([]openAIAccountCandidateScore, 0, len(primary)+len(retry))
@@ -390,6 +395,9 @@ func (s *defaultOpenAIAccountScheduler) acquireFromPriorityTierPool(
 	budget *openAISelectionProbeBudget,
 	st *openAIPriorityTierSelectionState,
 ) openAIPriorityTierPoolOutcome {
+	if err := ctx.Err(); err != nil {
+		return openAIPriorityTierPoolOutcome{err: err}
+	}
 	pool = openAIPriorityTierWithout(pool, st.demoted)
 	if len(pool) == 0 {
 		return openAIPriorityTierPoolOutcome{}
@@ -411,12 +419,17 @@ func (s *defaultOpenAIAccountScheduler) acquireFromPriorityTierPool(
 	// 2) 补试：整池只读一次新鲜负载、生成一次顺序，然后逐个候选抢槽；
 	//    档位复核在候选循环内做，被降档的账号释放后继续下一个，不重刷负载。
 	var retryOrder []openAIAccountCandidateScore
+	retryLoadFresh := false
 	compactBlocked := attempt.compactBlocked
+	if err := ctx.Err(); err != nil {
+		return openAIPriorityTierPoolOutcome{err: err}
+	}
 	if rest := openAIPriorityTierWithout(pool, st.demoted); len(rest) > 0 && !budget.acquireExhausted() {
 		freshMap := map[int64]*AccountLoadInfo{}
 		if s.service.concurrencyService != nil {
 			if fresh, err := s.service.concurrencyService.GetAccountsLoadBatchFresh(ctx, buildOpenAIAccountLoadRequest(rest)); err == nil && fresh != nil {
 				freshMap = fresh
+				retryLoadFresh = true
 			}
 		}
 		plan := s.buildOpenAIAccountLoadPlan(ctx, inner, rest, freshMap)
@@ -455,7 +468,7 @@ func (s *defaultOpenAIAccountScheduler) acquireFromPriorityTierPool(
 	queue.result = nil
 	queue.err = nil
 	queue.compactBlocked = compactBlocked
-	queue.selectionOrder = mergeOpenAIPriorityTierQueueOrder(attempt.selectionOrder, retryOrder, st.demoted, req.RequireCompact)
+	queue.selectionOrder = mergeOpenAIPriorityTierQueueOrder(attempt.selectionOrder, retryOrder, st.demoted, req.RequireCompact, retryLoadFresh)
 	return openAIPriorityTierPoolOutcome{queueAttempt: &queue}
 }
 
@@ -549,13 +562,16 @@ func (s *defaultOpenAIAccountScheduler) selectByPriorityTiers(
 	var queueFullBackup *AccountSelectionResult
 	var queueFullBackupAttempt *openAIAccountLoadSelectionAttempt
 	for _, entry := range queue {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, 0, 0, err
+		}
 		pool := openAIPriorityTierWithout(entry.pool, st.demoted)
 		if len(pool) == 0 {
 			continue
 		}
 		inner := openAIPriorityTierInnerRequest(req, pool)
 		attempt := *entry.attempt
-		attempt.selectionOrder = mergeOpenAIPriorityTierQueueOrder(attempt.selectionOrder, nil, st.demoted, false)
+		attempt.selectionOrder = mergeOpenAIPriorityTierQueueOrder(attempt.selectionOrder, nil, st.demoted, false, false)
 		lastAttempt = entry.attempt
 		selection, queueFull, err := s.finishPriorityTierFallback(ctx, inner, attempt, budget, filterStats, entry.tierPriority, st)
 		if err != nil {

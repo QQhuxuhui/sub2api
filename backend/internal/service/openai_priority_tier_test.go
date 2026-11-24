@@ -352,13 +352,13 @@ func TestPriorityTier_MergeQueueOrderKeepsPrimaryOrder(t *testing.T) {
 		{account: c, loadKnown: true, loadInfo: &AccountLoadInfo{AccountID: 3}},
 		{account: b, loadKnown: true, loadInfo: &AccountLoadInfo{AccountID: 2, CurrentConcurrency: 5}},
 	}
-	merged := mergeOpenAIPriorityTierQueueOrder(primary, retry, map[int64]struct{}{}, false)
+	merged := mergeOpenAIPriorityTierQueueOrder(primary, retry, map[int64]struct{}{}, false, true)
 	require.Len(t, merged, 3)
 	require.Equal(t, []int64{2, 1, 3}, []int64{merged[0].account.ID, merged[1].account.ID, merged[2].account.ID})
 	require.Equal(t, 5, merged[0].loadInfo.CurrentConcurrency, "负载数据应换成新鲜值")
 	require.True(t, merged[0].loadKnown)
 
-	withoutDemoted := mergeOpenAIPriorityTierQueueOrder(primary, retry, map[int64]struct{}{2: {}}, false)
+	withoutDemoted := mergeOpenAIPriorityTierQueueOrder(primary, retry, map[int64]struct{}{2: {}}, false, true)
 	require.Equal(t, []int64{1, 3}, []int64{withoutDemoted[0].account.ID, withoutDemoted[1].account.ID})
 }
 
@@ -593,7 +593,7 @@ func TestPriorityTier_MergeQueueOrderCompactTiers(t *testing.T) {
 	require.Equal(t, 2, openAICompactSupportTier(a))
 	primary := []openAIAccountCandidateScore{{account: a}, {account: u}}
 	retry := []openAIAccountCandidateScore{{account: a}, {account: b}, {account: u}}
-	merged := mergeOpenAIPriorityTierQueueOrder(primary, retry, nil, true)
+	merged := mergeOpenAIPriorityTierQueueOrder(primary, retry, nil, true, true)
 	require.Equal(t, []int64{1, 3, 2}, []int64{merged[0].account.ID, merged[1].account.ID, merged[2].account.ID})
 }
 
@@ -782,4 +782,61 @@ func TestPriorityTier_WeightedStickyFullQueueBecomesBackup(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, queueFull)
 	require.Equal(t, int64(1), selection.WaitPlan.AccountID)
+}
+
+// ---------------------------------------------------------------------------
+// 代码审查第 4 轮
+// ---------------------------------------------------------------------------
+
+func TestPriorityTier_MergeKeepsKnownLoadWhenRetryRefreshFailed(t *testing.T) {
+	a := &Account{ID: 1}
+	primary := []openAIAccountCandidateScore{{account: a, loadKnown: true, loadInfo: &AccountLoadInfo{AccountID: 1, WaitingCount: 7}}}
+	retry := []openAIAccountCandidateScore{{account: a, loadKnown: false, loadInfo: &AccountLoadInfo{AccountID: 1}}}
+	merged := mergeOpenAIPriorityTierQueueOrder(primary, retry, nil, false, false)
+	require.True(t, merged[0].loadKnown)
+	require.Equal(t, 7, merged[0].loadInfo.WaitingCount)
+}
+
+func TestPriorityTier_FailedRetryRefreshStillAvoidsFullTopQueue(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(4)
+	a := priorityTierTestAccount(1, 1, groupID)
+	b := priorityTierTestAccount(2, 2, groupID)
+	cc := staleThenErrorConcurrencyCache{
+		schedulerTestConcurrencyCache: schedulerTestConcurrencyCache{acquireResults: map[int64]bool{1: false, 2: false}},
+		mu:                            &sync.Mutex{},
+		calls:                         new(int),
+		first: map[int64]*AccountLoadInfo{
+			1: {AccountID: 1, CurrentConcurrency: 10, LoadRate: 100, WaitingCount: 5},
+			2: {AccountID: 2, CurrentConcurrency: 10, LoadRate: 100, WaitingCount: 0},
+		},
+	}
+	svc := newPriorityTierTestService([]Account{a, b}, cc, nil, priorityTierTestOptions{tierGroups: "[4]"})
+	svc.cfg.Gateway.Scheduling.FallbackMaxWaiting = 5
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "tier_refresh_failed_full", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, int64(2), selection.WaitPlan.AccountID)
+}
+
+func TestPriorityTier_CanceledContextStopsTierWalk(t *testing.T) {
+	groupID := int64(4)
+	calls := 0
+	cc := countingLoadConcurrencyCache{
+		schedulerTestConcurrencyCache: schedulerTestConcurrencyCache{acquireResults: map[int64]bool{42: false, 96: false, 97: false, 99: false, 268: false, 277: false}},
+		loadCalls:                     &calls,
+		mu:                            &sync.Mutex{},
+	}
+	svc := newPriorityTierTestService(group4LikeAccounts(groupID), cc, nil, priorityTierTestOptions{tierGroups: "[4]"})
+	scheduler := &defaultOpenAIAccountScheduler{service: svc}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	accounts := group4LikeAccounts(groupID)
+	filtered := make([]*Account, 0, len(accounts))
+	for i := range accounts {
+		filtered = append(filtered, &accounts[i])
+	}
+	_, _, _, _, err := scheduler.selectByPriorityTiers(ctx, OpenAIAccountScheduleRequest{GroupID: &groupID, Platform: PlatformOpenAI, RequestedModel: "gpt-5.1"}, filtered, map[int64]*AccountLoadInfo{}, newOpenAISelectionProbeBudget(), openAISelectionFilterStats{})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, calls, "取消后不应再读负载")
 }
