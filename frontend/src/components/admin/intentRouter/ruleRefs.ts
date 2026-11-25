@@ -25,7 +25,15 @@ export function followRuleRenames(jev: Pick<IntentJevConfig, RuleRefRole>, befor
   for (const role of ruleRefRoles) {
     const ref = jev[role]
     let binding = bound.get(role)
-    if (!binding || binding.name !== ref || !now.some((r) => r.uid === binding!.uid)) {
+    if (binding && binding.name === ref && !now.some((r) => r.uid === binding!.uid)) {
+      // The bound rule is gone from the list. A rule that now carries the
+      // name takes the reference (another group was loaded); otherwise keep
+      // the binding: a move splices the rule out and back in.
+      const named = ref ? now.find((r) => r.name === ref) : undefined
+      if (named) bound.set(role, { uid: named.uid, name: ref })
+      continue
+    }
+    if (!binding || binding.name !== ref) {
       const source = ref ? (before.find((r) => r.name === ref) ?? now.find((r) => r.name === ref)) : undefined
       if (!source) {
         bound.delete(role)

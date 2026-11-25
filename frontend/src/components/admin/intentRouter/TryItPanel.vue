@@ -46,7 +46,7 @@ import InfoTip from './InfoTip.vue'
 import { useIntentRouter } from './context'
 
 const { t } = useI18n()
-const { selectedGroup, dirty, formGeneration, accountLabel, keyLabel } = useIntentRouter()
+const { selectedGroup, dirty, formGeneration, accountLabel, keyTargetLabel } = useIntentRouter()
 
 const text = ref('')
 const testing = ref(false)
@@ -64,7 +64,7 @@ const summary = computed(() => {
   if (!r) return ''
   if (!r.understood) return t('intentRouter.test.resultUnclear')
   if (!r.intent) return t('intentRouter.test.resultNone')
-  const targets = r.api_key_id ? keyLabel(r.api_key_id) : r.account_ids.map(accountLabel).join('、')
+  const targets = r.api_key_id ? keyTargetLabel(r.api_key_id, r.target_group_id ?? 0) : r.account_ids.map(accountLabel).join('、')
   return t('intentRouter.test.resultIntent', { intent: r.intent, accounts: targets })
 })
 

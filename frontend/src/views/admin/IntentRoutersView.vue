@@ -305,6 +305,14 @@ function keyLabel(id: number) {
   if (!key || key.problem === 'key_not_found') return t('intentRouter.rules.missingKey', { id })
   return t('intentRouter.rules.keyChip', { id, name: key.name, user: key.user_email || `#${key.user_id}`, group: key.group_name || `#${key.group_id}`, platform: key.group_platform })
 }
+function keyTargetLabel(id: number, groupId: number) {
+  const key = ruleKeyLabels.value.get(id)
+  const name = key && key.problem !== 'key_not_found' ? key.name : ''
+  if (!groupId) return t('intentRouter.test.keyNoTarget', { id, name })
+  const group = groups.value.find((g) => g.id === groupId)
+  const cached = key && key.group_id === groupId ? key.group_name : ''
+  return t('intentRouter.test.keyTarget', { id, name, group: group?.name || cached || `#${groupId}` })
+}
 function keyProblem(id: number) {
   const key = ruleKeyLabels.value.get(id)
   if (!key) return ''
@@ -365,7 +373,7 @@ async function loadJevStatus(groupId: number) {
 
 provideIntentRouter({
   form, accounts, selectedGroup, savedRouter, jevStatus, dirty, formGeneration,
-  accountLabel, accountProblem, keyLabel, keyProblem, ruleTargetBroken, newRule,
+  accountLabel, accountProblem, keyLabel, keyTargetLabel, keyProblem, ruleTargetBroken, newRule,
   rememberKey: (key) => { ruleKeyLabels.value.set(key.id, key) },
   loadJevStatus: () => { if (selectedGroupId.value) void loadJevStatus(selectedGroupId.value) },
 })

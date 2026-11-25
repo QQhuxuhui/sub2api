@@ -236,6 +236,8 @@ export default {
     },
     test: {
       title: '试一下',
+      keyTarget: '令牌 #{id} {name} → {group}',
+      keyNoTarget: '令牌 #{id} {name}（目标不可用）',
       intro: '用已保存的配置识别一段话，未启用也能试。',
       placeholder: '如：帮我看看这段 Python 为什么报 KeyError',
       run: '识别',

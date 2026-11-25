@@ -169,8 +169,11 @@ function addRule() {
 function move(index: number, delta: number) {
   const to = index + delta
   if (to < 0 || to >= form.rules.length) return
-  const [rule] = form.rules.splice(index, 1)
-  form.rules.splice(to, 0, rule)
+  // One assignment, so watchers never see the rule missing mid-move.
+  const next = [...form.rules]
+  const [rule] = next.splice(index, 1)
+  next.splice(to, 0, rule)
+  form.rules = next
   menuFor.value = 0
 }
 function remove(index: number) {

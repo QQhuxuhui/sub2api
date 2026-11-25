@@ -22,6 +22,8 @@ export interface IntentRouterContext {
   /** Why an account cannot serve this group ('' when it can, or it is unknown). */
   accountProblem: (id: number) => string
   keyLabel: (id: number) => string
+  /** A key with the group a try-it answer resolved it to (0: none), not the page's cached group. */
+  keyTargetLabel: (id: number, groupId: number) => string
   keyProblem: (id: number) => string
   rememberKey: (key: IntentRuleKeyLabel) => void
   /** A rule's target cannot serve right now. */

@@ -236,6 +236,8 @@ export default {
     },
     test: {
       title: 'Try it',
+      keyTarget: 'key #{id} {name} → {group}',
+      keyNoTarget: 'key #{id} {name} (target unavailable)',
       intro: 'Classifies a text with the saved configuration, even while it is off.',
       placeholder: 'e.g. why does this Python snippet raise KeyError',
       run: 'Classify',

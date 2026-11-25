@@ -248,13 +248,53 @@ describe('IntentRoutersView', () => {
     vi.useRealTimers()
   })
 
+  it('shows the try-it target group from the answer, not the group the page cached for the key', async () => {
+    api.list.mockResolvedValue({ data: [{
+      ...savedRouter,
+      rules: [{ name: 'coding', description: 'code', account_ids: [], api_key_id: 7, enabled: true }],
+      rule_keys: [{ id: 7, name: 'internal-coding', user_id: 3, user_email: 'ops@example.com', group_id: 20, group_name: 'coding-pool', group_platform: 'anthropic' }],
+    }] })
+    const answer = { matched_by: 'keyword', keyword: 'go', answer: '', intent: 'coding', understood: true, account_ids: [], api_key_id: 7, latency_ms: 0 }
+    api.test.mockResolvedValueOnce({ data: { ...answer, target_group_id: 2 } }).mockResolvedValueOnce({ data: answer })
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-test-text"]').setValue('go build')
+    await wrapper.get('[data-test="intent-test-run"]').trigger('click')
+    await flushPromises()
+    let text = wrapper.get('[data-test="intent-test-result"]').text()
+    expect(text).toContain('gpt-main')
+    expect(text).not.toContain('coding-pool')
+
+    await wrapper.get('[data-test="intent-test-run"]').trigger('click')
+    await flushPromises()
+    text = wrapper.get('[data-test="intent-test-result"]').text()
+    expect(text).toContain('intentRouter.test.keyNoTarget')
+    expect(text).not.toContain('coding-pool')
+  })
+
+  it('carries a Jev rule reference through emptying a rule name, moving the rule, and naming it again', async () => {
+    const router = { ...savedRouter, rules: [...savedRouter.rules, { name: 'health', description: '', account_ids: [21], enabled: true }],
+      jev: { enabled: false, rule: 'coding', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100,
+        health_enabled: true, health_threshold: 0.7, health_rule: 'health', low_balance_usd: 1, balance_usd: 0 } }
+    api.list.mockResolvedValue({ data: [router] })
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...router, ...input } }))
+    const wrapper = await mountView()
+    const last = router.rules.length - 1
+    await wrapper.findAll('[data-test="intent-rule-name"]')[last].setValue('')
+    await wrapper.get(`[data-test="intent-rule-more-${last}"]`).trigger('click')
+    await wrapper.get(`[data-test="intent-rule-menu-${last}"]`).findAll('button')[0].trigger('click') // move up
+    await wrapper.findAll('[data-test="intent-rule-name"]')[last - 1].setValue('check')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].jev).toMatchObject({ health_rule: 'check' })
+  })
+
   it('shows a saved key rule with its group and flags a key that broke since', async () => {
     api.list.mockResolvedValue({ data: [{
       ...savedRouter,
       rules: [{ name: 'coding', description: 'code', account_ids: [], api_key_id: 7, enabled: true }],
       rule_keys: [{ id: 7, name: 'internal-coding', user_id: 3, user_email: 'ops@example.com', group_id: 20, group_name: 'coding-pool', group_platform: 'anthropic', problem: 'group_inactive' }],
     }] })
-    api.test.mockResolvedValue({ data: { matched_by: 'keyword', keyword: 'go', answer: '', intent: 'coding', understood: true, account_ids: [], api_key_id: 7, latency_ms: 0 } })
+    api.test.mockResolvedValue({ data: { matched_by: 'keyword', keyword: 'go', answer: '', intent: 'coding', understood: true, account_ids: [], api_key_id: 7, target_group_id: 20, latency_ms: 0 } })
     const wrapper = await mountView()
 
     expect((wrapper.get('[data-test="intent-rule-target-key"]').element as HTMLInputElement).checked).toBe(true)
