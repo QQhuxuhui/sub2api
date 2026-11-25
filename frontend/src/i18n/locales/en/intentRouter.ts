@@ -39,7 +39,7 @@ export default {
       ordinary: 'Normal scheduling',
       toTarget: 'hit → rule target',
       probeToTarget: 'probe → rule target',
-      passToOrdinary: 'normal/health → normal scheduling',
+      passToOrdinary: 'normal → normal scheduling',
       healthBranch: 'health check → health rule or normal',
       ruleCount: '{n} rules',
       none: 'none',
@@ -281,7 +281,7 @@ export default {
     templates: {
       title: 'Template judgements (all groups)',
       scopeBadge: 'Applies to every group',
-      help: 'Requests Jev is unsure about, grouped by template (digits and random strings become placeholders): A called a health check yet the probe score is high, B the same template judged two ways, C probe score just under the line. A template judged a probe goes straight to each group\'s Jev target rule accounts in every group with intent routing; one judged a health check or normal is left to ordinary scheduling. Short conversations only; keywords come first.',
+      help: 'Requests Jev is unsure about, grouped by template (digits and random strings become placeholders): A called a health check yet the probe score is high, B the same template judged two ways, C probe score just under the line. A template judged a probe goes straight to each group\'s Jev target rule accounts in every group with intent routing; one judged a health check goes to the health-check rule when health checks are on and that rule is usable, otherwise to ordinary scheduling; one judged normal is left to ordinary scheduling. Short conversations only; keywords come first.',
       status: { pending: 'Pending', probe: 'Probe', health: 'Health check', normal: 'Normal', all: 'All' },
       reason: { all: 'All reasons', a: 'A health check, high probe score', b: 'B judged two ways', c: 'C near miss' },
       reasonShort: { a: 'A', b: 'B', c: 'C' },

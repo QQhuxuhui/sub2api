@@ -905,6 +905,16 @@ func (c *intentRouterConfig) manualTarget() (domain.IntentRule, bool) {
 	return c.rule(c.Jev.Rule)
 }
 
+// manualHealthTarget is the rule a template judged "health" routes to: the
+// health-check rule while health checks are on, whether or not Jev itself is.
+// Without one such a template is left to ordinary scheduling.
+func (c *intentRouterConfig) manualHealthTarget() (domain.IntentRule, bool) {
+	if c == nil || !c.Jev.HealthEnabled || c.Jev.HealthRule == "" {
+		return domain.IntentRule{}, false
+	}
+	return c.rule(c.Jev.HealthRule)
+}
+
 // ---- admin ----
 
 func validIntentTemplateKey(key string) bool {

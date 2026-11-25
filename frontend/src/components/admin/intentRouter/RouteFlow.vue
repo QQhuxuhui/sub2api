@@ -72,7 +72,7 @@ const nodes = computed((): FlowNode[] => {
     },
     {
       key: 'template', title: t('intentRouter.flow.template'), tone: 'green', state: t('intentRouter.flow.on'),
-      branches: [{ text: t('intentRouter.flow.probeToTarget'), muted: !probeTargetReady.value }, { text: t('intentRouter.flow.passToOrdinary') }],
+      branches: [{ text: t('intentRouter.flow.probeToTarget'), muted: !probeTargetReady.value }, { text: t('intentRouter.flow.healthBranch') }, { text: t('intentRouter.flow.passToOrdinary') }],
     },
     {
       key: 'jev', title: 'Jev', ...jevNode.value,

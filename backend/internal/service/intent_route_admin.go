@@ -570,7 +570,9 @@ func (s *IntentRouterService) normalizeIntentRouterInput(ctx context.Context, in
 		in.Rules = []domain.IntentRule{}
 	}
 	if in.Enabled && !classifierReady {
-		if !intentRulesHaveKeywords(in.Rules) && jevRule == "" {
+		// A health-check rule is a route too while health checks are on: a
+		// template judged "health" goes there (see manualHealthTarget).
+		if !intentRulesHaveKeywords(in.Rules) && jevRule == "" && (healthRule == "" || !in.Jev.HealthEnabled) {
 			return bad("INTENT_CLASSIFIER_INCOMPLETE", "an enabled router needs a classifier model and API key, rules with keywords, or Jev")
 		}
 		for _, rule := range in.Rules {
@@ -1003,6 +1005,11 @@ func (s *IntentRouterService) testClassify(ctx context.Context, groupID int64, t
 	}
 	var manual intentManualVerdict
 	if manual = s.manualLabel(labels, text); manual.Label != "" {
+		if manual.Label == IntentTemplateHealth {
+			if rule, ok := cfg.manualHealthTarget(); ok {
+				return &IntentClassifyTestResult{MatchedBy: "manual", ManualLabel: manual.Label, TemplateKey: manual.Key, Intent: rule.Name, Understood: true, AccountIDs: rule.AccountIDs}, nil
+			}
+		}
 		if manual.Label != IntentTemplateProbe {
 			return &IntentClassifyTestResult{MatchedBy: "manual", ManualLabel: manual.Label, TemplateKey: manual.Key, Understood: true, AccountIDs: []int64{}}, nil
 		}
@@ -1064,7 +1071,7 @@ func (s *IntentRouterService) testClassify(ctx context.Context, groupID int64, t
 		}
 		if !cfg.classifierReady() {
 			for _, rule := range cfg.activeRules() {
-				if len(rule.Keywords) == 0 && rule.Name != cfg.Jev.Rule && rule.Name != cfg.Jev.TimelyRule {
+				if len(rule.Keywords) == 0 && rule.Name != cfg.Jev.Rule && rule.Name != cfg.Jev.TimelyRule && (!cfg.Jev.HealthEnabled || rule.Name != cfg.Jev.HealthRule) {
 					return nil, infraerrors.BadRequest("INTENT_CLASSIFIER_INCOMPLETE", "set the classifier model and API key first")
 				}
 			}

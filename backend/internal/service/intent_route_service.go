@@ -136,6 +136,9 @@ func (c *intentRouterConfig) usable() bool {
 	if _, ok := c.manualTarget(); ok {
 		return true
 	}
+	if _, ok := c.manualHealthTarget(); ok {
+		return true
+	}
 	return len(c.classifierRules()) > 0 || c.hasKeywords()
 }
 
@@ -540,6 +543,13 @@ func (s *IntentRouterService) classify(ctx context.Context, cfg *intentRouterCon
 				manualTargetMissing = true
 				s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "manual_target_missing", Detail: "template " + manual.Key[:12]})
 			case IntentTemplateHealth, IntentTemplateNormal:
+				if manual.Label == IntentTemplateHealth {
+					if rule, ok := cfg.manualHealthTarget(); ok {
+						s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "manual", Intent: rule.Name, Detail: manual.Label + " template " + manual.Key[:12]})
+						s.recordHit(in, view, rule.Name, "manual:"+manual.Label, 0, texts[0], texts[0], truncateRunes(texts[0], intentJevHitExcerpt))
+						return s.newDecision(cfg, rule, "", 0, 0)
+					}
+				}
 				s.record(IntentRouteEvent{GroupID: in.GroupID, Kind: "manual", Detail: manual.Label + " template " + manual.Key[:12]})
 				s.recordHit(in, view, "", "manual:"+manual.Label, 0, texts[0], texts[0], truncateRunes(texts[0], intentJevHitExcerpt))
 				return nil

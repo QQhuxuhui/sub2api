@@ -39,7 +39,7 @@ export default {
       ordinary: '原调度',
       toTarget: '命中 → 规则目标',
       probeToTarget: '测试题 → 规则目标',
-      passToOrdinary: '正常/测活 → 原调度',
+      passToOrdinary: '正常 → 原调度',
       healthBranch: '健康检查 → 健康规则或原调度',
       ruleCount: '{n} 条规则',
       none: '无',
@@ -281,7 +281,7 @@ export default {
     templates: {
       title: '全局模板判定',
       scopeBadge: '所有分组生效',
-      help: 'Jev 拿不准的请求按模板（数字和随机串换成占位）汇总在这里：A 判成测活但测试题分也高，B 同一模板被判过两种结果，C 测试题分差一点到线。判为测试题后，该模板在所有开了意图路由的分组里直接发到各组 Jev 目标规则的账号；判为测活或正常后直接放行。只对短对话生效，关键字优先。',
+      help: 'Jev 拿不准的请求按模板（数字和随机串换成占位）汇总在这里：A 判成测活但测试题分也高，B 同一模板被判过两种结果，C 测试题分差一点到线。判为测试题后，该模板在所有开了意图路由的分组里直接发到各组 Jev 目标规则的账号；判为测活时，健康检查已开启且所选规则可用才转发，否则按原调度；判为正常直接放行。只对短对话生效，关键字优先。',
       status: { pending: '待判定', probe: '测试题', health: '测活', normal: '正常', all: '全部' },
       reason: { all: '全部原因', a: 'A 测活但测试题分高', b: 'B 判过两种结果', c: 'C 差一点到线' },
       reasonShort: { a: 'A', b: 'B', c: 'C' },
