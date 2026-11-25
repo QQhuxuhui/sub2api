@@ -1,10 +1,18 @@
 import { watch } from 'vue'
+import type { Ref } from 'vue'
 import type { IntentJevConfig } from '@/api/admin/intentRouters'
 import type { FormState } from './ruleUtils'
 
 // Jev's target rules are stored by name. Renaming a rule in the editor must
 // carry those references along — otherwise the form submits the old name and
 // the server drops it (while Jev is off) or rejects the save (while it is on).
+//
+// Each reference is bound to one rule by uid, never guessed from names:
+// - the form is (re)filled, or the admin picks a rule: bind to the rule that
+//   carries the picked name right then (none for '' or an unknown name);
+// - the bound rule is renamed: the reference follows, except while the name
+//   is empty mid-edit;
+// - the bound rule is removed: unbind and leave the reference as it is.
 
 export const ruleRefRoles = ['rule', 'health_rule', 'timely_rule'] as const
 export type RuleRefRole = (typeof ruleRefRoles)[number]
@@ -14,47 +22,59 @@ export interface NamedRule {
   name: string
 }
 
-// Which rule (by uid) each reference points at, and the name it was last seen
-// with: a reference the admin re-picks no longer matches it and is re-bound.
-export type RuleRefBindings = Map<RuleRefRole, NamedRule>
+export interface RuleRefState {
+  /** The rule each reference is bound to (absent: none). */
+  bound: Map<RuleRefRole, number>
+  /** The reference value last seen, to tell an admin's pick from a rename. */
+  seen: Map<RuleRefRole, string>
+}
 
-// followRuleRenames updates jev's references for the rule-name change from
-// before to now. A rule whose name is emptied mid-edit keeps the reference
-// until it gets a name again.
-export function followRuleRenames(jev: Pick<IntentJevConfig, RuleRefRole>, before: NamedRule[], now: NamedRule[], bound: RuleRefBindings): void {
+export function newRuleRefState(): RuleRefState {
+  return { bound: new Map(), seen: new Map() }
+}
+
+function bindByName(state: RuleRefState, role: RuleRefRole, ref: string, rules: NamedRule[]): void {
+  const rule = ref ? rules.find((r) => r.name === ref) : undefined
+  if (rule) state.bound.set(role, rule.uid)
+  else state.bound.delete(role)
+  state.seen.set(role, ref)
+}
+
+/** Binds every reference afresh, as after loading a group. */
+export function resetRuleRefs(state: RuleRefState, jev: Pick<IntentJevConfig, RuleRefRole>, rules: NamedRule[]): void {
+  for (const role of ruleRefRoles) bindByName(state, role, jev[role], rules)
+}
+
+/** Applies one change of the rule list or of the references. */
+export function syncRuleRefs(state: RuleRefState, jev: Pick<IntentJevConfig, RuleRefRole>, rules: NamedRule[]): void {
   for (const role of ruleRefRoles) {
     const ref = jev[role]
-    let binding = bound.get(role)
-    if (binding && binding.name === ref && !now.some((r) => r.uid === binding!.uid)) {
-      // The bound rule is gone from the list. A rule that now carries the
-      // name takes the reference (another group was loaded); otherwise keep
-      // the binding: a move splices the rule out and back in.
-      const named = ref ? now.find((r) => r.name === ref) : undefined
-      if (named) bound.set(role, { uid: named.uid, name: ref })
+    if (ref !== state.seen.get(role)) {
+      bindByName(state, role, ref, rules)
       continue
     }
-    if (!binding || binding.name !== ref) {
-      const source = ref ? (before.find((r) => r.name === ref) ?? now.find((r) => r.name === ref)) : undefined
-      if (!source) {
-        bound.delete(role)
-        continue
-      }
-      binding = { uid: source.uid, name: ref }
-      bound.set(role, binding)
+    const uid = state.bound.get(role)
+    if (uid === undefined) continue
+    const rule = rules.find((r) => r.uid === uid)
+    if (!rule) {
+      state.bound.delete(role)
+      continue
     }
-    const current = now.find((r) => r.uid === binding!.uid)
-    if (current && current.name !== '' && current.name !== ref) {
-      jev[role] = current.name
-      binding.name = current.name
+    if (rule.name !== '' && rule.name !== ref) {
+      state.seen.set(role, rule.name)
+      jev[role] = rule.name
     }
   }
 }
 
-export function useRuleRefsFollowRenames(form: FormState): void {
-  const bound: RuleRefBindings = new Map()
+export function useRuleRefsFollowRenames(form: FormState, formGeneration: Ref<number>): void {
+  const state = newRuleRefState()
+  const names = () => form.rules.map((r) => ({ uid: r.uid, name: r.name.trim() }))
+  resetRuleRefs(state, form.jev, names())
+  watch(formGeneration, () => resetRuleRefs(state, form.jev, names()), { flush: 'sync' })
   watch(
-    () => form.rules.map((r) => ({ uid: r.uid, name: r.name.trim() })),
-    (now, before) => followRuleRenames(form.jev, before ?? [], now, bound),
+    () => [names(), form.jev.rule, form.jev.health_rule, form.jev.timely_rule] as const,
+    ([rules]) => syncRuleRefs(state, form.jev, rules),
     { flush: 'sync' },
   )
 }

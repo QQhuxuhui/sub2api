@@ -193,10 +193,10 @@ function blankJev(): IntentJevConfig {
   return { enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, health_enabled: false, health_threshold: 0.7, health_rule: '', timely_enabled: false, timely_threshold: 0.9, timely_rule: '', low_balance_usd: 1, balance_usd: 0 }
 }
 const form = reactive<FormState>(blankForm())
-useRuleRefsFollowRenames(form)
 // The blank form counts as saved until a group is loaded into it.
 const baseline = ref(JSON.stringify(toInput()))
 const formGeneration = ref(0)
+useRuleRefsFollowRenames(form, formGeneration)
 
 const accountsById = computed(() => new Map(accounts.value.map((a) => [a.id, a])))
 const selectedGroup = computed(() => groups.value.find((g) => g.id === selectedGroupId.value) ?? null)
