@@ -33,8 +33,11 @@ export function newRuleRefState(): RuleRefState {
   return { bound: new Map(), seen: new Map() }
 }
 
+// A name two rules share mid-edit binds to neither: the picker passes names
+// only, so which one was picked is unknown. The reference keeps the name.
 function bindByName(state: RuleRefState, role: RuleRefRole, ref: string, rules: NamedRule[]): void {
-  const rule = ref ? rules.find((r) => r.name === ref) : undefined
+  const named = ref ? rules.filter((r) => r.name === ref) : []
+  const rule = named.length === 1 ? named[0] : undefined
   if (rule) state.bound.set(role, rule.uid)
   else state.bound.delete(role)
   state.seen.set(role, ref)

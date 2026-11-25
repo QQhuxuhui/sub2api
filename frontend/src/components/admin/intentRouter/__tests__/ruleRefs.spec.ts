@@ -46,6 +46,17 @@ describe('ruleRefs', () => {
     expect(jev.health_rule).toBe('health-2')
   })
 
+  it('binds a name two rules share mid-edit to neither', () => {
+    const { jev, step } = setup([{ uid: 1, name: 'legacy' }, { uid: 2, name: 'health' }], 'health')
+    const rules = step([{ uid: 1, name: 'health' }, { uid: 2, name: 'health' }])
+    jev.health_rule = ''
+    step(rules)
+    jev.health_rule = 'health' // the second one, picked from the list
+    step(rules)
+    step([{ uid: 1, name: 'backup' }, { uid: 2, name: 'health' }])
+    expect(jev.health_rule).toBe('health')
+  })
+
   it('leaves a cleared reference cleared', () => {
     const { jev, step } = setup([{ uid: 1, name: 'health' }], 'health')
     jev.health_rule = ''
