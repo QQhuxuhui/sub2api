@@ -6,6 +6,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/ent/intentrouter"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
@@ -185,4 +186,35 @@ func TestIntentTemplateHealth_KeyTargetRule(t *testing.T) {
 	require.Equal(t, "health", got.Intent)
 	require.Equal(t, f.keys["good"], got.APIKeyID)
 	require.Equal(t, f.targetGroup, got.TargetGroupID)
+}
+
+// The try-it target comes from the configuration the text was judged against,
+// not from a cached copy: another instance may have just switched the rule
+// between accounts and an API key.
+func TestIntentRouter_TestClassifyTargetFollowsTheSavedRule(t *testing.T) {
+	ctx := context.Background()
+	f := newIntentKeyFixture(t)
+	accountRule := []domain.IntentRule{{Name: "draw", Keywords: []string{"pelican"}, Enabled: true, AccountIDs: []int64{f.accountID(t, "coding-1")}}}
+	keyRule := []domain.IntentRule{{Name: "draw", Keywords: []string{"pelican"}, Enabled: true, APIKeyID: f.keys["good"]}}
+	saveElsewhere := func(rules []domain.IntentRule) {
+		f.client.IntentRouter.Update().Where(intentrouter.GroupIDEQ(f.groupID)).SetRules(rules).ExecX(ctx)
+	}
+
+	_, err := f.svc.SaveRouter(ctx, f.groupID, IntentRouterInput{Enabled: true, Rules: accountRule})
+	require.NoError(t, err)
+	require.NoError(t, f.svc.reloadConfigs(ctx))
+	saveElsewhere(keyRule)
+	got, err := f.svc.TestClassify(ctx, f.groupID, "draw a pelican")
+	require.NoError(t, err)
+	require.Empty(t, got.AccountIDs)
+	require.Equal(t, f.keys["good"], got.APIKeyID)
+	require.Equal(t, f.targetGroup, got.TargetGroupID)
+
+	require.NoError(t, f.svc.reloadConfigs(ctx))
+	saveElsewhere(accountRule)
+	got, err = f.svc.TestClassify(ctx, f.groupID, "draw a pelican")
+	require.NoError(t, err)
+	require.Equal(t, []int64{f.accountID(t, "coding-1")}, got.AccountIDs)
+	require.Zero(t, got.APIKeyID)
+	require.Zero(t, got.TargetGroupID)
 }

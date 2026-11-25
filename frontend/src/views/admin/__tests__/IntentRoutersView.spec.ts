@@ -612,7 +612,37 @@ describe('IntentRoutersView', () => {
     await wrapper.findAll('[data-test="intent-rule-name"]')[1].setValue('Health')
     await wrapper.get('[data-test="intent-save"]').trigger('click')
     await flushPromises()
-    expect(api.save.mock.calls[0][1].jev).toMatchObject({ health_enabled: false, health_rule: 'health' })
+    expect(api.save.mock.calls[0][1].jev).toMatchObject({ health_enabled: false, health_rule: 'Health' })
+  })
+
+  it('carries Jev rule references along when a rule is renamed, even through an emptied name', async () => {
+    const router = { ...savedRouter, rules: [...savedRouter.rules, { name: 'health', description: '', account_ids: [21], enabled: true }],
+      jev: { enabled: false, rule: 'coding', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100,
+        health_enabled: true, health_threshold: 0.7, health_rule: 'health', timely_enabled: false, timely_threshold: 0.9, timely_rule: 'health', low_balance_usd: 1, balance_usd: 0 } }
+    api.list.mockResolvedValue({ data: [router] })
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...router, ...input } }))
+    const wrapper = await mountView()
+    const names = wrapper.findAll('[data-test="intent-rule-name"]')
+    await names[1].setValue('')
+    await names[1].setValue('probe-check')
+    await names[0].setValue('code')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].jev).toMatchObject({ rule: 'code', health_rule: 'probe-check', timely_rule: 'probe-check' })
+  })
+
+  it('keeps a Jev rule reference the admin cleared, when the rule is renamed afterwards', async () => {
+    const router = { ...savedRouter, rules: [...savedRouter.rules, { name: 'health', description: '', account_ids: [21], enabled: true }],
+      jev: { enabled: false, rule: 'coding', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100,
+        health_enabled: true, health_threshold: 0.7, health_rule: 'health', low_balance_usd: 1, balance_usd: 0 } }
+    api.list.mockResolvedValue({ data: [router] })
+    api.save.mockImplementation(async (_id: number, input: Record<string, unknown>) => ({ data: { ...router, ...input } }))
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="intent-jev-health-rule"]').setValue('')
+    await wrapper.findAll('[data-test="intent-rule-name"]')[1].setValue('other')
+    await wrapper.get('[data-test="intent-save"]').trigger('click')
+    await flushPromises()
+    expect(api.save.mock.calls[0][1].jev).toMatchObject({ health_rule: '' })
   })
 
   it('shows the health-check answer of a try-it result', async () => {

@@ -130,6 +130,7 @@ import StreamPreludeCard from '@/components/admin/intentRouter/StreamPreludeCard
 import TemplateReviewCard from '@/components/admin/intentRouter/TemplateReviewCard.vue'
 import TryItPanel from '@/components/admin/intentRouter/TryItPanel.vue'
 import { provideIntentRouter } from '@/components/admin/intentRouter/context'
+import { useRuleRefsFollowRenames } from '@/components/admin/intentRouter/ruleRefs'
 import { formatKeywords, keyPlatformCompatible, parseKeywords, platformCompatible, restoreOriginalControls, routerHasTargetProblem } from '@/components/admin/intentRouter/ruleUtils'
 import type { AccountOption, FormState, GroupOption, RuleForm, RuleTarget, Tone } from '@/components/admin/intentRouter/ruleUtils'
 import { useAppStore } from '@/stores/app'
@@ -192,6 +193,7 @@ function blankJev(): IntentJevConfig {
   return { enabled: false, rule: '', threshold: 0.5, max_turns: 3, timeout_ms: 1000, model: 'jev-latest', scope: 'all', user_ids: [], api_keys: [], sample_percent: 100, health_enabled: false, health_threshold: 0.7, health_rule: '', timely_enabled: false, timely_threshold: 0.9, timely_rule: '', low_balance_usd: 1, balance_usd: 0 }
 }
 const form = reactive<FormState>(blankForm())
+useRuleRefsFollowRenames(form)
 // The blank form counts as saved until a group is loaded into it.
 const baseline = ref(JSON.stringify(toInput()))
 const formGeneration = ref(0)

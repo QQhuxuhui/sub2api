@@ -961,60 +961,65 @@ func intentAccountPlatformCompatible(groupPlatform, accountPlatform string) bool
 // rules can be tuned before they affect traffic. Unlike Decide it reports
 // failures, because here the caller is the admin who needs to see them.
 func (s *IntentRouterService) TestClassify(ctx context.Context, groupID int64, text string) (*IntentClassifyTestResult, error) {
-	result, err := s.testClassify(ctx, groupID, text)
+	result, cfg, err := s.testClassify(ctx, groupID, text)
 	if err != nil || result == nil || result.Intent == "" {
 		return result, err
 	}
-	cfg := s.config(ctx, groupID)
-	for _, rule := range cfg.activeRules() {
-		if rule.Name == result.Intent && rule.APIKeyID > 0 {
-			result.APIKeyID = rule.APIKeyID
-			if target := cfg.keyTarget(rule.APIKeyID); target.usable() {
-				result.TargetGroupID = target.GroupID
-			}
-		}
+	// The target comes from the same saved configuration the text was judged
+	// against, not from this instance's cached copy, which may be older.
+	rule, ok := cfg.rule(result.Intent)
+	if !ok || rule.APIKeyID <= 0 {
+		return result, nil
+	}
+	result.APIKeyID = rule.APIKeyID
+	targets, _, err := loadIntentKeyTargets(ctx, s.entClient, []int64{rule.APIKeyID}, s.now())
+	if err != nil {
+		return nil, fmt.Errorf("load intent rule target: %w", err)
+	}
+	if target, found := targets[rule.APIKeyID]; found && target.usable() {
+		result.TargetGroupID = target.GroupID
 	}
 	return result, nil
 }
 
-func (s *IntentRouterService) testClassify(ctx context.Context, groupID int64, text string) (*IntentClassifyTestResult, error) {
+func (s *IntentRouterService) testClassify(ctx context.Context, groupID int64, text string) (*IntentClassifyTestResult, *intentRouterConfig, error) {
 	text = stripIntentInjectedText(text)
 	if text == "" {
-		return nil, infraerrors.BadRequest("INTENT_TEST_TEXT_REQUIRED", "enter a message to classify")
+		return nil, nil, infraerrors.BadRequest("INTENT_TEST_TEXT_REQUIRED", "enter a message to classify")
 	}
 	row, err := s.entClient.IntentRouter.Query().Where(intentrouter.GroupIDEQ(groupID)).Only(ctx)
 	if dbent.IsNotFound(err) {
-		return nil, infraerrors.NotFound("INTENT_ROUTER_NOT_FOUND", "save the router before testing it")
+		return nil, nil, infraerrors.NotFound("INTENT_ROUTER_NOT_FOUND", "save the router before testing it")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("load intent router: %w", err)
+		return nil, nil, fmt.Errorf("load intent router: %w", err)
 	}
 	cfg := intentRouterConfigFromEnt(row)
 	if len(cfg.activeRules()) == 0 {
-		return nil, infraerrors.BadRequest("INTENT_NO_ACTIVE_RULES", "enable at least one rule first")
+		return nil, nil, infraerrors.BadRequest("INTENT_NO_ACTIVE_RULES", "enable at least one rule first")
 	}
 	// Same order as live traffic: keywords first, the classifier only after.
 	if rule, keyword, ok := cfg.matchKeywords(text); ok {
-		return &IntentClassifyTestResult{MatchedBy: "keyword", Keyword: keyword, Intent: rule.Name, Understood: true, AccountIDs: rule.AccountIDs}, nil
+		return &IntentClassifyTestResult{MatchedBy: "keyword", Keyword: keyword, Intent: rule.Name, Understood: true, AccountIDs: rule.AccountIDs}, cfg, nil
 	}
 	// Then admin judgements of the template, as live traffic sees them (the
 	// turn limit does not apply: the test is one message).
 	labels, err := s.manualSnapshot(ctx, true)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var manual intentManualVerdict
 	if manual = s.manualLabel(labels, text); manual.Label != "" {
 		if manual.Label == IntentTemplateHealth {
 			if rule, ok := cfg.manualHealthTarget(); ok {
-				return &IntentClassifyTestResult{MatchedBy: "manual", ManualLabel: manual.Label, TemplateKey: manual.Key, Intent: rule.Name, Understood: true, AccountIDs: rule.AccountIDs}, nil
+				return &IntentClassifyTestResult{MatchedBy: "manual", ManualLabel: manual.Label, TemplateKey: manual.Key, Intent: rule.Name, Understood: true, AccountIDs: rule.AccountIDs}, cfg, nil
 			}
 		}
 		if manual.Label != IntentTemplateProbe {
-			return &IntentClassifyTestResult{MatchedBy: "manual", ManualLabel: manual.Label, TemplateKey: manual.Key, Understood: true, AccountIDs: []int64{}}, nil
+			return &IntentClassifyTestResult{MatchedBy: "manual", ManualLabel: manual.Label, TemplateKey: manual.Key, Understood: true, AccountIDs: []int64{}}, cfg, nil
 		}
 		if rule, ok := cfg.manualTarget(); ok {
-			return &IntentClassifyTestResult{MatchedBy: "manual", ManualLabel: manual.Label, TemplateKey: manual.Key, Intent: rule.Name, Understood: true, AccountIDs: rule.AccountIDs}, nil
+			return &IntentClassifyTestResult{MatchedBy: "manual", ManualLabel: manual.Label, TemplateKey: manual.Key, Intent: rule.Name, Understood: true, AccountIDs: rule.AccountIDs}, cfg, nil
 		}
 	}
 	withManual := func(r *IntentClassifyTestResult) *IntentClassifyTestResult {
@@ -1039,7 +1044,7 @@ func (s *IntentRouterService) testClassify(ctx context.Context, groupID int64, t
 			if status, account := intentJevAccountProblem(err); account {
 				meta["status"] = fmt.Sprint(status)
 			}
-			return nil, infraerrors.BadRequest("INTENT_JEV_FAILED", "jev call failed: "+truncateRunes(err.Error(), 300)).WithMetadata(meta)
+			return nil, nil, infraerrors.BadRequest("INTENT_JEV_FAILED", "jev call failed: "+truncateRunes(err.Error(), 300)).WithMetadata(meta)
 		}
 		p := answer.P
 		jevResult = &IntentClassifyTestResult{MatchedBy: "jev", Answer: fmt.Sprintf("p=%.2f", p), Understood: true, LatencyMS: latency, ProbeProbability: &p, HealthProbability: answer.Health, TimelyProbability: answer.Timely, AccountIDs: []int64{}}
@@ -1049,35 +1054,35 @@ func (s *IntentRouterService) testClassify(ctx context.Context, groupID int64, t
 			if rule, ok := cfg.rule(cfg.Jev.HealthRule); ok {
 				jevResult.Intent, jevResult.AccountIDs = rule.Name, rule.AccountIDs
 			}
-			return withManual(jevResult), nil
+			return withManual(jevResult), cfg, nil
 		}
 		if rule, ok := cfg.rule(cfg.Jev.Rule); ok && p >= cfg.Jev.Threshold {
 			jevResult.Intent, jevResult.AccountIDs = rule.Name, rule.AccountIDs
-			return withManual(jevResult), nil
+			return withManual(jevResult), cfg, nil
 		}
 		// Time sensitivity decides only what health checks and probes leave.
 		if cfg.Jev.TimelyEnabled && answer.Timely != nil && *answer.Timely >= cfg.Jev.TimelyThreshold {
 			if rule, ok := cfg.rule(cfg.Jev.TimelyRule); ok {
 				jevResult.Timely = true
 				jevResult.Intent, jevResult.AccountIDs = rule.Name, rule.AccountIDs
-				return withManual(jevResult), nil
+				return withManual(jevResult), cfg, nil
 			}
 		}
 	}
 	rules := cfg.classifierRules()
 	if len(rules) == 0 {
 		if jevResult != nil {
-			return withManual(jevResult), nil
+			return withManual(jevResult), cfg, nil
 		}
 		if !cfg.classifierReady() {
 			for _, rule := range cfg.activeRules() {
 				if len(rule.Keywords) == 0 && rule.Name != cfg.Jev.Rule && rule.Name != cfg.Jev.TimelyRule && (!cfg.Jev.HealthEnabled || rule.Name != cfg.Jev.HealthRule) {
-					return nil, infraerrors.BadRequest("INTENT_CLASSIFIER_INCOMPLETE", "set the classifier model and API key first")
+					return nil, nil, infraerrors.BadRequest("INTENT_CLASSIFIER_INCOMPLETE", "set the classifier model and API key first")
 				}
 			}
 		}
 		// Keyword-only router (or no rule the classifier may pick): no match.
-		return withManual(&IntentClassifyTestResult{Understood: true, AccountIDs: []int64{}}), nil
+		return withManual(&IntentClassifyTestResult{Understood: true, AccountIDs: []int64{}}), cfg, nil
 	}
 	started := s.now()
 	classifyCtx, cancel := context.WithTimeout(ctx, cfg.ClassifierTimeout)
@@ -1085,7 +1090,7 @@ func (s *IntentRouterService) testClassify(ctx context.Context, groupID int64, t
 	answer, err := s.classifier.Classify(classifyCtx, cfg, truncateRunes(text, cfg.MaxInputChars))
 	latency := s.now().Sub(started).Milliseconds()
 	if err != nil {
-		return nil, infraerrors.BadRequest("INTENT_CLASSIFIER_FAILED", "classifier call failed: "+truncateRunes(err.Error(), 300)).
+		return nil, nil, infraerrors.BadRequest("INTENT_CLASSIFIER_FAILED", "classifier call failed: "+truncateRunes(err.Error(), 300)).
 			WithMetadata(map[string]string{"latency_ms": fmt.Sprint(latency)})
 	}
 	result := &IntentClassifyTestResult{MatchedBy: "classifier", Answer: truncateRunes(answer, 300), LatencyMS: latency, AccountIDs: []int64{}}
@@ -1098,7 +1103,7 @@ func (s *IntentRouterService) testClassify(ctx context.Context, groupID int64, t
 	if rule, ok := cfg.rule(result.Intent); ok {
 		result.AccountIDs = rule.AccountIDs
 	}
-	return withManual(result), nil
+	return withManual(result), cfg, nil
 }
 
 // ClearCache forgets remembered conversations of one group (or all, with 0).
