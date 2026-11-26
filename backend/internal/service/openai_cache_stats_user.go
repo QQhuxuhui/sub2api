@@ -175,6 +175,31 @@ func (s *OpenAICacheStatsService) eachUserChunkRow(ctx context.Context, startTim
 	return nil
 }
 
+// openAICacheUserCacheMaxRows bounds the by-user chunk cache (about 200 bytes
+// a row): expired chunks go on every write, then the oldest until under it.
+const openAICacheUserCacheMaxRows = 300000
+
+func (s *OpenAICacheStatsService) trimUserCacheLocked(now time.Time) {
+	total := 0
+	for k, e := range s.userCache {
+		if now.Sub(e.loadedAt) > openAICacheClosedChunkTTL {
+			delete(s.userCache, k)
+			continue
+		}
+		total += len(e.rows)
+	}
+	for total > openAICacheUserCacheMaxRows && len(s.userCache) > 1 {
+		oldestKey, oldest := "", time.Time{}
+		for k, e := range s.userCache {
+			if oldestKey == "" || e.loadedAt.Before(oldest) {
+				oldestKey, oldest = k, e.loadedAt
+			}
+		}
+		total -= len(s.userCache[oldestKey].rows)
+		delete(s.userCache, oldestKey)
+	}
+}
+
 type openAICacheUserChunkEntry struct {
 	loadedAt time.Time
 	rows     []OpenAICacheUserUsageRow
@@ -199,13 +224,7 @@ func (s *OpenAICacheStatsService) loadUserChunkCached(ctx context.Context, repo 
 		}
 		s.mu.Lock()
 		s.userCache[key] = openAICacheUserChunkEntry{loadedAt: s.now(), rows: rows}
-		if len(s.userCache) >= 64 {
-			for k, e := range s.userCache {
-				if s.now().Sub(e.loadedAt) > openAICacheClosedChunkTTL {
-					delete(s.userCache, k)
-				}
-			}
-		}
+		s.trimUserCacheLocked(s.now())
 		s.mu.Unlock()
 		return rows, nil
 	})

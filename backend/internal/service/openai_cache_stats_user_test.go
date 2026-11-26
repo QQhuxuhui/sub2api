@@ -69,3 +69,18 @@ func TestOpenAICacheStatsUser_ListAndTrendAggregatePerUser(t *testing.T) {
 	require.Equal(t, OpenAICacheVerdictCeilingShort, trend[1].Verdict)  // 10% shown, 10% reachable
 	require.Equal(t, 1, repo.calls, "the day's chunk is cached between list and trend")
 }
+
+func TestOpenAICacheStatsUser_CacheBounded(t *testing.T) {
+	now := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	svc := NewOpenAICacheStatsService(&userStatsRepoStub{}, nil, nil)
+	svc.now = func() time.Time { return now }
+	svc.userCache = map[string]openAICacheUserChunkEntry{
+		"expired": {loadedAt: now.Add(-time.Hour), rows: make([]OpenAICacheUserUsageRow, 10)},
+		"old":     {loadedAt: now.Add(-2 * time.Minute), rows: make([]OpenAICacheUserUsageRow, openAICacheUserCacheMaxRows)},
+		"new":     {loadedAt: now, rows: make([]OpenAICacheUserUsageRow, 10)},
+	}
+	svc.trimUserCacheLocked(now)
+	require.NotContains(t, svc.userCache, "expired")
+	require.NotContains(t, svc.userCache, "old")
+	require.Contains(t, svc.userCache, "new")
+}

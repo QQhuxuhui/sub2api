@@ -169,38 +169,39 @@ func classifyOpenAICacheSimItem(item gjson.Result) openAICacheSimItemClass {
 	return openAICacheSimItemUnknown
 }
 
-// openAICacheSimRawSize is a JSON value's size, with image data counted flat.
+// openAICacheSimRawSize is a JSON value's raw size with every data: URL
+// string counted as openAICacheSimImageBytes (base64 images would dwarf the
+// text around them while costing comparatively few tokens). It scans the raw
+// bytes only: no string value is decoded, so escaped text allocates nothing.
 func openAICacheSimRawSize(v gjson.Result) int {
 	if !v.Exists() {
 		return 0
 	}
-	switch {
-	case v.Type == gjson.String:
-		if strings.HasPrefix(v.Str, "data:") {
-			return openAICacheSimImageBytes
+	raw := v.Raw
+	size := len(raw)
+	const marker = `"data:`
+	for off := 0; ; {
+		k := strings.Index(raw[off:], marker)
+		if k < 0 {
+			break
 		}
-		return len(v.Raw)
-	case v.IsObject():
-		typ := v.Get("type").String()
-		if typ == "input_image" || typ == "image_url" {
-			return openAICacheSimImageBytes
+		start := off + k
+		end := start + len(marker)
+		for end < len(raw) && raw[end] != '"' {
+			if raw[end] == '\\' {
+				end++
+			}
+			end++
 		}
-		size := 2
-		v.ForEach(func(key, value gjson.Result) bool {
-			size += len(key.Raw) + 1 + openAICacheSimRawSize(value) + 1
-			return true
-		})
-		return size
-	case v.IsArray():
-		size := 2
-		v.ForEach(func(_, value gjson.Result) bool {
-			size += openAICacheSimRawSize(value) + 1
-			return true
-		})
-		return size
-	default:
-		return len(v.Raw)
+		if end >= len(raw) {
+			break
+		}
+		if n := end + 1 - start; n > openAICacheSimImageBytes {
+			size -= n - openAICacheSimImageBytes
+		}
+		off = end + 1
 	}
+	return size
 }
 
 // openAICacheSimHistoryRatio is the share of the prompt (instructions, tools,

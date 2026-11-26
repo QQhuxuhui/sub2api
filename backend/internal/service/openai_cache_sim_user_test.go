@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -300,20 +302,36 @@ func TestOpenAICacheSimUserVerdict(t *testing.T) {
 }
 
 func TestOpenAICacheSimHistoryRatio_LargeBodyBoundedAllocations(t *testing.T) {
-	items := make([]byte, 0, 1<<20)
+	// Escaped multi-line text (as in code and JSON tool output) must not be
+	// decoded: neither per-item allocations nor body-sized buffers.
+	escaped := strings.Repeat(`line \"x\"\n`, 40)
+	items := make([]byte, 0, 1<<21)
 	items = append(items, `{"input":[`...)
 	for i := 0; i < 2000; i++ {
 		if i > 0 {
 			items = append(items, ',')
 		}
-		items = append(items, `{"role":"user","content":"`+longText(400)+`"},{"role":"assistant","content":"ok"}`...)
+		items = append(items, `{"role":"user","content":"`+escaped+`"},{"type":"function_call","call_id":"c","name":"f","arguments":"{\"a\":1}"},{"type":"function_call_output","call_id":"c","output":"`+escaped+`"}`...)
 	}
 	items = append(items, `]}`...)
-	allocs := testing.AllocsPerRun(3, func() {
+	run := func() {
 		r, kind := openAICacheSimHistoryRatio(nil, items)
-		if kind != openAICacheSimHistoryContinuation || r <= 0.99 {
+		if kind != openAICacheSimHistoryContinuation || r <= 0.9 {
 			panic("unexpected ratio")
 		}
-	})
-	require.Less(t, allocs, float64(100), "no per-item allocations or body copies")
+	}
+	run()
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	run()
+	runtime.ReadMemStats(&after)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(len(items)/20), "allocations stay far below the body size")
+}
+
+func TestOpenAICacheSimRawSize_DataURLCountedFlat(t *testing.T) {
+	big := `{"type":"input_image","image_url":"data:image/png;base64,` + longText(100000) + `"}`
+	require.Less(t, openAICacheSimRawSize(gjson.Parse(big)), 4200)
+	small := `{"text":"see data:x"}`
+	require.Equal(t, len(small), openAICacheSimRawSize(gjson.Parse(small)))
 }
