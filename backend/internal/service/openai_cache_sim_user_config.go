@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -115,23 +114,6 @@ func parseOpenAICacheSimUsers(raw string) (map[int64]OpenAICacheSimConfig, error
 		out[id] = cfg
 	}
 	return out, firstErr
-}
-
-func marshalOpenAICacheSimUsers(overrides map[int64]OpenAICacheSimConfig) (string, error) {
-	ids := make([]int64, 0, len(overrides))
-	for id := range overrides {
-		ids = append(ids, id)
-	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	obj := make(map[string]map[string]any, len(ids))
-	for _, id := range ids {
-		obj[strconv.FormatInt(id, 10)] = overrides[id].ToExtra()
-	}
-	data, err := json.Marshal(obj)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
 }
 
 func loadOpenAICacheSimUserSettings(ctx context.Context, repo SettingRepository) (*openAICacheSimUserSettings, error) {
@@ -332,25 +314,54 @@ func (s *SettingService) SetOpenAICacheSimUser(ctx context.Context, userID int64
 	if err != nil {
 		return err
 	}
-	overrides := make(map[int64]OpenAICacheSimConfig, len(settings.overrides)+1)
-	for id, c := range settings.overrides {
-		overrides[id] = c
+	usersRaw, err := s.settingRepo.GetValue(ctx, SettingKeyOpenAICacheSimUsers)
+	if err != nil && !errors.Is(err, ErrSettingNotFound) {
+		return err
 	}
-	if cfg == nil {
-		delete(overrides, userID)
-	} else {
-		overrides[userID] = *cfg
-	}
-	data, err := marshalOpenAICacheSimUsers(overrides)
+	data, err := editOpenAICacheSimUsersRaw(usersRaw, userID, cfg)
 	if err != nil {
 		return err
 	}
 	if err := s.settingRepo.Set(ctx, SettingKeyOpenAICacheSimUsers, data); err != nil {
 		return err
 	}
+	overrides, _ := parseOpenAICacheSimUsers(data)
 	settings.overrides = overrides
 	storeOpenAICacheSimUserCacheAfterSave(settings)
 	return nil
+}
+
+// editOpenAICacheSimUsersRaw changes only this user's entry of the stored
+// JSON: every other entry is kept as stored, even one that does not parse, so
+// a save never drops other users' overrides. A value that is not a JSON
+// object is refused rather than overwritten.
+func editOpenAICacheSimUsersRaw(raw string, userID int64, cfg *OpenAICacheSimConfig) (string, error) {
+	obj := map[string]json.RawMessage{}
+	if strings.TrimSpace(raw) != "" {
+		if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+			return "", fmt.Errorf("stored user overrides are not valid JSON, fix %s first: %w", SettingKeyOpenAICacheSimUsers, err)
+		}
+		if obj == nil {
+			obj = map[string]json.RawMessage{}
+		}
+	}
+	for key := range obj {
+		if id, err := strconv.ParseInt(strings.TrimSpace(key), 10, 64); err == nil && id == userID {
+			delete(obj, key)
+		}
+	}
+	if cfg != nil {
+		value, err := json.Marshal(cfg.ToExtra())
+		if err != nil {
+			return "", err
+		}
+		obj[strconv.FormatInt(userID, 10)] = value
+	}
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // ---- fixed-point percentages ----

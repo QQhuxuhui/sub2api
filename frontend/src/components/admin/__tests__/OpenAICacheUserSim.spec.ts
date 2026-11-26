@@ -118,4 +118,16 @@ describe('OpenAICacheGlobalCard', () => {
     expect(updateGlobalSimulation).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, lo: 82, hi: 88, cap: 95 }))
     expect(wrapper.emitted('saved')).toBeTruthy()
   })
+
+  it('读取失败时不能保存，只能重新读取', async () => {
+    getGlobalSimulation.mockRejectedValueOnce(new Error('boom'))
+    const wrapper = mount(OpenAICacheGlobalCard)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="openai-cache-global-save"]').exists()).toBe(false)
+    getGlobalSimulation.mockResolvedValue({ config: { ...cfg, enabled: true }, overrides: 0 })
+    await wrapper.get('[data-testid="openai-cache-global-reload"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="openai-cache-global-save"]').exists()).toBe(true)
+    expect(updateGlobalSimulation).not.toHaveBeenCalled()
+  })
 })

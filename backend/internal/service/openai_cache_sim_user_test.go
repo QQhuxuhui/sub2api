@@ -363,3 +363,56 @@ func TestOpenAICacheSimHistoryRatio_NativeTopLevelStringsNotDecoded(t *testing.T
 	// probe never decodes the native body.
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(len(body)*2))
 }
+
+func TestOpenAICacheSimRawSize_InputImageOnlyAsTypeValue(t *testing.T) {
+	// A tool parameter named input_image, or text reading input_image, is not an image.
+	tool := `[{"type":"function","name":"f","parameters":{"type":"object","properties":{"input_image":{"type":"string"}}}}]`
+	require.Equal(t, len(tool), openAICacheSimRawSize(gjson.Parse(tool)))
+	text := `{"role":"user","content":"input_image"}`
+	require.Equal(t, len(text), openAICacheSimRawSize(gjson.Parse(text)))
+	img := `{"type" : "input_image","image_url":"https://example.com/a.png"}`
+	require.Equal(t, len(img)+openAICacheSimImageBytes, openAICacheSimRawSize(gjson.Parse(img)))
+}
+
+func TestOpenAICacheSimHistoryRatio_StringInputNotDecoded(t *testing.T) {
+	body := []byte(`{"model":"gpt","input":"` + strings.Repeat(`line \"x\"\n`, 50000) + `"}`)
+	r, kind := openAICacheSimHistoryRatio(nil, body)
+	require.Equal(t, openAICacheSimHistoryNew, kind)
+	require.Zero(t, r)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	openAICacheSimHistoryRatio(nil, body)
+	runtime.ReadMemStats(&after)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(len(body)/4), "a string input is never decoded")
+}
+
+func TestOpenAICacheSimHistoryRatio_NullInputWithLegacyMessages(t *testing.T) {
+	// input:null with messages is normalized from messages, as the Responses entry does.
+	body := []byte(`{"input":null,"messages":[{"role":"user","content":"` + longText(5000) + `"},{"role":"assistant","content":"done"},{"role":"user","content":"more"}]}`)
+	r, kind := openAICacheSimHistoryRatio(nil, body)
+	require.Equal(t, openAICacheSimHistoryContinuation, kind)
+	require.Greater(t, r, 0.9)
+}
+
+func TestOpenAICacheSimUser_SaveKeepsUnparsableEntries(t *testing.T) {
+	resetOpenAICacheSimUserCacheForTest()
+	t.Cleanup(resetOpenAICacheSimUserCacheForTest)
+	repo := &contentModerationTestSettingRepo{values: map[string]string{
+		SettingKeyOpenAICacheSimUsers: `{"5":{"enabled":true,"lo":90,"hi":80},"6":{"enabled":true,"lo":82,"hi":88}}`,
+	}}
+	settings := &SettingService{settingRepo: repo}
+	ctx := context.Background()
+	on := userSimConfig(85, 90)
+	require.NoError(t, settings.SetOpenAICacheSimUser(ctx, 7, &on))
+	stored := repo.values[SettingKeyOpenAICacheSimUsers]
+	require.Contains(t, stored, `"5":{"enabled":true,"lo":90,"hi":80}`, "a bad entry is kept for the admin to fix")
+	require.True(t, gjson.Get(stored, "6").Exists())
+	require.True(t, gjson.Get(stored, "7").Exists())
+	require.NoError(t, settings.SetOpenAICacheSimUser(ctx, 6, nil))
+	require.False(t, gjson.Get(repo.values[SettingKeyOpenAICacheSimUsers], "6").Exists())
+
+	repo.values[SettingKeyOpenAICacheSimUsers] = `{"5":`
+	require.Error(t, settings.SetOpenAICacheSimUser(ctx, 7, &on), "corrupt JSON is refused, not overwritten")
+	require.Equal(t, `{"5":`, repo.values[SettingKeyOpenAICacheSimUsers])
+}

@@ -49,9 +49,19 @@
         {{ t('admin.openaiCacheUser.global.overrides', { n: overrides }) }}
       </button>
       <button
+        v-if="!loaded && !loading"
+        type="button"
+        class="btn btn-secondary btn-sm ml-auto"
+        data-testid="openai-cache-global-reload"
+        @click="load"
+      >
+        {{ t('common.refresh') }}
+      </button>
+      <button
+        v-else
         type="button"
         class="btn btn-primary btn-sm ml-auto"
-        :disabled="saving || loading"
+        :disabled="saving || loading || !loaded"
         data-testid="openai-cache-global-save"
         @click="save"
       >
@@ -76,6 +86,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const appStore = useAppStore()
 const loading = ref(false)
+// 首次读取成功前不允许保存，避免用表单默认值覆盖已有的全局配置。
+const loaded = ref(false)
 const saving = ref(false)
 const overrides = ref(0)
 const form = reactive({ enabled: false, lo: 82, hi: 88, half_life_minutes: 60, cap: 95 })
@@ -86,6 +98,7 @@ const load = async () => {
     const res = await openaiCacheAPI.getGlobalSimulation()
     Object.assign(form, res.config)
     overrides.value = res.overrides
+    loaded.value = true
   } catch (error) {
     console.error('Failed to load global cache simulation:', error)
     appStore.showError(t('admin.openaiCache.loadFailed'))
@@ -95,6 +108,7 @@ const load = async () => {
 }
 
 const save = async () => {
+  if (!loaded.value) return
   if (form.lo > form.hi) {
     appStore.showError(t('admin.accounts.openai.cacheSimulationRangeInvalid'))
     return

@@ -172,7 +172,8 @@ func classifyOpenAICacheSimItem(item gjson.Result) openAICacheSimItemClass {
 // openAICacheSimRawSize is a JSON value's raw size with every image counted
 // as openAICacheSimImageBytes: a data: URL string value counts nothing (base64
 // would dwarf the text around it) and every "input_image" part adds the flat
-// size, whatever its URL. It scans the raw bytes only — no string value is
+// size, whatever its URL (only a "type" value counts, not a key or text
+// that happens to read input_image). It scans the raw bytes only — no string value is
 // decoded — and only matches quotes that open a JSON string (not escaped ones
 // inside text).
 func openAICacheSimRawSize(v gjson.Result) int {
@@ -181,6 +182,7 @@ func openAICacheSimRawSize(v gjson.Result) int {
 	}
 	raw := v.Raw
 	size := len(raw)
+	typeKey := false
 	for i := 0; i < len(raw); i++ {
 		if raw[i] != '"' {
 			continue
@@ -197,12 +199,23 @@ func openAICacheSimRawSize(v gjson.Result) int {
 			break
 		}
 		str := raw[i+1 : end]
+		next := end + 1
+		for next < len(raw) && (raw[next] == ' ' || raw[next] == '\t' || raw[next] == '\n' || raw[next] == '\r') {
+			next++
+		}
+		if next < len(raw) && raw[next] == ':' {
+			// An object key: only a "type" key makes the next value a part type.
+			typeKey = str == "type"
+			i = end
+			continue
+		}
 		switch {
 		case strings.HasPrefix(str, "data:"):
 			size -= end + 1 - i
-		case str == "input_image":
+		case typeKey && str == "input_image":
 			size += openAICacheSimImageBytes
 		}
+		typeKey = false
 		i = end
 	}
 	if size < 0 {
@@ -221,7 +234,10 @@ func openAICacheSimHistoryRatio(cfg *config.Config, body []byte) (float64, strin
 	}
 	// Only a body without input that carries a legacy field is normalized
 	// (as the Responses entry does); native bodies are never decoded here.
-	if probe := unsafe.String(unsafe.SliceData(body), len(body)); !gjson.Get(probe, "input").Exists() &&
+	// "input.#" tells an array input apart without decoding a string input
+	// (a missing or null input is normalized from the legacy fields, as the
+	// Responses entry does; a string input is a new conversation).
+	if probe := unsafe.String(unsafe.SliceData(body), len(body)); !gjson.Get(probe, "input.#").Exists() &&
 		(gjson.Get(probe, "messages").Exists() || gjson.Get(probe, "prompt").Exists() || gjson.Get(probe, "commands").Exists()) {
 		normalized, changed, err := normalizeOpenAIResponsesLegacyIngressWithConfig(cfg, body)
 		if err != nil || len(normalized) == 0 {
@@ -235,6 +251,9 @@ func openAICacheSimHistoryRatio(cfg *config.Config, body []byte) (float64, strin
 	// not taken its concurrency slot yet): a zero-copy string view and a
 	// single ForEach pass, no Result slice for the input.
 	view := unsafe.String(unsafe.SliceData(body), len(body))
+	if !gjson.Get(view, "input.#").Exists() {
+		return 0, openAICacheSimHistoryNew
+	}
 	input := gjson.Get(view, "input")
 	if !input.IsArray() {
 		return 0, openAICacheSimHistoryNew
