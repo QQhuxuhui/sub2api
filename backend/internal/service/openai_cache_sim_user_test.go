@@ -339,7 +339,7 @@ func TestOpenAICacheSimRawSize_DataURLCountedFlat(t *testing.T) {
 
 func TestOpenAICacheSimRawSize_EscapedQuotesAndHTTPSImages(t *testing.T) {
 	text := `{"role":"user","content":"log says \"data:\" then ` + longText(64000) + `"}`
-	require.Equal(t, len(text), openAICacheSimRawSize(gjson.Parse(text)), "escaped quotes inside text are not string starts")
+	require.Equal(t, len(text)-2, openAICacheSimRawSize(gjson.Parse(text)), "escaped quotes inside text are not string starts (each counts one byte)")
 	img := `{"type":"input_image","image_url":"https://example.com/a.png"}`
 	require.Equal(t, len(img)+openAICacheSimImageBytes, openAICacheSimRawSize(gjson.Parse(img)))
 }
@@ -446,7 +446,7 @@ func TestOpenAICacheSimRawSize_FullyEscapedAndToolImages(t *testing.T) {
 	}
 	// Fully escaped type name still counts once.
 	part := `{"type":"` + esc("input_image") + `","image_url":"https://example.com/a.png"}`
-	require.Equal(t, len(part)+openAICacheSimImageBytes, openAICacheSimRawSize(gjson.Parse(part)))
+	require.Equal(t, len(part)-5*len("input_image")+openAICacheSimImageBytes, openAICacheSimRawSize(gjson.Parse(part)))
 	// Escaped data: prefix still drops the payload; a data-URL image counts once.
 	img := `{"type":"input_image","image_url":"data` + `:` + `image/png;base64,` + longText(100000) + `"}`
 	require.Less(t, openAICacheSimRawSize(gjson.Parse(img)), openAICacheSimImageBytes+200)
@@ -474,4 +474,26 @@ func TestOpenAICacheSimHistoryRatio_Round4Shapes(t *testing.T) {
 	// An upper-case DATA: scheme drops its payload like data:.
 	img := `{"type":"input_image","image_url":"DATA:image/png;base64,` + longText(100000) + `"}`
 	require.Less(t, openAICacheSimRawSize(gjson.Parse(img)), openAICacheSimImageBytes+200)
+}
+
+func TestOpenAICacheSimHistoryRatio_EscapedTextAndRepeatedRole(t *testing.T) {
+	esc := func(s string) string {
+		var b strings.Builder
+		for _, r := range s {
+			fmt.Fprintf(&b, `\u%04x`, r)
+		}
+		return b.String()
+	}
+	hist := longText(4096)
+	plain := `{"input":[{"role":"user","content":"` + hist + `"},{"role":"assistant","content":"ok"},{"role":"user","content":"` + longText(12288) + `"}]}`
+	escaped := `{"input":[{"role":"user","content":"` + esc(hist) + `"},{"role":"assistant","content":"ok"},{"role":"user","content":"` + longText(12288) + `"}]}`
+	rp, _ := openAICacheSimHistoryRatio(nil, []byte(plain))
+	re, _ := openAICacheSimHistoryRatio(nil, []byte(escaped))
+	require.InDelta(t, rp, re, 0.001, "escaped text weighs what it decodes to")
+
+	// An item that repeats role is unknown: never lifted.
+	dup := `{"input":[{"role":"user","content":"` + hist + `"},{"role":"assistant","role":"user","content":"x"},{"role":"user","content":"y"}]}`
+	r, kind := openAICacheSimHistoryRatio(nil, []byte(dup))
+	require.Zero(t, r)
+	require.Equal(t, openAICacheSimHistoryUnknownItem, kind)
 }

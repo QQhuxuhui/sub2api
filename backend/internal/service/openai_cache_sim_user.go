@@ -143,6 +143,11 @@ const (
 )
 
 func classifyOpenAICacheSimItem(item gjson.Result) openAICacheSimItemClass {
+	if item.IsObject() && (openAICacheSimTopLevelKeyCount(item.Raw, "role") > 1 || openAICacheSimTopLevelKeyCount(item.Raw, "type") > 1) {
+		// Parsers disagree on a repeated key (gjson reads the first, the
+		// forwarder's map keeps the last).
+		return openAICacheSimItemUnknown
+	}
 	typ := strings.TrimSpace(item.Get("type").String())
 	role := strings.TrimSpace(item.Get("role").String())
 	if role == "assistant" && (typ == "" || typ == "message") {
@@ -197,10 +202,12 @@ func openAICacheSimRawSize(v gjson.Result) int {
 			}
 			continue
 		}
-		// A string value starts here: find its end.
-		end := i + 1
+		// A string value starts here: find its end. An escape counts as the
+		// bytes it decodes to (\u0061 is one byte of prompt, not six).
+		end, escExtra := i+1, 0
 		for end < len(raw) && raw[end] != '"' {
 			if raw[end] == '\\' {
+				escExtra += openAICacheSimEscapeExtra(raw, end)
 				end++
 			}
 			end++
@@ -208,6 +215,7 @@ func openAICacheSimRawSize(v gjson.Result) int {
 		if end >= len(raw) {
 			break
 		}
+		size -= escExtra
 		str := raw[i+1 : end]
 		next := end + 1
 		for next < len(raw) && (raw[next] == ' ' || raw[next] == '\t' || raw[next] == '\n' || raw[next] == '\r') {
@@ -223,7 +231,7 @@ func openAICacheSimRawSize(v gjson.Result) int {
 		n := openAICacheSimDecodeHead(str, head[:])
 		switch {
 		case n >= 5 && strings.EqualFold(string(head[:5]), "data:"):
-			size -= end + 1 - i
+			size -= end + 1 - i - escExtra
 			dataValues++
 		case typeKey && n < openAICacheSimHeadLen && openAICacheSimAttachmentTypes[string(head[:n])]:
 			attachmentParts++
@@ -236,6 +244,28 @@ func openAICacheSimRawSize(v gjson.Result) int {
 		size = 0
 	}
 	return size
+}
+
+// openAICacheSimEscapeExtra is how many more raw bytes the escape starting at
+// raw[at] (a backslash) takes than the UTF-8 bytes it decodes to.
+func openAICacheSimEscapeExtra(raw string, at int) int {
+	if at+1 >= len(raw) || raw[at+1] != 'u' {
+		return 1
+	}
+	if at+6 > len(raw) {
+		return 0
+	}
+	r, err := strconv.ParseUint(raw[at+2:at+6], 16, 16)
+	switch {
+	case err != nil:
+		return 0
+	case r < 0x80:
+		return 5
+	case r < 0x800:
+		return 4
+	default:
+		return 3
+	}
 }
 
 // openAICacheSimTopLevelKeyCount counts how often key appears among the
