@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"math/rand/v2"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -169,14 +170,17 @@ func classifyOpenAICacheSimItem(item gjson.Result) openAICacheSimItemClass {
 	return openAICacheSimItemUnknown
 }
 
-// openAICacheSimRawSize is a JSON value's raw size with every image counted
-// as openAICacheSimImageBytes: a data: URL string value counts nothing (base64
-// would dwarf the text around it) and every "input_image" part adds the flat
-// size, whatever its URL; so does every "input_file" part (a file uploaded
-// as a data: URL is new input too). Only a "type" value counts, not a key or
-// text that happens to read input_image. It scans the raw bytes only — no string value is
-// decoded — and only matches quotes that open a JSON string (not escaped ones
-// inside text).
+// openAICacheSimRawSize is a JSON value's raw size with every attachment
+// weighed as openAICacheSimImageBytes instead of its bytes. Attachments are
+// data: URL string values (base64 would dwarf the text around it; this covers
+// images a tool returns directly) and "input_image" / "input_file" /
+// "image_url" parts, whatever their URL. A part that carries a data: URL is
+// one attachment, not two: the value counts max(data: values, attachment
+// parts). Only a "type" value names a part, not a key or text that happens to
+// read input_image. Keys, types and the data: prefix are matched on their
+// decoded text, so an escaped spelling counts the same as the plain one. It
+// scans the raw bytes only — no string value is decoded in full — and only
+// matches quotes that open a JSON string (not escaped ones inside text).
 func openAICacheSimRawSize(v gjson.Result) int {
 	if !v.Exists() {
 		return 0
@@ -184,6 +188,7 @@ func openAICacheSimRawSize(v gjson.Result) int {
 	raw := v.Raw
 	size := len(raw)
 	typeKey := false
+	dataValues, attachmentParts := 0, 0
 	for i := 0; i < len(raw); i++ {
 		if raw[i] != '"' {
 			continue
@@ -206,19 +211,23 @@ func openAICacheSimRawSize(v gjson.Result) int {
 		}
 		if next < len(raw) && raw[next] == ':' {
 			// An object key: only a "type" key makes the next value a part type.
-			typeKey = openAICacheSimShortString(str) == "type"
+			typeKey = openAICacheSimIsString(str, "type")
 			i = end
 			continue
 		}
+		var head [openAICacheSimHeadLen]byte
+		n := openAICacheSimDecodeHead(str, head[:])
 		switch {
-		case strings.HasPrefix(str, "data:"):
+		case n >= 5 && string(head[:5]) == "data:":
 			size -= end + 1 - i
-		case typeKey && openAICacheSimAttachmentTypes[openAICacheSimShortString(str)]:
-			size += openAICacheSimImageBytes
+			dataValues++
+		case typeKey && n < openAICacheSimHeadLen && openAICacheSimAttachmentTypes[string(head[:n])]:
+			attachmentParts++
 		}
 		typeKey = false
 		i = end
 	}
+	size += openAICacheSimImageBytes * max(dataValues, attachmentParts)
 	if size < 0 {
 		size = 0
 	}
@@ -229,15 +238,61 @@ func openAICacheSimRawSize(v gjson.Result) int {
 // openAICacheSimImageBytes.
 var openAICacheSimAttachmentTypes = map[string]bool{"input_image": true, "input_file": true, "image_url": true}
 
-// openAICacheSimShortString is the decoded text of a raw JSON string body
-// that is short enough to be a key or a part type: an escaped spelling
-// (input_\u0066ile) matches like the plain one. Longer strings are returned
-// raw (they are never decoded).
-func openAICacheSimShortString(str string) string {
-	if len(str) > 64 || strings.IndexByte(str, '\\') < 0 {
-		return str
+// openAICacheSimHeadLen bounds how much of a string is decoded for matching:
+// one more than the longest name compared, so a longer string never equals.
+const openAICacheSimHeadLen = 16
+
+// openAICacheSimIsString reports whether a raw JSON string body decodes to want.
+func openAICacheSimIsString(str, want string) bool {
+	var head [openAICacheSimHeadLen]byte
+	n := openAICacheSimDecodeHead(str, head[:])
+	return n < openAICacheSimHeadLen && string(head[:n]) == want
+}
+
+// openAICacheSimDecodeHead decodes the start of a raw JSON string body into
+// buf and returns the decoded length, without allocating: simple escapes and
+// \uXXXX (non-ASCII becomes a byte no name contains). It stops when buf is full.
+func openAICacheSimDecodeHead(str string, buf []byte) int {
+	n := 0
+	for i := 0; i < len(str) && n < len(buf); i++ {
+		c := str[i]
+		if c != '\\' {
+			buf[n] = c
+			n++
+			continue
+		}
+		i++
+		if i >= len(str) {
+			break
+		}
+		switch str[i] {
+		case 'u':
+			if i+4 >= len(str) {
+				return n
+			}
+			r, err := strconv.ParseUint(str[i+1:i+5], 16, 16)
+			i += 4
+			if err != nil || r >= 0x80 {
+				buf[n] = 0xff
+			} else {
+				buf[n] = byte(r)
+			}
+		case 'n':
+			buf[n] = '\n'
+		case 't':
+			buf[n] = '\t'
+		case 'r':
+			buf[n] = '\r'
+		case 'b':
+			buf[n] = '\b'
+		case 'f':
+			buf[n] = '\f'
+		default:
+			buf[n] = str[i]
+		}
+		n++
 	}
-	return gjson.Parse(`"` + str + `"`).Str
+	return n
 }
 
 // openAICacheSimHistoryRatio is the share of the prompt (instructions, tools,

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"strings"
 	"sync"
@@ -433,4 +434,25 @@ func TestOpenAICacheSimRawSize_EscapedTypeSpellingsCount(t *testing.T) {
 	} {
 		require.Greater(t, openAICacheSimRawSize(gjson.Parse(part)), openAICacheSimImageBytes-1, part)
 	}
+}
+
+func TestOpenAICacheSimRawSize_FullyEscapedAndToolImages(t *testing.T) {
+	esc := func(s string) string {
+		var b strings.Builder
+		for _, r := range s {
+			fmt.Fprintf(&b, `\u%04x`, r)
+		}
+		return b.String()
+	}
+	// Fully escaped type name still counts once.
+	part := `{"type":"` + esc("input_image") + `","image_url":"https://example.com/a.png"}`
+	require.Equal(t, len(part)+openAICacheSimImageBytes, openAICacheSimRawSize(gjson.Parse(part)))
+	// Escaped data: prefix still drops the payload; a data-URL image counts once.
+	img := `{"type":"input_image","image_url":"data` + `:` + `image/png;base64,` + longText(100000) + `"}`
+	require.Less(t, openAICacheSimRawSize(gjson.Parse(img)), openAICacheSimImageBytes+200)
+	// A tool returning an image data URI directly weighs one attachment.
+	out := `{"type":"function_call_output","call_id":"c","output":"data:image/png;base64,` + longText(100000) + `"}`
+	got := openAICacheSimRawSize(gjson.Parse(out))
+	require.Greater(t, got, openAICacheSimImageBytes)
+	require.Less(t, got, openAICacheSimImageBytes+200)
 }
