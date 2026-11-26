@@ -169,24 +169,24 @@ func classifyOpenAICacheSimItem(item gjson.Result) openAICacheSimItemClass {
 	return openAICacheSimItemUnknown
 }
 
-// openAICacheSimRawSize is a JSON value's raw size with every data: URL
-// string counted as openAICacheSimImageBytes (base64 images would dwarf the
-// text around them while costing comparatively few tokens). It scans the raw
-// bytes only: no string value is decoded, so escaped text allocates nothing.
+// openAICacheSimRawSize is a JSON value's raw size with every image counted
+// as openAICacheSimImageBytes: a data: URL string value counts nothing (base64
+// would dwarf the text around it) and every "input_image" part adds the flat
+// size, whatever its URL. It scans the raw bytes only — no string value is
+// decoded — and only matches quotes that open a JSON string (not escaped ones
+// inside text).
 func openAICacheSimRawSize(v gjson.Result) int {
 	if !v.Exists() {
 		return 0
 	}
 	raw := v.Raw
 	size := len(raw)
-	const marker = `"data:`
-	for off := 0; ; {
-		k := strings.Index(raw[off:], marker)
-		if k < 0 {
-			break
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '"' {
+			continue
 		}
-		start := off + k
-		end := start + len(marker)
+		// A string value starts here: find its end.
+		end := i + 1
 		for end < len(raw) && raw[end] != '"' {
 			if raw[end] == '\\' {
 				end++
@@ -196,10 +196,17 @@ func openAICacheSimRawSize(v gjson.Result) int {
 		if end >= len(raw) {
 			break
 		}
-		if n := end + 1 - start; n > openAICacheSimImageBytes {
-			size -= n - openAICacheSimImageBytes
+		str := raw[i+1 : end]
+		switch {
+		case strings.HasPrefix(str, "data:"):
+			size -= end + 1 - i
+		case str == "input_image":
+			size += openAICacheSimImageBytes
 		}
-		off = end + 1
+		i = end
+	}
+	if size < 0 {
+		size = 0
 	}
 	return size
 }
@@ -212,12 +219,17 @@ func openAICacheSimHistoryRatio(cfg *config.Config, body []byte) (float64, strin
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return 0, openAICacheSimHistoryParseFailed
 	}
-	normalized, changed, err := normalizeOpenAIResponsesLegacyIngressWithConfig(cfg, body)
-	if err != nil {
-		return 0, openAICacheSimHistoryParseFailed
-	}
-	if changed {
-		body = normalized
+	// Only a body without input that carries a legacy field is normalized
+	// (as the Responses entry does); native bodies are never decoded here.
+	if probe := unsafe.String(unsafe.SliceData(body), len(body)); !gjson.Get(probe, "input").Exists() &&
+		(gjson.Get(probe, "messages").Exists() || gjson.Get(probe, "prompt").Exists() || gjson.Get(probe, "commands").Exists()) {
+		normalized, changed, err := normalizeOpenAIResponsesLegacyIngressWithConfig(cfg, body)
+		if err != nil || len(normalized) == 0 {
+			return 0, openAICacheSimHistoryParseFailed
+		}
+		if changed {
+			body = normalized
+		}
 	}
 	// Read without copying the body (it may be megabytes and the request has
 	// not taken its concurrency slot yet): a zero-copy string view and a

@@ -335,3 +335,31 @@ func TestOpenAICacheSimRawSize_DataURLCountedFlat(t *testing.T) {
 	small := `{"text":"see data:x"}`
 	require.Equal(t, len(small), openAICacheSimRawSize(gjson.Parse(small)))
 }
+
+func TestOpenAICacheSimRawSize_EscapedQuotesAndHTTPSImages(t *testing.T) {
+	text := `{"role":"user","content":"log says \"data:\" then ` + longText(64000) + `"}`
+	require.Equal(t, len(text), openAICacheSimRawSize(gjson.Parse(text)), "escaped quotes inside text are not string starts")
+	img := `{"type":"input_image","image_url":"https://example.com/a.png"}`
+	require.Equal(t, len(img)+openAICacheSimImageBytes, openAICacheSimRawSize(gjson.Parse(img)))
+}
+
+func TestOpenAICacheSimHistoryRatio_EscapedDataTextDoesNotInflate(t *testing.T) {
+	body := `{"input":[{"role":"user","content":"` + longText(16000) + `"},{"role":"assistant","content":"ok"},{"role":"user","content":"log says \"data:\" then ` + longText(64000) + `"}]}`
+	r, kind := openAICacheSimHistoryRatio(nil, []byte(body))
+	require.Equal(t, openAICacheSimHistoryContinuation, kind)
+	require.InDelta(t, 0.2, r, 0.01)
+}
+
+func TestOpenAICacheSimHistoryRatio_NativeTopLevelStringsNotDecoded(t *testing.T) {
+	instructions := strings.Repeat(`rule \"x\"\n`, 20000)
+	body := []byte(`{"instructions":"` + instructions + `","model":"gpt","input":[{"role":"user","content":"a"},{"role":"assistant","content":"b"},{"role":"user","content":"c"}]}`)
+	openAICacheSimHistoryRatio(nil, body)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	openAICacheSimHistoryRatio(nil, body)
+	runtime.ReadMemStats(&after)
+	// instructions are read once (bounded by the system prompt), the legacy
+	// probe never decodes the native body.
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(len(body)*2))
+}

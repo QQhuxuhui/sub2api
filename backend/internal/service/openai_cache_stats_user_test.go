@@ -84,3 +84,17 @@ func TestOpenAICacheStatsUser_CacheBounded(t *testing.T) {
 	require.NotContains(t, svc.userCache, "old")
 	require.Contains(t, svc.userCache, "new")
 }
+
+func TestOpenAICacheStatsUser_OversizedChunkNotCached(t *testing.T) {
+	day := time.Date(2026, 11, 20, 0, 0, 0, 0, OpenAICacheSimShanghai())
+	rows := make([]OpenAICacheUserUsageRow, openAICacheUserCacheMaxRows+1)
+	for i := range rows {
+		rows[i] = OpenAICacheUserUsageRow{Bucket: day, UserID: int64(i)}
+	}
+	repo := &userStatsRepoStub{rows: rows}
+	svc := NewOpenAICacheStatsService(repo, nil, nil)
+	count := 0
+	require.NoError(t, svc.eachUserChunkRow(context.Background(), day, day.AddDate(0, 0, 1), openAICacheBaseBucketSeconds, func(OpenAICacheUserUsageRow) { count++ }))
+	require.Equal(t, len(rows), count)
+	require.Empty(t, svc.userCache)
+}

@@ -222,6 +222,9 @@ func (s *OpenAICacheStatsService) loadUserChunkCached(ctx context.Context, repo 
 		if err != nil {
 			return nil, err
 		}
+		if len(rows) > openAICacheUserCacheMaxRows {
+			return rows, nil // too large to keep: served once, not cached
+		}
 		s.mu.Lock()
 		s.userCache[key] = openAICacheUserChunkEntry{loadedAt: s.now(), rows: rows}
 		s.trimUserCacheLocked(s.now())
