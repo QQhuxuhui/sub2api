@@ -131,22 +131,30 @@ func (s *OpenAICacheStatsService) userRepo() (OpenAICacheUserStatsRepository, er
 	return repo, nil
 }
 
-// loadUserChunks mirrors loadChunks for the by-user aggregate (same chunking
-// and cache lifetimes, separate keys).
-func (s *OpenAICacheStatsService) loadUserChunks(ctx context.Context, startTime, endTime time.Time, baseSeconds int) ([]OpenAICacheUserUsageRow, error) {
+// eachUserChunkRow mirrors loadChunks for the by-user aggregate (same chunking
+// and cache lifetimes, separate keys) and hands every cached row to fn without
+// copying the range's rows into one slice.
+func (s *OpenAICacheStatsService) eachUserChunkRow(ctx context.Context, startTime, endTime time.Time, baseSeconds int, fn func(OpenAICacheUserUsageRow)) error {
 	repo, err := s.userRepo()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var out []OpenAICacheUserUsageRow
 	now := s.now()
+	visit := func(c openAICacheChunk, ttl time.Duration) error {
+		rows, err := s.loadUserChunkCached(ctx, repo, c, baseSeconds, ttl)
+		if err != nil {
+			return err
+		}
+		for i := range rows {
+			fn(rows[i])
+		}
+		return nil
+	}
 	for _, c := range splitOpenAICacheRange(startTime, endTime, openAICacheSimShanghai) {
 		if c.end.Before(now) {
-			rows, err := s.loadUserChunkCached(ctx, repo, c, baseSeconds, openAICacheClosedChunkTTL)
-			if err != nil {
-				return nil, err
+			if err := visit(c, openAICacheClosedChunkTTL); err != nil {
+				return err
 			}
-			out = append(out, rows...)
 			continue
 		}
 		for cur := c.start; cur.Before(c.end) && cur.Before(now); {
@@ -158,15 +166,13 @@ func (s *OpenAICacheStatsService) loadUserChunks(ctx context.Context, startTime,
 			if !next.Before(now) {
 				ttl = openAICacheOpenChunkTTL
 			}
-			rows, err := s.loadUserChunkCached(ctx, repo, openAICacheChunk{start: cur, end: next}, baseSeconds, ttl)
-			if err != nil {
-				return nil, err
+			if err := visit(openAICacheChunk{start: cur, end: next}, ttl); err != nil {
+				return err
 			}
-			out = append(out, rows...)
 			cur = next
 		}
 	}
-	return out, nil
+	return nil
 }
 
 type openAICacheUserChunkEntry struct {
@@ -217,18 +223,16 @@ func (s *OpenAICacheStatsService) ListUsers(ctx context.Context, settings *Setti
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.loadUserChunks(ctx, startTime, endTime, openAICacheBaseBucketSeconds)
-	if err != nil {
-		return nil, err
-	}
 	byUser := map[int64]*openAICacheUserAgg{}
-	for _, u := range rows {
+	if err := s.eachUserChunkRow(ctx, startTime, endTime, openAICacheBaseBucketSeconds, func(u OpenAICacheUserUsageRow) {
 		a := byUser[u.UserID]
 		if a == nil {
 			a = &openAICacheUserAgg{}
 			byUser[u.UserID] = a
 		}
 		a.add(u)
+	}); err != nil {
+		return nil, err
 	}
 	global, err := settings.GetOpenAICacheSimGlobal(ctx)
 	if err != nil {
@@ -317,16 +321,12 @@ func (s *OpenAICacheStatsService) ListUserTrend(ctx context.Context, settings *S
 	if granularity == OpenAICacheGranularityMinute {
 		base = openAICacheMinuteBucketSeconds
 	}
-	rows, err := s.loadUserChunks(ctx, startTime, endTime, base)
-	if err != nil {
-		return nil, err
-	}
 	mode := settings.OpenAICacheSimUserModes(ctx, []int64{userID})[userID]
 	byBucket := map[int64]*openAICacheUserAgg{}
 	var order []time.Time
-	for _, u := range rows {
+	if err := s.eachUserChunkRow(ctx, startTime, endTime, base, func(u OpenAICacheUserUsageRow) {
 		if u.UserID != userID {
-			continue
+			return
 		}
 		b := openAICacheTrendBucket(u.Bucket, granularity, loc)
 		a, ok := byBucket[b.Unix()]
@@ -336,6 +336,8 @@ func (s *OpenAICacheStatsService) ListUserTrend(ctx context.Context, settings *S
 			order = append(order, b)
 		}
 		a.add(u)
+	}); err != nil {
+		return nil, err
 	}
 	if granularity == OpenAICacheGranularityDay {
 		order = order[:0]
