@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cachesim"
@@ -217,41 +218,45 @@ func openAICacheSimHistoryRatio(cfg *config.Config, body []byte) (float64, strin
 	if changed {
 		body = normalized
 	}
-	root := gjson.ParseBytes(body)
-	input := root.Get("input")
+	// Read without copying the body (it may be megabytes and the request has
+	// not taken its concurrency slot yet): a zero-copy string view and a
+	// single ForEach pass, no Result slice for the input.
+	view := unsafe.String(unsafe.SliceData(body), len(body))
+	input := gjson.Get(view, "input")
 	if !input.IsArray() {
 		return 0, openAICacheSimHistoryNew
 	}
-	items := input.Array()
-	last := -1
-	for i, item := range items {
+	head := openAICacheSimRawSize(gjson.Get(view, "instructions")) + openAICacheSimRawSize(gjson.Get(view, "tools"))
+	total, blockStart, lastBlockStart := 0, 0, -1
+	prevModel, unknown := false, false
+	input.ForEach(func(_, item gjson.Result) bool {
 		switch classifyOpenAICacheSimItem(item) {
 		case openAICacheSimItemUnknown:
-			return 0, openAICacheSimHistoryUnknownItem
+			unknown = true
+			return false
 		case openAICacheSimItemModel:
-			last = i
+			if !prevModel {
+				blockStart = total
+			}
+			lastBlockStart = blockStart
+			prevModel = true
+		default:
+			prevModel = false
 		}
+		total += openAICacheSimRawSize(item) + 1
+		return true
+	})
+	if unknown {
+		return 0, openAICacheSimHistoryUnknownItem
 	}
-	if last < 0 {
+	if lastBlockStart < 0 {
 		return 0, openAICacheSimHistoryNew
 	}
-	start := last
-	for start > 0 && classifyOpenAICacheSimItem(items[start-1]) == openAICacheSimItemModel {
-		start--
-	}
-	head := openAICacheSimRawSize(root.Get("instructions")) + openAICacheSimRawSize(root.Get("tools"))
-	prefix, total := head, head
-	for i, item := range items {
-		size := openAICacheSimRawSize(item) + 1
-		if i < start {
-			prefix += size
-		}
-		total += size
-	}
-	if total <= 0 || prefix <= 0 {
+	prefix, all := head+lastBlockStart, head+total
+	if all <= 0 || prefix <= 0 {
 		return 0, openAICacheSimHistoryContinuation
 	}
-	ratio := float64(prefix) / float64(total)
+	ratio := float64(prefix) / float64(all)
 	if ratio > 1 {
 		ratio = 1
 	}

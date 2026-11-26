@@ -298,3 +298,22 @@ func TestOpenAICacheSimUserVerdict(t *testing.T) {
 	_, _, v = openAICacheUserVerdict(mode, openAICacheUserAgg{})
 	require.Empty(t, v, "no input")
 }
+
+func TestOpenAICacheSimHistoryRatio_LargeBodyBoundedAllocations(t *testing.T) {
+	items := make([]byte, 0, 1<<20)
+	items = append(items, `{"input":[`...)
+	for i := 0; i < 2000; i++ {
+		if i > 0 {
+			items = append(items, ',')
+		}
+		items = append(items, `{"role":"user","content":"`+longText(400)+`"},{"role":"assistant","content":"ok"}`...)
+	}
+	items = append(items, `]}`...)
+	allocs := testing.AllocsPerRun(3, func() {
+		r, kind := openAICacheSimHistoryRatio(nil, items)
+		if kind != openAICacheSimHistoryContinuation || r <= 0.99 {
+			panic("unexpected ratio")
+		}
+	})
+	require.Less(t, allocs, float64(100), "no per-item allocations or body copies")
+}
