@@ -172,8 +172,9 @@ func classifyOpenAICacheSimItem(item gjson.Result) openAICacheSimItemClass {
 // openAICacheSimRawSize is a JSON value's raw size with every image counted
 // as openAICacheSimImageBytes: a data: URL string value counts nothing (base64
 // would dwarf the text around it) and every "input_image" part adds the flat
-// size, whatever its URL (only a "type" value counts, not a key or text
-// that happens to read input_image). It scans the raw bytes only — no string value is
+// size, whatever its URL; so does every "input_file" part (a file uploaded
+// as a data: URL is new input too). Only a "type" value counts, not a key or
+// text that happens to read input_image. It scans the raw bytes only — no string value is
 // decoded — and only matches quotes that open a JSON string (not escaped ones
 // inside text).
 func openAICacheSimRawSize(v gjson.Result) int {
@@ -212,7 +213,7 @@ func openAICacheSimRawSize(v gjson.Result) int {
 		switch {
 		case strings.HasPrefix(str, "data:"):
 			size -= end + 1 - i
-		case typeKey && str == "input_image":
+		case typeKey && (str == "input_image" || str == "input_file"):
 			size += openAICacheSimImageBytes
 		}
 		typeKey = false

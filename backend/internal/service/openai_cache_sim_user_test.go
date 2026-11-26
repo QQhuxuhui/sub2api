@@ -416,3 +416,11 @@ func TestOpenAICacheSimUser_SaveKeepsUnparsableEntries(t *testing.T) {
 	require.Error(t, settings.SetOpenAICacheSimUser(ctx, 7, &on), "corrupt JSON is refused, not overwritten")
 	require.Equal(t, `{"5":`, repo.values[SettingKeyOpenAICacheSimUsers])
 }
+
+func TestOpenAICacheSimHistoryRatio_UploadedFileCountsAsNewInput(t *testing.T) {
+	// A PDF uploaded this turn as a data: URL weighs like an image, not zero.
+	body := `{"input":[{"role":"user","content":"` + longText(4096) + `"},{"role":"assistant","content":"ok"},{"role":"user","content":[{"type":"input_file","filename":"a.pdf","file_data":"data:application/pdf;base64,` + longText(300000) + `"}]}]}`
+	r, kind := openAICacheSimHistoryRatio(nil, []byte(body))
+	require.Equal(t, openAICacheSimHistoryContinuation, kind)
+	require.InDelta(t, 0.5, r, 0.05)
+}
