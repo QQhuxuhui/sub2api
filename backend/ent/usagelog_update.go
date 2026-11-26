@@ -814,6 +814,33 @@ func (_u *UsageLogUpdate) AddCacheSimCostDelta(v float64) *UsageLogUpdate {
 	return _u
 }
 
+// SetCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field.
+func (_u *UsageLogUpdate) SetCacheSimReachableTokens(v int) *UsageLogUpdate {
+	_u.mutation.ResetCacheSimReachableTokens()
+	_u.mutation.SetCacheSimReachableTokens(v)
+	return _u
+}
+
+// SetNillableCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableCacheSimReachableTokens(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetCacheSimReachableTokens(*v)
+	}
+	return _u
+}
+
+// AddCacheSimReachableTokens adds value to the "cache_sim_reachable_tokens" field.
+func (_u *UsageLogUpdate) AddCacheSimReachableTokens(v int) *UsageLogUpdate {
+	_u.mutation.AddCacheSimReachableTokens(v)
+	return _u
+}
+
+// ClearCacheSimReachableTokens clears the value of the "cache_sim_reachable_tokens" field.
+func (_u *UsageLogUpdate) ClearCacheSimReachableTokens() *UsageLogUpdate {
+	_u.mutation.ClearCacheSimReachableTokens()
+	return _u
+}
+
 // SetUserAgent sets the "user_agent" field.
 func (_u *UsageLogUpdate) SetUserAgent(v string) *UsageLogUpdate {
 	_u.mutation.SetUserAgent(v)
@@ -1443,6 +1470,15 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedCacheSimCostDelta(); ok {
 		_spec.AddField(usagelog.FieldCacheSimCostDelta, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.CacheSimReachableTokens(); ok {
+		_spec.SetField(usagelog.FieldCacheSimReachableTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedCacheSimReachableTokens(); ok {
+		_spec.AddField(usagelog.FieldCacheSimReachableTokens, field.TypeInt, value)
+	}
+	if _u.mutation.CacheSimReachableTokensCleared() {
+		_spec.ClearField(usagelog.FieldCacheSimReachableTokens, field.TypeInt)
 	}
 	if value, ok := _u.mutation.UserAgent(); ok {
 		_spec.SetField(usagelog.FieldUserAgent, field.TypeString, value)
@@ -2463,6 +2499,33 @@ func (_u *UsageLogUpdateOne) AddCacheSimCostDelta(v float64) *UsageLogUpdateOne 
 	return _u
 }
 
+// SetCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field.
+func (_u *UsageLogUpdateOne) SetCacheSimReachableTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetCacheSimReachableTokens()
+	_u.mutation.SetCacheSimReachableTokens(v)
+	return _u
+}
+
+// SetNillableCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableCacheSimReachableTokens(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetCacheSimReachableTokens(*v)
+	}
+	return _u
+}
+
+// AddCacheSimReachableTokens adds value to the "cache_sim_reachable_tokens" field.
+func (_u *UsageLogUpdateOne) AddCacheSimReachableTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.AddCacheSimReachableTokens(v)
+	return _u
+}
+
+// ClearCacheSimReachableTokens clears the value of the "cache_sim_reachable_tokens" field.
+func (_u *UsageLogUpdateOne) ClearCacheSimReachableTokens() *UsageLogUpdateOne {
+	_u.mutation.ClearCacheSimReachableTokens()
+	return _u
+}
+
 // SetUserAgent sets the "user_agent" field.
 func (_u *UsageLogUpdateOne) SetUserAgent(v string) *UsageLogUpdateOne {
 	_u.mutation.SetUserAgent(v)
@@ -3122,6 +3185,15 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.AddedCacheSimCostDelta(); ok {
 		_spec.AddField(usagelog.FieldCacheSimCostDelta, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.CacheSimReachableTokens(); ok {
+		_spec.SetField(usagelog.FieldCacheSimReachableTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedCacheSimReachableTokens(); ok {
+		_spec.AddField(usagelog.FieldCacheSimReachableTokens, field.TypeInt, value)
+	}
+	if _u.mutation.CacheSimReachableTokensCleared() {
+		_spec.ClearField(usagelog.FieldCacheSimReachableTokens, field.TypeInt)
 	}
 	if value, ok := _u.mutation.UserAgent(); ok {
 		_spec.SetField(usagelog.FieldUserAgent, field.TypeString, value)

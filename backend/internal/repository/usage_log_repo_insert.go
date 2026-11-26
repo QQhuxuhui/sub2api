@@ -63,6 +63,7 @@ var usageLogInsertArgTypes = [...]string{
 	"integer",     // raw_input_tokens
 	"integer",     // raw_cache_read_tokens
 	"numeric",     // cache_sim_cost_delta
+	"integer",     // cache_sim_reachable_tokens
 	"text",        // user_agent
 	"text",        // ip_address
 	"integer",     // image_count
@@ -268,6 +269,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			raw_input_tokens,
 			raw_cache_read_tokens,
 			cache_sim_cost_delta,
+			cache_sim_reachable_tokens,
 			user_agent,
 			ip_address,
 			image_count,
@@ -301,7 +303,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -732,6 +734,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			raw_input_tokens,
 			raw_cache_read_tokens,
 			cache_sim_cost_delta,
+			cache_sim_reachable_tokens,
 			user_agent,
 			ip_address,
 			image_count,
@@ -831,6 +834,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				raw_input_tokens,
 				raw_cache_read_tokens,
 				cache_sim_cost_delta,
+				cache_sim_reachable_tokens,
 				user_agent,
 				ip_address,
 				image_count,
@@ -899,6 +903,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				raw_input_tokens,
 				raw_cache_read_tokens,
 				cache_sim_cost_delta,
+				cache_sim_reachable_tokens,
 				user_agent,
 				ip_address,
 				image_count,
@@ -1007,6 +1012,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			raw_input_tokens,
 			raw_cache_read_tokens,
 			cache_sim_cost_delta,
+			cache_sim_reachable_tokens,
 			user_agent,
 			ip_address,
 			image_count,
@@ -1101,6 +1107,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			raw_input_tokens,
 			raw_cache_read_tokens,
 			cache_sim_cost_delta,
+			cache_sim_reachable_tokens,
 			user_agent,
 			ip_address,
 			image_count,
@@ -1169,6 +1176,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			raw_input_tokens,
 			raw_cache_read_tokens,
 			cache_sim_cost_delta,
+			cache_sim_reachable_tokens,
 			user_agent,
 			ip_address,
 			image_count,
@@ -1245,6 +1253,7 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			raw_input_tokens,
 			raw_cache_read_tokens,
 			cache_sim_cost_delta,
+			cache_sim_reachable_tokens,
 			user_agent,
 			ip_address,
 			image_count,
@@ -1278,7 +1287,7 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1383,6 +1392,7 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			rawInputTokens,
 			rawCacheReadTokens,
 			log.CacheSimCostDelta,
+			nullInt(log.CacheSimReachableTokens),
 			userAgent,
 			ipAddress,
 			log.ImageCount,

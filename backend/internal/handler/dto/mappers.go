@@ -776,6 +776,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		RawInputTokens:          l.RawInputTokens,
 		RawCacheReadTokens:      l.RawCacheReadTokens,
 		CacheSimCostDelta:       l.CacheSimCostDelta,
+		CacheSimReachableTokens: l.CacheSimReachableTokens,
 		ChannelID:               l.ChannelID,
 		ModelMappingChain:       l.ModelMappingChain,
 		UpstreamRequestID:       l.UpstreamRequestID,

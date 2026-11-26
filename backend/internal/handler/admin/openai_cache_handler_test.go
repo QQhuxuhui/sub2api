@@ -71,7 +71,7 @@ func (s *openAICacheSimAdminService) UpdateAccountExtra(ctx context.Context, id 
 func newOpenAICacheSimRouter(account *service.Account) (*gin.Engine, *openAICacheSimAdminService) {
 	gin.SetMode(gin.TestMode)
 	svc := &openAICacheSimAdminService{stubAdminService: newStubAdminService(), account: account}
-	h := NewOpenAICacheHandler(nil, svc)
+	h := NewOpenAICacheHandler(nil, svc, nil)
 	r := gin.New()
 	r.PUT("/admin/openai-cache/accounts/:id/simulation", h.UpdateSimulation)
 	return r, svc

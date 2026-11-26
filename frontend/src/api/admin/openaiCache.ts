@@ -132,5 +132,99 @@ export async function updateSimulation(
   return data
 }
 
-export const openaiCacheAPI = { listAccounts, listDaily, updateSimulation }
+// ---- 按用户缓存模拟 ----
+
+export type OpenAICacheUserSource = 'user' | 'global' | 'account'
+export type OpenAICacheVerdict = 'ok' | 'ceiling_short' | 'strategy_short' | ''
+
+export interface OpenAICacheUserRow {
+  user_id: number
+  email: string
+  username: string
+  source: OpenAICacheUserSource
+  active: boolean
+  config: OpenAICacheSimConfigView | null
+  override: OpenAICacheSimConfigView | null
+  all: OpenAICacheRateView
+  text: OpenAICacheRateView
+  requests: number
+  zero_cache_requests: number
+  zero_cache_pct: number
+  billed_cost: number
+  expected_cost: number
+  cost_delta: number
+  reachable_rate: number | null
+  coverage_rate: number | null
+  verdict: OpenAICacheVerdict
+  window?: OpenAICacheWindowView
+}
+
+export interface OpenAICacheUsersResult {
+  timezone: string
+  global: OpenAICacheSimConfigView
+  overrides: number
+  users: OpenAICacheUserRow[]
+}
+
+export interface OpenAICacheUserTrendRow {
+  date: string
+  bucket_start: string
+  all: OpenAICacheRateView
+  text: OpenAICacheRateView
+  reachable_rate: number | null
+  coverage_rate: number | null
+  verdict: OpenAICacheVerdict
+}
+
+// 按用户的接口固定按 Asia/Shanghai 解析日期，不带浏览器时区。
+export async function listUsers(params: { start_date: string; end_date: string }): Promise<OpenAICacheUsersResult> {
+  const { data } = await apiClient.get<OpenAICacheUsersResult>('/admin/openai-cache/users', { params })
+  return { ...data, users: data.users || [] }
+}
+
+export async function listUserTrend(params: {
+  user_id: number
+  start_date: string
+  end_date: string
+  granularity?: OpenAICacheGranularity
+}): Promise<{ rows: OpenAICacheUserTrendRow[]; granularity: OpenAICacheGranularity; timezone: string }> {
+  const { data } = await apiClient.get<{ rows: OpenAICacheUserTrendRow[]; granularity: OpenAICacheGranularity; timezone: string }>(
+    '/admin/openai-cache/user-trend',
+    { params }
+  )
+  return { rows: data.rows || [], granularity: data.granularity || 'day', timezone: data.timezone }
+}
+
+export async function getGlobalSimulation(): Promise<{ config: OpenAICacheSimConfigView; overrides: number }> {
+  const { data } = await apiClient.get<{ config: OpenAICacheSimConfigView; overrides: number }>('/admin/openai-cache/global')
+  return data
+}
+
+export async function updateGlobalSimulation(payload: OpenAICacheSimUpdateRequest): Promise<OpenAICacheSimConfigView> {
+  const { data } = await apiClient.put<OpenAICacheSimConfigView>('/admin/openai-cache/global', payload)
+  return data
+}
+
+/** inherit=true 删除该用户的单独配置（回到继承全局 / 账号）。 */
+export async function updateUserSimulation(
+  userId: number,
+  payload: OpenAICacheSimUpdateRequest | { inherit: true }
+): Promise<OpenAICacheSimConfigView | { inherit: true }> {
+  const { data } = await apiClient.put<OpenAICacheSimConfigView | { inherit: true }>(
+    `/admin/openai-cache/users/${userId}/simulation`,
+    payload
+  )
+  return data
+}
+
+export const openaiCacheAPI = {
+  listAccounts,
+  listDaily,
+  updateSimulation,
+  listUsers,
+  listUserTrend,
+  getGlobalSimulation,
+  updateGlobalSimulation,
+  updateUserSimulation
+}
 export default openaiCacheAPI

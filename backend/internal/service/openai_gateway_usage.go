@@ -186,7 +186,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// 账号开了「缓存模拟」时，计费与落库按模拟后的缓存读（客户看到的数字）走，
 	// 原始值留底到 raw_* 列，差价记到 cache_sim_cost_delta。决策与响应改写共用同一份状态。
-	cacheSim := s.resolveOpenAICacheSimForRecord(ctx, account, result, input.InboundEndpoint)
+	cacheSim := s.resolveOpenAICacheSimForRecord(ctx, account, apiKey, result, input.InboundEndpoint)
 	if cacheSim.Changed() {
 		result.Usage.CacheReadInputTokens = cacheSim.SimCached
 	}
@@ -454,6 +454,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		rawCached := cacheSim.RawCached
 		usageLog.RawInputTokens = &rawInput
 		usageLog.RawCacheReadTokens = &rawCached
+		usageLog.CacheSimReachableTokens = cacheSim.Reachable
 	}
 	isVideoUsage := isGrokVideoUsageResult(result, billingModels)
 	if isVideoUsage {

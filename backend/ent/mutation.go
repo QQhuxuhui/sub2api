@@ -48234,94 +48234,96 @@ func (m *UsageCleanupTaskMutation) ResetEdge(name string) error {
 // UsageLogMutation represents an operation that mutates the UsageLog nodes in the graph.
 type UsageLogMutation struct {
 	config
-	op                           Op
-	typ                          string
-	id                           *int64
-	request_id                   *string
-	model                        *string
-	requested_model              *string
-	upstream_model               *string
-	upstream_response_model      *string
-	upstream_model_mismatch      *bool
-	channel_id                   *int64
-	addchannel_id                *int64
-	model_mapping_chain          *string
-	billing_tier                 *string
-	billing_mode                 *string
-	input_tokens                 *int
-	addinput_tokens              *int
-	output_tokens                *int
-	addoutput_tokens             *int
-	cache_creation_tokens        *int
-	addcache_creation_tokens     *int
-	cache_read_tokens            *int
-	addcache_read_tokens         *int
-	cache_creation_5m_tokens     *int
-	addcache_creation_5m_tokens  *int
-	cache_creation_1h_tokens     *int
-	addcache_creation_1h_tokens  *int
-	input_cost                   *float64
-	addinput_cost                *float64
-	output_cost                  *float64
-	addoutput_cost               *float64
-	cache_creation_cost          *float64
-	addcache_creation_cost       *float64
-	cache_read_cost              *float64
-	addcache_read_cost           *float64
-	total_cost                   *float64
-	addtotal_cost                *float64
-	actual_cost                  *float64
-	addactual_cost               *float64
-	rate_multiplier              *float64
-	addrate_multiplier           *float64
-	long_context_billing_applied *bool
-	account_rate_multiplier      *float64
-	addaccount_rate_multiplier   *float64
-	billing_type                 *int8
-	addbilling_type              *int8
-	stream                       *bool
-	duration_ms                  *int
-	addduration_ms               *int
-	first_token_ms               *int
-	addfirst_token_ms            *int
-	client_first_byte_ms         *int
-	addclient_first_byte_ms      *int
-	raw_input_tokens             *int
-	addraw_input_tokens          *int
-	raw_cache_read_tokens        *int
-	addraw_cache_read_tokens     *int
-	cache_sim_cost_delta         *float64
-	addcache_sim_cost_delta      *float64
-	user_agent                   *string
-	ip_address                   *string
-	image_count                  *int
-	addimage_count               *int
-	image_size                   *string
-	image_input_size             *string
-	image_output_size            *string
-	image_size_source            *string
-	image_size_breakdown         *map[string]int
-	video_count                  *int
-	addvideo_count               *int
-	video_resolution             *string
-	video_duration_seconds       *int
-	addvideo_duration_seconds    *int
-	cache_ttl_overridden         *bool
-	created_at                   *time.Time
-	clearedFields                map[string]struct{}
-	user                         *int64
-	cleareduser                  bool
-	api_key                      *int64
-	clearedapi_key               bool
-	account                      *int64
-	clearedaccount               bool
-	group                        *int64
-	clearedgroup                 bool
-	subscription                 *int64
-	clearedsubscription          bool
-	done                         bool
-	oldValue                     func(context.Context) (*UsageLog, error)
-	predicates                   []predicate.UsageLog
+	op                            Op
+	typ                           string
+	id                            *int64
+	request_id                    *string
+	model                         *string
+	requested_model               *string
+	upstream_model                *string
+	upstream_response_model       *string
+	upstream_model_mismatch       *bool
+	channel_id                    *int64
+	addchannel_id                 *int64
+	model_mapping_chain           *string
+	billing_tier                  *string
+	billing_mode                  *string
+	input_tokens                  *int
+	addinput_tokens               *int
+	output_tokens                 *int
+	addoutput_tokens              *int
+	cache_creation_tokens         *int
+	addcache_creation_tokens      *int
+	cache_read_tokens             *int
+	addcache_read_tokens          *int
+	cache_creation_5m_tokens      *int
+	addcache_creation_5m_tokens   *int
+	cache_creation_1h_tokens      *int
+	addcache_creation_1h_tokens   *int
+	input_cost                    *float64
+	addinput_cost                 *float64
+	output_cost                   *float64
+	addoutput_cost                *float64
+	cache_creation_cost           *float64
+	addcache_creation_cost        *float64
+	cache_read_cost               *float64
+	addcache_read_cost            *float64
+	total_cost                    *float64
+	addtotal_cost                 *float64
+	actual_cost                   *float64
+	addactual_cost                *float64
+	rate_multiplier               *float64
+	addrate_multiplier            *float64
+	long_context_billing_applied  *bool
+	account_rate_multiplier       *float64
+	addaccount_rate_multiplier    *float64
+	billing_type                  *int8
+	addbilling_type               *int8
+	stream                        *bool
+	duration_ms                   *int
+	addduration_ms                *int
+	first_token_ms                *int
+	addfirst_token_ms             *int
+	client_first_byte_ms          *int
+	addclient_first_byte_ms       *int
+	raw_input_tokens              *int
+	addraw_input_tokens           *int
+	raw_cache_read_tokens         *int
+	addraw_cache_read_tokens      *int
+	cache_sim_cost_delta          *float64
+	addcache_sim_cost_delta       *float64
+	cache_sim_reachable_tokens    *int
+	addcache_sim_reachable_tokens *int
+	user_agent                    *string
+	ip_address                    *string
+	image_count                   *int
+	addimage_count                *int
+	image_size                    *string
+	image_input_size              *string
+	image_output_size             *string
+	image_size_source             *string
+	image_size_breakdown          *map[string]int
+	video_count                   *int
+	addvideo_count                *int
+	video_resolution              *string
+	video_duration_seconds        *int
+	addvideo_duration_seconds     *int
+	cache_ttl_overridden          *bool
+	created_at                    *time.Time
+	clearedFields                 map[string]struct{}
+	user                          *int64
+	cleareduser                   bool
+	api_key                       *int64
+	clearedapi_key                bool
+	account                       *int64
+	clearedaccount                bool
+	group                         *int64
+	clearedgroup                  bool
+	subscription                  *int64
+	clearedsubscription           bool
+	done                          bool
+	oldValue                      func(context.Context) (*UsageLog, error)
+	predicates                    []predicate.UsageLog
 }
 
 var _ ent.Mutation = (*UsageLogMutation)(nil)
@@ -50445,6 +50447,76 @@ func (m *UsageLogMutation) ResetCacheSimCostDelta() {
 	m.addcache_sim_cost_delta = nil
 }
 
+// SetCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field.
+func (m *UsageLogMutation) SetCacheSimReachableTokens(i int) {
+	m.cache_sim_reachable_tokens = &i
+	m.addcache_sim_reachable_tokens = nil
+}
+
+// CacheSimReachableTokens returns the value of the "cache_sim_reachable_tokens" field in the mutation.
+func (m *UsageLogMutation) CacheSimReachableTokens() (r int, exists bool) {
+	v := m.cache_sim_reachable_tokens
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCacheSimReachableTokens returns the old "cache_sim_reachable_tokens" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldCacheSimReachableTokens(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCacheSimReachableTokens is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCacheSimReachableTokens requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCacheSimReachableTokens: %w", err)
+	}
+	return oldValue.CacheSimReachableTokens, nil
+}
+
+// AddCacheSimReachableTokens adds i to the "cache_sim_reachable_tokens" field.
+func (m *UsageLogMutation) AddCacheSimReachableTokens(i int) {
+	if m.addcache_sim_reachable_tokens != nil {
+		*m.addcache_sim_reachable_tokens += i
+	} else {
+		m.addcache_sim_reachable_tokens = &i
+	}
+}
+
+// AddedCacheSimReachableTokens returns the value that was added to the "cache_sim_reachable_tokens" field in this mutation.
+func (m *UsageLogMutation) AddedCacheSimReachableTokens() (r int, exists bool) {
+	v := m.addcache_sim_reachable_tokens
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearCacheSimReachableTokens clears the value of the "cache_sim_reachable_tokens" field.
+func (m *UsageLogMutation) ClearCacheSimReachableTokens() {
+	m.cache_sim_reachable_tokens = nil
+	m.addcache_sim_reachable_tokens = nil
+	m.clearedFields[usagelog.FieldCacheSimReachableTokens] = struct{}{}
+}
+
+// CacheSimReachableTokensCleared returns if the "cache_sim_reachable_tokens" field was cleared in this mutation.
+func (m *UsageLogMutation) CacheSimReachableTokensCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldCacheSimReachableTokens]
+	return ok
+}
+
+// ResetCacheSimReachableTokens resets all changes to the "cache_sim_reachable_tokens" field.
+func (m *UsageLogMutation) ResetCacheSimReachableTokens() {
+	m.cache_sim_reachable_tokens = nil
+	m.addcache_sim_reachable_tokens = nil
+	delete(m.clearedFields, usagelog.FieldCacheSimReachableTokens)
+}
+
 // SetUserAgent sets the "user_agent" field.
 func (m *UsageLogMutation) SetUserAgent(s string) {
 	m.user_agent = &s
@@ -51260,7 +51332,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 51)
+	fields := make([]string, 0, 52)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -51374,6 +51446,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.cache_sim_cost_delta != nil {
 		fields = append(fields, usagelog.FieldCacheSimCostDelta)
+	}
+	if m.cache_sim_reachable_tokens != nil {
+		fields = append(fields, usagelog.FieldCacheSimReachableTokens)
 	}
 	if m.user_agent != nil {
 		fields = append(fields, usagelog.FieldUserAgent)
@@ -51498,6 +51573,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.RawCacheReadTokens()
 	case usagelog.FieldCacheSimCostDelta:
 		return m.CacheSimCostDelta()
+	case usagelog.FieldCacheSimReachableTokens:
+		return m.CacheSimReachableTokens()
 	case usagelog.FieldUserAgent:
 		return m.UserAgent()
 	case usagelog.FieldIPAddress:
@@ -51609,6 +51686,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldRawCacheReadTokens(ctx)
 	case usagelog.FieldCacheSimCostDelta:
 		return m.OldCacheSimCostDelta(ctx)
+	case usagelog.FieldCacheSimReachableTokens:
+		return m.OldCacheSimReachableTokens(ctx)
 	case usagelog.FieldUserAgent:
 		return m.OldUserAgent(ctx)
 	case usagelog.FieldIPAddress:
@@ -51910,6 +51989,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetCacheSimCostDelta(v)
 		return nil
+	case usagelog.FieldCacheSimReachableTokens:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCacheSimReachableTokens(v)
+		return nil
 	case usagelog.FieldUserAgent:
 		v, ok := value.(string)
 		if !ok {
@@ -52075,6 +52161,9 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addcache_sim_cost_delta != nil {
 		fields = append(fields, usagelog.FieldCacheSimCostDelta)
 	}
+	if m.addcache_sim_reachable_tokens != nil {
+		fields = append(fields, usagelog.FieldCacheSimReachableTokens)
+	}
 	if m.addimage_count != nil {
 		fields = append(fields, usagelog.FieldImageCount)
 	}
@@ -52136,6 +52225,8 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedRawCacheReadTokens()
 	case usagelog.FieldCacheSimCostDelta:
 		return m.AddedCacheSimCostDelta()
+	case usagelog.FieldCacheSimReachableTokens:
+		return m.AddedCacheSimReachableTokens()
 	case usagelog.FieldImageCount:
 		return m.AddedImageCount()
 	case usagelog.FieldVideoCount:
@@ -52305,6 +52396,13 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddCacheSimCostDelta(v)
 		return nil
+	case usagelog.FieldCacheSimReachableTokens:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddCacheSimReachableTokens(v)
+		return nil
 	case usagelog.FieldImageCount:
 		v, ok := value.(int)
 		if !ok {
@@ -52381,6 +52479,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(usagelog.FieldRawCacheReadTokens) {
 		fields = append(fields, usagelog.FieldRawCacheReadTokens)
+	}
+	if m.FieldCleared(usagelog.FieldCacheSimReachableTokens) {
+		fields = append(fields, usagelog.FieldCacheSimReachableTokens)
 	}
 	if m.FieldCleared(usagelog.FieldUserAgent) {
 		fields = append(fields, usagelog.FieldUserAgent)
@@ -52470,6 +52571,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldRawCacheReadTokens:
 		m.ClearRawCacheReadTokens()
+		return nil
+	case usagelog.FieldCacheSimReachableTokens:
+		m.ClearCacheSimReachableTokens()
 		return nil
 	case usagelog.FieldUserAgent:
 		m.ClearUserAgent()
@@ -52619,6 +52723,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldCacheSimCostDelta:
 		m.ResetCacheSimCostDelta()
+		return nil
+	case usagelog.FieldCacheSimReachableTokens:
+		m.ResetCacheSimReachableTokens()
 		return nil
 	case usagelog.FieldUserAgent:
 		m.ResetUserAgent()

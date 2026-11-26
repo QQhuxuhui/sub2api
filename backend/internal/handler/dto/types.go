@@ -699,6 +699,8 @@ type AdminUsageLog struct {
 	RawCacheReadTokens *int `json:"raw_cache_read_tokens,omitempty"`
 	// CacheSimCostDelta 本笔因缓存模拟少收的费用。仅管理端。
 	CacheSimCostDelta float64 `json:"cache_sim_cost_delta"`
+	// CacheSimReachableTokens 按用户缓存模拟的本笔真实可达缓存读；非按用户请求为 null。仅管理端。
+	CacheSimReachableTokens *int `json:"cache_sim_reachable_tokens,omitempty"`
 
 	// ChannelID 渠道 ID
 	ChannelID *int64 `json:"channel_id,omitempty"`

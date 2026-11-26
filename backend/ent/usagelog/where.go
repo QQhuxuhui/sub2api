@@ -245,6 +245,11 @@ func CacheSimCostDelta(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldCacheSimCostDelta, v))
 }
 
+// CacheSimReachableTokens applies equality check predicate on the "cache_sim_reachable_tokens" field. It's identical to CacheSimReachableTokensEQ.
+func CacheSimReachableTokens(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldCacheSimReachableTokens, v))
+}
+
 // UserAgent applies equality check predicate on the "user_agent" field. It's identical to UserAgentEQ.
 func UserAgent(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldUserAgent, v))
@@ -1993,6 +1998,56 @@ func CacheSimCostDeltaLT(v float64) predicate.UsageLog {
 // CacheSimCostDeltaLTE applies the LTE predicate on the "cache_sim_cost_delta" field.
 func CacheSimCostDeltaLTE(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldCacheSimCostDelta, v))
+}
+
+// CacheSimReachableTokensEQ applies the EQ predicate on the "cache_sim_reachable_tokens" field.
+func CacheSimReachableTokensEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldCacheSimReachableTokens, v))
+}
+
+// CacheSimReachableTokensNEQ applies the NEQ predicate on the "cache_sim_reachable_tokens" field.
+func CacheSimReachableTokensNEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldCacheSimReachableTokens, v))
+}
+
+// CacheSimReachableTokensIn applies the In predicate on the "cache_sim_reachable_tokens" field.
+func CacheSimReachableTokensIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldCacheSimReachableTokens, vs...))
+}
+
+// CacheSimReachableTokensNotIn applies the NotIn predicate on the "cache_sim_reachable_tokens" field.
+func CacheSimReachableTokensNotIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldCacheSimReachableTokens, vs...))
+}
+
+// CacheSimReachableTokensGT applies the GT predicate on the "cache_sim_reachable_tokens" field.
+func CacheSimReachableTokensGT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldCacheSimReachableTokens, v))
+}
+
+// CacheSimReachableTokensGTE applies the GTE predicate on the "cache_sim_reachable_tokens" field.
+func CacheSimReachableTokensGTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldCacheSimReachableTokens, v))
+}
+
+// CacheSimReachableTokensLT applies the LT predicate on the "cache_sim_reachable_tokens" field.
+func CacheSimReachableTokensLT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldCacheSimReachableTokens, v))
+}
+
+// CacheSimReachableTokensLTE applies the LTE predicate on the "cache_sim_reachable_tokens" field.
+func CacheSimReachableTokensLTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldCacheSimReachableTokens, v))
+}
+
+// CacheSimReachableTokensIsNil applies the IsNil predicate on the "cache_sim_reachable_tokens" field.
+func CacheSimReachableTokensIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldCacheSimReachableTokens))
+}
+
+// CacheSimReachableTokensNotNil applies the NotNil predicate on the "cache_sim_reachable_tokens" field.
+func CacheSimReachableTokensNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldCacheSimReachableTokens))
 }
 
 // UserAgentEQ applies the EQ predicate on the "user_agent" field.

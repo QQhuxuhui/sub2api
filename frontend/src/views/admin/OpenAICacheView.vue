@@ -45,6 +45,31 @@
         </div>
       </div>
 
+      <!-- 按用户缓存模拟：全局配置 + 账号/用户切换 -->
+      <OpenAICacheGlobalCard ref="globalCardRef" @saved="userPanelRef?.load()" @show-overrides="showOverrides" />
+      <div class="flex gap-2" role="tablist" data-testid="openai-cache-view-tabs">
+        <button
+          v-for="tab in viewTabs"
+          :key="tab"
+          type="button"
+          role="tab"
+          :aria-selected="viewTab === tab"
+          :data-testid="`openai-cache-tab-${tab}`"
+          :class="['btn btn-sm', viewTab === tab ? 'btn-primary' : 'btn-secondary']"
+          @click="viewTab = tab"
+        >
+          {{ t(`admin.openaiCacheUser.tabs.${tab}`) }}
+        </button>
+      </div>
+      <OpenAICacheUserPanel
+        v-if="viewTab === 'users'"
+        ref="userPanelRef"
+        :start-date="startDate"
+        :end-date="endDate"
+        :granularity="granularity"
+        @changed="globalCardRef?.load()"
+      />
+      <template v-else>
       <!-- 汇总卡片 -->
       <div class="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
         <div class="card p-4">
@@ -219,13 +244,14 @@
           </table>
         </div>
       </div>
+      </template>
     </div>
     <OpenAICacheSimModal :show="simModalOpen" :account="simModalAccount" @close="simModalOpen = false" @saved="onSimSaved" />
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Chart as ChartJS,
@@ -245,6 +271,8 @@ import Select from '@/components/common/Select.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import OpenAICacheSimModal from '@/components/admin/OpenAICacheSimModal.vue'
+import OpenAICacheGlobalCard from '@/components/admin/OpenAICacheGlobalCard.vue'
+import OpenAICacheUserPanel from '@/components/admin/OpenAICacheUserPanel.vue'
 import { useAppStore } from '@/stores/app'
 import { openaiCacheAPI } from '@/api/admin/openaiCache'
 import type {
@@ -347,6 +375,17 @@ const summary = ref<OpenAICacheSummary | null>(null)
 const accounts = ref<OpenAICacheAccountRow[]>([])
 const daily = ref<OpenAICacheDailyRow[]>([])
 const selectedAccount = ref<OpenAICacheAccountRow | null>(null)
+
+// 按用户缓存模拟（新组件，账号视图保持不变）。
+const viewTabs = ['accounts', 'users'] as const
+const viewTab = ref<(typeof viewTabs)[number]>('accounts')
+const globalCardRef = ref<InstanceType<typeof OpenAICacheGlobalCard> | null>(null)
+const userPanelRef = ref<InstanceType<typeof OpenAICacheUserPanel> | null>(null)
+const showOverrides = async () => {
+  viewTab.value = 'users'
+  await nextTick()
+  userPanelRef.value?.showOverrides()
+}
 
 const bucketOf = (x: { all: OpenAICacheRateView; text: OpenAICacheRateView }): OpenAICacheRateView =>
   scope.value === 'text' ? x.text : x.all

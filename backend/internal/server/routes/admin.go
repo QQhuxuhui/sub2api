@@ -360,6 +360,12 @@ func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		openAICache.GET("/accounts", h.Admin.OpenAICache.ListAccounts)
 		openAICache.GET("/daily", h.Admin.OpenAICache.ListDaily)
 		openAICache.PUT("/accounts/:id/simulation", h.Admin.OpenAICache.UpdateSimulation)
+		openAICache.GET("/users", h.Admin.OpenAICache.ListUsers)
+		openAICache.GET("/user-trend", h.Admin.OpenAICache.ListUserTrend)
+		openAICache.GET("/user-overrides", h.Admin.OpenAICache.ListUserOverrides)
+		openAICache.PUT("/users/:id/simulation", h.Admin.OpenAICache.UpdateUserSimulation)
+		openAICache.GET("/global", h.Admin.OpenAICache.GetGlobalSimulation)
+		openAICache.PUT("/global", h.Admin.OpenAICache.UpdateGlobalSimulation)
 	}
 
 	// OpenAI 换号规则表、分组开关与「不支持加密参数」账号标记。

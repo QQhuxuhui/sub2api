@@ -80,6 +80,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // raw_input_tokens
 			sqlmock.AnyArg(), // raw_cache_read_tokens
 			sqlmock.AnyArg(), // cache_sim_cost_delta
+			sqlmock.AnyArg(), // cache_sim_reachable_tokens
 			sqlmock.AnyArg(), // user_agent
 			sqlmock.AnyArg(), // ip_address
 			log.ImageCount,
@@ -179,6 +180,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(), // raw_input_tokens
 			sqlmock.AnyArg(), // raw_cache_read_tokens
 			sqlmock.AnyArg(), // cache_sim_cost_delta
+			sqlmock.AnyArg(), // cache_sim_reachable_tokens
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			log.ImageCount,
@@ -315,11 +317,11 @@ func TestPrepareUsageLogInsert_PersistsImageSizeMetadata(t *testing.T) {
 		CreatedAt:          time.Date(2025, 1, 6, 12, 0, 0, 0, time.UTC),
 	})
 
-	require.Equal(t, sql.NullString{String: imageSize, Valid: true}, prepared.args[42])
-	require.Equal(t, sql.NullString{String: inputSize, Valid: true}, prepared.args[43])
-	require.Equal(t, sql.NullString{String: outputSize, Valid: true}, prepared.args[44])
-	require.Equal(t, sql.NullString{String: source, Valid: true}, prepared.args[45])
-	breakdownJSON, ok := prepared.args[46].(string)
+	require.Equal(t, sql.NullString{String: imageSize, Valid: true}, prepared.args[43])
+	require.Equal(t, sql.NullString{String: inputSize, Valid: true}, prepared.args[44])
+	require.Equal(t, sql.NullString{String: outputSize, Valid: true}, prepared.args[45])
+	require.Equal(t, sql.NullString{String: source, Valid: true}, prepared.args[46])
+	breakdownJSON, ok := prepared.args[47].(string)
 	require.True(t, ok)
 	require.JSONEq(t, `{"1K":1,"4K":1}`, breakdownJSON)
 }
@@ -946,6 +948,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{}, // raw_input_tokens
 			sql.NullInt64{}, // raw_cache_read_tokens
 			0.0, // cache_sim_cost_delta
+			sql.NullInt64{}, // cache_sim_reachable_tokens
 			sql.NullString{},
 			sql.NullString{},
 			2,
@@ -1030,6 +1033,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{}, // raw_input_tokens
 			sql.NullInt64{}, // raw_cache_read_tokens
 			0.0, // cache_sim_cost_delta
+			sql.NullInt64{}, // cache_sim_reachable_tokens
 			sql.NullString{},
 			sql.NullString{},
 			0,
@@ -1097,6 +1101,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{}, // raw_input_tokens
 			sql.NullInt64{}, // raw_cache_read_tokens
 			0.0, // cache_sim_cost_delta
+			sql.NullInt64{}, // cache_sim_reachable_tokens
 			sql.NullString{},
 			sql.NullString{},
 			0,
@@ -1165,6 +1170,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{}, // raw_input_tokens
 			sql.NullInt64{}, // raw_cache_read_tokens
 			0.0, // cache_sim_cost_delta
+			sql.NullInt64{}, // cache_sim_reachable_tokens
 			sql.NullString{},
 			sql.NullString{},
 			0,

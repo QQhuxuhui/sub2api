@@ -189,6 +189,9 @@ type UsageLog struct {
 	RawCacheReadTokens *int
 	// CacheSimCostDelta 本笔因缓存模拟少收的费用（本该收 − 实收），未模拟为 0。仅管理端可见。
 	CacheSimCostDelta float64
+	// CacheSimReachableTokens: the by-user cache simulation's reachable cache
+	// reads (real upper bound) of this request; nil when not by-user. Admin only.
+	CacheSimReachableTokens *int
 	UserAgent         *string
 	IPAddress         *string
 	// SessionID is the explicit client-provided request correlation identifier

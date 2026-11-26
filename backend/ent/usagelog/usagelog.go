@@ -90,6 +90,8 @@ const (
 	FieldRawCacheReadTokens = "raw_cache_read_tokens"
 	// FieldCacheSimCostDelta holds the string denoting the cache_sim_cost_delta field in the database.
 	FieldCacheSimCostDelta = "cache_sim_cost_delta"
+	// FieldCacheSimReachableTokens holds the string denoting the cache_sim_reachable_tokens field in the database.
+	FieldCacheSimReachableTokens = "cache_sim_reachable_tokens"
 	// FieldUserAgent holds the string denoting the user_agent field in the database.
 	FieldUserAgent = "user_agent"
 	// FieldIPAddress holds the string denoting the ip_address field in the database.
@@ -206,6 +208,7 @@ var Columns = []string{
 	FieldRawInputTokens,
 	FieldRawCacheReadTokens,
 	FieldCacheSimCostDelta,
+	FieldCacheSimReachableTokens,
 	FieldUserAgent,
 	FieldIPAddress,
 	FieldImageCount,
@@ -502,6 +505,11 @@ func ByRawCacheReadTokens(opts ...sql.OrderTermOption) OrderOption {
 // ByCacheSimCostDelta orders the results by the cache_sim_cost_delta field.
 func ByCacheSimCostDelta(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCacheSimCostDelta, opts...).ToFunc()
+}
+
+// ByCacheSimReachableTokens orders the results by the cache_sim_reachable_tokens field.
+func ByCacheSimReachableTokens(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCacheSimReachableTokens, opts...).ToFunc()
 }
 
 // ByUserAgent orders the results by the user_agent field.

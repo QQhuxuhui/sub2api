@@ -8,6 +8,7 @@ import audit from './audit'
 import promptAudit from './promptAudit'
 import plugins from './plugins'
 import openaiCache from './openaiCache'
+import openaiCacheUser from './openaiCacheUser'
 import openaiFailover from './openaiFailover'
 
 export default {
@@ -21,5 +22,6 @@ export default {
   ...promptAudit,
   ...plugins,
   ...openaiCache,
+  ...openaiCacheUser,
   ...openaiFailover,
 }

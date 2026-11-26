@@ -227,6 +227,8 @@ type OpenAICacheStatsService struct {
 	mu    sync.Mutex
 	cache map[string]openAICacheChunkEntry
 	sf    singleflight.Group
+	// userCache holds the by-user aggregates (openai_cache_stats_user.go).
+	userCache map[string]openAICacheUserChunkEntry
 }
 
 // NewOpenAICacheStatsService 构造。

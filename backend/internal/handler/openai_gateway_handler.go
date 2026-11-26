@@ -267,6 +267,10 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if state := cachesim.FromContext(parent); state != nil {
 		base = cachesim.WithState(base, state)
 	}
+	// 按用户缓存模拟的计划同样带过去（落库按它决定走哪条记录路径）。
+	if plan := service.OpenAICacheSimUserPlanFromContext(parent); plan != nil {
+		base = service.WithOpenAICacheSimUserPlan(base, plan)
+	}
 	// 带切号缓存平滑计划的意图路由决策同样带过去：落库据此判断这一笔是否参与平滑。
 	// 没有平滑计划时不带，落库路径与原来完全一致。
 	if decision := service.IntentRouteDecisionFromContext(parent); decision.CacheSmoothPlan() != nil {
@@ -290,6 +294,18 @@ func wrapUsageRecordTaskContext(parent context.Context, task service.UsageRecord
 		defer done()
 		task(usageRecordContext(parent, ctx))
 	}, done
+}
+
+// prepareOpenAICacheSimUser attaches the by-user cache simulation plan to
+// requests that resolve to OpenAI (see service.PrepareOpenAICacheSimUser).
+func (h *OpenAIGatewayHandler) prepareOpenAICacheSimUser(c *gin.Context, apiKey *service.APIKey, body []byte, entry string) {
+	if h == nil || h.gatewayService == nil || c == nil || c.Request == nil {
+		return
+	}
+	if openAICompatibleRequestPlatform(c.Request.Context(), apiKey) != service.PlatformOpenAI {
+		return
+	}
+	h.gatewayService.PrepareOpenAICacheSimUser(c, apiKey, body, entry)
 }
 
 func openAICompatibleRequestPlatform(ctx context.Context, apiKey *service.APIKey) string {
@@ -560,6 +576,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	service.SetOpenAIHTTPResponseOwner(c, subject.UserID, apiKey.ID)
 
 	setOpsRequestContext(c, reqModel, reqStream)
+	h.prepareOpenAICacheSimUser(c, apiKey, body, service.OpenAICacheSimEntryResponses)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && !decision.AllowNextStage {
@@ -1294,6 +1311,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	setOpsRequestContext(c, reqModel, reqStream)
+	h.prepareOpenAICacheSimUser(c, apiKey, body, service.OpenAICacheSimEntryCompat)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.AllowNextStage {

@@ -519,6 +519,20 @@ func (_c *UsageLogCreate) SetNillableCacheSimCostDelta(v *float64) *UsageLogCrea
 	return _c
 }
 
+// SetCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field.
+func (_c *UsageLogCreate) SetCacheSimReachableTokens(v int) *UsageLogCreate {
+	_c.mutation.SetCacheSimReachableTokens(v)
+	return _c
+}
+
+// SetNillableCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableCacheSimReachableTokens(v *int) *UsageLogCreate {
+	if v != nil {
+		_c.SetCacheSimReachableTokens(*v)
+	}
+	return _c
+}
+
 // SetUserAgent sets the "user_agent" field.
 func (_c *UsageLogCreate) SetUserAgent(v string) *UsageLogCreate {
 	_c.mutation.SetUserAgent(v)
@@ -1161,6 +1175,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.CacheSimCostDelta(); ok {
 		_spec.SetField(usagelog.FieldCacheSimCostDelta, field.TypeFloat64, value)
 		_node.CacheSimCostDelta = value
+	}
+	if value, ok := _c.mutation.CacheSimReachableTokens(); ok {
+		_spec.SetField(usagelog.FieldCacheSimReachableTokens, field.TypeInt, value)
+		_node.CacheSimReachableTokens = &value
 	}
 	if value, ok := _c.mutation.UserAgent(); ok {
 		_spec.SetField(usagelog.FieldUserAgent, field.TypeString, value)
@@ -2032,6 +2050,30 @@ func (u *UsageLogUpsert) UpdateCacheSimCostDelta() *UsageLogUpsert {
 // AddCacheSimCostDelta adds v to the "cache_sim_cost_delta" field.
 func (u *UsageLogUpsert) AddCacheSimCostDelta(v float64) *UsageLogUpsert {
 	u.Add(usagelog.FieldCacheSimCostDelta, v)
+	return u
+}
+
+// SetCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field.
+func (u *UsageLogUpsert) SetCacheSimReachableTokens(v int) *UsageLogUpsert {
+	u.Set(usagelog.FieldCacheSimReachableTokens, v)
+	return u
+}
+
+// UpdateCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateCacheSimReachableTokens() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldCacheSimReachableTokens)
+	return u
+}
+
+// AddCacheSimReachableTokens adds v to the "cache_sim_reachable_tokens" field.
+func (u *UsageLogUpsert) AddCacheSimReachableTokens(v int) *UsageLogUpsert {
+	u.Add(usagelog.FieldCacheSimReachableTokens, v)
+	return u
+}
+
+// ClearCacheSimReachableTokens clears the value of the "cache_sim_reachable_tokens" field.
+func (u *UsageLogUpsert) ClearCacheSimReachableTokens() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldCacheSimReachableTokens)
 	return u
 }
 
@@ -3091,6 +3133,34 @@ func (u *UsageLogUpsertOne) AddCacheSimCostDelta(v float64) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateCacheSimCostDelta() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheSimCostDelta()
+	})
+}
+
+// SetCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field.
+func (u *UsageLogUpsertOne) SetCacheSimReachableTokens(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCacheSimReachableTokens(v)
+	})
+}
+
+// AddCacheSimReachableTokens adds v to the "cache_sim_reachable_tokens" field.
+func (u *UsageLogUpsertOne) AddCacheSimReachableTokens(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddCacheSimReachableTokens(v)
+	})
+}
+
+// UpdateCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateCacheSimReachableTokens() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCacheSimReachableTokens()
+	})
+}
+
+// ClearCacheSimReachableTokens clears the value of the "cache_sim_reachable_tokens" field.
+func (u *UsageLogUpsertOne) ClearCacheSimReachableTokens() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearCacheSimReachableTokens()
 	})
 }
 
@@ -4352,6 +4422,34 @@ func (u *UsageLogUpsertBulk) AddCacheSimCostDelta(v float64) *UsageLogUpsertBulk
 func (u *UsageLogUpsertBulk) UpdateCacheSimCostDelta() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheSimCostDelta()
+	})
+}
+
+// SetCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field.
+func (u *UsageLogUpsertBulk) SetCacheSimReachableTokens(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCacheSimReachableTokens(v)
+	})
+}
+
+// AddCacheSimReachableTokens adds v to the "cache_sim_reachable_tokens" field.
+func (u *UsageLogUpsertBulk) AddCacheSimReachableTokens(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddCacheSimReachableTokens(v)
+	})
+}
+
+// UpdateCacheSimReachableTokens sets the "cache_sim_reachable_tokens" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateCacheSimReachableTokens() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCacheSimReachableTokens()
+	})
+}
+
+// ClearCacheSimReachableTokens clears the value of the "cache_sim_reachable_tokens" field.
+func (u *UsageLogUpsertBulk) ClearCacheSimReachableTokens() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearCacheSimReachableTokens()
 	})
 }
 

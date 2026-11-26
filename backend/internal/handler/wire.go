@@ -147,11 +147,13 @@ func ProvideOpenAIGatewayHandler(
 	cfg *config.Config,
 	coordinator *securityaudit.Coordinator,
 	cacheSimStore service.OpenAICacheSimWindowStore,
+	cacheSimUserStore service.OpenAICacheSimUserStore,
 	failoverPolicy *service.OpenAIFailoverPolicyService,
 	compositeResolver *service.CompositeRouteResolver,
 ) *OpenAIGatewayHandler {
 	gatewayService.SetPluginManager(pluginManager)
 	gatewayService.SetOpenAICacheSimWindowStore(cacheSimStore)
+	service.SetOpenAICacheSimUserStore(cacheSimUserStore)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, apiKeyService,
 		usageRecordWorkerPool, errorPassthroughService, contentModerationService, opsService, cfg)
 	h.compositeResolver = compositeResolver

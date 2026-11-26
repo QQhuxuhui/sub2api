@@ -15,13 +15,14 @@ import (
 
 // OpenAICacheHandler 管理端「上游缓存」页：OpenAI 账号的真实/展示缓存率与缓存模拟让利。
 type OpenAICacheHandler struct {
-	statsService *service.OpenAICacheStatsService
-	adminService service.AdminService
+	statsService   *service.OpenAICacheStatsService
+	adminService   service.AdminService
+	settingService *service.SettingService
 }
 
 // NewOpenAICacheHandler 构造。
-func NewOpenAICacheHandler(statsService *service.OpenAICacheStatsService, adminService service.AdminService) *OpenAICacheHandler {
-	return &OpenAICacheHandler{statsService: statsService, adminService: adminService}
+func NewOpenAICacheHandler(statsService *service.OpenAICacheStatsService, adminService service.AdminService, settingService *service.SettingService) *OpenAICacheHandler {
+	return &OpenAICacheHandler{statsService: statsService, adminService: adminService, settingService: settingService}
 }
 
 // openAICacheMaxRangeDays 自定义范围上限，防止大表全扫。

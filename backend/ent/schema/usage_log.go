@@ -147,6 +147,10 @@ func (UsageLog) Fields() []ent.Field {
 		field.Float("cache_sim_cost_delta").
 			Default(0).
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
+		// 按用户缓存模拟：本笔真实可达缓存读（上限），NULL 表示不是按用户模拟的请求
+		field.Int("cache_sim_reachable_tokens").
+			Optional().
+			Nillable(),
 		field.String("user_agent").
 			MaxLen(512).
 			Optional().

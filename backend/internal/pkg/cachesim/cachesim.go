@@ -20,6 +20,13 @@ type State struct {
 	rawTotal  int
 	rawCached int
 	simCached int
+	// reachable is the by-user simulation's real upper bound for this
+	// request (set once after the decision); reachableSet tells it apart from 0.
+	reachable    int
+	reachableSet bool
+	// userCounted: the decision already added this request to the user's
+	// window (so recording must not add it again).
+	userCounted bool
 }
 
 // New 返回空状态。
@@ -140,4 +147,32 @@ func (s *State) Excluded() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.excluded
+}
+
+// SetUserResult records the by-user simulation's outcome for the decision
+// already made: the request's reachable cache reads and whether the decision
+// added it to the user's window. Later calls are ignored. Call it outside
+// Decide's callback (Decide holds the lock while calling it).
+func (s *State) SetUserResult(reachable int, counted bool) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.reachableSet || !s.decided {
+		return
+	}
+	s.reachable = reachable
+	s.reachableSet = true
+	s.userCounted = counted
+}
+
+// UserResult returns what SetUserResult recorded (ok=false: nothing).
+func (s *State) UserResult() (reachable int, counted bool, ok bool) {
+	if s == nil {
+		return 0, false, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.reachable, s.userCounted, s.reachableSet
 }

@@ -99,6 +99,13 @@ type openAICacheSimRequest struct {
 	// smooth is the intent-routing cache smoothing plan (nil when off); the
 	// simulator then also runs for accounts without their own simulation.
 	smooth *IntentCacheSmoothPlan
+	// user is the by-user simulation plan of an active user (nil: account
+	// simulation). Its decision replaces the account's and does not stack
+	// smoothing; smoothing still records the shown value.
+	user        *OpenAICacheSimUserPlan
+	userStore   OpenAICacheSimUserStore
+	reachable   int
+	userCounted bool
 }
 
 // openAICacheSimForRequest 在账号开了模拟且请求 context 带状态时返回模拟器，否则 nil。
@@ -108,6 +115,25 @@ func openAICacheSimForRequest(c *gin.Context, account *Account) *openAICacheSimR
 	}
 	cfg := account.OpenAICacheSimulation()
 	smooth := IntentCacheSmoothPlanFromContext(c.Request.Context())
+	if user := OpenAICacheSimUserPlanFromContext(c.Request.Context()); user != nil && account.IsOpenAI() {
+		if user.Kind == OpenAICacheSimUserOff {
+			return nil
+		}
+		state := cachesim.FromContext(c.Request.Context())
+		if state == nil {
+			return nil
+		}
+		return &openAICacheSimRequest{
+			accountID: account.ID,
+			cfg:       cfg,
+			state:     state,
+			store:     currentOpenAICacheSimStore(),
+			ctx:       c.Request.Context(),
+			smooth:    smooth,
+			user:      user,
+			userStore: currentOpenAICacheSimUserStore(),
+		}
+	}
 	if !cfg.Enabled && smooth == nil {
 		return nil
 	}
@@ -126,9 +152,22 @@ func openAICacheSimForRequest(c *gin.Context, account *Account) *openAICacheSimR
 }
 
 // decide 做出（或复用）这一笔的决策。窗口读取失败时保守地不加码。
-func (r *openAICacheSimRequest) decide(rawTotal, rawCached, rawCreation int) int {
+// responsesShape reports the usage is in the Responses shape; only then may
+// the by-user simulation lift it (the account simulation ignores it).
+func (r *openAICacheSimRequest) decide(rawTotal, rawCached, rawCreation int, responsesShape bool) int {
 	if r == nil {
 		return rawCached
+	}
+	if r.user != nil {
+		decided := false
+		sim := r.state.Decide(rawTotal, rawCached, func(total, cached int) int {
+			decided = true
+			return r.simulateUser(total, cached, rawCreation, responsesShape)
+		})
+		if decided {
+			r.state.SetUserResult(r.reachable, r.userCounted)
+		}
+		return sim
 	}
 	return r.state.Decide(rawTotal, rawCached, func(total, cached int) int {
 		sim := r.simulateAccount(total, cached, rawCreation)
@@ -178,12 +217,12 @@ func (r *openAICacheSimRequest) commitShown(total, shown int) {
 }
 
 // apply 把一个 usage 的 (total, cached) 映射为模拟值：未决策时先决策。
-func (r *openAICacheSimRequest) apply(total, cached, creation int) (int, bool) {
+func (r *openAICacheSimRequest) apply(total, cached, creation int, responsesShape bool) (int, bool) {
 	if r == nil || total <= 0 || r.state.Excluded() {
 		return cached, false
 	}
 	if !r.state.Decided() {
-		sim := r.decide(total, cached, creation)
+		sim := r.decide(total, cached, creation, responsesShape)
 		return sim, sim != cached
 	}
 	return r.state.Apply(total, cached)
@@ -267,7 +306,7 @@ func (r *openAICacheSimRequest) applyUsageAt(data []byte, prefix string, usage g
 		}
 		creation := int(usage.Get("cache_creation_input_tokens").Int())
 		total := int(input.Int()) + int(cacheRead.Int()) + creation
-		sim, changed := r.apply(total, int(cacheRead.Int()), creation)
+		sim, changed := r.apply(total, int(cacheRead.Int()), creation, false)
 		if commit {
 			r.commitShown(total, sim)
 		}
@@ -316,7 +355,8 @@ func (r *openAICacheSimRequest) applyUsageAt(data []byte, prefix string, usage g
 		}
 	}
 	cached := int(usage.Get(cachedField).Int())
-	sim, changed := r.apply(total, cached, openAICacheCreationTokensFromUsage(usage))
+	responsesShape := totalField == "input_tokens" && !usage.Get("prompt_tokens").Exists() && !usage.Get("cache_read_input_tokens").Exists()
+	sim, changed := r.apply(total, cached, openAICacheCreationTokensFromUsage(usage), responsesShape)
 	if commit {
 		r.commitShown(total, sim)
 	}
@@ -337,7 +377,7 @@ func (r *openAICacheSimRequest) applyResponsesUsage(usage *apicompat.ResponsesUs
 	if usage.InputTokensDetails != nil {
 		cached = usage.InputTokensDetails.CachedTokens
 	}
-	sim, changed := r.apply(usage.InputTokens, cached, usage.CacheCreationInputTokens)
+	sim, changed := r.apply(usage.InputTokens, cached, usage.CacheCreationInputTokens, true)
 	if terminal {
 		r.commitShown(usage.InputTokens, sim)
 	}
@@ -365,7 +405,7 @@ func (r *openAICacheSimRequest) applyChatUsage(usage *apicompat.ChatUsage) *apic
 	if d := usage.PromptTokensDetails; d != nil {
 		cached, creation = d.CachedTokens, max(d.CacheCreationTokens, d.CacheWriteTokens)
 	}
-	sim, changed := r.apply(usage.PromptTokens, cached, creation)
+	sim, changed := r.apply(usage.PromptTokens, cached, creation, false)
 	r.commitShown(usage.PromptTokens, sim)
 	if !changed {
 		return usage
@@ -388,6 +428,9 @@ type openAICacheSimRecord struct {
 	RawCached int
 	SimCached int
 	cfg       OpenAICacheSimConfig
+	// Reachable is the by-user simulation's reachable cache reads (nil: not
+	// a by-user request).
+	Reachable *int
 }
 
 // Changed 报告模拟是否真的改了数字。
@@ -458,7 +501,30 @@ func containsFold(s, sub string) bool {
 
 // resolveOpenAICacheSimForRecord 在 RecordUsage 里解析模拟结果：优先沿用改写层已做的
 // 决策；改写层没见过 usage（极少数路径）时在这里决策，并把窗口推进一步。
-func (s *OpenAIGatewayService) resolveOpenAICacheSimForRecord(ctx context.Context, account *Account, result *OpenAIForwardResult, inboundEndpoint string) openAICacheSimRecord {
+//
+// apiKey (may be nil) identifies the downstream user: requests of a user under
+// the by-user simulation take its path, and the user's current-hour totals
+// also count what the account simulation recorded for them.
+func (s *OpenAIGatewayService) resolveOpenAICacheSimForRecord(ctx context.Context, account *Account, apiKey *APIKey, result *OpenAIForwardResult, inboundEndpoint string) openAICacheSimRecord {
+	if account != nil && result != nil && account.IsOpenAI() {
+		if plan := OpenAICacheSimUserPlanFromContext(ctx); plan != nil {
+			return s.resolveOpenAICacheSimUserForRecord(ctx, plan, account, result, inboundEndpoint)
+		}
+	}
+	rec := s.resolveOpenAICacheSimAccountForRecord(ctx, account, result, inboundEndpoint)
+	if account != nil && result != nil && apiKey != nil && account.IsOpenAI() {
+		if mode := resolveOpenAICacheSimUserMode(ctx, s.openAICacheSimSettingRepo(), apiKey.UserID); mode.Active {
+			// Compatibility entries and non-text requests of an active user:
+			// the dashboard counts them, so the user's hour does too.
+			countOpenAICacheSimUser(ctx, apiKey.UserID, mode.Config, rec.RawTotal, rec.SimCached, true)
+		}
+	}
+	return rec
+}
+
+// resolveOpenAICacheSimAccountForRecord is the account simulation's recording
+// (unchanged behaviour).
+func (s *OpenAIGatewayService) resolveOpenAICacheSimAccountForRecord(ctx context.Context, account *Account, result *OpenAIForwardResult, inboundEndpoint string) openAICacheSimRecord {
 	rec := openAICacheSimRecord{}
 	if account == nil || result == nil {
 		return rec
