@@ -372,7 +372,7 @@ func TestOpenAICacheSimRawSize_InputImageOnlyAsTypeValue(t *testing.T) {
 	text := `{"role":"user","content":"input_image"}`
 	require.Equal(t, len(text), openAICacheSimRawSize(gjson.Parse(text)))
 	img := `{"type" : "input_image","image_url":"https://example.com/a.png"}`
-	require.Equal(t, len(img)+openAICacheSimImageBytes, openAICacheSimRawSize(gjson.Parse(img)))
+	require.Equal(t, len(img)-2+openAICacheSimImageBytes, openAICacheSimRawSize(gjson.Parse(img)))
 }
 
 func TestOpenAICacheSimHistoryRatio_StringInputNotDecoded(t *testing.T) {
@@ -455,4 +455,23 @@ func TestOpenAICacheSimRawSize_FullyEscapedAndToolImages(t *testing.T) {
 	got := openAICacheSimRawSize(gjson.Parse(out))
 	require.Greater(t, got, openAICacheSimImageBytes)
 	require.Less(t, got, openAICacheSimImageBytes+200)
+}
+
+func TestOpenAICacheSimHistoryRatio_Round4Shapes(t *testing.T) {
+	// A repeated top-level input is never lifted.
+	dup := `{"input":[{"role":"user","content":"` + longText(4096) + `"},{"role":"assistant","content":"ok"},{"role":"user","content":"x"}],"commands":[],"input":[{"role":"user","content":"x"}]}`
+	r, kind := openAICacheSimHistoryRatio(nil, []byte(dup))
+	require.Zero(t, r)
+	require.Equal(t, openAICacheSimHistoryUnknownItem, kind)
+
+	// Layout whitespace does not change the ratio.
+	plain := `{"input":[{"role":"user","content":"` + longText(4096) + `"},{"role":"assistant","content":"ok"},{"role":"user","content":"` + longText(12288) + `"}]}`
+	padded := `{"input":[{"role":"user",` + strings.Repeat(" \n", 98304) + `"content":"` + longText(4096) + `"},{"role":"assistant","content":"ok"},{"role":"user","content":"` + longText(12288) + `"}]}`
+	rp, _ := openAICacheSimHistoryRatio(nil, []byte(plain))
+	rq, _ := openAICacheSimHistoryRatio(nil, []byte(padded))
+	require.InDelta(t, rp, rq, 0.001)
+
+	// An upper-case DATA: scheme drops its payload like data:.
+	img := `{"type":"input_image","image_url":"DATA:image/png;base64,` + longText(100000) + `"}`
+	require.Less(t, openAICacheSimRawSize(gjson.Parse(img)), openAICacheSimImageBytes+200)
 }

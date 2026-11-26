@@ -191,6 +191,10 @@ func openAICacheSimRawSize(v gjson.Result) int {
 	dataValues, attachmentParts := 0, 0
 	for i := 0; i < len(raw); i++ {
 		if raw[i] != '"' {
+			// Layout whitespace is not prompt content.
+			if raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r' {
+				size--
+			}
 			continue
 		}
 		// A string value starts here: find its end.
@@ -218,7 +222,7 @@ func openAICacheSimRawSize(v gjson.Result) int {
 		var head [openAICacheSimHeadLen]byte
 		n := openAICacheSimDecodeHead(str, head[:])
 		switch {
-		case n >= 5 && string(head[:5]) == "data:":
+		case n >= 5 && strings.EqualFold(string(head[:5]), "data:"):
 			size -= end + 1 - i
 			dataValues++
 		case typeKey && n < openAICacheSimHeadLen && openAICacheSimAttachmentTypes[string(head[:n])]:
@@ -232,6 +236,42 @@ func openAICacheSimRawSize(v gjson.Result) int {
 		size = 0
 	}
 	return size
+}
+
+// openAICacheSimTopLevelKeyCount counts how often key appears among the
+// top-level keys of a JSON object, scanning the raw bytes without decoding.
+func openAICacheSimTopLevelKeyCount(raw, key string) int {
+	count, depth := 0, 0
+	for i := 0; i < len(raw); i++ {
+		switch raw[i] {
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+		case '"':
+			end := i + 1
+			for end < len(raw) && raw[end] != '"' {
+				if raw[end] == '\\' {
+					end++
+				}
+				end++
+			}
+			if end >= len(raw) {
+				return count
+			}
+			if depth == 1 {
+				next := end + 1
+				for next < len(raw) && (raw[next] == ' ' || raw[next] == '\t' || raw[next] == '\n' || raw[next] == '\r') {
+					next++
+				}
+				if next < len(raw) && raw[next] == ':' && openAICacheSimIsString(raw[i+1:end], key) {
+					count++
+				}
+			}
+			i = end
+		}
+	}
+	return count
 }
 
 // openAICacheSimAttachmentTypes are the part types weighed as
@@ -322,6 +362,11 @@ func openAICacheSimHistoryRatio(cfg *config.Config, body []byte) (float64, strin
 	// not taken its concurrency slot yet): a zero-copy string view and a
 	// single ForEach pass, no Result slice for the input.
 	view := unsafe.String(unsafe.SliceData(body), len(body))
+	if openAICacheSimTopLevelKeyCount(view, "input") > 1 {
+		// Parsers disagree on a repeated key (gjson reads the first, the
+		// forwarder's map keeps the last): never lift such a body.
+		return 0, openAICacheSimHistoryUnknownItem
+	}
 	if !gjson.Get(view, "input.#").Exists() {
 		return 0, openAICacheSimHistoryNew
 	}
