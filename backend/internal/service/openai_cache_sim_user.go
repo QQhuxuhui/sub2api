@@ -206,14 +206,14 @@ func openAICacheSimRawSize(v gjson.Result) int {
 		}
 		if next < len(raw) && raw[next] == ':' {
 			// An object key: only a "type" key makes the next value a part type.
-			typeKey = str == "type"
+			typeKey = openAICacheSimShortString(str) == "type"
 			i = end
 			continue
 		}
 		switch {
 		case strings.HasPrefix(str, "data:"):
 			size -= end + 1 - i
-		case typeKey && (str == "input_image" || str == "input_file"):
+		case typeKey && openAICacheSimAttachmentTypes[openAICacheSimShortString(str)]:
 			size += openAICacheSimImageBytes
 		}
 		typeKey = false
@@ -223,6 +223,21 @@ func openAICacheSimRawSize(v gjson.Result) int {
 		size = 0
 	}
 	return size
+}
+
+// openAICacheSimAttachmentTypes are the part types weighed as
+// openAICacheSimImageBytes.
+var openAICacheSimAttachmentTypes = map[string]bool{"input_image": true, "input_file": true, "image_url": true}
+
+// openAICacheSimShortString is the decoded text of a raw JSON string body
+// that is short enough to be a key or a part type: an escaped spelling
+// (input_\u0066ile) matches like the plain one. Longer strings are returned
+// raw (they are never decoded).
+func openAICacheSimShortString(str string) string {
+	if len(str) > 64 || strings.IndexByte(str, '\\') < 0 {
+		return str
+	}
+	return gjson.Parse(`"` + str + `"`).Str
 }
 
 // openAICacheSimHistoryRatio is the share of the prompt (instructions, tools,

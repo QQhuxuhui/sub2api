@@ -424,3 +424,13 @@ func TestOpenAICacheSimHistoryRatio_UploadedFileCountsAsNewInput(t *testing.T) {
 	require.Equal(t, openAICacheSimHistoryContinuation, kind)
 	require.InDelta(t, 0.5, r, 0.05)
 }
+
+func TestOpenAICacheSimRawSize_EscapedTypeSpellingsCount(t *testing.T) {
+	for _, part := range []string{
+		`{"type":"input_file","file_data":"data:application/pdf;base64,AAAA"}`,
+		`{"type":"input_image","image_url":"https://example.com/a.png"}`,
+		`{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}`,
+	} {
+		require.Greater(t, openAICacheSimRawSize(gjson.Parse(part)), openAICacheSimImageBytes-1, part)
+	}
+}
