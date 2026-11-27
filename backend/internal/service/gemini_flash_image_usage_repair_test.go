@@ -288,7 +288,7 @@ func TestCollectGeminiSSEPreservesUsageFromMetadataOnlyFinalChunk(t *testing.T) 
 		"",
 	}, "\n")
 
-	collected, usage, err := collectGeminiSSE(strings.NewReader(stream), false)
+	collected, usage, err := collectGeminiSSE(nil, strings.NewReader(stream), false)
 	require.NoError(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 2091, usage.OutputTokens)
@@ -314,7 +314,7 @@ func TestCollectGeminiSSEPreservesImagesAcrossSeparateChunks(t *testing.T) {
 		"",
 	}, "\n")
 
-	collected, _, err := collectGeminiSSE(strings.NewReader(stream), false)
+	collected, _, err := collectGeminiSSE(nil, strings.NewReader(stream), false)
 	require.NoError(t, err)
 	body, err := json.Marshal(collected)
 	require.NoError(t, err)
@@ -349,7 +349,7 @@ func TestCollectGeminiSSEDoesNotDuplicateCumulativeImages(t *testing.T) {
 		"",
 	}, "\n")
 
-	collected, _, err := collectGeminiSSE(strings.NewReader(stream), false)
+	collected, _, err := collectGeminiSSE(nil, strings.NewReader(stream), false)
 	require.NoError(t, err)
 	body, err := json.Marshal(collected)
 	require.NoError(t, err)

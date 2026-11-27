@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/stretchr/testify/require"
 )
 
@@ -339,16 +340,17 @@ func TestPricingRequestToService_Defaults(t *testing.T) {
 func TestPricingRequestToService_WithAllFields(t *testing.T) {
 	reqs := []channelModelPricingRequest{
 		{
-			Platform:          "openai",
-			Models:            []string{"gpt-4", "gpt-4o"},
-			BillingMode:       "per_request",
-			InputPrice:        float64Ptr(0.01),
-			OutputPrice:       float64Ptr(0.03),
-			CacheWritePrice:   float64Ptr(0.005),
-			CacheWrite1hPrice: float64Ptr(0.008),
-			CacheReadPrice:    float64Ptr(0.002),
-			ImageOutputPrice:  float64Ptr(0.04),
-			PerRequestPrice:   float64Ptr(0.5),
+			Platform:           "openai",
+			Models:             []string{"gpt-4", "gpt-4o"},
+			BillingMode:        "per_request",
+			InputPrice:         float64Ptr(0.01),
+			OutputPrice:        float64Ptr(0.03),
+			CacheWritePrice:    float64Ptr(0.005),
+			CacheWrite1hPrice:  float64Ptr(0.008),
+			CacheWrite12hPrice: float64Ptr(0.01),
+			CacheReadPrice:     float64Ptr(0.002),
+			ImageOutputPrice:   float64Ptr(0.04),
+			PerRequestPrice:    float64Ptr(0.5),
 		},
 	}
 
@@ -362,6 +364,7 @@ func TestPricingRequestToService_WithAllFields(t *testing.T) {
 	require.Equal(t, float64Ptr(0.03), r.OutputPrice)
 	require.Equal(t, float64Ptr(0.005), r.CacheWritePrice)
 	require.Equal(t, float64Ptr(0.008), r.CacheWrite1hPrice)
+	require.Equal(t, float64Ptr(0.01), r.CacheWrite12hPrice)
 	require.Equal(t, float64Ptr(0.002), r.CacheReadPrice)
 	require.Equal(t, float64Ptr(0.04), r.ImageOutputPrice)
 	require.Equal(t, float64Ptr(0.5), r.PerRequestPrice)
@@ -374,16 +377,17 @@ func TestPricingRequestToService_WithIntervals(t *testing.T) {
 			BillingMode: "per_request",
 			Intervals: []pricingIntervalRequest{
 				{
-					MinTokens:         0,
-					MaxTokens:         intPtr(2000),
-					TierLabel:         "small",
-					InputPrice:        float64Ptr(0.01),
-					OutputPrice:       float64Ptr(0.02),
-					CacheWritePrice:   float64Ptr(0.003),
-					CacheWrite1hPrice: float64Ptr(0.006),
-					CacheReadPrice:    float64Ptr(0.001),
-					PerRequestPrice:   float64Ptr(0.1),
-					SortOrder:         1,
+					MinTokens:          0,
+					MaxTokens:          intPtr(2000),
+					TierLabel:          "small",
+					InputPrice:         float64Ptr(0.01),
+					OutputPrice:        float64Ptr(0.02),
+					CacheWritePrice:    float64Ptr(0.003),
+					CacheWrite1hPrice:  float64Ptr(0.006),
+					CacheWrite12hPrice: float64Ptr(0),
+					CacheReadPrice:     float64Ptr(0.001),
+					PerRequestPrice:    float64Ptr(0.1),
+					SortOrder:          1,
 				},
 				{
 					MinTokens: 2000,
@@ -407,6 +411,7 @@ func TestPricingRequestToService_WithIntervals(t *testing.T) {
 	require.Equal(t, float64Ptr(0.02), iv0.OutputPrice)
 	require.Equal(t, float64Ptr(0.003), iv0.CacheWritePrice)
 	require.Equal(t, float64Ptr(0.006), iv0.CacheWrite1hPrice)
+	require.Equal(t, float64Ptr(0), iv0.CacheWrite12hPrice)
 	require.Equal(t, float64Ptr(0.001), iv0.CacheReadPrice)
 	require.Equal(t, float64Ptr(0.1), iv0.PerRequestPrice)
 	require.Equal(t, 1, iv0.SortOrder)
@@ -475,6 +480,7 @@ func TestPricingRequestToService_MultipliersGatedByFlag(t *testing.T) {
 		BillingMode:                "token",
 		FastMultiplier:             float64Ptr(2.5),
 		FlexMultiplier:             float64Ptr(0.5),
+		UltrafastMultiplier:        float64Ptr(3),
 		ReasoningEffortMultipliers: map[string]float64{"high": 1.5, "max": 3},
 		Intervals: []pricingIntervalRequest{{
 			MinTokens:            272000,
@@ -488,6 +494,7 @@ func TestPricingRequestToService_MultipliersGatedByFlag(t *testing.T) {
 	allowed := pricingRequestToService([]channelModelPricingRequest{req}, true)
 	require.Equal(t, float64Ptr(2.5), allowed[0].FastMultiplier)
 	require.Equal(t, float64Ptr(0.5), allowed[0].FlexMultiplier)
+	require.Equal(t, float64Ptr(3), allowed[0].UltrafastMultiplier)
 	require.Equal(t, req.ReasoningEffortMultipliers, allowed[0].ReasoningEffortMultipliers)
 	require.Equal(t, float64Ptr(2), allowed[0].Intervals[0].InputMultiplier)
 	require.Equal(t, float64Ptr(1.5), allowed[0].Intervals[0].OutputMultiplier)
@@ -497,6 +504,7 @@ func TestPricingRequestToService_MultipliersGatedByFlag(t *testing.T) {
 	dropped := pricingRequestToService([]channelModelPricingRequest{req}, false)
 	require.Nil(t, dropped[0].FastMultiplier)
 	require.Nil(t, dropped[0].FlexMultiplier)
+	require.Nil(t, dropped[0].UltrafastMultiplier)
 	require.Equal(t, req.ReasoningEffortMultipliers, dropped[0].ReasoningEffortMultipliers)
 	require.Nil(t, dropped[0].Intervals[0].InputMultiplier)
 	require.Nil(t, dropped[0].Intervals[0].OutputMultiplier)
@@ -504,6 +512,22 @@ func TestPricingRequestToService_MultipliersGatedByFlag(t *testing.T) {
 	require.Nil(t, dropped[0].Intervals[0].CacheReadMultiplier)
 	// 非倍率字段不受开关影响
 	require.Equal(t, 272000, dropped[0].Intervals[0].MinTokens)
+}
+
+func TestPricingRequestAndResponse_UltrafastMultiplier(t *testing.T) {
+	var req channelModelPricingRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"models":["gpt-6-astra"],"ultrafast_multiplier":1.25}`), &req))
+	pricing := pricingRequestToService([]channelModelPricingRequest{req}, true)
+	require.Equal(t, float64Ptr(1.25), pricing[0].UltrafastMultiplier)
+	got := pricingToResponse(&pricing[0])
+	require.Equal(t, float64Ptr(1.25), got.UltrafastMultiplier)
+	data, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"ultrafast_multiplier":1.25`)
+
+	req = channelModelPricingRequest{}
+	require.NoError(t, json.Unmarshal([]byte(`{"models":["gpt-6-astra"],"ultrafast_multiplier":0}`), &req))
+	require.Error(t, binding.Validator.ValidateStruct(&req))
 }
 
 func TestPricingToResponse_TimePricing(t *testing.T) {

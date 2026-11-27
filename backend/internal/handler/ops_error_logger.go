@@ -1184,8 +1184,10 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		}
 
 		// Google 格式错误体没有 type 字段：按网关回写时登记的错误类型补齐。
+		// timeout_error 也可能只是本仓按 Google status=DEADLINE_EXCEEDED 推断的兜底值
+		// （408 读请求体超时同样映射成 DEADLINE_EXCEEDED），网关显式登记的类型更准确。
 		if errType, code := service.OpsLocalErrorType(c); errType != "" && !parsed.StreamFailure &&
-			(parsed.ErrorType == "" || parsed.ErrorType == "api_error") {
+			(parsed.ErrorType == "" || parsed.ErrorType == "api_error" || parsed.ErrorType == "timeout_error") {
 			parsed.ErrorType = errType
 			if code != "" {
 				parsed.Code = code
@@ -2358,8 +2360,7 @@ func isOpsLocalBusinessLimitError(code string, msg string) bool {
 		(strings.Contains(msg, "beta feature ") && strings.Contains(msg, " is not allowed")) ||
 		(strings.Contains(msg, "openai service_tier=") && strings.Contains(msg, " is not allowed for model")) ||
 		strings.Contains(msg, "this account only allows codex official clients") ||
-		strings.Contains(msg, "openai wsv1 is temporarily unsupported") ||
-		strings.Contains(msg, "openai codex passthrough requires a non-empty instructions field")
+		strings.Contains(msg, "openai wsv1 is temporarily unsupported")
 }
 
 func hasOpsUpstreamErrorContext(c *gin.Context) bool {

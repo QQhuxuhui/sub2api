@@ -130,6 +130,14 @@ func TestOpenAIStreamKeepaliveThenOverloadFailsOverWithoutWriting(t *testing.T) 
 		var failoverErr *UpstreamFailoverError
 		require.ErrorAs(t, err, &failoverErr)
 		require.Equal(t, http.StatusServiceUnavailable, failoverErr.ClientStatusCode)
+		if openAIKeepaliveForwardedDirect(handler, eventType) {
+			// 上游 v0.2.25：native 路径把 keepalive 事件直接转发（Codex 只在解析到事件时
+			// 重置空闲计时），字节记为保活字节，换号判定不把它算作输出。
+			require.Equal(t, openAIKeepaliveSSE(withEventLine, eventType, data), rec.Body.String())
+			// 扣除保活字节后与未写出时相同（gin 未写出时 Size() 为 -1）。
+			require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c), "only keepalive bytes reached the client")
+			return
+		}
 		require.False(t, c.Writer.Written())
 		require.Empty(t, rec.Body.String())
 	})
@@ -156,8 +164,14 @@ func TestOpenAIStreamKeepaliveGoesOutInOrderWithTheRealOutput(t *testing.T) {
 		status := strings.Index(body, `"type":"`+eventType+`"`)
 		output := strings.Index(body, "hello")
 		require.GreaterOrEqual(t, created, 0, body)
-		require.Greater(t, status, created, "the frame keeps its place")
-		require.Greater(t, output, status)
+		if openAIKeepaliveForwardedDirect(handler, eventType) {
+			// 直接转发的 keepalive 先于暂存的 response.created 到达客户端。
+			require.GreaterOrEqual(t, status, 0, body)
+			require.Greater(t, output, created)
+		} else {
+			require.Greater(t, status, created, "the frame keeps its place")
+			require.Greater(t, output, status)
+		}
 		require.NotNil(t, firstTokenMs)
 		require.GreaterOrEqual(t, *firstTokenMs, 100, "semantic TTFT starts at the output, not at the status event")
 	})
@@ -322,4 +336,10 @@ func TestOpenAIWSHTTPBridgeKeepaliveOnLaterTurnGoesStraightToTheClient(t *testin
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr), "only the first turn stages and fails over")
 	require.NotEmpty(t, writes)
+}
+
+// openAIKeepaliveForwardedDirect 报告该处理器是否把上游 keepalive 事件绕过首输出暂存直接转发
+// （上游 v0.2.25 起 native 路径如此；passthrough 仍按原位转发）。
+func openAIKeepaliveForwardedDirect(handler openAIKeepaliveHandler, eventType string) bool {
+	return handler.name == "native" && eventType == "keepalive"
 }

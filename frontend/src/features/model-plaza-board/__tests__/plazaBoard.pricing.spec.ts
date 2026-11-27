@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import PlazaModelPricingTable from '@/components/modelPlaza/PlazaModelPricingTable.vue'
 import type { ModelPlazaGroup, PlazaModel } from '@/api/modelPlaza'
 import { summarizePrice } from '../plazaBoard'
@@ -31,6 +32,11 @@ function tableText(model: PlazaModel, g: ModelPlazaGroup): string {
 }
 
 describe('摘要价与现有定价表一致', () => {
+  // 上游 PlazaModelPricingTable 起用了依赖 Pinia 的 useClipboard。
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
   const cases: Array<{ name: string; model: PlazaModel; group: ModelPlazaGroup }> = [
     { name: '按量 · 分组倍率', model: tokenModel('claude-a', 'anthropic'), group: group(1, 'g', 'anthropic', [], { rate_multiplier: 0.45 }) },
     {

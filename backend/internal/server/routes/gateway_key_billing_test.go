@@ -40,6 +40,18 @@ type keyBillingRouteRateRepo struct {
 	ctxHasDeadline bool
 }
 
+type keyBillingRouteGroupRepo struct {
+	service.GroupRepository
+	group *service.Group
+}
+
+func (r *keyBillingRouteGroupRepo) GetByIDLite(_ context.Context, id int64) (*service.Group, error) {
+	if r.group == nil || id != r.group.ID {
+		return nil, service.ErrGroupNotFound
+	}
+	return r.group, nil
+}
+
 func (r *keyBillingRouteRateRepo) GetByUserAndGroup(ctx context.Context, _ int64, _ int64) (*float64, error) {
 	r.lookupCalls++
 	r.ctxDeadline, r.ctxHasDeadline = ctx.Deadline()
@@ -50,17 +62,20 @@ func (r *keyBillingRouteRateRepo) GetRPMOverrideByUserAndGroup(context.Context, 
 	return nil, nil
 }
 
-func newKeyBillingRouteTestRouter(runMode string) (*gin.Engine, *keyBillingRouteRateRepo, string) {
-	return newKeyBillingRouteTestRouterWithTimeouts(runMode, 0, 0)
+func newKeyBillingRouteTestRouter(runMode string, groups service.GroupRepository) (*gin.Engine, *keyBillingRouteRateRepo, string) {
+	return newKeyBillingRouteTestRouterWithTimeouts(runMode, groups, 0, 0)
 }
 
 // newKeyBillingRouteTestRouterWithTimeouts 走与生产一致的 RegisterGatewayRoutes 注册，
 // 可指定全局网关超时与用户级 request_timeout_seconds，用于验证 billing 路由是否真的
 // 挂上了用户级超时中间件（该路由需跳过 requireGroup，故在 Group 之前单独注册）。
-func newKeyBillingRouteTestRouterWithTimeouts(runMode string, globalTimeoutSeconds, userTimeoutSeconds int) (*gin.Engine, *keyBillingRouteRateRepo, string) {
+func newKeyBillingRouteTestRouterWithTimeouts(runMode string, groups service.GroupRepository, globalTimeoutSeconds, userTimeoutSeconds int) (*gin.Engine, *keyBillingRouteRateRepo, string) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{
 		ID:               42,
+		Name:             "标准分组",
+		Description:      "共享账号",
+		I18n:             service.GroupI18n{"en": {Name: "Standard"}},
 		Status:           service.StatusActive,
 		Hydrated:         true,
 		Platform:         service.PlatformOpenAI,
@@ -91,8 +106,11 @@ func newKeyBillingRouteTestRouterWithTimeouts(runMode string, globalTimeoutSecon
 		Gateway: config.GatewayConfig{RequestTimeoutSeconds: globalTimeoutSeconds},
 	}
 	rateRepo := &keyBillingRouteRateRepo{}
+	if groups == nil {
+		groups = &keyBillingRouteGroupRepo{group: group}
+	}
 	apiKeyService := service.NewAPIKeyService(
-		&keyBillingRouteAPIKeyRepo{apiKey: apiKey}, nil, nil, nil, rateRepo, nil, cfg,
+		&keyBillingRouteAPIKeyRepo{apiKey: apiKey}, nil, groups, nil, rateRepo, nil, cfg,
 	)
 	gatewayService := service.NewGatewayService(
 		nil, nil, nil, nil, nil, nil, rateRepo, nil, cfg, nil, nil, nil, nil, nil,
@@ -141,7 +159,7 @@ func TestGatewayRoutesKeyBillingInfoPathIsRegistered(t *testing.T) {
 
 func TestGatewayRoutesKeyBillingInfoEndToEnd(t *testing.T) {
 	t.Run("missing credentials", func(t *testing.T) {
-		router, rateRepo, _ := newKeyBillingRouteTestRouter(config.RunModeStandard)
+		router, rateRepo, _ := newKeyBillingRouteTestRouter(config.RunModeStandard, nil)
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing", nil))
@@ -153,7 +171,7 @@ func TestGatewayRoutesKeyBillingInfoEndToEnd(t *testing.T) {
 	})
 
 	t.Run("standard mode", func(t *testing.T) {
-		router, rateRepo, key := newKeyBillingRouteTestRouter(config.RunModeStandard)
+		router, rateRepo, key := newKeyBillingRouteTestRouter(config.RunModeStandard, nil)
 		req := httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing", nil)
 		req.Header.Set("Authorization", "Bearer "+key)
 		w := httptest.NewRecorder()
@@ -167,12 +185,74 @@ func TestGatewayRoutesKeyBillingInfoEndToEnd(t *testing.T) {
 		var body map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 		require.Equal(t, "sub2api.key_billing", body["object"])
+		require.NotContains(t, body, "group_name")
+		require.NotContains(t, body, "group_description")
 		require.Equal(t, 0.75, body["effective_rate_multiplier"])
 		require.Equal(t, 1, rateRepo.lookupCalls)
 	})
 
+	t.Run("requested group belongs to the calling key", func(t *testing.T) {
+		router, _, key := newKeyBillingRouteTestRouter(config.RunModeStandard, nil)
+		req := httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing?include=group&group_id=99", nil)
+		req.Header.Set("x-api-key", key)
+		req.Header.Set("Accept-Language", "en")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		require.Equal(t, "Standard", body["group_name"])
+		require.Equal(t, "共享账号", body["group_description"])
+		require.Equal(t, 0.75, body["group_rate_multiplier"])
+		require.NotContains(t, body, "group_id")
+		require.NotContains(t, w.Body.String(), key)
+	})
+
+	t.Run("include accepts a list of sections", func(t *testing.T) {
+		for query, wantGroup := range map[string]bool{
+			"include=group,model_pricing":         true,
+			"include=model_pricing,%20group":      true,
+			"include=model_pricing&include=group": true,
+			"include=group&include=model_pricing": true,
+			"include=model_pricing":               false,
+			"include=groups":                      false,
+			"include=":                            false,
+		} {
+			router, _, key := newKeyBillingRouteTestRouter(config.RunModeStandard, nil)
+			req := httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing?"+query, nil)
+			req.Header.Set("x-api-key", key)
+			req.Header.Set("Accept-Language", "en")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code, query)
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), query)
+			require.Equal(t, 0.75, body["effective_rate_multiplier"], query)
+			if wantGroup {
+				require.Equal(t, "Standard", body["group_name"], query)
+			} else {
+				require.NotContains(t, body, "group_name", query)
+			}
+		}
+	})
+
+	t.Run("optional group lookup failure preserves billing rates", func(t *testing.T) {
+		router, _, key := newKeyBillingRouteTestRouter(config.RunModeStandard, &keyBillingRouteGroupRepo{})
+		req := httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing?include=group", nil)
+		req.Header.Set("x-api-key", key)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		require.Equal(t, 0.75, body["effective_rate_multiplier"])
+		require.NotContains(t, body, "group_name")
+	})
+
 	t.Run("simple mode", func(t *testing.T) {
-		router, rateRepo, key := newKeyBillingRouteTestRouter(config.RunModeSimple)
+		router, rateRepo, key := newKeyBillingRouteTestRouter(config.RunModeSimple, nil)
 		req := httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing", nil)
 		req.Header.Set("x-api-key", key)
 		w := httptest.NewRecorder()
@@ -215,7 +295,7 @@ func TestGatewayRoutesKeyBillingUserTimeoutOverride(t *testing.T) {
 	// 反向对照：不设用户级超时时应落在全局 deadline 上。这条锁住"链路里确实有全局
 	// 超时"，否则下面 -1 的用例可能因为压根没挂超时而假通过。
 	t.Run("no user override keeps global deadline", func(t *testing.T) {
-		router, rateRepo, key := newKeyBillingRouteTestRouterWithTimeouts(config.RunModeStandard, globalTimeout, 0)
+		router, rateRepo, key := newKeyBillingRouteTestRouterWithTimeouts(config.RunModeStandard, nil, globalTimeout, 0)
 		start := time.Now()
 
 		w := doRequest(t, router, key)
@@ -227,7 +307,7 @@ func TestGatewayRoutesKeyBillingUserTimeoutOverride(t *testing.T) {
 	})
 
 	t.Run("positive user timeout overrides global deadline", func(t *testing.T) {
-		router, rateRepo, key := newKeyBillingRouteTestRouterWithTimeouts(config.RunModeStandard, globalTimeout, 3600)
+		router, rateRepo, key := newKeyBillingRouteTestRouterWithTimeouts(config.RunModeStandard, nil, globalTimeout, 3600)
 		start := time.Now()
 
 		w := doRequest(t, router, key)
@@ -243,7 +323,7 @@ func TestGatewayRoutesKeyBillingUserTimeoutOverride(t *testing.T) {
 	})
 
 	t.Run("minus one cancels global deadline", func(t *testing.T) {
-		router, rateRepo, key := newKeyBillingRouteTestRouterWithTimeouts(config.RunModeStandard, globalTimeout, -1)
+		router, rateRepo, key := newKeyBillingRouteTestRouterWithTimeouts(config.RunModeStandard, nil, globalTimeout, -1)
 
 		w := doRequest(t, router, key)
 

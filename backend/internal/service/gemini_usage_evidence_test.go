@@ -215,11 +215,11 @@ func TestGeminiUsageEvidence_AggregateCollectorObservesWithoutChangingResult(t *
 		`data: [DONE]`,
 		``,
 	}, "\n")
-	gotPlain, usagePlain, err := collectGeminiSSE(strings.NewReader(stream), false)
+	gotPlain, usagePlain, err := collectGeminiSSE(nil, strings.NewReader(stream), false)
 	require.NoError(t, err)
 
 	ev := &geminiUsageEvidence{exit: geminiUsageEvidenceExitStreamAggregate}
-	gotEv, usageEv, err := collectGeminiSSEWithEvidence(strings.NewReader(stream), false, ev, nil)
+	gotEv, usageEv, err := collectGeminiSSEWithEvidence(nil, strings.NewReader(stream), false, ev, nil)
 	require.NoError(t, err)
 	require.Equal(t, gotPlain, gotEv, "聚合结果不受取证影响")
 	require.Equal(t, usagePlain, usageEv)
@@ -231,7 +231,7 @@ func TestGeminiUsageEvidence_AggregateCollectorObservesWithoutChangingResult(t *
 
 func TestGeminiUsageEvidence_OAuthUnwrapFailureCounted(t *testing.T) {
 	ev := &geminiUsageEvidence{}
-	_, _, err := collectGeminiSSEWithEvidence(strings.NewReader("data: not-json\n\n"), true, ev, nil)
+	_, _, err := collectGeminiSSEWithEvidence(nil, strings.NewReader("data: not-json\n\n"), true, ev, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, ev.parseFailures)
 	first, tail, _ := ev.budgetedSamples()

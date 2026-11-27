@@ -97,9 +97,11 @@ type ChannelModelPricing struct {
 	OutputPrice                *float64           `json:"output_price"`
 	CacheWritePrice            *float64           `json:"cache_write_price"`
 	CacheWrite1hPrice          *float64           `json:"cache_write_1h_price"`
+	CacheWrite12hPrice         *float64           `json:"cache_write_12h_price"`
 	CacheReadPrice             *float64           `json:"cache_read_price"`
 	FastMultiplier             *float64           `json:"fast_multiplier"`
 	FlexMultiplier             *float64           `json:"flex_multiplier"`
+	UltrafastMultiplier        *float64           `json:"ultrafast_multiplier"`
 	ReasoningEffortMultipliers map[string]float64 `json:"reasoning_effort_multipliers,omitempty"`
 	// 图片输入价格（每 token）；nil = 回退 InputPrice，显式 0 = 免费。
 	// 这个三态语义是本仓自研的，上游同名字段没有「显式 0」这一档 —— 合并时保留 dev 侧语义，
@@ -138,6 +140,7 @@ type PricingInterval struct {
 	OutputPrice          *float64  `json:"output_price"`
 	CacheWritePrice      *float64  `json:"cache_write_price"`
 	CacheWrite1hPrice    *float64  `json:"cache_write_1h_price"`
+	CacheWrite12hPrice   *float64  `json:"cache_write_12h_price"`
 	CacheReadPrice       *float64  `json:"cache_read_price"`
 	InputMultiplier      *float64  `json:"input_multiplier"`
 	OutputMultiplier     *float64  `json:"output_multiplier"`
@@ -386,6 +389,7 @@ func validateIntervalPrices(iv *PricingInterval, idx int) error {
 		{"output_price", iv.OutputPrice},
 		{"cache_write_price", iv.CacheWritePrice},
 		{"cache_write_1h_price", iv.CacheWrite1hPrice},
+		{"cache_write_12h_price", iv.CacheWrite12hPrice},
 		{"cache_read_price", iv.CacheReadPrice},
 		{"per_request_price", iv.PerRequestPrice},
 	}

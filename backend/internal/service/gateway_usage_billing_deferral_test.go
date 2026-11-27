@@ -155,10 +155,10 @@ func TestNotifyBalanceLow_DeferredLeavesTheCheckToTheSettler(t *testing.T) {
 	p := deferralTestParams()
 	p.User.BalanceNotifyEnabled = true
 
-	notifyBalanceLow(p, deps, &UsageBillingApplyResult{Applied: true, BalanceDeferred: true})
+	notifyBalanceLow(context.Background(), p, deps, &UsageBillingApplyResult{Applied: true, BalanceDeferred: true})
 	require.Zero(t, settings.reads.Load(), "a deferred deduction must not reach the threshold check")
 
 	newBalance := 5.0
-	notifyBalanceLow(p, deps, &UsageBillingApplyResult{Applied: true, NewBalance: &newBalance})
+	notifyBalanceLow(context.Background(), p, deps, &UsageBillingApplyResult{Applied: true, NewBalance: &newBalance})
 	require.Equal(t, int64(1), settings.reads.Load())
 }

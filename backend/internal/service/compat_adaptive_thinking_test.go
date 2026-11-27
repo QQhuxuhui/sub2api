@@ -86,6 +86,11 @@ func TestCompatPaths_BudgetRemovedModelsGetAdaptiveThinking(t *testing.T) {
 				require.Equal(t, "high", gjson.GetBytes(out, "output_config.effort").String())
 				require.NotContains(t, string(out), "budget_tokens")
 
+				if model == "claude-fable-5-2" {
+					// 上游 v0.2.22 起共用转换器把 Fable/Mythos 5.2 当作 adaptive 模型（同 5.5），
+					// low 与不带 effort 时也发 adaptive thinking。
+					return
+				}
 				// Low and absent effort never produced manual thinking: still none.
 				require.False(t, gjson.GetBytes(compatThinkingOutboundBody(t, path, model, "low"), "thinking").Exists())
 				require.False(t, gjson.GetBytes(compatThinkingOutboundBody(t, path, model, ""), "thinking").Exists())

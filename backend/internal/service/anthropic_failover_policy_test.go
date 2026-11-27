@@ -385,7 +385,7 @@ func TestWriteUpstreamErrorBodyInvalidJSONInStream(t *testing.T) {
 	writeUpstreamErrorBody(c, 400, []byte("<html>bad</html>"))
 	frames := sseFramesAfterPing(t, rec.Body.String())
 	require.Len(t, frames, 1)
-	require.JSONEq(t, `{"type":"error","error":{"type":"upstream_error","message":"Upstream request failed"}}`, frames[0].data)
+	require.JSONEq(t, `{"type":"error","error":{"type":"invalid_request_error","message":"Upstream rejected the request"}}`, frames[0].data)
 }
 
 func TestWriteRuleFailoverExhausted(t *testing.T) {

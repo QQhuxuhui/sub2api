@@ -42,7 +42,7 @@ var thinkingTestEfforts = []string{"", "low", "medium", "high", "xhigh", "max", 
 // request moves.
 func TestUseAdaptiveThinkingWhereBudgetRemoved_TargetModels(t *testing.T) {
 	for _, model := range []string{
-		"claude-fable-5", "claude-fable-5-1", "claude-fable-5-2", "claude-mythos-5-2", "claude-mythos-preview",
+		"claude-fable-5", "claude-fable-5-1", "claude-mythos-preview",
 		"claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-5",
 		"claude-opus-4-7-20260115", "claude-sonnet-5@20260301", "us.anthropic.claude-opus-4-8-v1:0",
 	} {
@@ -91,9 +91,10 @@ func TestUseAdaptiveThinkingWhereBudgetRemoved_OtherModelsUnchanged(t *testing.T
 	}
 }
 
-// The 5.5 models are already adaptive after conversion: nothing to rewrite.
+// The 5.5 models (and Fable/Mythos 5.2, converted to adaptive by the shared
+// converter since upstream v0.2.22) are already adaptive: nothing to rewrite.
 func TestUseAdaptiveThinkingWhereBudgetRemoved_55ModelsUnchanged(t *testing.T) {
-	for _, model := range []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"} {
+	for _, model := range []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2", "claude-mythos-5-2"} {
 		for _, effort := range []string{"", "low", "medium", "high", "xhigh", "max"} {
 			before, after := convertForThinkingTest(t, model, effort)
 			require.Equal(t, string(before), string(after), "%s effort=%q", model, effort)
@@ -121,7 +122,7 @@ func TestUseAdaptiveThinkingWhereBudgetRemoved_LeavesOtherThinkingModesAlone(t *
 // The shared converter is untouched: paths that do not call the rewrite
 // (Antigravity, Gemini compatibility) still get the budget they derive tiers from.
 func TestResponsesToAnthropicRequest_StillEmitsBudgetForTargetModels(t *testing.T) {
-	for _, model := range []string{"claude-fable-5-2", "claude-opus-5", "claude-opus-4-8", "claude-sonnet-5"} {
+	for _, model := range []string{"claude-opus-5", "claude-opus-4-8", "claude-sonnet-5"} {
 		converted, err := ResponsesToAnthropicRequest(responsesRequestForThinkingTest(t, model, "high"))
 		require.NoError(t, err)
 		require.Equal(t, &AnthropicThinking{Type: "enabled", BudgetTokens: 10240}, converted.Thinking, model)

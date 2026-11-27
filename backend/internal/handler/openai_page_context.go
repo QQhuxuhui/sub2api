@@ -13,10 +13,20 @@ import (
 
 var codexSelectedPageName = regexp.MustCompile(`^codex_apps_selected_page_part_([1-9][0-9]*)_of_([1-9][0-9]*)$`)
 
-// Desktop injects page snapshots as standalone outputs, without a model tool call.
-// Keep them as untrusted user text, including on history replay and mixed bootstrap turns.
-func normalizeCodexPageContext(body []byte) ([]byte, bool) {
-	if !mayContainCodexPageContextCandidate(body) || !hasUniqueJSONMembers(body) {
+// codexUntrustedContextNames are the names Codex gives to context it injects
+// as standalone function_call_output items (namespace "agent", no call_id).
+// The selected-page entry is a prefix; the rest are exact names.
+var codexUntrustedContextNames = []string{
+	"codex_apps_open_page", "codex_apps_selected_page_part_",
+	"browser_info", "terminal_info", "goal_objective", "untrusted_context", "untrusted_content", "ide_context", "proposed_plan",
+}
+
+// Codex injects external context (Desktop page snapshots, VS Code IDE context,
+// terminal and browser info, approved plans, ...) as standalone outputs,
+// without a model tool call. Keep them as untrusted user text, including on
+// history replay and mixed bootstrap turns.
+func normalizeCodexUntrustedContext(body []byte) ([]byte, bool) {
+	if !mayContainCodexCallOutputCandidate(body, codexUntrustedContextNames...) || !hasUniqueJSONMembers(body) {
 		return body, false
 	}
 	var request map[string]json.RawMessage
@@ -47,16 +57,21 @@ func normalizeCodexPageContext(body []byte) ([]byte, bool) {
 				continue
 			}
 		}
-		name, output := readString("name"), readString("output")
-		if !validCodexPageContext(name, output) {
+		name := readString("name")
+		var output *string
+		if json.Unmarshal(item["output"], &output) != nil || output == nil || !validCodexUntrustedContext(name, *output) {
 			continue
+		}
+		text := "<external_" + name + ">" + *output + "</external_" + name + ">"
+		if validCodexPageContext(name, *output) {
+			text = "<external_" + name + ">\n" + *output + "\n</external_" + name + ">"
 		}
 		message := map[string]any{
 			"type": "message",
 			"role": "user",
 			"content": []map[string]string{{
 				"type": "input_text",
-				"text": "<external_" + name + ">\n" + output + "\n</external_" + name + ">",
+				"text": text,
 			}},
 		}
 		encoded, err := marshalCodexPageContextJSON(message)
@@ -106,6 +121,21 @@ func marshalCodexPageContextJSON(value any) ([]byte, error) {
 	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
+func validCodexUntrustedContext(name, output string) bool {
+	switch name {
+	case "browser_info", "terminal_info", "goal_objective", "untrusted_context", "ide_context":
+		return strings.TrimSpace(output) != ""
+	case "untrusted_content":
+		// Codex's fallback for an unnamed context source can carry any text, including an empty value.
+		return true
+	case "proposed_plan":
+		// Codex splits an approved plan by byte length, so a chunk can be all whitespace.
+		return output != ""
+	default:
+		return validCodexPageContext(name, output)
+	}
+}
+
 func validCodexPageContext(name, output string) bool {
 	if name == "codex_apps_open_page" {
 		return validCodexPageSnapshot(output)
@@ -149,64 +179,4 @@ func validCodexPageSnapshot(text string) bool {
 	}
 	var value string
 	return json.Unmarshal(id, &value) == nil && strings.TrimSpace(value) != ""
-}
-
-// mayContainCodexPageContextCandidate is a cheap pre-check that lets ordinary
-// requests skip the full decode. It only decides whether to decode: an escape
-// that may spell the type or tool names defers to the full path, which still
-// applies every check above.
-func mayContainCodexPageContextCandidate(body []byte) bool {
-	if codexJSONMayEscapePlainASCII(body) {
-		return true
-	}
-	if !bytes.Contains(body, []byte("function_call_output")) {
-		return false
-	}
-	return bytes.Contains(body, []byte("codex_apps_open_page")) ||
-		bytes.Contains(body, []byte("codex_apps_selected_page_part_"))
-}
-
-// codexJSONMayEscapePlainASCII reports whether body has a \u escape that spells
-// a printable ASCII character no encoder needs to escape; only such an escape
-// can hide the tool names from a literal search. Escapes real clients emit
-// (non-ASCII runes such as \u4e2d, control characters, quote, backslash,
-// apostrophe and the HTML-safe <, >, &) are ignored, so ordinary escaped text
-// keeps the fast path. Escapes are consumed pairwise, so an escaped backslash
-// followed by a literal u is plain text. A malformed or truncated escape
-// counts as true. Mirrors service.JSONMayEscapePlainASCII in upstream
-// (json_escape_probe.go); switch to it once that file is merged.
-func codexJSONMayEscapePlainASCII(body []byte) bool {
-	for i := 0; ; {
-		j := bytes.IndexByte(body[i:], '\\')
-		if j < 0 {
-			return false
-		}
-		next := i + j + 1
-		if next >= len(body) {
-			return true
-		}
-		if body[next] != 'u' {
-			i = next + 1
-			continue
-		}
-		if next+5 > len(body) {
-			return true
-		}
-		r, err := strconv.ParseUint(string(body[next+1:next+5]), 16, 32)
-		if err != nil || codexJSONEscapeHidesPlainASCII(rune(r)) {
-			return true
-		}
-		i = next + 5
-	}
-}
-
-func codexJSONEscapeHidesPlainASCII(r rune) bool {
-	if r < 0x20 || r >= 0x7f {
-		return false
-	}
-	switch r {
-	case '"', '\\', '<', '>', '&', '\'':
-		return false
-	}
-	return true
 }

@@ -39,7 +39,6 @@ func TestEveryGroupFieldIsEitherProjectedOrExplicitlyExcluded(t *testing.T) {
 		"BatchImageHoldMultiplier":     "同上",
 		"SortOrder":                    "列表排序，纯展示",
 		"RequireOAuthOnly":             "建号/绑定期校验，不在网关热路径",
-		"RequirePrivacySet":            "同上",
 		"CreatedAt":                    "元数据，网关链路不读",
 		"UpdatedAt":                    "元数据，网关链路不读",
 		"AccountGroups":                "关联实体，快照要保持小；调度另有自己的账号查询",

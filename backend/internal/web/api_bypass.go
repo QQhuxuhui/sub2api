@@ -60,6 +60,10 @@ var bypassPathPrefixes = []string{
 // 上游正是这么漏的。
 var bypassExactPaths = []string{
 	"/health",
+	// MCP OAuth 元数据（上游 v0.2.20+ MCP OAuth 引入）
+	"/.well-known/oauth-protected-resource",
+	"/.well-known/oauth-protected-resource/api/v1/mcp",
+	"/.well-known/oauth-authorization-server",
 	"/models",
 	"/responses",
 	"/alpha/search",

@@ -37,7 +37,7 @@ func TestGatewayRoutesRejectDuplicateJSONKeysOnEveryBodyRoute(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		router.ServeHTTP(rec, req)
 		require.Equalf(t, http.StatusBadRequest, rec.Code, "%s %s: %s", r.Method, r.Path, rec.Body.String())
-		require.Containsf(t, rec.Body.String(), "duplicate JSON key: /model", "%s %s", r.Method, r.Path)
+		requireDuplicateFieldRejected(t, rec.Body.String(), "%s %s", r.Method, r.Path)
 		checked = append(checked, r.Method+" "+r.Path)
 	}
 	require.NotEmpty(t, checked)
@@ -63,18 +63,28 @@ func TestGatewayRoutesDuplicateJSONKeyGuardMountedOnEveryChain(t *testing.T) {
 	require.Regexp(t, regexp.MustCompile(`codexDirect\.Use\([^\n]*\brequestTimeoutFinalizer\)`), source)
 	require.Regexp(t, regexp.MustCompile(`r\.Handle\(method, path, [^\n]*\brequestTimeoutFinalizer, handler\)`), source)
 
-	// Route-level text limits run after the guard, so the guard must know them.
+	// Text-only routes get the text body limit at the group level (textBodyRoutes,
+	// upstream v0.2.25); the guard pre-reads with the same per-route limit.
 	limitTable := regexp.MustCompile(`(?s)WithDuplicateJSONKeyGuard\(middleware\.RequestTimeoutFinalizer\(\), map\[string\]int64\{(.*?)\n\t\}\)`).FindStringSubmatch(source)
 	require.Len(t, limitTable, 2)
-	textRoutes := regexp.MustCompile(`(gateway|codexDirect)\.(POST|PUT|PATCH)\("([^"]+)", textBodyLimit`).FindAllStringSubmatch(source, -1)
+	textTable := regexp.MustCompile(`(?s)textBodyRoutes := map\[string\]bool\{(.*?)\n\t\}`).FindStringSubmatch(source)
+	require.Len(t, textTable, 2)
+	textRoutes := regexp.MustCompile(`"([^"]+)":\s*true`).FindAllStringSubmatch(textTable[1], -1)
 	require.NotEmpty(t, textRoutes)
 	for _, m := range textRoutes {
-		prefix := "/v1"
-		if m[1] == "codexDirect" {
-			prefix = "/backend-api/codex"
-		}
-		require.Containsf(t, limitTable[1], `"`+prefix+m[3]+`"`, "%s%s must be in the guard's route limit table", prefix, m[3])
+		require.Containsf(t, limitTable[1], `"`+m[1]+`"`, "%s must be in the guard's route limit table", m[1])
 	}
+}
+
+// 合并上游 v0.2.25 后，同一类请求有两道检查：上游 RejectConflictingRequestFields
+// 排在链上更前（GHSA-p3r4-jcm3-2hph），本仓重复键守卫在 Finalizer 里兜底（另拦嵌套过深、
+// 键数过多）。重复 model 由先运行的上游检查拒绝，两种文案都表示请求被拦在 handler 之前。
+func requireDuplicateFieldRejected(t *testing.T, body string, msgAndArgs ...any) {
+	t.Helper()
+	if strings.Contains(body, "duplicate JSON key: /model") || strings.Contains(body, `declares field \"model\" more than once`) {
+		return
+	}
+	require.Failf(t, "duplicate model key was not rejected by either guard", "body=%s %v", body, msgAndArgs)
 }
 
 // A model the group's allowlist forbids is refused by the allowlist (404),
@@ -95,7 +105,7 @@ func TestGatewayRoutesDuplicateJSONKeyWithModelAllowlist(t *testing.T) {
 
 	rec = send(`{"model":"gpt-5.4","model":"gpt-4.1"}`)
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-	require.Contains(t, rec.Body.String(), "duplicate JSON key: /model")
+	requireDuplicateFieldRejected(t, rec.Body.String(), "allowlisted duplicate")
 
 	rec = send(`xx{"model":"gpt-5.4"}`)
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
